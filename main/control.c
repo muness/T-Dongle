@@ -230,6 +230,8 @@ static void handle(char *line) {
                    "BRIGHTNESS ROTATION DIM_SECONDS, setup, cancel, reset, "
                    "confirm-reset, reboot, bootloader, setup N (preselect slot N). Profiles validate by association "
                    "before replacing saved data. No console echo.\r\n");
+    else if (!strcmp(line, "portal"))
+        portal_trace_dump();
     else if (!strcmp(line, "status") || !strcmp(line, "show") || !strcmp(line, "diagnostics"))
         status();
     else if (!strcmp(line, "list")) {

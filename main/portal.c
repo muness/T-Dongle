@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include "app.h"
 #include "cJSON.h"
+#include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_netif.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -197,13 +199,79 @@ static const char PAGE_TAIL[] =
     " f.hidden=true;say('Setup cancelled. The dongle is restarting into adapter mode.','msg');\n"
     "};\n"
     "</script>\n";
+/* Setup-mode timeline for diagnosing slow captive-portal pop-ups: the first TRACE_MAX events
+ * after the AP starts (station join, DHCP lease, each DNS query, each HTTP request), in ms since
+ * AP start. Kept, not overwritten, because the start of the sequence is what matters.
+ * Console: portal. */
+#define TRACE_MAX 64
+static struct {
+    uint32_t ms;
+    char kind;
+    char text[43];
+} s_trace[TRACE_MAX];
+static int s_trace_n;
+static int64_t s_trace_t0;
+static portMUX_TYPE s_trace_lock = portMUX_INITIALIZER_UNLOCKED;
+static void trace(char kind, const char *text) {
+    uint32_t ms = (uint32_t)((esp_timer_get_time() - s_trace_t0) / 1000);
+    portENTER_CRITICAL(&s_trace_lock);
+    if (s_trace_n < TRACE_MAX) {
+        s_trace[s_trace_n].ms = ms;
+        s_trace[s_trace_n].kind = kind;
+        snprintf(s_trace[s_trace_n].text, sizeof(s_trace[0].text), "%s", text);
+        s_trace_n++;
+    }
+    portEXIT_CRITICAL(&s_trace_lock);
+}
+void portal_trace_dump(void) {
+    static const char *const names[128] = {['J'] = "join", ['L'] = "leave", ['I'] = "dhcp",
+                                           ['D'] = "dns", ['H'] = "http", ['S'] = "start"};
+    int n = s_trace_n;
+    console_printf("portal trace: %d events%s\r\n", n, n == TRACE_MAX ? " (full)" : "");
+    for (int i = 0; i < n; i++)
+        console_printf("%7lu ms %-5s %s\r\n", (unsigned long)s_trace[i].ms,
+                       names[(int)s_trace[i].kind] ? names[(int)s_trace[i].kind] : "?", s_trace[i].text);
+}
+static void trace_uri(httpd_req_t *r) {
+    char host[24] = "", t[43];
+    httpd_req_get_hdr_value_str(r, "Host", host, sizeof(host));
+    snprintf(t, sizeof(t), "%.20s%.22s", host, r->uri);
+    trace('H', t);
+}
+static void trace_wifi(void *arg, esp_event_base_t base, int32_t id, void *data) {
+    char t[43];
+    if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t *e = data;
+        snprintf(t, sizeof(t), "%02x:%02x:%02x:%02x:%02x:%02x", e->mac[0], e->mac[1], e->mac[2],
+                 e->mac[3], e->mac[4], e->mac[5]);
+        trace('J', t);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t *e = data;
+        snprintf(t, sizeof(t), "reason %u", e->reason);
+        trace('L', t);
+    } else if (base == IP_EVENT && id == IP_EVENT_AP_STAIPASSIGNED) {
+        ip_event_ap_staipassigned_t *e = data;
+        snprintf(t, sizeof(t), IPSTR, IP2STR(&e->ip));
+        trace('I', t);
+    }
+}
 static esp_err_t page(httpd_req_t *r) {
+    trace_uri(r);
     headers(r);
     httpd_resp_set_type(r, "text/html");
-    httpd_resp_send_chunk(r, PAGE_HEAD, sizeof(PAGE_HEAD) - 1);
-    httpd_resp_send_chunk(r, token, HTTPD_RESP_USE_STRLEN);
-    httpd_resp_send_chunk(r, PAGE_TAIL, sizeof(PAGE_TAIL) - 1);
-    return httpd_resp_send_chunk(r, NULL, 0);
+    int64_t t0 = esp_timer_get_time();
+    esp_err_t e = httpd_resp_send_chunk(r, PAGE_HEAD, sizeof(PAGE_HEAD) - 1);
+    if (e == ESP_OK)
+        e = httpd_resp_send_chunk(r, token, HTTPD_RESP_USE_STRLEN);
+    if (e == ESP_OK)
+        e = httpd_resp_send_chunk(r, PAGE_TAIL, sizeof(PAGE_TAIL) - 1);
+    if (e == ESP_OK)
+        e = httpd_resp_send_chunk(r, NULL, 0);
+    char t[43];
+    snprintf(t, sizeof(t), "page %s in %lld ms", e == ESP_OK ? "sent" : esp_err_to_name(e),
+             (long long)((esp_timer_get_time() - t0) / 1000));
+    trace('H', t);
+    return e;
 }
 static bool token_ok(httpd_req_t *r) {
     char supplied[40];
@@ -257,6 +325,7 @@ static void scan_begin(void) {
         scanning = false;
 }
 static esp_err_t scan_get(httpd_req_t *r) {
+    trace_uri(r);
     headers(r);
     if (!token_ok(r))
         return httpd_resp_send_err(r, HTTPD_403_FORBIDDEN, "Invalid setup token");
@@ -285,6 +354,7 @@ static esp_err_t scan_get(httpd_req_t *r) {
 }
 static app_snapshot_t s_snap; /* httpd runs one handler at a time */
 static esp_err_t saved_get(httpd_req_t *r) {
+    trace_uri(r);
     headers(r);
     if (!token_ok(r))
         return httpd_resp_send_err(r, HTTPD_403_FORBIDDEN, "Invalid setup token");
@@ -398,6 +468,19 @@ static void dns_task(void *arg) {
             continue;
         uint16_t qtype = (q[i + 1] << 8) | q[i + 2];
         int end = i + 5;
+        {
+            char name[43];
+            int o = snprintf(name, sizeof(name), "t%u ", qtype);
+            for (int k = 12; k < i && o < (int)sizeof(name) - 1;) {
+                int len = q[k++];
+                for (int c = 0; c < len && k < i && o < (int)sizeof(name) - 1; c++)
+                    name[o++] = (q[k] >= 32 && q[k] < 127) ? q[k] : '?', k++;
+                if (k < i && o < (int)sizeof(name) - 1)
+                    name[o++] = '.';
+            }
+            name[o] = 0;
+            trace('D', name);
+        }
         q[2] = 0x81; /* response, recursion desired */
         q[3] = 0x80; /* recursion available, no error */
         q[6] = 0;
@@ -413,6 +496,7 @@ static void dns_task(void *arg) {
     }
 }
 static esp_err_t redirect(httpd_req_t *r, httpd_err_code_t err) {
+    trace_uri(r);
     httpd_resp_set_status(r, "302 Found");
     httpd_resp_set_hdr(r, "Location", "http://192.168.4.1/");
     httpd_resp_set_hdr(r, "Cache-Control", "no-store");
@@ -441,7 +525,13 @@ void portal_start(void) {
 #endif
     c.ap.max_connection = 2;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &c));
+    s_trace_t0 = esp_timer_get_time();
+    s_trace_n = 0;
+    esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED, trace_wifi, NULL);
+    esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED, trace_wifi, NULL);
+    esp_event_handler_register(IP_EVENT, IP_EVENT_AP_STAIPASSIGNED, trace_wifi, NULL);
     ESP_ERROR_CHECK(esp_wifi_start());
+    trace('S', "AP up");
     /* Hand out the dongle as DNS server. No DHCP option 114: RFC 8910 requires it to name an
      * RFC 8908 captive portal API served over HTTPS with a valid certificate, which a dongle at
      * 192.168.4.1 cannot provide. Pointing it at this HTML page violates both, and phones that
@@ -464,8 +554,8 @@ void portal_start(void) {
      * purge, live ones were evicted and retried. 7 = LWIP_MAX_SOCKETS 10 - 3 httpd internal. */
     h.max_open_sockets = 7;
     h.lru_purge_enable = true;
-    h.recv_wait_timeout = 3;
-    h.send_wait_timeout = 3;
+    /* ESP-IDF default send/recv timeouts (5 s). At 3 s a send to a phone still waking from Wi-Fi
+     * power save could abort the 12 KB page mid-transfer; iOS then waited ~60 s to retry. */
     httpd_handle_t server;
     if (httpd_start(&server, &h) != ESP_OK) {
         mgmt_write("ERR setup HTTP start failed\r\n");

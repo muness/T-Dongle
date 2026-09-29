@@ -33,6 +33,7 @@ void console_init(void);
 void mgmt_write(const char *s);
 void console_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void portal_start(void);
+void portal_trace_dump(void);
 void portal_identity(char *ssid, char *pass);
 void ui_start(void);
 void setup_reboot(bool enter);
