@@ -260,8 +260,11 @@ static esp_err_t scan_get(httpd_req_t *r) {
     headers(r);
     if (!token_ok(r))
         return httpd_resp_send_err(r, HTTPD_403_FORBIDDEN, "Invalid setup token");
-    if (strstr(r->uri, "again"))
+    static bool scanned;
+    if (strstr(r->uri, "again") || !scanned) {
+        scanned = true;
         scan_begin();
+    }
     cJSON *o = cJSON_CreateObject(), *a = cJSON_AddArrayToObject(o, "n");
     cJSON_AddBoolToObject(o, "busy", scanning);
     for (int i = 0; i < net_count; i++) {
@@ -439,23 +442,27 @@ void portal_start(void) {
     c.ap.max_connection = 2;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &c));
     ESP_ERROR_CHECK(esp_wifi_start());
-    /* Hand out the dongle as DNS server and advertise the portal URL (DHCP option 114). */
+    /* Hand out the dongle as DNS server. No DHCP option 114: RFC 8910 requires it to name an
+     * RFC 8908 captive portal API served over HTTPS with a valid certificate, which a dongle at
+     * 192.168.4.1 cannot provide. Pointing it at this HTML page violates both, and phones that
+     * honour the option then have to fail over to their usual probe. DNS hijack plus the
+     * redirect below is what triggers the setup sheet. */
     esp_netif_dhcps_stop(ap);
     esp_netif_dns_info_t dns = {.ip.type = IPADDR_TYPE_V4};
     dns.ip.u_addr.ip4.addr = esp_ip4addr_aton("192.168.4.1");
     esp_netif_set_dns_info(ap, ESP_NETIF_DNS_MAIN, &dns);
     dhcps_offer_t offer = OFFER_DNS;
     esp_netif_dhcps_option(ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &offer, sizeof(offer));
-    static const char portal_uri[] = "http://192.168.4.1/";
-    esp_netif_dhcps_option(ap, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI, (void *)portal_uri,
-                           sizeof(portal_uri) - 1);
     esp_netif_dhcps_start(ap);
     xTaskCreate(dns_task, "dns", 3072, NULL, 3, NULL);
-    scan_begin();
+    /* No scan here: a scan takes the radio off the AP channel for a couple of seconds, exactly
+     * while the phone is joining and probing. The page's first /scan request starts it. */
     httpd_config_t h = HTTPD_DEFAULT_CONFIG();
     h.stack_size = 6144;
     h.uri_match_fn = NULL;
-    h.max_open_sockets = 4;
+    /* Phones open several connections at once (OS probe, page, favicon). With 4 slots and LRU
+     * purge, live ones were evicted and retried. 7 = LWIP_MAX_SOCKETS 10 - 3 httpd internal. */
+    h.max_open_sockets = 7;
     h.lru_purge_enable = true;
     h.recv_wait_timeout = 3;
     h.send_wait_timeout = 3;
