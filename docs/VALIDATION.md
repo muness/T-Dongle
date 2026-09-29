@@ -60,3 +60,13 @@ Fixed buffers include eight 1514-byte copied frames, three 3200-byte NCM NTBs in
 [ACCEPTANCE.md](ACCEPTANCE.md) has the complete unchecked matrix. First: inspect the actual board and ROM-reported flash size, resolve the schematic/product discrepancy, then obtain owner authorization to flash the **headless** build on a Linux test host. Verify power budget, USB enumeration, station association, DHCP/ARP and bidirectional traffic before the full UI build and actual Pi/TeslaAndroid coexistence test.
 
 Hardware release gates include the board's published 800 mA maximum versus USB2's 500 mA descriptor budget, suspend-current compliance, panel offset/color/brightness, all authentication modes, IPv6/multicast, AP/profile failover and power-cut recovery. The installed TeslaAndroid release/fingerprint is unknown; repository NCM support cannot establish it. No real compatibility blocker has yet been observed, so no Android modification, ECM/RNDIS implementation or NAT fallback is proposed.
+
+## macOS hardware session, 2026-09-28
+
+First physical run, on an original T-Dongle-S3 (ESP32-S3 rev v0.2, Winbond 16 MB flash) with a Mac as USB host. Not the Pi, not TeslaAndroid.
+
+- The packaged QIO 80 MHz setting boot-looped on this unit; DIO 40 MHz boots. Defaults changed accordingly.
+- The firmware wedged its USB device side after a transfer test: CDC-ACM console silent, NCM link reported inactive, LCD and Wi-Fi still running, chip still enumerated. Cause attributed to the forwarding worker deferring a link-state refresh into TinyUSB's 16-entry event queue once per frame, competing with ISR transfer-complete events. Now rate-limited to link changes plus a 1 s heartbeat. Not reproduced since, but the attribution is inference, not a captured trace.
+- Downstream drops were 15% because a frame was dropped the instant all NCM IN transfer blocks were in flight. With a bounded retry (up to ~100 ms) and 4 × 6400-byte IN blocks: 10 MB HTTP download at ~700 KB/s, 134 drops in 8,854 frames, console answering throughout. Before: ~214 KB/s, 1,502 drops in 9,775 frames.
+- Setup AP was not visible after the first boot following an esptool reset; visible after a power-cycle. Unexplained.
+- macOS placed the NCM service above Wi-Fi, so the laptop routed all traffic through the dongle as soon as it had a lease. Host-side service order, not firmware.

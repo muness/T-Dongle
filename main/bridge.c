@@ -9,6 +9,7 @@
  * with runtime credentials in NVS (console.c).
  */
 
+#include "soc/rtc_cntl_reg.h"
 #include "app.h"
 #include "device/dcd.h"
 #include "device/usbd_pvt.h"
@@ -51,16 +52,19 @@ static uint64_t s_connected_ms;
  * region indeterminate, which the magic word detects. A 1 s timer refreshes
  * the snapshot while the firmware is healthy. */
 #define CRASHLOG_MAGIC                                                                             \
-    0x45555747u /* "EUWG": bumped when the layout changes,                                         \
+    0x45555748u /* "EUWH": bumped when the layout changes,                                         \
                    so a reflash never misreads stale RTC RAM */
 typedef struct {
     uint32_t magic;
     uint32_t boots, hangs, faults;
+    uint32_t streak; /* consecutive crashes without 30 s of healthy uptime */
     uint32_t host_to_wifi, wifi_to_host, txdrop, reflected, poolfail, rxdrop;
 } crashlog_t;
 static RTC_NOINIT_ATTR crashlog_t s_crashlog;
 static bridge_crash_info_t s_crash; /* boot-time evaluation, served to the console */
 static esp_timer_handle_t s_snapshot_timer;
+/* Heartbeat from the TinyUSB task: if it stops (wedged USB stack), restart instead of hanging. */
+static volatile int64_t s_usb_alive_us;
 
 static void snapshot_timer_cb(void *arg) {
     portENTER_CRITICAL(&s_lock);
@@ -71,6 +75,13 @@ static void snapshot_timer_cb(void *arg) {
     s_crashlog.poolfail = s_stats.poolfail;
     s_crashlog.rxdrop = s_stats.rxdrop;
     portEXIT_CRITICAL(&s_lock);
+    int64_t now = esp_timer_get_time();
+    if (now > 30000000)
+        s_crashlog.streak = 0; /* survived long enough: not a crash loop */
+    if (s_usb_alive_us && now - s_usb_alive_us > 10000000) {
+        s_crashlog.hangs++;
+        esp_restart(); /* USB task stalled for 10 s: self-recover */
+    }
 }
 
 static void crashlog_boot(void) {
@@ -93,6 +104,13 @@ static void crashlog_boot(void) {
         } else if (rr == ESP_RST_TASK_WDT || rr == ESP_RST_INT_WDT || rr == ESP_RST_WDT) {
             s_crashlog.hangs++;
             s_crash.recovered = "watchdog";
+        }
+        if (s_crash.recovered && ++s_crashlog.streak >= 3) {
+            /* Crash loop: drop into the ROM download mode so tools/flash.sh can recover the
+             * dongle without the BOOT button. */
+            s_crashlog.streak = 0;
+            REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+            esp_restart();
         }
     }
     s_crashlog.boots++;
@@ -211,7 +229,7 @@ static esp_err_t usb_recv_callback(void *buffer, uint16_t len, void *ctx) {
 }
 /* RX callback always releases the driver buffer. Fixed copied frames move to a
  * worker, so USB congestion never blocks the high-priority Wi-Fi task. */
-#define RX_SLOTS 8
+#define RX_SLOTS 32
 #define FRAME_MAX 1514
 static struct {
     uint16_t len;
@@ -247,20 +265,43 @@ static esp_err_t pkt_wifi2usb(void *buffer, uint16_t len, void *eb) {
     return ESP_OK;
 }
 bool tud_network_default_link_state_cb(void) { return bridge_wifi_connected(); }
-static void update_usb_link(void *arg) { tud_network_link_state(0, bridge_wifi_connected()); }
+static void update_usb_link(void *arg) {
+    s_usb_alive_us = esp_timer_get_time();
+    tud_network_link_state(0, bridge_wifi_connected());
+}
 static void tx_worker(void *arg) {
     unsigned i;
+    bool last_link = false;
+    int64_t last_beat = 0;
     for (;;) {
-        usbd_defer_func(update_usb_link, NULL, false);
+        /* Refresh the NCM link state only on a change, plus a 1 s heartbeat. Deferring on every
+         * loop pass (one per forwarded frame) competes with ISR transfer-complete events for the
+         * 16-entry TinyUSB event queue; an ISR event dropped there leaves an endpoint stuck. */
+        bool link = bridge_wifi_connected();
+        int64_t now = esp_timer_get_time();
+        if (link != last_link || now - last_beat >= 1000000) {
+            last_link = link;
+            last_beat = now;
+            usbd_defer_func(update_usb_link, NULL, false);
+        }
         if (xQueueReceive(s_pending, &i, pdMS_TO_TICKS(100)) == pdTRUE) {
             uint16_t len = s_frames[i].len;
             portENTER_CRITICAL(&s_lock);
             bool current = s_frames[i].epoch == s_epoch;
             portEXIT_CRITICAL(&s_lock);
-            esp_err_t e = current && bridge_wifi_connected() && tud_ready()
-                              ? tinyusb_net_send_sync(s_frames[i].bytes, len, (void *)(uintptr_t)i,
-                                                      pdMS_TO_TICKS(20))
-                              : ESP_ERR_INVALID_STATE;
+            /* NCM refuses a frame (ESP_FAIL) while every IN transfer block is in flight to the
+             * host. That is ordinary backpressure at full-speed USB, not an error: wait a tick
+             * and retry for up to ~100 ms before counting a drop. */
+            esp_err_t e = ESP_ERR_INVALID_STATE;
+            for (int attempt = 0; attempt < 10; attempt++) {
+                if (!(current && bridge_wifi_connected() && tud_ready()))
+                    break;
+                e = tinyusb_net_send_sync(s_frames[i].bytes, len, (void *)(uintptr_t)i,
+                                          pdMS_TO_TICKS(20));
+                if (e != ESP_FAIL)
+                    break;
+                vTaskDelay(pdMS_TO_TICKS(10));
+            }
             if (e != ESP_OK) {
                 COUNT(rxdrop);
                 xQueueSend(s_free, &i, 0);
@@ -311,6 +352,10 @@ esp_err_t wifi_apply_creds(const char *ssid, const char *pass) {
     c.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
     c.sta.pmf_cfg.capable = true;
     c.sta.threshold.authmode = pass[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
+    /* Same SSID can exist on several APs/nodes. Scan every channel and join the strongest one;
+     * the default fast scan takes the first match, which may be a far, weak node. */
+    c.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    c.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
     esp_err_t e = esp_wifi_set_config(WIFI_IF_STA, &c);
     if (e == ESP_OK && ssid[0])
         e = esp_wifi_connect();
@@ -379,6 +424,10 @@ void app_main(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     esp_wifi_set_ps(WIFI_PS_NONE);
+    /* 20 MHz is more sensitive than 40 MHz in a crowded 2.4 GHz band; use the highest TX power. */
+    esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20);
+    esp_wifi_set_max_tx_power(84);
+    s_usb_alive_us = esp_timer_get_time();
     const esp_timer_create_args_t snap = {.callback = snapshot_timer_cb, .name = "crashsnap"};
     ESP_ERROR_CHECK(esp_timer_create(&snap, &s_snapshot_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(s_snapshot_timer, 1000000));
