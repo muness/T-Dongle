@@ -21,7 +21,7 @@ jobs:
       - run: tools/bootstrap.sh
       - shell: bash
         run: |
-          . "$HOME/.cache/tdongle/esp-idf-v5.5.1/export.sh"
+          . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
           tools/test.sh
           tools/build.sh '${{ matrix.variant }}'
       - uses: actions/upload-artifact@v4

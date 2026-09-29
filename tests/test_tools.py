@@ -41,7 +41,7 @@ class Packaging(unittest.TestCase):
         import tempfile
         package = load('package')
         with tempfile.TemporaryDirectory() as tmp:
-            root=Path(tmp)
+            root=Path(tmp).resolve()
             component=root/'components'/'driver';component.mkdir(parents=True)
             (component/'LICENSE').write_text('fixture')
             output=root/'dist'/'artifact';output.mkdir(parents=True)

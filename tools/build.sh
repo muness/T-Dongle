@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${IDF_PATH:?Run tools/bootstrap.sh and source the pinned ESP-IDF export.sh first}"
-[[ "$(git -C "$IDF_PATH" rev-parse HEAD)" == fcae32885b0296b32044cb99ecbdc50d98dddb83 ]] || { echo 'Wrong ESP-IDF commit' >&2; exit 1; }
+[[ "$(git -C "$IDF_PATH" rev-parse HEAD)" == b774170ff46c393eeb5e495ea37936038d3f4f4f ]] || { echo 'Wrong ESP-IDF commit' >&2; exit 1; }
 variant="${1:-full}"
 case "$variant" in
  full) defaults=sdkconfig.defaults;;

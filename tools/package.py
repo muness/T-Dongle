@@ -56,7 +56,7 @@ def main():
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
     dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip())
     (out / 'manifest.json').write_text(json.dumps({'version': version, 'variant': variant, 'git_commit': revision, 'dirty': dirty,
-        'idf_commit': 'fcae32885b0296b32044cb99ecbdc50d98dddb83', 'target': 'esp32s3', 'flash_bytes': 16*1024*1024,
+        'idf_commit': 'b774170ff46c393eeb5e495ea37936038d3f4f4f', 'target': 'esp32s3', 'flash_bytes': 16*1024*1024,
         'offsets': {'bootloader.bin': '0x0', 'partition-table.bin': '0x8000', 'app.bin': '0x20000'},
         'hardware_tested': False}, indent=2)+'\n')
     (out / 'FLASH.txt').write_text('Original T-Dongle-S3 only; hardware not validated. Confirm chip/flash before flashing.\n'

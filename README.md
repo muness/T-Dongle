@@ -23,14 +23,14 @@ Linux/macOS prerequisites: Git, Python 3.10+, CMake, Ninja, standard ESP-IDF pre
 ```sh
 ./tools/bootstrap.sh
 # Source the export.sh path printed by bootstrap:
-. "$HOME/.cache/tdongle/esp-idf-v5.5.1/export.sh"
+. "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
 ./tools/test.sh
 ./tools/build.sh full
 ./tools/build.sh headless
 ./tools/build.sh network-only
 ```
 
-IDF v5.5.1 commit `fcae32885b0296b32044cb99ecbdc50d98dddb83`; Espressif integration 2.0.1 vendored with small reviewed fixes; TinyUSB `0.21.0~2`; LVGL `9.3.0`. Exact commits, registry hashes and per-file licenses are in [source audit](docs/SOURCE_AUDIT.md), [dependencies.lock](dependencies.lock), and [attribution](docs/THIRD_PARTY.md). Do not run dependency update as part of a reproducibility check. Build scripts reject a different IDF commit and isolate sdkconfig per variant. Reproducible-build mode removes compile timestamps; cross-machine bit identity is not claimed without comparison.
+IDF v5.5.5 commit `b774170ff46c393eeb5e495ea37936038d3f4f4f`; Espressif integration 2.0.1 vendored with small reviewed fixes; TinyUSB `0.21.0~2`; LVGL `9.3.0`. Exact commits, registry hashes and per-file licenses are in [source audit](docs/SOURCE_AUDIT.md), [dependencies.lock](dependencies.lock), and [attribution](docs/THIRD_PARTY.md). Do not run dependency update as part of a reproducibility check. Build scripts reject a different IDF commit and isolate sdkconfig per variant. Reproducible-build mode removes compile timestamps; cross-machine bit identity is not claimed without comparison.
 
 Successful builds generate `dist/tdongle-0.1.0-VARIANT/` containing application, bootloader, partition image, ELF, effective sdkconfig, manifest, flash offsets, dependency notices and SHA256SUMS. `dist` is generated/ignored, not a promise that an image already exists. Build scripts **never flash**. `full` has LCD/LED + ACM; `headless` disables LCD/LED for A/B benchmarks but keeps physical controls; `network-only` retains display/browser setup and omits ACM. None adds ECM/RNDIS/NAT. CI builds all three and uploads versioned artifacts.
 
