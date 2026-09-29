@@ -31,7 +31,17 @@ The device plugged into the dongle gets its address straight from your Wi-Fi net
 
 ## 1. Flash the firmware
 
-There are no prebuilt downloads yet, so you build it once. You need macOS or Linux with Git, Python 3.10+, CMake and Ninja, and a few GB of disk.
+Open **[muness.com/T-Dongle](https://muness.com/T-Dongle/)** in desktop Chrome or Edge.
+
+1. Hold the dongle's button while you plug it into USB, then let go.
+2. Click **Install**, pick the port, and allow erase.
+3. Unplug the dongle and plug it back in without the button.
+
+To update later, use the same page: click **Prepare for update**, then **Install**, and decline erase to keep your saved networks. No button needed.
+
+<details><summary>Build and flash from source instead</summary>
+
+You need macOS or Linux with Git, Python 3.10+, CMake and Ninja, and a few GB of disk.
 
 ```sh
 git clone https://github.com/muness/T-Dongle.git
@@ -39,15 +49,12 @@ cd T-Dongle
 ./tools/bootstrap.sh                                  # installs the pinned ESP-IDF toolchain
 . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
 ./tools/build.sh full
+./tools/flash.sh          # first time: hold the button while plugging in
 ```
 
-**First flash:** hold the dongle's button while plugging it into USB, then:
+Later updates need no button: run `./tools/build.sh full` and `./tools/flash.sh` with the dongle running.
 
-```sh
-./tools/flash.sh
-```
-
-Unplug and plug it back in without the button. Later updates need no button at all: run `./tools/build.sh full` and `./tools/flash.sh` with the dongle plugged in and running.
+</details>
 
 ## 2. Connect it to your Wi-Fi
 
