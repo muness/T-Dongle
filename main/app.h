@@ -37,3 +37,4 @@ void portal_identity(char *ssid, char *pass);
 void ui_start(void);
 void setup_reboot(bool enter);
 bool setup_requested(void);
+int setup_preferred_slot(void);

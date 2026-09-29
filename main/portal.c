@@ -302,6 +302,9 @@ static esp_err_t saved_get(httpd_req_t *r) {
         cJSON_AddNumberToObject(e, "priority", p->priority);
         cJSON_AddItemToArray(a, e);
     }
+    int want = setup_preferred_slot(); /* slot picked from the button menu, while still empty */
+    if (want && !s_snap.cfg.p[want - 1].ssid[0])
+        free_slot = want;
     cJSON_AddNumberToObject(o, "free", free_slot);
     char *txt = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);

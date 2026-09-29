@@ -25,6 +25,9 @@ static uint8_t tried;
 static unsigned failures;
 static RTC_NOINIT_ATTR uint32_t mode_magic;
 static RTC_NOINIT_ATTR uint32_t mode_next;
+static RTC_NOINIT_ATTR uint32_t mode_slot; /* slot 1..8 chosen from the menu, 0 = none */
+static int setup_slot;                     /* survives the reboot into setup via mode_slot */
+int setup_preferred_slot(void) { return setup_slot; }
 static uint64_t now_ms(void) { return esp_timer_get_time() / 1000; }
 void setup_reboot(bool enter) {
     mode_magic = 0x54444d31;
@@ -35,6 +38,8 @@ bool setup_requested(void) {
     uint32_t mode = 0;
     if (esp_reset_reason() == ESP_RST_SW && mode_magic == 0x54444d31)
         mode = mode_next;
+    setup_slot = mode == 1 && mode_slot >= 1 && mode_slot <= PROFILE_MAX ? (int)mode_slot : 0;
+    mode_slot = 0;
     mode_magic = 0;
     mode_next = 0;
     settings_t s;
@@ -217,13 +222,13 @@ static bool index_arg(const char *s, int *i) {
     return true;
 }
 static void handle(char *line) {
-    int i;
+    int i = 0;
     if (!strcmp(line, "help"))
         mgmt_write("Commands: status, list, scan, use N, del N, profile "
                    "{\"slot\":1,\"name\":\"Home\",\"ssid\":\"SSID\","
                    "\"password\":\"password\",\"priority\":50}, display "
                    "BRIGHTNESS ROTATION DIM_SECONDS, setup, cancel, reset, "
-                   "confirm-reset, reboot, bootloader. Profiles validate by association "
+                   "confirm-reset, reboot, bootloader, setup N (preselect slot N). Profiles validate by association "
                    "before replacing saved data. No console echo.\r\n");
     else if (!strcmp(line, "status") || !strcmp(line, "show") || !strcmp(line, "diagnostics"))
         status();
@@ -303,9 +308,16 @@ static void handle(char *line) {
         cfg.dim_seconds = dim;
         if (!persist())
             cfg = old;
-    } else if (!strcmp(line, "setup")) {
-        if (!trial)
+    } else if (!strcmp(line, "setup") || (!strncmp(line, "setup ", 6) && index_arg(line + 6, &i))) {
+        /* "setup N" opens setup with slot N preselected on the page (the menu uses it for an
+         * empty slot). Already in setup: just change the preselection. */
+        int slot = line[5] ? i + 1 : 0;
+        if (in_setup)
+            setup_slot = slot;
+        else if (!trial) {
+            mode_slot = slot;
             setup_reboot(true);
+        }
     } else if (!strcmp(line, "cancel")) {
         setup_reboot(false);
     } else if (!strcmp(line, "reset")) {

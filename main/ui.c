@@ -241,7 +241,8 @@ static void task(void *arg) {
                     menu = -1;
                 } else if (menu >= 1 && menu <= 8) {
                     char cmd[20];
-                    snprintf(cmd, sizeof(cmd), "use %d", menu);
+                    /* An empty slot opens setup to add a network there; a saved one is used. */
+                    snprintf(cmd, sizeof(cmd), a.cfg.p[menu - 1].ssid[0] ? "use %d" : "setup %d", menu);
                     control_submit(cmd);
                     menu = -1;
                 } else if (menu == 9) {
@@ -323,7 +324,7 @@ static void task(void *arg) {
                     else {
                         char tmp[48];
                         snprintf(tmp, sizeof(tmp), "%d %s", menu,
-                                 a.cfg.p[menu - 1].ssid[0] ? a.cfg.p[menu - 1].name : "(empty)");
+                                 a.cfg.p[menu - 1].ssid[0] ? a.cfg.p[menu - 1].name : "(empty) add");
                         text_clip(lines[1], 32, tmp, 26);
                     }
                     strcpy(lines[3], "Short: next  Hold: select");
