@@ -55,10 +55,15 @@ static const char PAGE_HEAD[] =
     ".hint{display:block;font-weight:400;font-size:.82em;color:var(--mute)}\n"
     "input{width:100%;font:inherit;color:var(--text);background:#0b141b;border:1px solid var(--line);border-radius:10px;padding:.65em .75em;margin-top:.3em;min-height:44px;transition:border-color .2s var(--ease),box-shadow .2s var(--ease)}\n"
     "input:focus-visible,button:focus-visible,summary:focus-visible{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(64,223,255,.35)}\n"
-    ".nets{display:grid;gap:.4em;margin:.5em 0 0}\n"
+    ".nets{display:grid;grid-template-columns:minmax(0,1fr);gap:.4em;margin:.5em 0 0}\n"
     ".net{display:flex;justify-content:space-between;gap:1em;text-align:left;margin:0;min-height:44px;background:#0b141b;color:var(--text);border:1px solid var(--line);font-weight:400}\n"
     ".net:hover{border-color:var(--acc);background:#0b141b}\n"
+    ".net span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n"
     ".net span:last-child{color:var(--mute);white-space:nowrap}\n"
+    ".saved{display:flex;justify-content:space-between;align-items:center;gap:1em;padding:.35em .4em .35em .9em;min-height:48px;border:1px solid var(--line);border-radius:12px;background:#0b141b}\n"
+    ".saved span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}\n"
+    "#savedbox{display:grid;grid-template-columns:minmax(0,1fr);gap:.4em;margin-bottom:1.2em}#savedbox[hidden]{display:none}\n"
+    ".saved button.quiet{flex:none;width:auto;margin:0;min-height:38px;padding:.3em .9em}\n"
     ".note{color:var(--mute);font-size:.9em;margin:.5em 0 0}\n"
     ".show{display:flex;align-items:center;gap:.5em;font-weight:400;font-size:.9em;margin-top:.5em;min-height:44px}\n"
     ".show input{width:auto;min-height:0;margin:0;accent-color:var(--acc)}\n"
@@ -94,8 +99,9 @@ static const char PAGE_HEAD[] =
     "<span class=chip>T-Dongle setup</span>\n"
     "<h1>Connect your dongle to Wi-Fi</h1>\n"
     "<p class=lead>About a minute. Internet forwarding is paused while you do this.</p>\n"
-    "<ol><li data-n=1>Enter the 2.4 GHz network the dongle should use</li><li data-n=2>Save; it restarts and tests the connection</li><li data-n=3>Watch the dongle's light: amber, then green</li></ol>\n"
+    "<ol><li data-n=1>Pick the 2.4 GHz network the dongle should use</li><li data-n=2>Save it. Add more networks the same way if you like</li><li data-n=3>Tap Done; the dongle restarts and joins the best one</li></ol>\n"
     "<form id=f autocomplete=off>\n"
+    "<section id=savedbox hidden><label>Saved networks<span class=hint>The dongle joins the highest-priority one it can find.</span></label><div id=savedlist class=nets style=margin-top:0></div></section>\n"
     "<label>Nearby networks<span class=hint>Tap one to use it.</span></label>\n"
     "<div id=nets class=nets></div>\n"
     "<button id=scan type=button class=quiet>Scan again</button>\n"
@@ -106,11 +112,11 @@ static const char PAGE_HEAD[] =
     "<label>Profile name<span class=hint>Defaults to the network name.</span><input name=name maxlength=24></label>\n"
     "<div class=row><label>Slot (1 to 8)<input name=slot type=number inputmode=numeric min=1 max=8 value=1 required></label><label>Priority (0 to 100)<input name=priority type=number inputmode=numeric min=0 max=100 value=50 required></label></div>\n"
     "</details>\n"
-    "<button id=save>Save and test connection</button>\n"
+    "<button id=save>Save network</button>\n"
     "<button id=cancel type=button class=quiet>Cancel setup</button>\n"
     "</form>\n"
     "<div id=result role=status aria-live=polite></div>\n"
-    "<small>The dongle keeps your previous networks until the new one stays connected for 10 seconds, within a 45 second trial. This checks that it can join the network. It does not check Internet access. Setup closes by itself after 10 minutes.</small>\n"
+    "<small>A new network is saved right away. Replacing a saved one (same slot) restarts the dongle into a 45 second trial and keeps the old one unless the new one stays connected for 10 seconds. Neither checks Internet access. Setup closes by itself after 10 minutes.</small>\n"
     "</main>\n"
     "<script>const token='";
 static const char PAGE_TAIL[] =
@@ -133,7 +139,7 @@ static const char PAGE_TAIL[] =
     " try{\n"
     "  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Setup-Token':token},body:JSON.stringify(data)});\n"
     "  const t=await r.text();\n"
-    "  return r.ok?{ok:true}:{ok:false,text:t};\n"
+    "  return r.ok?{ok:true,text:t}:{ok:false,text:t};\n"
     " }catch(e){return {ok:null}}\n"
     "}\n"
     "function bars(r){return r>-60?'strong':r>-75?'ok':'weak'}\n"
@@ -151,6 +157,20 @@ static const char PAGE_TAIL[] =
     "  if(j.busy)setTimeout(()=>scan(false),1500)}catch(e){}\n"
     "}\n"
     "$('scan').onclick=()=>scan(true);scan(false);\n"
+    "let nsaved=0,slotTouched=false;f.slot.oninput=()=>{slotTouched=true};\n"
+    "async function loadSaved(){\n"
+    " try{const r=await fetch('/saved',{headers:{'X-Setup-Token':token}});const j=await r.json();\n"
+    "  const L=$('savedlist');L.innerHTML='';nsaved=j.n.length;$('savedbox').hidden=!nsaved;\n"
+    "  $('cancel').textContent=nsaved?'Done':'Cancel setup';\n"
+    "  j.n.forEach(n=>{const row=document.createElement('div');row.className='saved';\n"
+    "   const a=document.createElement('span');a.textContent=n.ssid.startsWith(n.name)?n.ssid:n.name+' ('+n.ssid+')';a.title=n.ssid;\n"
+    "   const del=document.createElement('button');del.type='button';del.className='quiet';del.textContent='Delete';\n"
+    "   del.onclick=async()=>{if(!confirm('Delete '+n.name+'?'))return;del.disabled=true;const r=await send('/del',{slot:n.slot});if(r.ok===false)say(r.text||'Could not delete.','msg err');setTimeout(loadSaved,600)};\n"
+    "   row.appendChild(a);row.appendChild(del);L.appendChild(row)});\n"
+    "  if(!slotTouched)f.slot.value=j.free||1;\n"
+    " }catch(e){}\n"
+    "}\n"
+    "loadSaved();\n"
     "const saved=[['#ffb020','Amber, breathing: joining your network'],['#5fe0a0','Green with a brief glow: connected and USB ready'],['#ff5a4d','Red, two blinks: network not found or wrong password']];\n"
     "f.onsubmit=async e=>{\n"
     " e.preventDefault();\n"
@@ -161,14 +181,19 @@ static const char PAGE_TAIL[] =
     " if(!/^[\\x20-\\x7e]*$/.test(d.ssid+d.name+d.password)){say('Only plain ASCII letters, numbers and symbols are supported for now.','msg err');return}\n"
     " $('save').disabled=true;$('save').textContent='Saving...';\n"
     " const r=await send('/save',d);\n"
-    " if(r.ok===false){say(r.text||'The dongle rejected that. Check the fields and try again.','msg err');$('save').disabled=false;$('save').textContent='Save and test connection';return}\n"
+    " if(r.ok===false){say(r.text||'The dongle rejected that. Check the fields and try again.','msg err');$('save').disabled=false;$('save').textContent='Save network';return}\n"
     " f.password.value='';\n"
+    " if(r.text==='saved'){\n"
+    "  say('Saved '+d.ssid+'. Add another network, or tap Done.','msg');\n"
+    "  f.ssid.value='';f.name.value='';slotTouched=false;$('save').disabled=false;$('save').textContent='Save network';\n"
+    "  setTimeout(loadSaved,600);return}\n"
     " done('Saved. The dongle is testing it now.',saved);\n"
     "};\n"
     "$('cancel').onclick=async()=>{\n"
     " $('cancel').disabled=true;\n"
     " const r=await send('/cancel',{});\n"
     " if(r.ok===false){say(r.text||'Could not cancel. Try again.','msg err');$('cancel').disabled=false;return}\n"
+    " if(nsaved){done('Done. The dongle is restarting and joining your network.',saved);return}\n"
     " f.hidden=true;say('Setup cancelled. The dongle is restarting into adapter mode.','msg');\n"
     "};\n"
     "</script>\n";
@@ -255,6 +280,38 @@ static esp_err_t scan_get(httpd_req_t *r) {
     free(txt);
     return e;
 }
+static app_snapshot_t s_snap; /* httpd runs one handler at a time */
+static esp_err_t saved_get(httpd_req_t *r) {
+    headers(r);
+    if (!token_ok(r))
+        return httpd_resp_send_err(r, HTTPD_403_FORBIDDEN, "Invalid setup token");
+    app_snapshot(&s_snap); /* passwords already cleared in the public copy */
+    cJSON *o = cJSON_CreateObject(), *a = cJSON_AddArrayToObject(o, "n");
+    int free_slot = 0;
+    for (int i = 0; i < PROFILE_MAX; i++) {
+        const profile_t *p = &s_snap.cfg.p[i];
+        if (!p->ssid[0]) {
+            if (!free_slot)
+                free_slot = i + 1;
+            continue;
+        }
+        cJSON *e = cJSON_CreateObject();
+        cJSON_AddNumberToObject(e, "slot", i + 1);
+        cJSON_AddStringToObject(e, "name", p->name[0] ? p->name : p->ssid);
+        cJSON_AddStringToObject(e, "ssid", p->ssid);
+        cJSON_AddNumberToObject(e, "priority", p->priority);
+        cJSON_AddItemToArray(a, e);
+    }
+    cJSON_AddNumberToObject(o, "free", free_slot);
+    char *txt = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    if (!txt)
+        return httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    httpd_resp_set_type(r, "application/json");
+    esp_err_t e = httpd_resp_sendstr(r, txt);
+    free(txt);
+    return e;
+}
 static esp_err_t post(httpd_req_t *r) {
     headers(r);
     if (!token_ok(r))
@@ -272,10 +329,19 @@ static esp_err_t post(httpd_req_t *r) {
     body[n] = 0;
     if (memchr(body, 0, n))
         return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "Invalid body");
-    bool ok;
+    bool ok, direct = false;
     if (!strcmp(r->uri, "/cancel"))
         ok = control_submit("cancel");
-    else {
+    else if (!strcmp(r->uri, "/del")) {
+        cJSON *j = cJSON_Parse(body), *sl = cJSON_GetObjectItem(j, "slot");
+        int slot = cJSON_IsNumber(sl) ? sl->valueint : 0;
+        cJSON_Delete(j);
+        if (slot < 1 || slot > PROFILE_MAX)
+            return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "Slot must be 1 to 8");
+        char cmd[16];
+        snprintf(cmd, sizeof(cmd), "del %d", slot);
+        ok = control_submit(cmd);
+    } else {
         /* Reject controls and escaped NUL before cJSON can truncate strings. */
         for (size_t i = 0; i < n; i++)
             if ((unsigned char)body[i] < 32)
@@ -287,6 +353,8 @@ static esp_err_t post(httpd_req_t *r) {
                                        "Invalid profile fields (ASCII, lengths, slot "
                                        "and priority required; no duplicates)");
         memset(&p, 0, sizeof(p));
+        app_snapshot(&s_snap);
+        direct = s_snap.setup && !s_snap.cfg.p[slot].ssid[0]; /* same rule as control.c */
         char cmd[512];
         snprintf(cmd, sizeof(cmd), "profile %s", body);
         ok = control_submit(cmd);
@@ -295,8 +363,9 @@ static esp_err_t post(httpd_req_t *r) {
     memset(body, 0, sizeof(body));
     if (!ok)
         return httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR, "Busy; retry");
-    return httpd_resp_sendstr(r, "Request queued. Check screen for validation; "
-                                 "valid save/cancel disconnects setup and reboots.");
+    if (!strcmp(r->uri, "/save"))
+        return httpd_resp_sendstr(r, direct ? "saved" : "trial");
+    return httpd_resp_sendstr(r, "ok");
 }
 /* Captive portal: every DNS name resolves to the dongle and every unknown URL redirects to the
  * setup page, so phones and laptops pop the setup sheet on their own. Setup mode only. */
@@ -397,7 +466,11 @@ void portal_start(void) {
                 cancel = {.uri = "/cancel", .method = HTTP_POST, .handler = post};
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &save);
-    httpd_uri_t scan = {.uri = "/scan", .method = HTTP_GET, .handler = scan_get};
+    httpd_uri_t scan = {.uri = "/scan", .method = HTTP_GET, .handler = scan_get},
+                saved = {.uri = "/saved", .method = HTTP_GET, .handler = saved_get},
+                del = {.uri = "/del", .method = HTTP_POST, .handler = post};
+    httpd_register_uri_handler(server, &saved);
+    httpd_register_uri_handler(server, &del);
     httpd_register_uri_handler(server, &scan);
     httpd_register_uri_handler(server, &cancel);
     httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, redirect);

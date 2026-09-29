@@ -181,6 +181,23 @@ static bool stage_json(const char *json) {
         error("Invalid profile fields");
         return false;
     }
+    if (in_setup && !cfg.p[slot].ssid[0]) {
+        /* Adding to an empty slot risks nothing already saved, so save it now and keep setup
+         * open for the next network. A wrong password only means this profile fails to join;
+         * the others are untouched. Replacing a saved profile still goes through the trial. */
+        settings_t old = cfg;
+        cfg.p[slot] = p;
+        if (!cfg.p[cfg.preferred].ssid[0])
+            cfg.preferred = slot;
+        memset(&p, 0, sizeof(p));
+        if (!persist()) {
+            cfg = old;
+            error("Storage save failed");
+            return false;
+        }
+        console_printf("OK saved to slot %d; setup stays open\r\n", slot + 1);
+        return true;
+    }
     if (settings_stage(slot, &p) != ESP_OK) {
         error("Cannot stage profile");
         return false;
