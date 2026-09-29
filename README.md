@@ -2,7 +2,7 @@
 
 Development firmware for the **original LILYGO T-Dongle-S3 with 160×80 screen**. ESP-IDF + TinyUSB CDC-NCM, optional CDC-ACM console, Wi-Fi profiles, local browser setup, four status pages and APA102 state LED. No PSRAM, microSD, extra controller or Android companion app.
 
-**Compiled and host-tested is not hardware-validated.** See [validation results](docs/VALIDATION.md) for exact builds/tests and pending checks. No claim of TeslaAndroid compatibility or throughput has been established on physical hardware. The user's existing Pi 400/TeslaAndroid installation is treated as working and must not be reconfigured to accommodate an unverified dongle.
+**Tested on one original T-Dongle-S3 with a macOS host;** see [validation results](docs/VALIDATION.md). Measured with iperf3 to a LAN host: about 7 Mbit/s down and 5.5 Mbit/s up at -60 to -70 dBm. Downstream is near the ceiling of the chip's full-speed (12 Mbit/s) USB, so this is a convenience adapter, not a fast one. Not yet tested with a Raspberry Pi, Linux host or TeslaAndroid.
 
 ```
 Router / phone hotspot (2.4 GHz)
@@ -46,11 +46,11 @@ If NVS cannot initialize, the firmware does not erase it automatically. Use ROM 
 
 ## First use: local browser setup
 
-First unconfigured boot starts a temporary password-protected `TDongle-XXXXXX` Wi-Fi AP. The **screen shows the random temporary password** and `192.168.4.1`. Connect a phone/laptop to it, keep the connection despite “no Internet,” then visit **http://192.168.4.1/**. There is no captive DNS redirect and no mandatory QR code. No saved upstream password is displayed or encoded.
+First unconfigured boot starts an **open** (passwordless) `TDongle-XXXXXX` Wi-Fi AP, and the screen shows its name and `192.168.4.1`. Join it from a phone or laptop. Most devices open the setup page on their own through the captive portal; otherwise visit **http://192.168.4.1/**. The page lists nearby networks to tap. No saved upstream password is displayed or encoded.
 
-Enter slot 1–8, profile name, exact SSID, password and priority 0–100. Save reboots into a 45-second candidate trial. Ten continuous seconds associated commits the replacement; failure retains previous saved profiles and shows an error. This validates association, **not Internet reachability**. Static host addresses are supported; no DHCP success is inferred from a source IP.
+Pick or type the SSID and enter its password. **Advanced** holds profile name, slot 1–8 and priority 0–100. The slot defaults to 1, so to add a second network rather than replace the first, reopen setup and choose another slot under Advanced (or use the console `profile` command). Save reboots into a 45-second candidate trial. Ten continuous seconds associated commits the replacement; failure retains previous saved profiles and shows an error. This validates association, **not Internet reachability**. Static host addresses are supported; no DHCP success is inferred from a source IP.
 
-Setup is an exclusive mode: NCM link down, forwarding paused, AP DHCP/HTTP active. Cancel or ten-minute timeout reboots to adapter mode. With no saved profile, cancellation leaves it unconfigured until setup is explicitly reopened or the next cold boot. Ordinary network failures do **not** expose a setup AP or erase credentials. Anyone possessing the temporary AP password can configure the device. There is no administrative listener on upstream Wi-Fi.
+Setup is an exclusive mode: NCM link down, forwarding paused, AP DHCP/HTTP active. Cancel or ten-minute timeout reboots to adapter mode. With no saved profile, cancellation leaves it unconfigured until setup is explicitly reopened or the next cold boot. Ordinary network failures do **not** expose a setup AP or erase credentials. Because the setup AP is open, anyone in range can configure the device while setup mode is active, which lasts at most ten minutes. Build with `CONFIG_ADAPTER_OPEN_SETUP_AP=n` for a random WPA2 password shown on the screen instead. There is no administrative listener on upstream Wi-Fi.
 
 ## Console and terminal tools
 
