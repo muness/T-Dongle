@@ -137,6 +137,9 @@ static void led_byte(uint8_t v) {
     }
 }
 #endif
+typedef enum { LED_JOIN, LED_SETUP, LED_UP, LED_FAIL } led_mode_t;
+static led_mode_t led_mode = LED_SETUP;
+static uint64_t led_since;
 static void led_color(uint8_t r, uint8_t g, uint8_t b) {
 #if CONFIG_ADAPTER_LED
     for (int i = 0; i < 4; i++)
@@ -152,6 +155,36 @@ static void led_color(uint8_t r, uint8_t g, uint8_t b) {
     (void)g;
     (void)b;
 #endif
+}
+/* Slow triangle wave, 0..255, so status reads as "alive" rather than "blinking". */
+static uint8_t breathe(uint64_t now, unsigned period_ms) {
+    unsigned t = now % period_ms, half = period_ms / 2;
+    unsigned up = t < half ? t : period_ms - t;
+    return 40 + up * 215 / half;
+}
+static void led_update(uint64_t now) {
+    uint32_t since = now - led_since;
+    switch (led_mode) {
+    case LED_SETUP: /* blue, slow breathe */
+        led_color(0, 0, breathe(now, 3000) * 180 / 255);
+        break;
+    case LED_UP: /* one bright arrival glow that settles to steady green */
+        if (since < 1200) {
+            unsigned w = 120 - since * 120 / 1200;
+            led_color(w, 180, w);
+        } else
+            led_color(0, 180, 0);
+        break;
+    case LED_FAIL: { /* two short red blinks, then a rest: reads as "error" without colour */
+        unsigned t = since % 2000;
+        led_color(t < 150 || (t >= 300 && t < 450) ? 180 : 0, 0, 0);
+        break;
+    }
+    default: { /* amber, faster breathe while joining or waiting for USB */
+        unsigned k = breathe(now, 1600);
+        led_color(k * 120 / 255, k * 60 / 255, 0);
+    }
+    }
 }
 static void task(void *arg) {
     gpio_config_t button = {.pin_bit_mask = 1ULL << BOARD_BUTTON,
@@ -173,7 +206,7 @@ static void task(void *arg) {
     unsigned page = 0;
     int menu = -1;
     bool confirm = false;
-    uint64_t confirm_until = 0, last_touch = 0, last_draw = 0;
+    uint64_t confirm_until = 0, last_touch = 0, last_draw = 0, last_led = 0;
 #if CONFIG_ADAPTER_DISPLAY
     unsigned rotation = 0;
 #endif
@@ -229,6 +262,7 @@ static void task(void *arg) {
             rate_update(&rates, b.stats.down_bytes, b.stats.up_bytes, now * 1000);
             view_t v = {.page = page,
                         .detail = (now / 4000) % 3,
+                        .tick = (now / 500) % 4,
                         .setup = a.setup,
                         .trial = a.trial,
                         .associated = b.associated,
@@ -303,7 +337,7 @@ static void task(void *arg) {
                 unsigned bright = dim ? 5 : a.cfg.brightness;
                 ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 255 - bright * 255 / 100);
                 ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
-                if (page == 0 && !a.setup && menu < 0) {
+                if (page == 0 && a.active >= 0 && !a.setup && menu < 0) {
                     text_clip(lines[0], sizeof(lines[0]), v.ssid, 26);
                     lv_obj_set_width(labels[0], 104);
                     char signal[16];
@@ -337,16 +371,23 @@ static void task(void *arg) {
                 }
             }
 #endif
+            led_mode_t mode = LED_JOIN;
             if (a.setup || a.active < 0)
-                led_color(0, 0, 180);
+                mode = LED_SETUP;
             else if (b.associated && b.usb_ready)
-                led_color(0, 180, 0);
+                mode = LED_UP;
             else if (!b.associated &&
                      (b.last_reason == 201 || b.last_reason == 202 || b.last_reason == 15))
-                led_color(180, 0, 0);
-            else
-                led_color((now % 1000 < 500) ? 120 : 0, (now % 1000 < 500) ? 60 : 0, 0);
+                mode = LED_FAIL;
+            if (mode != led_mode) {
+                led_mode = mode;
+                led_since = now;
+            }
             app_ui_stack(uxTaskGetStackHighWaterMark(NULL));
+        }
+        if (now - last_led >= 50) {
+            last_led = now;
+            led_update(now);
         }
 #if CONFIG_ADAPTER_DISPLAY
         if (screen)

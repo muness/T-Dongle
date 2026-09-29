@@ -2,7 +2,7 @@
 #pragma once
 #include "core.h"
 typedef struct {
-    unsigned page, detail;
+    unsigned page, detail, tick;
     bool setup, trial, associated, usb_ready, usb_mounted, ip_valid;
     char ssid[33], name[25], ip[40], error[48], ap_ssid[25], ap_pass[17];
     int rssi, active;

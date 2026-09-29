@@ -2,9 +2,9 @@
 <rect width="160" height="80" fill="black"/>
 <defs><clipPath id="screen"><rect x="2" width="156" height="80"/></clipPath></defs>
 <g clip-path="url(#screen)" fill="white" font-family="monospace" font-size="9">
-<text x="2" y="11">SETUP (10 min max)</text>
+<text x="2" y="11">1 Join this Wi-Fi:</text>
 <text x="2" y="26">TDongle-EXAMPLE</text>
-<text x="2" y="41">example-only-key</text>
-<text x="2" y="56">192.168.4.1</text>
+<text x="2" y="41">Pass example-only-key</text>
+<text x="2" y="56">2 Open 192.168.4.1</text>
 <text x="2" y="71">AP not found (synthetic)</text>
 </g></svg>

@@ -98,7 +98,7 @@ Hold opens the setup/profile menu; short press advances, release then hold selec
 
 Long SSIDs/addresses are clipped within fixed 156×13 pixel rows. Full IPv6 source observations (including link-local/ULA) and freshness are available in console diagnostics; they do not overwrite LCD fields. [Synthetic layout previews](docs/preview-0.svg) use the actual text formatter with an approximate browser font, **not runtime measurements or hardware screenshots**.
 
-Backlight is active-low PWM at 1 kHz, default 60%, dims to 5% after 60 seconds. Orientation selects either landscape direction. APA102: blue = unconfigured/setup; blinking amber = joining/waiting for USB; green = associated **and USB transport ready**, not Internet verified; red = common no-AP/auth failure. Optional LED/display errors do not abort network startup. SPI timeout disables further rendering while retaining any in-flight DMA buffer.
+Backlight is active-low PWM at 1 kHz, default 60%, dims to 5% after 60 seconds. Orientation selects either landscape direction. APA102: slowly breathing blue = unconfigured/setup; breathing amber = joining/waiting for USB; green (with a brief glow on connect, then steady) = associated **and USB transport ready**, not Internet verified; two red blinks then a pause = common no-AP/auth failure. An unconfigured dongle shows a welcome screen that explains how to start setup, and the joining state animates on the LCD. Optional LED/display errors do not abort network startup. SPI timeout disables further rendering while retaining any in-flight DMA buffer.
 
 ## Troubleshooting and physical validation
 
