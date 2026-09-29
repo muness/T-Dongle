@@ -199,10 +199,10 @@ static const char PAGE_TAIL[] =
     " f.hidden=true;say('Setup cancelled. The dongle is restarting into adapter mode.','msg');\n"
     "};\n"
     "</script>\n";
-/* Setup-mode timeline for diagnosing slow captive-portal pop-ups: the first TRACE_MAX events
- * after the AP starts (station join, DHCP lease, each DNS query, each HTTP request), in ms since
- * AP start. Kept, not overwritten, because the start of the sequence is what matters.
- * Console: portal. */
+/* Setup-mode timeline for diagnosing slow captive-portal pop-ups: station join, DHCP lease, each
+ * DNS query, each HTTP request and page send, in ms since the AP started. Each station join
+ * restarts it, so it holds the first TRACE_MAX events of the latest join, the part that shows
+ * where a pop-up stalls. Console: portal. */
 #define TRACE_MAX 64
 static struct {
     uint32_t ms;
@@ -244,6 +244,9 @@ static void trace_wifi(void *arg, esp_event_base_t base, int32_t id, void *data)
         wifi_event_ap_staconnected_t *e = data;
         snprintf(t, sizeof(t), "%02x:%02x:%02x:%02x:%02x:%02x", e->mac[0], e->mac[1], e->mac[2],
                  e->mac[3], e->mac[4], e->mac[5]);
+        portENTER_CRITICAL(&s_trace_lock);
+        s_trace_n = 0; /* keep the latest join's sequence, not the first join's */
+        portEXIT_CRITICAL(&s_trace_lock);
         trace('J', t);
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_STADISCONNECTED) {
         wifi_event_ap_stadisconnected_t *e = data;
