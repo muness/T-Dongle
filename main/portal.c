@@ -5,6 +5,10 @@
 #include "esp_netif.h"
 #include "esp_random.h"
 #include "esp_wifi.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "dhcpserver/dhcpserver.h"
+#include "lwip/sockets.h"
 #include <stdio.h>
 #include <string.h>
 static char ap_ssid[25], ap_pass[17], token[33];
@@ -15,6 +19,9 @@ void portal_identity(char *ssid, char *pass) {
     for (int i = 0; i < 16; i++)
         ap_pass[i] = "abcdefghijkmnpqrstuvwxyz23456789"[esp_random() % 32];
     ap_pass[16] = 0;
+#if CONFIG_ADAPTER_OPEN_SETUP_AP
+    ap_pass[0] = 0;
+#endif
     for (int i = 0; i < 32; i++)
         token[i] = "0123456789abcdef"[esp_random() % 16];
     token[32] = 0;
@@ -48,11 +55,16 @@ static const char PAGE_HEAD[] =
     ".hint{display:block;font-weight:400;font-size:.82em;color:var(--mute)}\n"
     "input{width:100%;font:inherit;color:var(--text);background:#0b141b;border:1px solid var(--line);border-radius:10px;padding:.65em .75em;margin-top:.3em;min-height:44px;transition:border-color .2s var(--ease),box-shadow .2s var(--ease)}\n"
     "input:focus-visible,button:focus-visible,summary:focus-visible{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(64,223,255,.35)}\n"
+    ".nets{display:grid;gap:.4em;margin:.5em 0 0}\n"
+    ".net{display:flex;justify-content:space-between;gap:1em;text-align:left;margin:0;min-height:44px;background:#0b141b;color:var(--text);border:1px solid var(--line);font-weight:400}\n"
+    ".net:hover{border-color:var(--acc);background:#0b141b}\n"
+    ".net span:last-child{color:var(--mute);white-space:nowrap}\n"
+    ".note{color:var(--mute);font-size:.9em;margin:.5em 0 0}\n"
     ".show{display:flex;align-items:center;gap:.5em;font-weight:400;font-size:.9em;margin-top:.5em;min-height:44px}\n"
     ".show input{width:auto;min-height:0;margin:0;accent-color:var(--acc)}\n"
     "details{margin-top:1em;color:var(--mute)}\n"
     "summary{cursor:pointer;min-height:44px;display:flex;align-items:center}\n"
-    "summary::before{content:'\u25b8';color:var(--acc);margin-right:.5em;transition:transform .2s var(--ease)}\n"
+    "summary::before{content:'▸';color:var(--acc);margin-right:.5em;transition:transform .2s var(--ease)}\n"
     "details[open] summary::before{transform:rotate(90deg)}\n"
     ".row{display:grid;grid-template-columns:1fr 1fr;gap:.8em}\n"
     "button{font:inherit;font-weight:600;min-height:48px;width:100%;border:0;border-radius:12px;padding:.7em 1em;cursor:pointer;background:var(--acc);color:#04202a;margin-top:1.1em;transition:transform .12s var(--ease),opacity .2s var(--ease),background-color .2s var(--ease)}\n"
@@ -84,6 +96,9 @@ static const char PAGE_HEAD[] =
     "<p class=lead>About a minute. Internet forwarding is paused while you do this.</p>\n"
     "<ol><li data-n=1>Enter the 2.4 GHz network the dongle should use</li><li data-n=2>Save; it restarts and tests the connection</li><li data-n=3>Watch the dongle's light: amber, then green</li></ol>\n"
     "<form id=f autocomplete=off>\n"
+    "<label>Nearby networks<span class=hint>Tap one to use it.</span></label>\n"
+    "<div id=nets class=nets></div>\n"
+    "<button id=scan type=button class=quiet>Scan again</button>\n"
     "<label>Wi-Fi network name (SSID)<span class=hint>Exactly as it appears, including capitals. 2.4 GHz only.</span><input name=ssid maxlength=32 required autocapitalize=off autocorrect=off spellcheck=false></label>\n"
     "<label>Password<span class=hint>Leave empty for an open network. 8 to 63 characters.</span><input id=pw name=password type=password maxlength=63 autocomplete=new-password autocapitalize=off autocorrect=off spellcheck=false></label>\n"
     "<label class=show><input type=checkbox id=show>Show password</label>\n"
@@ -121,6 +136,21 @@ static const char PAGE_TAIL[] =
     "  return r.ok?{ok:true}:{ok:false,text:t};\n"
     " }catch(e){return {ok:null}}\n"
     "}\n"
+    "function bars(r){return r>-60?'strong':r>-75?'ok':'weak'}\n"
+    "function render(j){\n"
+    " nets.innerHTML='';\n"
+    " if(!j.n.length){const p=document.createElement('p');p.className='note';p.textContent=j.busy?'Scanning...':'No networks found. Type the name below.';nets.appendChild(p)}\n"
+    " j.n.forEach(n=>{const b=document.createElement('button');b.type='button';b.className='net quiet';\n"
+    "  const a=document.createElement('span');a.textContent=n.s;const c=document.createElement('span');c.textContent=(n.o?'open, ':'')+bars(n.r);\n"
+    "  b.appendChild(a);b.appendChild(c);\n"
+    "  b.onclick=()=>{f.ssid.value=n.s;if(n.o)f.password.value='';$('pw').focus()};nets.appendChild(b)});\n"
+    "}\n"
+    "async function scan(again){\n"
+    " try{const r=await fetch('/scan'+(again?'?again=1':''),{headers:{'X-Setup-Token':token}});const j=await r.json();render(j);\n"
+    "  $('scan').disabled=j.busy;$('scan').textContent=j.busy?'Scanning...':'Scan again';\n"
+    "  if(j.busy)setTimeout(()=>scan(false),1500)}catch(e){}\n"
+    "}\n"
+    "$('scan').onclick=()=>scan(true);scan(false);\n"
     "const saved=[['#ffb020','Amber, breathing: joining your network'],['#5fe0a0','Green with a brief glow: connected and USB ready'],['#ff5a4d','Red, two blinks: network not found or wrong password']];\n"
     "f.onsubmit=async e=>{\n"
     " e.preventDefault();\n"
@@ -150,11 +180,84 @@ static esp_err_t page(httpd_req_t *r) {
     httpd_resp_send_chunk(r, PAGE_TAIL, sizeof(PAGE_TAIL) - 1);
     return httpd_resp_send_chunk(r, NULL, 0);
 }
+static bool token_ok(httpd_req_t *r) {
+    char supplied[40];
+    return httpd_req_get_hdr_value_str(r, "X-Setup-Token", supplied, sizeof(supplied)) == ESP_OK &&
+           !strcmp(supplied, token);
+}
+/* Nearby-network list. The scan runs in its own task so the HTTP server never blocks; the page
+ * polls /scan until "busy" clears. Results are deduplicated by SSID, strongest first. */
+#define SCAN_MAX 16
+static struct {
+    char ssid[33];
+    int8_t rssi;
+    uint8_t open;
+} nets[SCAN_MAX];
+static volatile int net_count;
+static volatile bool scanning;
+static void scan_task(void *arg) {
+    wifi_scan_config_t sc = {.show_hidden = false};
+    uint16_t n = 24;
+    wifi_ap_record_t *rec = calloc(n, sizeof(*rec));
+    int count = 0;
+    if (rec && esp_wifi_scan_start(&sc, true) == ESP_OK &&
+        esp_wifi_scan_get_ap_records(&n, rec) == ESP_OK) {
+        for (int i = 0; i < n; i++) { /* records arrive sorted by RSSI, strongest first */
+            const char *s = (const char *)rec[i].ssid;
+            bool ascii = s[0] != 0, dup = false;
+            for (const char *c = s; *c; c++)
+                if ((unsigned char)*c < 32 || (unsigned char)*c > 126)
+                    ascii = false;
+            for (int j = 0; j < count; j++)
+                if (!strcmp(nets[j].ssid, s))
+                    dup = true;
+            if (!ascii || dup || count == SCAN_MAX)
+                continue;
+            strcpy(nets[count].ssid, s);
+            nets[count].rssi = rec[i].rssi;
+            nets[count].open = rec[i].authmode == WIFI_AUTH_OPEN;
+            count++;
+        }
+    }
+    free(rec);
+    net_count = count;
+    scanning = false;
+    vTaskDelete(NULL);
+}
+static void scan_begin(void) {
+    if (scanning)
+        return;
+    scanning = true;
+    if (xTaskCreate(scan_task, "scan", 4096, NULL, 2, NULL) != pdPASS)
+        scanning = false;
+}
+static esp_err_t scan_get(httpd_req_t *r) {
+    headers(r);
+    if (!token_ok(r))
+        return httpd_resp_send_err(r, HTTPD_403_FORBIDDEN, "Invalid setup token");
+    if (strstr(r->uri, "again"))
+        scan_begin();
+    cJSON *o = cJSON_CreateObject(), *a = cJSON_AddArrayToObject(o, "n");
+    cJSON_AddBoolToObject(o, "busy", scanning);
+    for (int i = 0; i < net_count; i++) {
+        cJSON *e = cJSON_CreateObject();
+        cJSON_AddStringToObject(e, "s", nets[i].ssid);
+        cJSON_AddNumberToObject(e, "r", nets[i].rssi);
+        cJSON_AddBoolToObject(e, "o", nets[i].open);
+        cJSON_AddItemToArray(a, e);
+    }
+    char *txt = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    if (!txt)
+        return httpd_resp_send_err(r, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+    httpd_resp_set_type(r, "application/json");
+    esp_err_t e = httpd_resp_sendstr(r, txt);
+    free(txt);
+    return e;
+}
 static esp_err_t post(httpd_req_t *r) {
     headers(r);
-    char supplied[40];
-    if (httpd_req_get_hdr_value_str(r, "X-Setup-Token", supplied, sizeof(supplied)) != ESP_OK ||
-        strcmp(supplied, token))
+    if (!token_ok(r))
         return httpd_resp_send_err(r, HTTPD_403_FORBIDDEN, "Invalid setup token");
     if (r->content_len < 2 || r->content_len > 400)
         return httpd_resp_send_err(r, HTTPD_400_BAD_REQUEST, "Body must be 2..400 bytes");
@@ -195,6 +298,51 @@ static esp_err_t post(httpd_req_t *r) {
     return httpd_resp_sendstr(r, "Request queued. Check screen for validation; "
                                  "valid save/cancel disconnects setup and reboots.");
 }
+/* Captive portal: every DNS name resolves to the dongle and every unknown URL redirects to the
+ * setup page, so phones and laptops pop the setup sheet on their own. Setup mode only. */
+static void dns_task(void *arg) {
+    int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(53)};
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (s < 0 || bind(s, (struct sockaddr *)&a, sizeof(a)) < 0) {
+        if (s >= 0)
+            close(s);
+        vTaskDelete(NULL);
+    }
+    uint8_t q[256];
+    for (;;) {
+        struct sockaddr_in from;
+        socklen_t fl = sizeof(from);
+        int n = recvfrom(s, q, sizeof(q) - 16, 0, (struct sockaddr *)&from, &fl);
+        if (n < 17)
+            continue;
+        int i = 12; /* end of the question name, then QTYPE and QCLASS */
+        while (i < n && q[i])
+            i += q[i] + 1;
+        if (i + 5 > n)
+            continue;
+        uint16_t qtype = (q[i + 1] << 8) | q[i + 2];
+        int end = i + 5;
+        q[2] = 0x81; /* response, recursion desired */
+        q[3] = 0x80; /* recursion available, no error */
+        q[6] = 0;
+        q[7] = qtype == 1 ? 1 : 0; /* answer only A records; AAAA gets an empty NOERROR */
+        q[8] = q[9] = q[10] = q[11] = 0;
+        if (qtype == 1) {
+            static const uint8_t ans[] = {0xc0, 0x0c, 0,  1,  0,   1,   0,   0,
+                                          0,    60,   0,  4,  192, 168, 4,   1};
+            memcpy(q + end, ans, sizeof(ans));
+            end += sizeof(ans);
+        }
+        sendto(s, q, end, 0, (struct sockaddr *)&from, fl);
+    }
+}
+static esp_err_t redirect(httpd_req_t *r, httpd_err_code_t err) {
+    httpd_resp_set_status(r, "302 Found");
+    httpd_resp_set_hdr(r, "Location", "http://192.168.4.1/");
+    httpd_resp_set_hdr(r, "Cache-Control", "no-store");
+    return httpd_resp_send(r, NULL, 0);
+}
 void portal_start(void) {
     /* Only setup mode creates an esp_netif. Adapter mode has no LwIP interface.
      */
@@ -202,21 +350,40 @@ void portal_start(void) {
     esp_wifi_stop();
     bridge_clear_addresses();
     ESP_ERROR_CHECK(esp_netif_init());
-    assert(esp_netif_create_default_wifi_ap());
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    esp_netif_t *ap = esp_netif_create_default_wifi_ap();
+    assert(ap);
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
     wifi_config_t c = {0};
     strcpy((char *)c.ap.ssid, ap_ssid);
     strcpy((char *)c.ap.password, ap_pass);
     c.ap.ssid_len = strlen(ap_ssid);
     c.ap.channel = 1;
+#if CONFIG_ADAPTER_OPEN_SETUP_AP
+    c.ap.authmode = WIFI_AUTH_OPEN;
+#else
     c.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    c.ap.max_connection = 2;
     c.ap.pmf_cfg.capable = true;
+#endif
+    c.ap.max_connection = 2;
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &c));
     ESP_ERROR_CHECK(esp_wifi_start());
+    /* Hand out the dongle as DNS server and advertise the portal URL (DHCP option 114). */
+    esp_netif_dhcps_stop(ap);
+    esp_netif_dns_info_t dns = {.ip.type = IPADDR_TYPE_V4};
+    dns.ip.u_addr.ip4.addr = esp_ip4addr_aton("192.168.4.1");
+    esp_netif_set_dns_info(ap, ESP_NETIF_DNS_MAIN, &dns);
+    dhcps_offer_t offer = OFFER_DNS;
+    esp_netif_dhcps_option(ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &offer, sizeof(offer));
+    static const char portal_uri[] = "http://192.168.4.1/";
+    esp_netif_dhcps_option(ap, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI, (void *)portal_uri,
+                           sizeof(portal_uri) - 1);
+    esp_netif_dhcps_start(ap);
+    xTaskCreate(dns_task, "dns", 3072, NULL, 3, NULL);
+    scan_begin();
     httpd_config_t h = HTTPD_DEFAULT_CONFIG();
     h.stack_size = 6144;
-    h.max_open_sockets = 3;
+    h.uri_match_fn = NULL;
+    h.max_open_sockets = 4;
     h.lru_purge_enable = true;
     h.recv_wait_timeout = 3;
     h.send_wait_timeout = 3;
@@ -230,5 +397,8 @@ void portal_start(void) {
                 cancel = {.uri = "/cancel", .method = HTTP_POST, .handler = post};
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &save);
+    httpd_uri_t scan = {.uri = "/scan", .method = HTTP_GET, .handler = scan_get};
+    httpd_register_uri_handler(server, &scan);
     httpd_register_uri_handler(server, &cancel);
+    httpd_register_err_handler(server, HTTPD_404_NOT_FOUND, redirect);
 }

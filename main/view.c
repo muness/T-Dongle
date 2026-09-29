@@ -7,11 +7,13 @@ void view_lines(const view_t *v, char lines[5][32]) {
     static const char *const dots[4] = {"DOWN", "JOIN.", "JOIN..", "JOIN..."};
     char b[5][128] = {{0}};
     if (v->setup) {
-        snprintf(b[0], 128, "1 Join this Wi-Fi:");
-        snprintf(b[1], 128, "%s", v->ap_ssid);
-        snprintf(b[2], 128, "Pass %s", v->ap_pass);
-        snprintf(b[3], 128, "2 Open 192.168.4.1");
-        snprintf(b[4], 128, "%s", v->error[0] ? v->error : "Bridge paused, 10 min max");
+        /* Large font on the LCD: only what is needed to connect. */
+        snprintf(b[0], 128, "%s", v->ap_ssid);
+        if (v->ap_pass[0]) {
+            snprintf(b[1], 128, "%s", v->ap_pass);
+            snprintf(b[2], 128, "192.168.4.1");
+        } else
+            snprintf(b[1], 128, "192.168.4.1");
     } else if (v->page == 0 && v->active < 0) {
         snprintf(b[0], 128, "Welcome to T-Dongle");
         snprintf(b[1], 128, "No Wi-Fi saved yet.");

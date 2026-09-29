@@ -14,6 +14,8 @@ assert 'CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y' in config
 assert '# CONFIG_SPIRAM is not set' in config
 assert 'CONFIG_TINYUSB_NET_MODE_NCM=y' in config
 assert 'CONFIG_APP_REPRODUCIBLE_BUILD=y' in config
+# The setup AP is passwordless by owner decision. A stale cached sdkconfig once dropped this silently.
+assert 'CONFIG_ADAPTER_OPEN_SETUP_AP=y' in config, 'setup AP must be open (no password); delete the stale build sdkconfig'
 with (build/'tdongle_adapter.elf').open('rb') as f:
     elf=ELFFile(f);sym=elf.get_section_by_name('.symtab')
     def value(name):

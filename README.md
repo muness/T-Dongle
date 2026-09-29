@@ -36,11 +36,11 @@ Successful builds generate `dist/tdongle-0.1.0-VARIANT/` containing application,
 
 ## First flash and recovery
 
-1. Physically confirm original T-Dongle-S3, board revision, screen and [pin map](main/board.h). The schematic flash label conflicts with product documentation; check chip and flash size using the ROM tools before writing. Target is ESP32-S3, 16 MB QIO flash at 80 MHz, PSRAM disabled. Do not flash Dual/Plus hardware with this image.
-2. Hold **BOOT while plugging into USB** to enter Espressif ROM download mode. Identify its port (`/dev/ttyACM…` on Linux, `/dev/cu.usbmodem…` on macOS). Close serial tools.
+1. Physically confirm original T-Dongle-S3, board revision, screen and [pin map](main/board.h). The schematic flash label conflicts with product documentation; check chip and flash size using the ROM tools before writing. Target is ESP32-S3, 16 MB flash written as DIO at 40 MHz (the tested unit, Winbond W25Q128, boot-loops at QIO 80 MHz), PSRAM disabled. Do not flash Dual/Plus hardware with this image.
+2. If the firmware is running and its console answers, `tools/flash.sh` sends the `bootloader` command and writes the built package without touching the button. Otherwise hold **BOOT while plugging into USB** to enter Espressif ROM download mode. Identify its port (`/dev/ttyACM…` on Linux, `/dev/cu.usbmodem…` on macOS). Close serial tools.
 3. Read-only identification: `python -m esptool --chip esp32s3 --port PORT chip_id` and `python -m esptool --chip esp32s3 --port PORT flash_id`.
 4. After authorizing the write yourself, run `idf.py -B build-full -p PORT flash`, or use the exact command in the built package's `FLASH.txt` from that directory. No erase-all is required for an ordinary update. Custom partitions: NVS `0x9000`/64 KiB, PHY `0x19000`/4 KiB, app `0x20000`/4 MiB; remaining flash unused.
-5. Unplug/replug **without holding BOOT**. TinyUSB takes over native USB pins 19/20; subsequent reflashing may require holding BOOT while plugging in again. This ROM route remains available even if firmware USB fails.
+5. Unplug/replug **without holding BOOT**. TinyUSB takes over native USB pins 19/20; subsequent reflashing uses `tools/flash.sh` or the `bootloader` console command, and falls back to holding BOOT while plugging in. If a write aborts after the app partition is erased, the bootloader loops and the chip's USB-Serial-JTAG stays up, so a plain `esptool write_flash` recovers it without the button.
 
 If NVS cannot initialize, the firmware does not erase it automatically. Use ROM recovery and preserve flash before investigating. Explicit confirmed factory reset clears only the adapter namespace, not PHY calibration. Flash encryption and secure boot are not enabled; saved NVS credentials are plaintext to physical flash access.
 

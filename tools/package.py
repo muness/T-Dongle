@@ -60,8 +60,8 @@ def main():
         'offsets': {'bootloader.bin': '0x0', 'partition-table.bin': '0x8000', 'app.bin': '0x20000'},
         'hardware_tested': False}, indent=2)+'\n')
     (out / 'FLASH.txt').write_text('Original T-Dongle-S3 only; hardware not validated. Confirm chip/flash before flashing.\n'
-        'User-authorized flash only; hold BOOT while plugging in to enter ROM mode.\n'
-        'python -m esptool --chip esp32s3 --port PORT write_flash --flash_mode qio --flash_freq 80m --flash_size 16MB '
+        'User-authorized flash only. Use tools/flash.sh (no button needed once the firmware runs); or hold BOOT while plugging in for ROM mode.\n'
+        'python -m esptool --chip esp32s3 --port PORT write_flash --flash_mode dio --flash_freq 40m --flash_size 16MB '
         '0x0 bootloader.bin 0x8000 partition-table.bin 0x20000 app.bin\n')
     checksums=[]
     for p in sorted(out.rglob('*')):

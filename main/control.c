@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include "soc/rtc_cntl_reg.h"
 #include "app.h"
 #include "cJSON.h"
 #include "esp_attr.h"
@@ -131,6 +132,15 @@ static void status(void) {
                    "internet=not_checked\r\n",
                    in_setup ? "setup" : "adapter", trial, active + 1, bridge_link_status(), signal,
                    b.usb_mounted, b.usb_ready);
+    wifi_ap_record_t ap;
+    int8_t txp = 0;
+    esp_wifi_get_max_tx_power(&txp);
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
+        console_printf("radio bssid=%02x:%02x:%02x:%02x:%02x:%02x channel=%u rssi=%d txpower_dbm=%.2f\r\n",
+                       ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3], ap.bssid[4],
+                       ap.bssid[5], ap.primary, ap.rssi, txp * 0.25);
+    else
+        console_printf("radio not_associated txpower_dbm=%.2f\r\n", txp * 0.25);
     uint8_t ip[16];
     if (bridge_host_ipv4(ip))
         console_printf("observed_ipv4=%u.%u.%u.%u age_ms=%" PRIu64 " (not DHCP proof)\r\n", ip[0],
@@ -194,7 +204,7 @@ static void handle(char *line) {
                    "{\"slot\":1,\"name\":\"Home\",\"ssid\":\"SSID\","
                    "\"password\":\"password\",\"priority\":50}, display "
                    "BRIGHTNESS ROTATION DIM_SECONDS, setup, cancel, reset, "
-                   "confirm-reset, reboot. Profiles validate by association "
+                   "confirm-reset, reboot, bootloader. Profiles validate by association "
                    "before replacing saved data. No console echo.\r\n");
     else if (!strcmp(line, "status") || !strcmp(line, "show") || !strcmp(line, "diagnostics"))
         status();
@@ -293,6 +303,13 @@ static void handle(char *line) {
             mgmt_write("ERR reset confirmation expired\r\n");
     } else if (!strcmp(line, "reboot"))
         esp_restart();
+    else if (!strcmp(line, "bootloader")) {
+        /* Reboot into the ROM download mode so tools/flash.sh can reflash without BOOT+replug. */
+        mgmt_write("OK rebooting into ROM download mode\r\n");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
+        esp_restart();
+    }
     else
         mgmt_write("ERR unknown/invalid command; help\r\n");
 }

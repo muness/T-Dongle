@@ -24,6 +24,7 @@ static lv_display_t *display;
 static SemaphoreHandle_t dma_done;
 static lv_obj_t *labels[5], *bars[HISTORY_LEN], *signal_label;
 static bool screen;
+static int big_layout;
 static uint8_t *dma_pixels;
 static bool transfer_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *e,
                           void *ctx) {
@@ -337,6 +338,21 @@ static void task(void *arg) {
                 unsigned bright = dim ? 5 : a.cfg.brightness;
                 ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 255 - bright * 255 / 100);
                 ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+                int layout = a.setup && menu < 0 ? (a.ap_pass[0] ? 2 : 1) : 0;
+                if (layout != big_layout) {
+                    big_layout = layout;
+                    for (int i = 0; i < 5; i++) {
+                        lv_obj_set_style_text_font(labels[i],
+                                                   layout ? &lv_font_montserrat_16
+                                                          : &lv_font_montserrat_10,
+                                                   0);
+                        lv_obj_set_pos(labels[i], 2,
+                                       layout == 1   ? 14 + i * 28
+                                       : layout == 2 ? 4 + i * 24
+                                                     : 2 + i * 15);
+                        lv_obj_set_height(labels[i], layout ? 22 : 13);
+                    }
+                }
                 if (page == 0 && a.active >= 0 && !a.setup && menu < 0) {
                     text_clip(lines[0], sizeof(lines[0]), v.ssid, 26);
                     lv_obj_set_width(labels[0], 104);
