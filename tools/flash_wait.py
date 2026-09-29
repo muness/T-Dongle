@@ -4,7 +4,8 @@
 
 Prints the ROM serial port on success. The app console is only reliably alive shortly after a
 boot, so this keeps trying every ~1.5 s (also while the dongle is unplugged and replugged).
-The ROM loader is recognised by its USB id (303a:1001), not by the port name.
+The ROM loader is any Espressif port that is not the app (303a:4000/4001). macOS pyserial reports
+the ROM's USB-Serial-JTAG as pid 0x9 rather than 0x1001, so matching the ROM pid directly misses it.
 """
 import sys
 import time
@@ -13,14 +14,14 @@ import serial
 from serial.tools import list_ports
 
 ESPRESSIF = 0x303A
-ROM_PID = 0x1001
+APP_PIDS = (0x4000, 0x4001)
 
 
 def scan():
     rom, app = [], []
     for p in list_ports.comports():
         if p.vid == ESPRESSIF:
-            (rom if p.pid == ROM_PID else app).append(p.device)
+            (app if p.pid in APP_PIDS else rom).append(p.device)
     return rom, app
 
 

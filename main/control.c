@@ -137,9 +137,10 @@ static void status(void) {
     int8_t txp = 0;
     esp_wifi_get_max_tx_power(&txp);
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK)
-        console_printf("radio bssid=%02x:%02x:%02x:%02x:%02x:%02x channel=%u rssi=%d txpower_dbm=%.2f\r\n",
+        console_printf("radio bssid=%02x:%02x:%02x:%02x:%02x:%02x channel=%u rssi=%d txpower_dbm=%.2f "
+                       "roams=%" PRIu32 "\r\n",
                        ap.bssid[0], ap.bssid[1], ap.bssid[2], ap.bssid[3], ap.bssid[4],
-                       ap.bssid[5], ap.primary, ap.rssi, txp * 0.25);
+                       ap.bssid[5], ap.primary, ap.rssi, txp * 0.25, bridge_roams());
     else
         console_printf("radio not_associated txpower_dbm=%.2f\r\n", txp * 0.25);
     uint8_t ip[16];

@@ -27,3 +27,10 @@ CONFIG_ADAPTER_OPEN_SETUP_AP=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT=4
 CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE=6400
+# Roaming: network-assisted only. 802.11k/v lets the controller steer the dongle (the supplicant
+# honours BSS transition requests itself). ESP-IDF's roaming app is gated behind
+# IDF_EXPERIMENTAL_FEATURES, and an RSSI-only roam ping-ponged between two similar-strength APs, so no
+# self-initiated roaming.
+CONFIG_ESP_WIFI_11KV_SUPPORT=y
+CONFIG_ESP_WIFI_RRM_SUPPORT=y
+CONFIG_ESP_WIFI_WNM_SUPPORT=y

@@ -32,3 +32,4 @@ bool bridge_host_ipv4(uint8_t ip[4]);
 bool bridge_host_ipv6(uint8_t ip[16]);
 esp_err_t wifi_apply_creds(const char *ssid, const char *pass);
 void bridge_clear_addresses(void);
+uint32_t bridge_roams(void);

@@ -326,6 +326,13 @@ static void tx_worker(void *arg) {
         }
     }
 }
+/* Roaming is network-assisted only (sdkconfig.defaults): 802.11k/v steering from the network.
+ * ESP-IDF's roaming app is experimental-gated. An RSSI-only rule, tried and measured,
+ * ping-ponged between two APs of similar strength; the network knows its backhaul, the
+ * dongle does not. A roam here is any association to a BSSID different from the previous one. */
+static uint8_t s_last_bssid[6];
+static uint32_t s_roams;
+uint32_t bridge_roams(void) { return s_roams; }
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *d = data;
@@ -345,6 +352,13 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         s_connected = true;
         s_connected_ms = esp_timer_get_time() / 1000;
         portEXIT_CRITICAL(&s_lock);
+        wifi_event_sta_connected_t *c = data;
+        static const uint8_t none[6];
+        if (memcmp(s_last_bssid, none, 6) && memcmp(s_last_bssid, c->bssid, 6)) {
+            s_roams++;
+            app_event(6, c->channel);
+        }
+        memcpy(s_last_bssid, c->bssid, 6);
         app_event(1, 0);
     }
 }
@@ -368,6 +382,8 @@ esp_err_t wifi_apply_creds(const char *ssid, const char *pass) {
      * the default fast scan takes the first match, which may be a far, weak node. */
     c.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
     c.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    c.sta.rm_enabled = 1;  /* 802.11k neighbour reports */
+    c.sta.btm_enabled = 1; /* 802.11v: let the network steer us to a better AP */
     esp_err_t e = esp_wifi_set_config(WIFI_IF_STA, &c);
     if (e == ESP_OK && ssid[0])
         e = esp_wifi_connect();

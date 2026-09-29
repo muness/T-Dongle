@@ -83,3 +83,16 @@ Mac host, `iperf3 -c 192.168.1.2 -B <dongle address>`, 30 s each way, dongle cou
 Downstream sits at 7.1 to 7.5 Mbit/s, which is within about 15% of what NCM over full-speed USB can carry; the longer retry window changed nothing. Upstream is not limited by the dropped frames: retrying the Wi-Fi transmit cut refusals by 70% and TCP retransmits by two thirds, yet throughput was unchanged with the congestion window hovering at 45 to 70 KB, which points at round-trip latency through the dongle's Wi-Fi transmit queue and air-time on a shared 2.4 GHz channel. Further firmware work on throughput is not justified by this data.
 
 `esp_restart()` arms a 1 s RTC watchdog with flash-boot protection before resetting. Entering ROM download mode that way leaves the watchdog running, which reset the chip out of download mode within seconds: once during a write (erasing the app partition; recovered with plain esptool since the bootloader loop leaves USB-Serial-JTAG up) and twice into a boot whose USB device side never worked (console and NCM data both dead, link reported up). Both forced-download paths now use the bare ROM software reset.
+
+### Roaming and Wi-Fi TX queue, same evening
+
+- **RSSI-only roaming was tried and removed.** A handwritten roam (floor -70 dBm, 8 dB gain) left a -68 dBm channel 11 AP for a channel 6 AP within 20 s of boot and moved three times in three minutes. Both radios sit between -60 and -75 dBm in the test room, so the floor was inside normal variation, and instantaneous RSSI is too noisy to compare against a scan. ESP-IDF's roaming app is gated behind IDF_EXPERIMENTAL_FEATURES. The firmware now enables 802.11k/v (RRM + WNM) so a steering controller can move the dongle, and does no self-initiated roaming. `status` reports `roams=`, counting any association to a new BSSID. Steering by a real controller has not been observed yet.
+- **A smaller Wi-Fi TX queue did not help.** Same AP (channel 6, -56 to -62 dBm), 25 s iperf3 each way:
+
+| Dynamic TX buffers | Down Mbit/s | Up Mbit/s | Up RTT under load | poolfail (up) |
+|---:|---:|---:|---:|---:|
+| 8 | 7.00 | 5.18 | 69 ms | 35 |
+| 24 (default, kept) | 7.21 | 5.57 | 66 ms | 5 |
+
+Upload latency is unchanged, so the queueing is not in the dongle's Wi-Fi TX buffers. The Mac's interface queue or air-time is the likelier source. The channel 6 AP that gave 3.4 to 4.1 Mbit/s down at -74 dBm gave 7.0 to 7.2 at -60, so that was signal, not a repeater.
+- `tools/flash.sh` now reflashes with no button and no replug. macOS pyserial reports the ROM's USB-Serial-JTAG as pid 0x9, which the script previously did not recognise.
