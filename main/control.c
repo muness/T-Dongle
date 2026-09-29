@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+#include "esp_rom_sys.h"
 #include "soc/rtc_cntl_reg.h"
 #include "app.h"
 #include "cJSON.h"
@@ -307,8 +308,10 @@ static void handle(char *line) {
         /* Reboot into the ROM download mode so tools/flash.sh can reflash without BOOT+replug. */
         mgmt_write("OK rebooting into ROM download mode\r\n");
         vTaskDelay(pdMS_TO_TICKS(200));
+        /* Not esp_restart(): it arms a 1 s RTC watchdog that then resets the ROM out of
+         * download mode mid-flash. A plain ROM software reset leaves no watchdog behind. */
         REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-        esp_restart();
+        esp_rom_software_reset_system();
     }
     else
         mgmt_write("ERR unknown/invalid command; help\r\n");

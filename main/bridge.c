@@ -9,6 +9,7 @@
  * with runtime credentials in NVS (console.c).
  */
 
+#include "esp_rom_sys.h"
 #include "soc/rtc_cntl_reg.h"
 #include "app.h"
 #include "device/dcd.h"
@@ -110,7 +111,7 @@ static void crashlog_boot(void) {
              * dongle without the BOOT button. */
             s_crashlog.streak = 0;
             REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
-            esp_restart();
+            esp_rom_software_reset_system(); /* see control.c: no RTC watchdog left armed */
         }
     }
     s_crashlog.boots++;
@@ -216,7 +217,18 @@ static esp_err_t usb_recv_callback(void *buffer, uint16_t len, void *ctx) {
         COUNT(txdrop);
         return ESP_OK;
     }
-    if (esp_wifi_internal_tx(ESP_IF_WIFI_STA, buffer, len) == ESP_OK) {
+    /* The Wi-Fi driver refuses a frame when its TX queue is full, which is ordinary
+     * backpressure under load. Retry briefly rather than drop: this runs inside the TinyUSB
+     * task, so waiting here simply delays the host's next OUT transfer. Keep it short so the
+     * console and the Wi-Fi-to-host direction, which share the task, are not starved. */
+    esp_err_t tx = ESP_FAIL;
+    for (int attempt = 0; attempt < 20; attempt++) {
+        tx = esp_wifi_internal_tx(ESP_IF_WIFI_STA, buffer, len);
+        if (tx == ESP_OK || !bridge_wifi_connected())
+            break;
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    if (tx == ESP_OK) {
         portENTER_CRITICAL(&s_lock);
         s_stats.host_to_wifi++;
         s_stats.up_bytes += len;
@@ -291,9 +303,9 @@ static void tx_worker(void *arg) {
             portEXIT_CRITICAL(&s_lock);
             /* NCM refuses a frame (ESP_FAIL) while every IN transfer block is in flight to the
              * host. That is ordinary backpressure at full-speed USB, not an error: wait a tick
-             * and retry for up to ~100 ms before counting a drop. */
+             * and retry for up to ~300 ms before counting a drop. */
             esp_err_t e = ESP_ERR_INVALID_STATE;
-            for (int attempt = 0; attempt < 10; attempt++) {
+            for (int attempt = 0; attempt < 30; attempt++) {
                 if (!(current && bridge_wifi_connected() && tud_ready()))
                     break;
                 e = tinyusb_net_send_sync(s_frames[i].bytes, len, (void *)(uintptr_t)i,

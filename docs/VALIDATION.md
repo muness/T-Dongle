@@ -70,3 +70,16 @@ First physical run, on an original T-Dongle-S3 (ESP32-S3 rev v0.2, Winbond 16 MB
 - Downstream drops were 15% because a frame was dropped the instant all NCM IN transfer blocks were in flight. With a bounded retry (up to ~100 ms) and 4 × 6400-byte IN blocks: 10 MB HTTP download at ~700 KB/s, 134 drops in 8,854 frames, console answering throughout. Before: ~214 KB/s, 1,502 drops in 9,775 frames.
 - Setup AP was not visible after the first boot following an esptool reset; visible after a power-cycle. Unexplained.
 - macOS placed the NCM service above Wi-Fi, so the laptop routed all traffic through the dongle as soon as it had a lease. Host-side service order, not firmware.
+
+### iperf3 to a LAN NAS through the dongle, same evening
+
+Mac host, `iperf3 -c 192.168.1.2 -B <dongle address>`, 30 s each way, dongle counters sampled at 1 Hz over the console throughout (no console dropouts in either run).
+
+| Build | Down Mbit/s | Down drops / frames | Up Mbit/s | Up retransmits | poolfail / up frames | RSSI |
+|---|---:|---:|---:|---:|---:|---:|
+| 100 ms USB retry, no Wi-Fi retry | 7.2 | 100 / 19,377 | 5.7 | 190 | 193 / 14,837 | -73 |
+| 300 ms USB retry, 20 ms Wi-Fi retry | 7.1 | 125 / 18,938 | 5.3 | 68 | 55 / 13,686 | -66 |
+
+Downstream sits at 7.1 to 7.5 Mbit/s, which is within about 15% of what NCM over full-speed USB can carry; the longer retry window changed nothing. Upstream is not limited by the dropped frames: retrying the Wi-Fi transmit cut refusals by 70% and TCP retransmits by two thirds, yet throughput was unchanged with the congestion window hovering at 45 to 70 KB, which points at round-trip latency through the dongle's Wi-Fi transmit queue and air-time on a shared 2.4 GHz channel. Further firmware work on throughput is not justified by this data.
+
+`esp_restart()` arms a 1 s RTC watchdog with flash-boot protection before resetting. Entering ROM download mode that way leaves the watchdog running, which reset the chip out of download mode within seconds: once during a write (erasing the app partition; recovered with plain esptool since the bootloader loop leaves USB-Serial-JTAG up) and twice into a boot whose USB device side never worked (console and NCM data both dead, link reported up). Both forced-download paths now use the bare ROM software reset.
