@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tarfile
 import gzip
+import os
 
 def notice_sources(paths, project, idf):
     # IDF metadata includes empty entries for virtual components. Never interpret
@@ -33,7 +34,9 @@ def archive_path(out):
 
 def main():
     build, variant = Path(sys.argv[1]), sys.argv[2]
-    version = '0.1.0'
+    # Local builds stay 0.1.0 so tools/flash.sh finds dist/tdongle-0.1.0-*; the release workflow
+    # sets TDONGLE_VERSION from the git tag.
+    version = os.environ.get('TDONGLE_VERSION', '0.1.0')
     out = Path('dist') / f'tdongle-{version}-{variant}'
     files = {'tdongle_adapter.bin': 'app.bin', 'bootloader/bootloader.bin': 'bootloader.bin',
              'partition_table/partition-table.bin': 'partition-table.bin',

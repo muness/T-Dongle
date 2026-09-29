@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Flash T-Dongle</title>
+<meta name="description" content="Flash the T-Dongle Wi-Fi to USB Ethernet firmware onto a LILYGO T-Dongle-S3 from Chrome.">
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<style>
+:root{--bg:#0e161d;--panel:#16222b;--line:#2a3a46;--text:#e8f0f5;--mute:#9db0bd;--acc:#40dfff;--warn:#ffb020}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f7f9;--panel:#fff;--line:#d5dee4;--text:#13202a;--mute:#52636f;--acc:#0a8fb0;--warn:#a86500}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:38em;margin:0 auto;padding:2em 16px 4em}
+h1{font-size:1.7em;line-height:1.2;margin:.2em 0 .3em}
+h2{font-size:1.1em;margin:0 0 .4em}
+p{margin:.4em 0}
+.lead{color:var(--mute)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1.1em 1.2em;margin:1.2em 0}
+.version{font-size:.85em;color:var(--mute);letter-spacing:.02em}
+ol{padding-left:1.3em;margin:.5em 0}
+li{margin:.35em 0}
+button{font:inherit;font-weight:600;min-height:46px;border-radius:12px;padding:.6em 1.2em;cursor:pointer;border:0;background:var(--acc);color:#04202a}
+button.quiet{background:transparent;color:var(--text);border:1px solid var(--line)}
+button:disabled{opacity:.55;cursor:progress}
+.row{display:flex;flex-wrap:wrap;gap:.7em;align-items:center;margin-top:.8em}
+.msg{font-size:.92em;color:var(--mute);min-height:1.4em}
+.warn{color:var(--warn)}
+a{color:var(--acc)}
+code{font-size:.9em}
+#unsupported{display:none}
+</style>
+</head>
+<body>
+<main>
+<p class="version" id="version">T-Dongle firmware</p>
+<h1>Flash your T-Dongle</h1>
+<p class="lead">Turns a LILYGO T-Dongle-S3 (the one with the screen) into a USB Ethernet adapter that joins Wi-Fi by itself. Use Chrome or Edge on a computer. <a href="https://github.com/muness/T-Dongle">Project page</a></p>
+
+<div class="card warn" id="unsupported">This browser cannot talk to USB devices. Use desktop Chrome or Edge.</div>
+
+<section class="card">
+<h2>First install</h2>
+<ol>
+<li>Hold the dongle's button while you plug it into USB, then let go.</li>
+<li>Click <b>Install</b>, pick the port (it may be called "USB JTAG/serial debug unit"), and allow erase.</li>
+<li>When it finishes, unplug the dongle and plug it back in without the button.</li>
+</ol>
+<div class="row">
+<esp-web-install-button id="install" manifest="manifest.json"><button slot="activate">Install</button><span slot="unsupported">Not supported in this browser</span><span slot="not-allowed">Needs HTTPS</span></esp-web-install-button>
+</div>
+</section>
+
+<section class="card">
+<h2>Update</h2>
+<p>Already running T-Dongle firmware? No button needed.</p>
+<ol>
+<li>With the dongle plugged in, click <b>Prepare for update</b> and pick the "T-Dongle-S3" port. The dongle restarts into its loader.</li>
+<li>Click <b>Install</b> above, pick the new port, and <b>decline erase</b> so your saved Wi-Fi networks are kept.</li>
+</ol>
+<div class="row"><button class="quiet" id="prep" type="button">Prepare for update</button></div>
+<p class="msg" id="prepmsg" role="status" aria-live="polite"></p>
+</section>
+
+<p class="msg">After flashing, the dongle shows a setup Wi-Fi called <b>TDongle-XXXXXX</b>. Join it from your phone to add your networks. Details are in the <a href="https://github.com/muness/T-Dongle#2-connect-it-to-your-wi-fi">README</a>.</p>
+</main>
+<script>
+if (!("serial" in navigator)) document.getElementById("unsupported").style.display = "block";
+fetch("manifest.json").then(r => r.json()).then(m => {
+  document.getElementById("version").textContent = "T-Dongle firmware v" + m.version + " · ESP32-S3";
+}).catch(() => {});
+const msg = document.getElementById("prepmsg");
+document.getElementById("prep").onclick = async () => {
+  if (!("serial" in navigator)) { msg.textContent = "Use desktop Chrome or Edge."; return; }
+  let port;
+  try { port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] }); }
+  catch (e) { msg.textContent = "No port picked."; return; }
+  try {
+    await port.open({ baudRate: 115200 });
+    const w = port.writable.getWriter();
+    await w.write(new TextEncoder().encode("\r\nbootloader\r\n"));
+    w.releaseLock();
+    await new Promise(r => setTimeout(r, 300));
+    await port.close().catch(() => {});
+    msg.textContent = "Done. The dongle is restarting into its loader. Now click Install and pick the new port.";
+  } catch (e) {
+    msg.textContent = "Could not send the command. Unplug the dongle, hold its button while plugging it in, and use Install.";
+  }
+};
+</script>
+</body>
+</html>

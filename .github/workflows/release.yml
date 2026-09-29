@@ -1,0 +1,44 @@
+name: release
+# Push a tag like v0.2.0 to build the firmware, attach it to a GitHub release and publish the
+# browser flash page (site/index.html) to GitHub Pages from the gh-pages branch.
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+concurrency:
+  group: release-pages
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y git wget flex bison gperf python3-venv cmake ninja-build ccache libffi-dev libssl-dev libusb-1.0-0
+      - run: tools/bootstrap.sh
+      - name: Build and test
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
+          tools/test.sh
+          TDONGLE_VERSION="$VERSION" tools/build.sh full
+          python3 tools/site.py "dist/tdongle-$VERSION-full" "$VERSION" site-out
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "T-Dongle $GITHUB_REF_NAME" --generate-notes \
+            "dist/tdongle-$VERSION-full.tar.gz" "dist/tdongle-$VERSION-full.tar.gz.sha256" \
+            "dist/tdongle-$VERSION-full/app.bin#app.bin (0x20000)" \
+            "dist/tdongle-$VERSION-full/bootloader.bin#bootloader.bin (0x0)" \
+            "dist/tdongle-$VERSION-full/partition-table.bin#partition-table.bin (0x8000)"
+      - name: Publish flash page
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ github.token }}
+          publish_branch: gh-pages
+          publish_dir: site-out
+          keep_files: true
+          commit_message: "Publish flash page for ${{ github.ref_name }}"
