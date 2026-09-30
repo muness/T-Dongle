@@ -24,6 +24,7 @@ jobs:
           . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
           tools/test.sh
           TDONGLE_VERSION="$VERSION" tools/build.sh full
+          python3 tools/android_manifest.py "dist/tdongle-$VERSION-full" "$VERSION"
           python3 tools/site.py "dist/tdongle-$VERSION-full" "$VERSION" site-out
       - name: GitHub release
         env:
@@ -31,6 +32,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --title "T-Dongle $GITHUB_REF_NAME" --generate-notes \
             "dist/tdongle-$VERSION-full.tar.gz" "dist/tdongle-$VERSION-full.tar.gz.sha256" \
+            "dist/tdongle-$VERSION-full/android-firmware.json#Android compatibility descriptor" \
             "dist/tdongle-$VERSION-full/app.bin#app.bin (0x20000)" \
             "dist/tdongle-$VERSION-full/bootloader.bin#bootloader.bin (0x0)" \
             "dist/tdongle-$VERSION-full/partition-table.bin#partition-table.bin (0x8000)"
