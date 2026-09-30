@@ -2,7 +2,8 @@ name: firmware-and-host-tests
 on: [push, pull_request, workflow_dispatch]
 jobs:
   host:
-    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, linux-general]
     steps:
       - uses: actions/checkout@v4
       - run: TEST_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tools/test.sh
@@ -11,7 +12,8 @@ jobs:
           name: synthetic-ui-previews
           path: docs/preview-*.svg
   firmware:
-    runs-on: ubuntu-24.04
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, linux-general]
     strategy:
       matrix:
         variant: [full, headless, network-only]
@@ -23,8 +25,15 @@ jobs:
         run: |
           . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
           tools/test.sh
-          tools/build.sh '${{ matrix.variant }}'
+          VERSION="0.2.${GITHUB_RUN_NUMBER}"
+          TDONGLE_VERSION="$VERSION" tools/build.sh '${{ matrix.variant }}'
+          if [ '${{ matrix.variant }}' = full ]; then
+            python3 tools/android_manifest.py "dist/tdongle-$VERSION-full" "$VERSION"
+            python3 -c 'import json,os,pathlib; pathlib.Path("dist/preview.json").write_text(json.dumps({"channel":"pr-test","commit":os.environ["GITHUB_SHA"],"run":os.environ["GITHUB_RUN_ID"],"hardwareTested":False}))'
+          fi
       - uses: actions/upload-artifact@v4
         with:
-          name: tdongle-0.1.0-${{ matrix.variant }}
-          path: dist/tdongle-0.1.0-${{ matrix.variant }}/
+          name: tdongle-preview-${{ matrix.variant }}-${{ github.run_id }}
+          path: |
+            dist/tdongle-0.2.*-${{ matrix.variant }}/
+            dist/preview.json
