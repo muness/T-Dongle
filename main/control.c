@@ -229,9 +229,11 @@ static void handle(char *line) {
                    "\"password\":\"password\",\"priority\":50}, display "
                    "BRIGHTNESS ROTATION DIM_SECONDS, setup, cancel, reset, "
                    "confirm-reset, reboot, bootloader, setup N (preselect slot N). Profiles validate by association "
-                   "before replacing saved data. No console echo. Extensions: capabilities, preference, metadata JSON.\r\n");
+                   "before replacing saved data. No console echo. Extensions: capabilities, preference, metadata JSON, display-settings.\r\n");
     else if (!strcmp(line, "capabilities"))
-        mgmt_write("capabilities schema=1 features=telemetry,metadata\r\n");
+        mgmt_write("capabilities schema=1 features=telemetry,metadata,display_readback\r\n");
+    else if (!strcmp(line, "display-settings"))
+        console_printf("display-settings brightness=%u rotation=%u dim_seconds=%u\r\n", cfg.brightness, cfg.rotation, cfg.dim_seconds);
     else if (!strcmp(line, "preference"))
         console_printf("preferred=%d\r\n", cfg.p[cfg.preferred].ssid[0] ? cfg.preferred + 1 : 0);
     else if (!strncmp(line, "metadata ", 9)) {
