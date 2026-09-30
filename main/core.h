@@ -56,3 +56,12 @@ void text_clip(char *dst, size_t cap, const char *src, size_t columns);
 /* Candidate validation: 0 waiting, 1 commit, -1 timed out. */
 int trial_decision(uint64_t now, uint64_t started, uint64_t associated_since, bool associated);
 bool profile_parse_json(const char *json, int *slot, profile_t *p);
+
+/* Compare-and-set metadata; no SSID/password mutation and no association change. */
+typedef struct {
+    int slot, expected_priority, priority;
+    char expected_name[25], expected_ssid[33], name[25];
+    bool preferred;
+} metadata_edit_t;
+bool metadata_parse_json(const char *json, metadata_edit_t *edit);
+bool metadata_apply(settings_t *settings, const metadata_edit_t *edit);
