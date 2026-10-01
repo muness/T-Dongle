@@ -43,3 +43,34 @@ cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/componen
 build-host/test_map_request
 cc -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_project_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_project_stream
 build-host/test_project_stream
+python - <<'PYCODE'
+from pathlib import Path
+s=Path('components/microlink/src/ml_derp.c').read_text();a=s.index('static int derp_read_exact(');b=s.index('/* ============================================================================',a)
+Path('build-host/derp_receive.inc').write_text(s[a:b])
+PYCODE
+cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_derp_receive.c -o build-host/test_derp_receive
+build-host/test_derp_receive
+python - <<'PYCODE'
+from pathlib import Path
+s=Path('main/gateway_main.c').read_text();a=s.index('#include "json_writer.inc"');b=s.index('static esp_err_t command(',a)
+Path('build-host/status_stream.inc').write_text(s[a:b]);Path('build-host/json_writer.inc').write_text(Path('main/json_writer.inc').read_text())
+PYCODE
+cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_status_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_status_stream
+build-host/test_status_stream
+python - <<'PYCODE'
+from pathlib import Path
+h=Path('components/microlink/include/microlink_internal.h').read_text();a=h.index('/* Peer update (from coord');b=h.index('/* ============================================================================',a);c=h.index('typedef struct {',h.index('#define ML_MAX_DERP_NODES'));d=h.index('/* ============================================================================',c)
+Path('build-host/semantic_types.inc').write_text(h[a:b]+h[c:d])
+s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static void parse_peers_from_map_response(');b=s.index('/* Add Endpoints',a);c=s.index('static void decode_derp_regions(');d=s.index('static bool activate_derp_regions(',c)
+Path('build-host/semantic_consumers.inc').write_text(s[a:b]+s[c:d])
+w=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=w.index('static void process_peer_updates(');b=w.index('/* ============================================================================',a);Path('build-host/batch_consumer.inc').write_text(w[a:b])
+PYCODE
+cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_map.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_map
+build-host/test_semantic_map
+python - <<'PYCODE'
+from pathlib import Path
+s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static int coord_send(');b=s.index('static int coord_recv(',a);c=s.index('static int noise_send_owned(');d=s.index('/* Receive and decrypt',c)
+Path('build-host/control_send.inc').write_text(s[a:b]+s[c:d])
+PYCODE
+cc -std=c11 -fsanitize=address,undefined -g -pthread -I build-host -I "$mbed/include" -I "$mbed/library" tests/test_control_send.c "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_control_send
+build-host/test_control_send

@@ -375,88 +375,56 @@ static void dispatch_derp_frame(microlink_t *ml, uint8_t frame_type,
  * Uses mbedtls recv_timeout (100ms) so ssl_read never blocks indefinitely.
  * Returns: 1 = frame read and dispatched, 0 = timeout (no data), <0 = error
  */
-static int poll_derp_read(microlink_t *ml) {
-    if (!ml->derp.connected || ml->derp.sockfd < 0) return -1;
-
-    /* Read 5-byte frame header.
-     * SO_RCVTIMEO=100ms ensures read() returns within 100ms if no data. */
-    uint8_t header[5];
-    int n = mbedtls_ssl_read(&ml->derp.ssl, header, 5);
-    if (n == MBEDTLS_ERR_SSL_WANT_READ || n == MBEDTLS_ERR_SSL_WANT_WRITE ||
-        n == MBEDTLS_ERR_SSL_TIMEOUT) {
-        return 0;  /* No data available / timeout */
-    }
-    if (n <= 0) {
-        ESP_LOGW(TAG, "DERP header read returned %d (0x%04x)", n, n < 0 ? -n : 0);
-        return n;
-    }
-    if (n < 5) {
-        ESP_LOGW(TAG, "DERP partial header: got %d of 5 bytes", n);
-        return -1;
-    }
-
-    uint8_t frame_type = header[0];
-    uint32_t len = (header[1] << 24) | (header[2] << 16) | (header[3] << 8) | header[4];
-
-    uint8_t src_key[32] = {0};
-    uint8_t *payload = NULL;
-    size_t payload_len = 0;
-
-    if (len == 0) {
-        dispatch_derp_frame(ml, frame_type, src_key, NULL, 0);
-        return 1;
-    }
-
-    if (len > 65536) {
-        ESP_LOGW(TAG, "DERP frame too large: %lu", (unsigned long)len);
-        return -1;
-    }
-
-    /* Read frame payload - we already got the header so payload should follow.
-     * Use longer timeout (2s) since we KNOW data is coming. */
-    uint8_t *buf = ml_psram_malloc(len);
-    if (!buf) return -1;
-
-    size_t total_read = 0;
-    uint64_t payload_start = ml_get_time_ms();
-    while (total_read < len) {
-        /* Safety timeout: 5 seconds for payload */
-        if (ml_get_time_ms() - payload_start > 5000) {
-            ESP_LOGW(TAG, "DERP payload timeout at %d/%lu bytes",
-                     (int)total_read, (unsigned long)len);
-            free(buf);
+/* One deadline covers header, sender key and payload; consumers own only base pointers. */
+static int derp_read_exact(microlink_t *ml, uint8_t *out, size_t length,
+                           uint64_t started, bool idle_ok) {
+    size_t used = 0;
+    while (used < length) {
+        if (ml_get_time_ms() - started > 5000)
             return -1;
-        }
-        n = mbedtls_ssl_read(&ml->derp.ssl, buf + total_read, len - total_read);
+        int n = mbedtls_ssl_read(&ml->derp.ssl, out + used, length - used);
         if (n == MBEDTLS_ERR_SSL_WANT_READ || n == MBEDTLS_ERR_SSL_WANT_WRITE ||
             n == MBEDTLS_ERR_SSL_TIMEOUT) {
+            if (idle_ok && !used)
+                return 0;
             vTaskDelay(pdMS_TO_TICKS(5));
             continue;
         }
-        if (n <= 0) {
-            ESP_LOGW(TAG, "DERP payload read error: %d (0x%04x) at %d/%lu bytes",
-                     n, n < 0 ? -n : 0, (int)total_read, (unsigned long)len);
-            free(buf);
-            return n;
-        }
-        total_read += n;
+        if (n <= 0)
+            return -1;
+        used += (size_t)n;
     }
-
-    /* For RecvPacket (0x05): first 32 bytes are sender's public key */
-    if (frame_type == DERP_FRAME_RECV_PACKET && len > 32) {
-        memcpy(src_key, buf, 32);
-        payload = malloc(len - 32);
-        if (payload) {
-            memcpy(payload, buf + 32, len - 32);
-            payload_len = len - 32;
-        }
-        free(buf);
-    } else {
-        payload = buf;
-        payload_len = len;
+    return 1;
+}
+static int poll_derp_read(microlink_t *ml) {
+    if (!ml->derp.connected || ml->derp.sockfd < 0)
+        return -1;
+    uint8_t header[5], src_key[32] = {0};
+    uint64_t started = ml_get_time_ms();
+    int result = derp_read_exact(ml, header, sizeof(header), started, true);
+    if (result <= 0)
+        return result;
+    uint8_t frame_type = header[0];
+    uint32_t len = ((uint32_t)header[1] << 24) | ((uint32_t)header[2] << 16) |
+                   ((uint32_t)header[3] << 8) | header[4];
+    if (len > 65536)
+        return -1;
+    if (frame_type == DERP_FRAME_RECV_PACKET) {
+        if (len <= sizeof(src_key))
+            return -1;
+        if (derp_read_exact(ml, src_key, sizeof(src_key), started, false) < 0)
+            return -1;
+        len -= sizeof(src_key);
     }
-
-    dispatch_derp_frame(ml, frame_type, src_key, payload, payload_len);
+    uint8_t *payload = len ? ml_psram_malloc(len) : NULL;
+    if (len && !payload)
+        return -1;
+    if (len && derp_read_exact(ml, payload, len, started, false) < 0) {
+        free(payload);
+        return -1;
+    }
+    /* Dispatch either transfers this allocation to a queue or frees it. */
+    dispatch_derp_frame(ml, frame_type, src_key, payload, len);
     return 1;
 }
 

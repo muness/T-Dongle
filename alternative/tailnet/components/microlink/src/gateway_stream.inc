@@ -26,8 +26,12 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                        : 0;
     size_t used = 0, expected = 0;
     uint8_t prefix[4];
+#ifdef GATEWAY_SEMANTIC_MAP
+    gateway_stage_init(&gateway_projection, ml);
+#else
     gs_init(&gateway_projection, (char *)gateway_json, sizeof(gateway_json));
     gateway_projection.home = ml->derp_region_default;
+#endif
     int result = 0;
     bool applied = false;
     uint64_t deadline = ml_get_time_ms() + (initial ? 15000 : 4000);
@@ -127,11 +131,17 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                     }
                     gateway_json[used - 4] = b;
                 } else if (!gs_byte(&gateway_projection, b)) {
-                    result = gateway_map_fail(
-                        ml, gateway_projection.overflow ? 6 : 8,
+                    const char *message =
                         gateway_projection.overflow
                             ? "Retained map exceeds capacity"
-                            : "Map JSON exceeds parser bounds or is malformed");
+                            : "Map JSON exceeds parser bounds or is malformed";
+#ifdef GATEWAY_SEMANTIC_MAP
+                    gateway_stage *stage = gateway_projection.context;
+                    if (stage->failure)
+                        message = stage->failure;
+#endif
+                    result = gateway_map_fail(
+                        ml, gateway_projection.overflow ? 6 : 8, message);
                     goto done;
                 }
                 used++;
@@ -150,47 +160,86 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                     expected = 4 + (size_t)length;
                 }
                 if (expected && used == expected) {
-                    size_t json_len = used - 4;
+#ifdef GATEWAY_SEMANTIC_MAP
                     if (!ml->config.map_callback) {
                         if (!gs_finish(&gateway_projection)) {
                             result = gateway_map_fail(
                                 ml, 8,
-                                "Incomplete or malformed projected JSON");
+                                "Incomplete or unsupported semantic map");
                             goto done;
                         }
-                        json_len = gateway_projection.used;
-                    }
-                    gateway_json[json_len] = 0;
-                    ml->map_projected_bytes = json_len;
-                    if (!json_len) {
-                        result = gateway_map_fail(
-                            ml, 8,
-                            "Map JSON is malformed or nesting exceeds 32");
-                        goto done;
-                    }
-                    ml->map_heap_before =
-                        heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-                    ml->map_largest_before =
-                        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-                    cJSON *map = cJSON_ParseWithLength((char *)gateway_json,
-                                                       json_len + 1);
-                    ml->map_heap_after =
-                        heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-                    if (!map || !cJSON_IsObject(map)) {
+                        ml->map_projected_bytes =
+                            ((gateway_stage *)gateway_projection.context)
+                                ->total;
+                        ml->map_heap_before =
+                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                        ml->map_largest_before =
+                            heap_caps_get_largest_free_block(
+                                MALLOC_CAP_INTERNAL);
+                        if (!gateway_stage_commit(ml, &gateway_projection)) {
+                            result = gateway_map_fail(
+                                ml, 9,
+                                ((gateway_stage *)gateway_projection.context)
+                                        ->failure
+                                    ? ((gateway_stage *)
+                                           gateway_projection.context)
+                                          ->failure
+                                    : "Map batch admission failed; no map "
+                                      "applied");
+                            goto done;
+                        }
+                        ml->map_heap_after =
+                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                    } else
+#endif
+                    {
+                        size_t json_len = used - 4;
+                        if (!ml->config.map_callback) {
+                            if (!gs_finish(&gateway_projection)) {
+                                result = gateway_map_fail(
+                                    ml, 8,
+                                    "Incomplete or malformed projected JSON");
+                                goto done;
+                            }
+                            json_len = gateway_projection.used;
+                        }
+                        gateway_json[json_len] = 0;
+                        ml->map_projected_bytes = json_len;
+                        if (!json_len) {
+                            result = gateway_map_fail(
+                                ml, 8,
+                                "Map JSON is malformed or nesting exceeds 32");
+                            goto done;
+                        }
+                        ml->map_heap_before =
+                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                        ml->map_largest_before =
+                            heap_caps_get_largest_free_block(
+                                MALLOC_CAP_INTERNAL);
+                        cJSON *map = cJSON_ParseWithLength((char *)gateway_json,
+                                                           json_len + 1);
+                        ml->map_heap_after =
+                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+                        if (!map || !cJSON_IsObject(map)) {
+                            cJSON_Delete(map);
+                            result = gateway_map_fail(
+                                ml, 9,
+                                "Map object allocation or JSON parsing failed");
+                            goto done;
+                        }
+                        apply_long_poll_map(ml, map);
                         cJSON_Delete(map);
-                        result = gateway_map_fail(
-                            ml, 9,
-                            "Map object allocation or JSON parsing failed");
-                        goto done;
                     }
-                    apply_long_poll_map(ml, map);
-                    cJSON_Delete(map);
                     ml->ctrl_stream_rx_ms = ml_get_time_ms();
                     applied = true;
                     used = expected = 0;
+#ifdef GATEWAY_SEMANTIC_MAP
+                    gateway_stage_init(&gateway_projection, ml);
+#else
                     gs_init(&gateway_projection, (char *)gateway_json,
                             sizeof(gateway_json));
                     gateway_projection.home = ml->derp_region_default;
+#endif
                 }
             } else if (ml->stream_type == 6 && ml->stream_special_used < 8) {
                 ml->stream_special[ml->stream_special_used++] = b;

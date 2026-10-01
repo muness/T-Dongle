@@ -1,3 +1,5 @@
+#ifndef GATEWAY_PROJECT_STREAM_INCLUDED
+#define GATEWAY_PROJECT_STREAM_INCLUDED
 /* Incremental JSON validation/projection. Raw bytes never accumulate: only
  * retained fields enter the bounded output. State is shared under gateway_lock.
  */
@@ -8,15 +10,21 @@ typedef struct {
     char key[128];
     size_t key_length;
 } gs_frame;
-typedef struct {
+typedef struct gs_parser gs_parser;
+struct gs_parser {
     gs_frame frames[32];
     unsigned depth, lex, unicode, home;
     bool escaped, key, keep, started, complete, overflow;
     char scalar[96];
     size_t scalar_length, used, capacity;
     char *out;
-} gs_parser;
+    void *context;
+    bool (*emit)(gs_parser *, char);
+    bool (*event)(gs_parser *, bool, char);
+};
 static bool gs_emit(gs_parser *p, char c) {
+    if (p->emit)
+        return p->emit(p, c);
     if (p->used + 1 >= p->capacity) {
         p->overflow = true;
         return false;
@@ -66,6 +74,8 @@ static bool gs_finish_scalar(gs_parser *p) {
             if (!gs_emit(p, p->scalar[i]))
                 return false;
     p->lex = 0;
+    if (p->event && !p->event(p, false, 's'))
+        return false;
     if (!p->depth)
         p->complete = true;
     return true;
@@ -127,8 +137,12 @@ again:
                         f->regions++;
                 }
                 f->phase = 2;
-            } else if (!p->depth)
-                p->complete = true;
+            } else {
+                if (p->event && !p->event(p, false, 's'))
+                    return false;
+                if (!p->depth)
+                    p->complete = true;
+            }
         }
         return true;
     }
@@ -144,7 +158,10 @@ again:
                 return false;
             if (f->scope != GP_DROP && !gs_emit(p, c))
                 return false;
-            if (!--p->depth)
+            --p->depth;
+            if (p->event && !p->event(p, false, c))
+                return false;
+            if (!p->depth)
                 p->complete = true;
             return true;
         }
@@ -175,6 +192,8 @@ again:
         return false;
     gp_scope scope;
     if (!gs_start_value(p, &scope))
+        return false;
+    if (p->event && !p->event(p, true, c))
         return false;
     p->keep = scope != GP_DROP;
     p->key = false;
@@ -210,6 +229,9 @@ static bool gs_finish(gs_parser *p) {
         return false;
     if (!p->complete || p->depth || p->lex)
         return false;
-    p->out[p->used] = 0;
+    if (!p->emit)
+        p->out[p->used] = 0;
     return true;
 }
+
+#endif

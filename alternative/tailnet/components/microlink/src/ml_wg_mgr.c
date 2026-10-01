@@ -847,62 +847,108 @@ static void remove_peer(microlink_t *ml, const ml_peer_update_t *update) {
     }
 }
 
+static void apply_peer_update(microlink_t *ml, const ml_peer_update_t *update) {
+    switch (update->action) {
+    case ML_PEER_BATCH:
+        break; /* envelope handled by queue consumer */
+    case ML_PEER_ADD:
+        add_peer(ml, update);
+        break;
+    case ML_PEER_REMOVE:
+        remove_peer(ml, update);
+        break;
+    case ML_PEER_UPDATE_ENDPOINT:
+        /* Delta from PeersChangedPatch. Look up by NodeID first (the
+         * canonical key in PeerChange), fall back to nodekey when the
+         * patch carried a key rotation. is_exit_node is NOT touched
+         * here — the patch doesn't carry AllowedIPs, so we'd otherwise
+         * clobber the exit-node flag on any endpoint-only update. */
+        {
+            int idx = -1;
+            if (update->has_node_id) {
+                idx = find_peer_by_node_id(ml, update->node_id);
+            }
+            if (idx < 0) {
+                /* All-zero public_key means "patch carried no Key"; skip
+                 * lookup. */
+                static const uint8_t zero_key[32] = {0};
+                if (memcmp(update->public_key, zero_key, 32) != 0) {
+                    idx = find_peer_by_key(ml, update->public_key);
+                }
+            }
+            if (idx >= 0) {
+                ml_peer_t *p = &ml->peers[idx];
+                if (update->endpoint_count > 0) {
+                    p->endpoint_count = update->endpoint_count;
+                    for (int i = 0;
+                         i < update->endpoint_count && i < ML_MAX_ENDPOINTS;
+                         i++) {
+                        p->endpoints[i].ip = update->endpoints[i].ip;
+                        p->endpoints[i].port = update->endpoints[i].port;
+                        p->endpoints[i].is_ipv6 = update->endpoints[i].is_ipv6;
+                    }
+                }
+                if (update->derp_region > 0) {
+                    p->derp_region = update->derp_region;
+                }
+                if (update->has_online) {
+                    p->online = update->online;
+                }
+                ESP_LOGI(
+                    TAG,
+                    "Peer patched: %s (NodeID=%llu eps=%d derp=%d online=%d)",
+                    p->hostname, (unsigned long long)p->node_id,
+                    p->endpoint_count, p->derp_region, p->online);
+            } else {
+                ESP_LOGW(TAG, "Patch for unknown peer (NodeID=%llu) — ignored",
+                         (unsigned long long)update->node_id);
+            }
+        }
+        break;
+    }
+}
 static void process_peer_updates(microlink_t *ml) {
     ml_peer_update_t *update;
     while (xQueueReceive(ml->peer_update_queue, &update, 0) == pdTRUE) {
-        if (!update) continue;
-        switch (update->action) {
-        case ML_PEER_ADD:
-            add_peer(ml, update);
-            break;
-        case ML_PEER_REMOVE:
-            remove_peer(ml, update);
-            break;
-        case ML_PEER_UPDATE_ENDPOINT:
-            /* Delta from PeersChangedPatch. Look up by NodeID first (the
-             * canonical key in PeerChange), fall back to nodekey when the
-             * patch carried a key rotation. is_exit_node is NOT touched
-             * here — the patch doesn't carry AllowedIPs, so we'd otherwise
-             * clobber the exit-node flag on any endpoint-only update. */
-            {
-                int idx = -1;
-                if (update->has_node_id) {
-                    idx = find_peer_by_node_id(ml, update->node_id);
-                }
-                if (idx < 0) {
-                    /* All-zero public_key means "patch carried no Key"; skip lookup. */
-                    static const uint8_t zero_key[32] = {0};
-                    if (memcmp(update->public_key, zero_key, 32) != 0) {
-                        idx = find_peer_by_key(ml, update->public_key);
-                    }
-                }
-                if (idx >= 0) {
-                    ml_peer_t *p = &ml->peers[idx];
-                    if (update->endpoint_count > 0) {
-                        p->endpoint_count = update->endpoint_count;
-                        for (int i = 0; i < update->endpoint_count && i < ML_MAX_ENDPOINTS; i++) {
-                            p->endpoints[i].ip = update->endpoints[i].ip;
-                            p->endpoints[i].port = update->endpoints[i].port;
-                            p->endpoints[i].is_ipv6 = update->endpoints[i].is_ipv6;
+        if (!update)
+            continue;
+        __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
+        bool is_batch = update->action == ML_PEER_BATCH;
+        if (is_batch) {
+            ml_peer_batch_t *batch = (ml_peer_batch_t *)update;
+            /* Authoritative omission is evaluated by the peer owner after
+             * earlier batches, not against a stale coordination snapshot. */
+            if (batch->authoritative) {
+                for (int p = 0; p < ML_MAX_PEERS; p++) {
+                    if (!ml->peers[p].active)
+                        continue;
+                    bool present = false;
+                    for (size_t i = 0; i < batch->count; i++)
+                        if (batch->updates[i].action == ML_PEER_ADD &&
+                            !memcmp(batch->updates[i].public_key,
+                                    ml->peers[p].public_key, 32)) {
+                            present = true;
+                            break;
                         }
+                    if (!present) {
+                        ml_peer_update_t rm = {.action = ML_PEER_REMOVE};
+                        memcpy(rm.public_key, ml->peers[p].public_key, 32);
+                        remove_peer(ml, &rm);
                     }
-                    if (update->derp_region > 0) {
-                        p->derp_region = update->derp_region;
-                    }
-                    if (update->has_online) {
-                        p->online = update->online;
-                    }
-                    ESP_LOGI(TAG, "Peer patched: %s (NodeID=%llu eps=%d derp=%d online=%d)",
-                             p->hostname, (unsigned long long)p->node_id,
-                             p->endpoint_count, p->derp_region, p->online);
-                } else {
-                    ESP_LOGW(TAG, "Patch for unknown peer (NodeID=%llu) — ignored",
-                             (unsigned long long)update->node_id);
                 }
             }
-            break;
-        }
+            for (size_t i = 0; i < batch->count; i++)
+                if (batch->updates[i].action == ML_PEER_ADD)
+                    apply_peer_update(ml, &batch->updates[i]);
+            for (size_t i = 0; i < batch->count; i++)
+                if (batch->updates[i].action != ML_PEER_ADD)
+                    apply_peer_update(ml, &batch->updates[i]);
+        } else
+            apply_peer_update(ml, update);
+        __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
         free(update);
+        if (is_batch)
+            __atomic_store_n(&ml->map_batch_pending, false, __ATOMIC_RELEASE);
     }
 }
 

@@ -276,6 +276,7 @@ typedef struct {
         ML_PEER_ADD,
         ML_PEER_REMOVE,
         ML_PEER_UPDATE_ENDPOINT,
+        ML_PEER_BATCH,
     } action;
     uint32_t vpn_ip;
     uint8_t public_key[32];
@@ -305,6 +306,12 @@ typedef struct {
     bool has_node_id;
     uint64_t node_id;
 } ml_peer_update_t;
+typedef struct {
+    ml_peer_update_t header;
+    size_t count;
+    bool authoritative;
+    ml_peer_update_t updates[];
+} ml_peer_batch_t;
 
 /* ============================================================================
  * Peer State (owned exclusively by wg_mgr task)
@@ -556,6 +563,8 @@ struct microlink_s {
     QueueHandle_t wg_rx_queue;          /* net_io -> wg_mgr */
     QueueHandle_t stun_rx_queue;        /* net_io -> coord */
     QueueHandle_t coord_cmd_queue;      /* any -> coord */
+    volatile uint32_t peer_generation; /* even = peer metadata stable, odd = owner applying updates */
+    volatile bool map_batch_pending; /* at most one owned semantic batch per membership */
     QueueHandle_t peer_update_queue;    /* coord -> wg_mgr */
 
     /* Keys (loaded at init, read-only after) */

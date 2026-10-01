@@ -658,6 +658,24 @@ static int noise_send(microlink_t *ml, ml_noise_state_t *noise,
     return ret;
 }
 
+/* Caller owns writable plaintext plus MAC tailroom. This socket and nonce are
+ * exclusive to its coordination task; no global transmit buffer is shared. */
+static int noise_send_owned(microlink_t *ml, ml_noise_state_t *noise,
+                            uint8_t *plaintext, size_t length,
+                            size_t capacity) {
+    if (length > 65519 || capacity < length + 16)
+        return -1;
+    if (ml_noise_encrypt(noise->tx_key, noise->tx_nonce, NULL, 0, plaintext,
+                         length, plaintext) != ESP_OK)
+        return -1;
+    noise->tx_nonce++;
+    size_t encrypted = length + 16;
+    uint8_t header[3] = {4, encrypted >> 8, encrypted};
+    if (coord_send(ml, header, sizeof(header)) < 0)
+        return -1;
+    return coord_send(ml, plaintext, encrypted);
+}
+
 /* Receive and decrypt a Noise transport frame, returns plaintext length */
 static int noise_recv_buffer(microlink_t *ml, ml_noise_state_t *noise,
                         uint8_t *plaintext, size_t max_len, bool in_place) {
@@ -1380,7 +1398,7 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     ESP_LOGI(TAG, "RegisterRequest: %d bytes", (int)json_len);
 
     /* Build HTTP/2 HEADERS + DATA frames */
-    uint8_t *h2_buf = ml_psram_malloc(json_len + 512);
+    uint8_t *h2_buf = ml_psram_malloc(json_len + 512 + 16);
     if (!h2_buf) { free(json_str); return -1; }
 
     int h2_pos = 0;
@@ -1402,7 +1420,7 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     h2_pos += data_len;
 
     /* Encrypt and send as one Noise frame */
-    if (noise_send(ml, noise, h2_buf, h2_pos) < 0) {
+    if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
         free(h2_buf);
         return -1;
     }
@@ -1616,6 +1634,8 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
 
 /* Defined below with the long-poll reader; both map paths share one framed stream. */
 
+#include "gateway_stage_types.inc"
+
 static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
     /* Try all field names used by Tailscale (copied from v1 lines 3176-3184):
      *   "Peers"        - Full peer list (initial Stream=false response)
@@ -1650,7 +1670,7 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
     cJSON *peer;
     cJSON_ArrayForEach(peer, peers) {
         /* Allocate peer update (freed by wg_mgr after processing) */
-        ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
+        ml_peer_update_t *update = gateway_peer_alloc();
         if (!update) continue;
 
         update->action = ML_PEER_ADD;
@@ -1787,7 +1807,7 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
                  update->endpoint_count, update->is_exit_node);
 
         /* Send to wg_mgr task via queue */
-        if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+        if (!gateway_peer_publish(ml, &update)) {
             ESP_LOGW(TAG, "Peer update queue full, dropping %s", update->hostname);
             free(update);
         }
@@ -1820,13 +1840,13 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
             }
             if (present) continue;
 
-            ml_peer_update_t *rm = ml_psram_calloc(1, sizeof(ml_peer_update_t));
+            ml_peer_update_t *rm = gateway_peer_alloc();
             if (!rm) continue;
             rm->action = ML_PEER_REMOVE;
             memcpy(rm->public_key, ml->peers[i].public_key, 32);
             ESP_LOGI(TAG, "Peer sweep: %s not in authoritative netmap — removing",
                      ml->peers[i].hostname);
-            if (xQueueSend(ml->peer_update_queue, &rm, pdMS_TO_TICKS(100)) != pdTRUE) {
+            if (!gateway_peer_publish(ml, &rm)) {
                 free(rm);
             } else {
                 swept++;
@@ -1852,7 +1872,7 @@ check_removed:
         cJSON_ArrayForEach(key_item, removed) {
             if (!cJSON_IsNumber(key_item) && !key_item->valuestring) continue;
 
-            ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
+            ml_peer_update_t *update = gateway_peer_alloc();
             if (!update) continue;
 
             update->action = ML_PEER_REMOVE;
@@ -1871,7 +1891,7 @@ check_removed:
                          update->public_key[2], update->public_key[3]);
             }
 
-            if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+            if (!gateway_peer_publish(ml, &update)) {
                 free(update);
             }
         }
@@ -1889,7 +1909,7 @@ check_removed:
         cJSON_ArrayForEach(patch, patches) {
             if (!cJSON_IsObject(patch)) continue;
 
-            ml_peer_update_t *update = ml_psram_calloc(1, sizeof(ml_peer_update_t));
+            ml_peer_update_t *update = gateway_peer_alloc();
             if (!update) continue;
             update->action = ML_PEER_UPDATE_ENDPOINT;
 
@@ -1948,7 +1968,7 @@ check_removed:
                      update->derp_region,
                      update->has_online ? (update->online ? "true" : "false") : "-");
 
-            if (xQueueSend(ml->peer_update_queue, &update, pdMS_TO_TICKS(100)) != pdTRUE) {
+            if (!gateway_peer_publish(ml, &update)) {
                 free(update);
             }
         }
@@ -2036,20 +2056,15 @@ static int add_endpoints_to_json(microlink_t *ml, cJSON *root) {
  * MapResponse, DERPMap included, arrives on the long-poll stream instead.
  * No-op when the JSON carries no DERPMap. Returns true when at least one
  * region was parsed. */
-static bool parse_derp_map_from_response(microlink_t *ml, cJSON *map_json) {
-    cJSON *derp_map = cJSON_GetObjectItem(map_json, "DERPMap");
-    if (!derp_map) return false;
-    cJSON *regions = cJSON_GetObjectItem(derp_map, "Regions");
-    if (!regions) return false;
-
-    ml->derp_region_count = 0;
+static void decode_derp_regions(ml_derp_region_t *out, uint8_t *count, uint16_t preferred, cJSON *regions) {
+    *count = 0;
     cJSON *region_obj;
     cJSON_ArrayForEach(region_obj, regions) {
         cJSON *id = cJSON_GetObjectItem(region_obj, "RegionID");
-        bool home = cJSON_IsNumber(id) && id->valueint == ml->derp_region_default;
-        if (ml->derp_region_count >= ML_MAX_DERP_REGIONS && !home) continue;
-        if (home && ml->derp_region_count >= ML_MAX_DERP_REGIONS) ml->derp_region_count--;
-        ml_derp_region_t *r = &ml->derp_regions[ml->derp_region_count];
+        bool home = cJSON_IsNumber(id) && id->valueint == preferred;
+        if (*count >= ML_MAX_DERP_REGIONS && !home) continue;
+        if (home && *count >= ML_MAX_DERP_REGIONS) (*count)--;
+        ml_derp_region_t *r = &out[*count];
         memset(r, 0, sizeof(*r));
 
         cJSON *rid = cJSON_GetObjectItem(region_obj, "RegionID");
@@ -2118,10 +2133,13 @@ static bool parse_derp_map_from_response(microlink_t *ml, cJSON *map_json) {
                      r->nodes[ni].stun_only ? " stun-only" : "");
         }
 
-        ml->derp_region_count++;
+        (*count)++;
     }
-    ESP_LOGI(TAG, "DERPMap: parsed %d regions", ml->derp_region_count);
+    ESP_LOGI(TAG, "DERPMap: parsed %d regions", *count);
 
+}
+
+static bool activate_derp_regions(microlink_t *ml) {
     /* Netcheck: measure RTT to every known DERP region via STUN.
      * Whether we then override the control-plane HomeDERP is gated
      * by two policy knobs (microlink_config_t):
@@ -2176,6 +2194,17 @@ static bool parse_derp_map_from_response(microlink_t *ml, cJSON *map_json) {
     }
 
     return ml->derp_region_count > 0;
+}
+
+static bool parse_derp_map_from_response(microlink_t *ml, cJSON *map_json) {
+    cJSON *derp_map = cJSON_GetObjectItem(map_json, "DERPMap");
+    if (!derp_map) return false;
+    cJSON *regions = cJSON_GetObjectItem(derp_map, "Regions");
+    if (!regions) return false;
+
+    decode_derp_regions(ml->derp_regions,&ml->derp_region_count,ml->derp_region_default,regions);
+
+    return activate_derp_regions(ml);
 }
 
 /* Fetch + parse one full MapResponse (Node, peers, DERPMap).
@@ -2238,7 +2267,7 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
     ESP_LOGI(TAG, "MapRequest: %d bytes (Stream=false)", (int)json_len);
 
     /* Build H2 HEADERS + DATA, stream ID 3 (stream 1 was register) */
-    uint8_t *h2_buf = ml_psram_malloc(json_len + 512);
+    uint8_t *h2_buf = ml_psram_malloc(json_len + 512 + 16);
     if (!h2_buf) { free(json_str); return -1; }
 
     int h2_pos = 0;
@@ -2257,7 +2286,7 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
     if (data_len < 0) { free(h2_buf); return -1; }
     h2_pos += data_len;
 
-    if (noise_send(ml, noise, h2_buf, h2_pos) < 0) {
+    if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
         free(h2_buf);
         return -1;
     }
@@ -2309,7 +2338,7 @@ static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise, bool omi
     ESP_LOGI(TAG, "MapRequest: %d bytes (Stream=true)", (int)json_len);
 
     /* Build H2 frames on stream ID 5 */
-    uint8_t *h2_buf = ml_psram_malloc(json_len + 512);
+    uint8_t *h2_buf = ml_psram_malloc(json_len + 512 + 16);
     if (!h2_buf) { free(json_str); return -1; }
 
     int h2_pos = 0;
@@ -2327,7 +2356,7 @@ static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise, bool omi
     if (data_len < 0) { free(h2_buf); return -1; }
     h2_pos += data_len;
 
-    if (noise_send(ml, noise, h2_buf, h2_pos) < 0) {
+    if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
         free(h2_buf);
         return -1;
     }
@@ -2412,7 +2441,7 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     uint32_t sid = ml->h2_next_stream_id;
     ml->h2_next_stream_id += 2;
 
-    uint8_t *h2_buf = ml_psram_malloc(json_len + 512);
+    uint8_t *h2_buf = ml_psram_malloc(json_len + 512 + 16);
     if (!h2_buf) { free(json_str); return -1; }
 
     int h2_pos = 0;
@@ -2430,7 +2459,7 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     if (data_len < 0) { free(h2_buf); return -1; }
     h2_pos += data_len;
 
-    if (noise_send(ml, noise, h2_buf, h2_pos) < 0) {
+    if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
         free(h2_buf);
         ESP_LOGE(TAG, "Failed to send endpoint update");
         return -1;
@@ -2512,6 +2541,9 @@ static void apply_long_poll_map(microlink_t *ml, cJSON *update_json) {
 }
 
 #include "gateway_project.inc"
+#define GATEWAY_SEMANTIC_MAP 1
+#include "gateway_project_stream.inc"
+#include "gateway_stage.inc"
 #include "gateway_stream.inc"
 
 /* ============================================================================

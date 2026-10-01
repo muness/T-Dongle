@@ -298,75 +298,231 @@ static esp_err_t home(httpd_req_t *req) {
     return httpd_resp_send(req, setup_html_start,
                            setup_html_end - setup_html_start);
 }
+#include "json_writer.inc"
+typedef struct {
+    uint32_t id, state, vpn_ip;
+    size_t start_heap_before, start_heap_after;
+    bool enabled, has_client, routing_ready;
+    char label[24], error[64], dns[128], login[384], protocol_error[64];
+    uint32_t diagnostics[14], stack_free[5];
+    unsigned peers;
+    struct {
+        char name[64];
+        uint32_t address;
+    } peer[ML_MAX_PEERS];
+} status_member;
+static int status_chunk(void *context, const char *bytes, size_t length) {
+    return httpd_resp_send_chunk(context, bytes, length) == ESP_OK ? 0 : -1;
+}
+static esp_err_t status_busy(httpd_req_t *req) {
+    httpd_resp_set_hdr(req, "Retry-After", "1");
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(
+        req,
+        "{\"ok\":false,\"error\":\"Memberships are busy; retry shortly\"}");
+}
 static esp_err_t status(httpd_req_t *req) {
     if (!local_request(req))
         return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
                                    "USB access required");
-    if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(1000)) != pdTRUE)
-        return failure(req, "Memberships are busy; retry shortly");
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root,"firmware","0.2.4");
-    cJSON_AddNumberToObject(root,"membership_start_budget",member_start_budget());
-    cJSON_AddNumberToObject(root,"membership_context_bytes",sizeof(microlink_t));
-    cJSON_AddBoolToObject(root, "wifi", online);
-    cJSON_AddBoolToObject(root, "route_storage_ok", route_storage_ok);
-    cJSON_AddNumberToObject(root, "free_memory", esp_get_free_heap_size());
-    cJSON_AddNumberToObject(root,"largest_free_block",heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-    cJSON_AddNumberToObject(root,"minimum_free_memory",heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
-    cJSON *list = cJSON_AddArrayToObject(root, "members");
+    /* Allocate outside the lock, then re-count to tolerate add/remove races.
+     * No member/client pointers escape the lifetime lock. */
+    if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(20)) != pdTRUE)
+        return status_busy(req);
+    size_t capacity = 0;
+    for (membership_t *m = members; m; m = m->next)
+        capacity++;
+    xSemaphoreGive(members_lock);
+    if (capacity > SIZE_MAX / sizeof(status_member))
+        return status_busy(req);
+    status_member *snapshot =
+        capacity ? calloc(capacity, sizeof(*snapshot)) : NULL;
+    if (capacity && !snapshot)
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "Out of memory taking setup snapshot");
+    if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(20)) != pdTRUE) {
+        free(snapshot);
+        return status_busy(req);
+    }
+    size_t count = 0;
     for (membership_t *m = members; m; m = m->next) {
-        cJSON *j = cJSON_CreateObject();
-        cJSON_AddNumberToObject(j, "id", m->id);
-        cJSON_AddNumberToObject(j,"start_heap_before",m->start_heap_before);cJSON_AddNumberToObject(j,"start_heap_after",m->start_heap_after);
-        cJSON_AddStringToObject(j, "label", m->label);
-        cJSON_AddBoolToObject(j, "enabled", m->enabled);
-        cJSON_AddStringToObject(j, "error", m->error);
-        cJSON_AddNumberToObject(j, "state", m->client ? m->client->state : 0);
-        cJSON_AddBoolToObject(j, "routing_ready", m->enabled && m->client && m->client->wg_netif && m->client->state == ML_STATE_CONNECTED && !m->client->key_expired && !m->client->last_error[0]);
-        if (m->client) {
-            if(m->client->vpn_ip){char ip[16];microlink_ip_to_str(m->client->vpn_ip,ip);cJSON_AddStringToObject(j,"tailnet_ip",ip);}
-            if(m->client->self_dns_name[0])cJSON_AddStringToObject(j,"tailnet_dns_name",m->client->self_dns_name);
-            cJSON *diag=cJSON_AddObjectToObject(j,"map_diagnostics");
-#define MD(field) cJSON_AddNumberToObject(diag,#field,m->client->field)
-            MD(map_attempts);MD(map_failures);MD(map_error);MD(map_bytes);MD(map_declared_bytes);MD(map_projected_bytes);
-            MD(map_heap_before);MD(map_heap_after);MD(map_largest_before);MD(map_stream_id);MD(map_frame_type);
-            MD(noise_error);MD(noise_frame_bytes);MD(map_generation);
-#undef MD
-            cJSON_AddStringToObject(j, "login_url", m->client->auth_url);
-            cJSON_AddStringToObject(j, "protocol_error",
-                                    m->client->last_error[0]
-                                        ? m->client->last_error
-                                        : m->client->transport_error);
-            cJSON *peers = cJSON_AddArrayToObject(j, "peers");
-            for (int i = 0; i < m->client->peer_count; i++) {
-                ml_peer_t *p = &m->client->peers[i];
-                if (!p->vpn_ip)
-                    continue;
-                cJSON *jp = cJSON_CreateObject();
-                cJSON_AddStringToObject(jp, "name", p->hostname);
-                char short_name[64], qualified[128];
-                strlcpy(short_name, p->hostname, sizeof(short_name));
+        if (count == capacity) {
+            xSemaphoreGive(members_lock);
+            free(snapshot);
+            return status_busy(req);
+        }
+        status_member *v = &snapshot[count++];
+        v->id = m->id;
+        v->enabled = m->enabled;
+        v->start_heap_before = m->start_heap_before;
+        v->start_heap_after = m->start_heap_after;
+        strlcpy(v->label, m->label, sizeof(v->label));
+        strlcpy(v->error, m->error, sizeof(v->error));
+        microlink_t *c = m->client;
+        if (!c)
+            continue;
+        v->has_client = true;
+        v->state = c->state;
+        v->vpn_ip = c->vpn_ip;
+        v->routing_ready = m->enabled && c->wg_netif &&
+                           c->state == ML_STATE_CONNECTED && !c->key_expired &&
+                           !c->last_error[0];
+        strlcpy(v->dns, c->self_dns_name, sizeof(v->dns));
+        strlcpy(v->login, c->auth_url, sizeof(v->login));
+        strlcpy(v->protocol_error,
+                c->last_error[0] ? c->last_error : c->transport_error,
+                sizeof(v->protocol_error));
+        v->diagnostics[0] = c->map_attempts;
+        v->diagnostics[1] = c->map_failures;
+        v->diagnostics[2] = c->map_error;
+        v->diagnostics[3] = c->map_bytes;
+        v->diagnostics[4] = c->map_declared_bytes;
+        v->diagnostics[5] = c->map_projected_bytes;
+        v->diagnostics[6] = c->map_heap_before;
+        v->diagnostics[7] = c->map_heap_after;
+        v->diagnostics[8] = c->map_largest_before;
+        v->diagnostics[9] = c->map_stream_id;
+        v->diagnostics[10] = c->map_frame_type;
+        v->diagnostics[11] = c->noise_error;
+        v->diagnostics[12] = c->noise_frame_bytes;
+        v->diagnostics[13] = c->map_generation;
+        TaskHandle_t tasks[5] = {c->net_io_task, c->derp_tx_task,
+                                 c->derp_rx_task, c->coord_task,
+                                 c->wg_mgr_task};
+        for (unsigned t = 0; t < 5; t++) {
+            v->stack_free[t]=UINT32_MAX;
+            if (tasks[t] && !c->stop_incomplete)
+                v->stack_free[t] = uxTaskGetStackHighWaterMark(tasks[t]);
+        }
+        uint32_t peer_generation=__atomic_load_n(&c->peer_generation,__ATOMIC_ACQUIRE);
+        if(peer_generation&1){xSemaphoreGive(members_lock);free(snapshot);return status_busy(req);}
+        for (int i = 0; i < c->peer_count && i < ML_MAX_PEERS; i++) {
+            if (!c->peers[i].vpn_ip)
+                continue;
+            unsigned j = v->peers++;
+            strlcpy(v->peer[j].name, c->peers[i].hostname,
+                    sizeof(v->peer[j].name));
+            v->peer[j].address = c->peers[i].vpn_ip;
+        }
+        if(peer_generation!=__atomic_load_n(&c->peer_generation,__ATOMIC_ACQUIRE)){xSemaphoreGive(members_lock);free(snapshot);return status_busy(req);}
+        for(unsigned j=0;j<v->peers;j++)v->peer[j].address=gateway_alias(m->id,v->peer[j].address);
+    }
+    xSemaphoreGive(members_lock);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    jw_writer writer = {.context = req, .sink = status_chunk};
+    jw_writer *w = &writer;
+    jw_raw(w, "{");
+#define NUM(name, value)                                                       \
+    do {                                                                       \
+        jw_key(w, name);                                                       \
+        jw_number(w, value);                                                   \
+        jw_char(w, ',');                                                       \
+    } while (0)
+#define STR(name, value)                                                       \
+    do {                                                                       \
+        jw_key(w, name);                                                       \
+        jw_string(w, value);                                                   \
+        jw_char(w, ',');                                                       \
+    } while (0)
+#define BOOL(name, value)                                                      \
+    do {                                                                       \
+        jw_key(w, name);                                                       \
+        jw_bool(w, value);                                                     \
+        jw_char(w, ',');                                                       \
+    } while (0)
+    STR("firmware", "0.2.5");
+    NUM("membership_start_budget", member_start_budget());
+    NUM("membership_context_bytes", sizeof(microlink_t));
+    BOOL("wifi", online);
+    BOOL("route_storage_ok", route_storage_ok);
+    NUM("free_memory", esp_get_free_heap_size());
+    NUM("largest_free_block",
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    NUM("minimum_free_memory",
+        heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    jw_raw(w, "\"members\":[");
+    const char *diagnostic_names[] = {
+        "map_attempts",      "map_failures",       "map_error",
+        "map_bytes",         "map_declared_bytes", "map_projected_bytes",
+        "map_heap_before",   "map_heap_after",     "map_largest_before",
+        "map_stream_id",     "map_frame_type",     "noise_error",
+        "noise_frame_bytes", "map_generation"};
+    const char *stack_names[] = {"net_io", "derp_tx", "derp_rx", "coord",
+                                 "wg_mgr"};
+    for (size_t i = 0; i < count && !w->failed; i++) {
+        status_member *v = &snapshot[i];
+        if (i)
+            jw_char(w, ',');
+        jw_char(w, '{');
+        NUM("id", v->id);
+        NUM("start_heap_before", v->start_heap_before);
+        NUM("start_heap_after", v->start_heap_after);
+        STR("label", v->label);
+        BOOL("enabled", v->enabled);
+        STR("error", v->error);
+        NUM("state", v->state);
+        jw_key(w, "routing_ready");
+        jw_bool(w, v->routing_ready);
+        if (v->has_client) {
+            jw_char(w, ',');
+            if (v->vpn_ip) {
+                char ip[16];
+                microlink_ip_to_str(v->vpn_ip, ip);
+                STR("tailnet_ip", ip);
+            }
+            if (v->dns[0])
+                STR("tailnet_dns_name", v->dns);
+            jw_raw(w, "\"map_diagnostics\":{");
+            for (unsigned d = 0; d < 14; d++) {
+                if (d)
+                    jw_char(w, ',');
+                jw_key(w, diagnostic_names[d]);
+                jw_number(w, v->diagnostics[d]);
+            }
+            jw_raw(w, "},\"stack_free_bytes\":{");
+            for (unsigned t = 0; t < 5; t++) {
+                if (t)
+                    jw_char(w, ',');
+                jw_key(w, stack_names[t]);
+                if(v->stack_free[t]==UINT32_MAX)jw_raw(w,"null");else jw_number(w, v->stack_free[t]);
+            }
+            jw_raw(w, "},");
+            STR("login_url", v->login);
+            STR("protocol_error", v->protocol_error);
+            jw_raw(w, "\"peers\":[");
+            for (unsigned j = 0; j < v->peers && !w->failed; j++) {
+                if (j)
+                    jw_char(w, ',');
+                jw_char(w, '{');
+                STR("name", v->peer[j].name);
+                char short_name[64], qualified[128], ip[16];
+                strlcpy(short_name, v->peer[j].name, sizeof(short_name));
                 char *dot = strchr(short_name, '.');
                 if (dot)
                     *dot = 0;
                 snprintf(qualified, sizeof(qualified), "%s.%s.tailnet",
-                         short_name, m->label);
-                cJSON_AddStringToObject(jp, "qualifiedName", qualified);
-                uint32_t alias = gateway_alias(m->id, p->vpn_ip);
-                char ip[16];
-                snprintf(ip, sizeof(ip), "%lu.%lu.%lu.%lu",
-                         (unsigned long)(alias >> 24),
-                         (unsigned long)((alias >> 16) & 255),
-                         (unsigned long)((alias >> 8) & 255),
-                         (unsigned long)(alias & 255));
-                cJSON_AddStringToObject(jp, "address", ip);
-                cJSON_AddItemToArray(peers, jp);
+                         short_name, v->label);
+                STR("qualifiedName", qualified);
+                microlink_ip_to_str(v->peer[j].address, ip);
+                jw_key(w, "address");
+                jw_string(w, ip);
+                jw_char(w, '}');
             }
+            jw_char(w, ']');
         }
-        cJSON_AddItemToArray(list, j);
+        jw_char(w, '}');
     }
-    xSemaphoreGive(members_lock);
-    return json_reply(req, root);
+    jw_raw(w, "]}");
+    bool ok = jw_flush(w);
+    free(snapshot);
+#undef NUM
+#undef STR
+#undef BOOL
+    if (!ok)
+        return ESP_FAIL;
+    return httpd_resp_send_chunk(req, NULL, 0);
 }
 static esp_err_t command(httpd_req_t *req) {
     if (!local_request(req))
