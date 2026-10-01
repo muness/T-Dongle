@@ -44,4 +44,3 @@ idf_component_register(
     PRIV_REQUIRES
         wireguard_lwip
 )
-

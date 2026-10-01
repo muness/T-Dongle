@@ -4,8 +4,8 @@
 //
 
  .align	2
-	.global	square256_asm
-	.type	square256_asm, %function
+    .global	square256_asm
+    .type	square256_asm, %function
 square256_asm:
 // ######################
 // ASM Square 256 refined karatsuba:
@@ -13,7 +13,7 @@ square256_asm:
  // sqr 256 Refined Karatsuba
  // pInput in r1
  // pResult in r0
- // adheres to arm eabi calling convention. 
+ // adheres to arm eabi calling convention.
     push {r1,r4,r5,r6,r7,r14}
     .syntax unified
     mov r3,r8
@@ -36,9 +36,9 @@ square256_asm:
     .syntax divided
     ldm r1!,{r4,r5,r6,r7}
  // sqr 128 Refined Karatsuba
- // Input in r4 ... r7 
- // Result in r0 ... r7 
- // clobbers all registers except for r14 
+ // Input in r4 ... r7
+ // Result in r0 ... r7
+ // clobbers all registers except for r14
     .syntax unified
     mov r0,r4
     .syntax divided
@@ -66,9 +66,9 @@ square256_asm:
  // Result in r0,r1,r2,r3
  // Clobbers: r4-r6
  // START: sqr 32
- // Input operand in r4 
- // Result in r0 ,r1 
- // Clobbers: r2, r3 
+ // Input operand in r4
+ // Result in r0 ,r1
+ // Clobbers: r2, r3
     uxth r0,r4
     lsr r1,r4,#16
     .syntax unified
@@ -82,15 +82,15 @@ square256_asm:
     add r0,r2
     adc r1,r3
  // End: sqr 32
- // Result in r0 ,r1 
+ // Result in r0 ,r1
     sub r4,r5
     sbc r6,r6
     eor r4,r6
     sub r4,r6
  // START: sqr 32
- // Input operand in r5 
- // Result in r2 ,r3 
- // Clobbers: r5, r6 
+ // Input operand in r5
+ // Result in r2 ,r3
+ // Clobbers: r5, r6
     uxth r2,r5
     lsr r3,r5,#16
     .syntax unified
@@ -104,14 +104,14 @@ square256_asm:
     add r2,r5
     adc r3,r6
  // End: sqr 32
- // Result in r2 ,r3 
+ // Result in r2 ,r3
     mov r6,#0
     add r2,r1
     adc r3,r6
  // START: sqr 32
- // Input operand in r4 
- // Result in r4 ,r5 
- // Clobbers: r1, r6 
+ // Input operand in r4
+ // Result in r4 ,r5
+ // Clobbers: r1, r6
     lsr r5,r4,#16
     uxth r4,r4
     .syntax unified
@@ -125,7 +125,7 @@ square256_asm:
     add r4,r1
     adc r5,r6
  // End: sqr 32
- // Result in r4 ,r5 
+ // Result in r4 ,r5
     .syntax unified
     mov r1,r2
     .syntax divided
@@ -159,12 +159,12 @@ square256_asm:
     .syntax divided
  // START: sqr 64 Refined Karatsuba
  // Input operands in r6,r7
- // Result in r2,r3,r4,r5 
+ // Result in r2,r3,r4,r5
  // Clobbers: r0,r7,r6
  // START: sqr 32
- // Input operand in r6 
- // Result in r2 ,r3 
- // Clobbers: r4, r5 
+ // Input operand in r6
+ // Result in r2 ,r3
+ // Clobbers: r4, r5
     uxth r2,r6
     lsr r3,r6,#16
     .syntax unified
@@ -178,15 +178,15 @@ square256_asm:
     add r2,r4
     adc r3,r5
  // End: sqr 32
- // Result in r2 ,r3 
+ // Result in r2 ,r3
     sub r6,r7
     sbc r4,r4
     eor r6,r4
     sub r6,r4
  // START: sqr 32
- // Input operand in r7 
- // Result in r4 ,r5 
- // Clobbers: r0, r7 
+ // Input operand in r7
+ // Result in r4 ,r5
+ // Clobbers: r0, r7
     uxth r4,r7
     lsr r5,r7,#16
     .syntax unified
@@ -200,14 +200,14 @@ square256_asm:
     add r4,r0
     adc r5,r7
  // End: sqr 32
- // Result in r4 ,r5 
+ // Result in r4 ,r5
     mov r7,#0
     add r4,r3
     adc r5,r7
  // START: sqr 32
- // Input operand in r6 
- // Result in r7 ,r0 
- // Clobbers: r6, r3 
+ // Input operand in r6
+ // Result in r7 ,r0
+ // Clobbers: r6, r3
     uxth r7,r6
     lsr r0,r6,#16
     .syntax unified
@@ -221,7 +221,7 @@ square256_asm:
     add r7,r6
     adc r0,r3
  // End: sqr 32
- // Result in r7 ,r0 
+ // Result in r7 ,r0
     .syntax unified
     mov r3,r4
     .syntax divided
@@ -262,12 +262,12 @@ square256_asm:
     .syntax divided
  // START: sqr 64 Refined Karatsuba
  // Input operands in r2,r3
- // Result in r6,r7,r0,r1 
+ // Result in r6,r7,r0,r1
  // Clobbers: r2,r3,r4
  // START: sqr 32
- // Input operand in r2 
- // Result in r6 ,r7 
- // Clobbers: r0, r1 
+ // Input operand in r2
+ // Result in r6 ,r7
+ // Clobbers: r0, r1
     uxth r6,r2
     lsr r7,r2,#16
     .syntax unified
@@ -281,15 +281,15 @@ square256_asm:
     add r6,r0
     adc r7,r1
  // End: sqr 32
- // Result in r6 ,r7 
+ // Result in r6 ,r7
     sub r2,r3
     sbc r4,r4
     eor r2,r4
     sub r2,r4
  // START: sqr 32
- // Input operand in r3 
- // Result in r0 ,r1 
- // Clobbers: r3, r4 
+ // Input operand in r3
+ // Result in r0 ,r1
+ // Clobbers: r3, r4
     uxth r0,r3
     lsr r1,r3,#16
     .syntax unified
@@ -303,14 +303,14 @@ square256_asm:
     add r0,r3
     adc r1,r4
  // End: sqr 32
- // Result in r0 ,r1 
+ // Result in r0 ,r1
     mov r4,#0
     add r0,r7
     adc r1,r4
  // START: sqr 32
- // Input operand in r2 
- // Result in r3 ,r4 
- // Clobbers: r2, r7 
+ // Input operand in r2
+ // Result in r3 ,r4
+ // Clobbers: r2, r7
     uxth r3,r2
     lsr r4,r2,#16
     .syntax unified
@@ -324,7 +324,7 @@ square256_asm:
     add r3,r2
     adc r4,r7
  // End: sqr 32
- // Result in r3 ,r4 
+ // Result in r3 ,r4
     .syntax unified
     mov r7,r0
     .syntax divided
@@ -386,7 +386,7 @@ square256_asm:
     mov r0,r10
     .syntax divided
  // END: sqr 128 Refined Karatsuba
- // Result in r0 ... r7 
+ // Result in r0 ... r7
     push {r4,r5,r6,r7}
     .syntax unified
     mov r4,r14
@@ -396,9 +396,9 @@ square256_asm:
     add r4,#16
     ldm r4,{r4,r5,r6,r7}
  // sqr 128 Refined Karatsuba
- // Input in r4 ... r7 
- // Result in r0 ... r7 
- // clobbers all registers except for r14 
+ // Input in r4 ... r7
+ // Result in r0 ... r7
+ // clobbers all registers except for r14
     .syntax unified
     mov r0,r4
     .syntax divided
@@ -426,9 +426,9 @@ square256_asm:
  // Result in r0,r1,r2,r3
  // Clobbers: r4-r6
  // START: sqr 32
- // Input operand in r4 
- // Result in r0 ,r1 
- // Clobbers: r2, r3 
+ // Input operand in r4
+ // Result in r0 ,r1
+ // Clobbers: r2, r3
     uxth r0,r4
     lsr r1,r4,#16
     .syntax unified
@@ -442,15 +442,15 @@ square256_asm:
     add r0,r2
     adc r1,r3
  // End: sqr 32
- // Result in r0 ,r1 
+ // Result in r0 ,r1
     sub r4,r5
     sbc r6,r6
     eor r4,r6
     sub r4,r6
  // START: sqr 32
- // Input operand in r5 
- // Result in r2 ,r3 
- // Clobbers: r5, r6 
+ // Input operand in r5
+ // Result in r2 ,r3
+ // Clobbers: r5, r6
     uxth r2,r5
     lsr r3,r5,#16
     .syntax unified
@@ -464,14 +464,14 @@ square256_asm:
     add r2,r5
     adc r3,r6
  // End: sqr 32
- // Result in r2 ,r3 
+ // Result in r2 ,r3
     mov r6,#0
     add r2,r1
     adc r3,r6
  // START: sqr 32
- // Input operand in r4 
- // Result in r4 ,r5 
- // Clobbers: r1, r6 
+ // Input operand in r4
+ // Result in r4 ,r5
+ // Clobbers: r1, r6
     lsr r5,r4,#16
     uxth r4,r4
     .syntax unified
@@ -485,7 +485,7 @@ square256_asm:
     add r4,r1
     adc r5,r6
  // End: sqr 32
- // Result in r4 ,r5 
+ // Result in r4 ,r5
     .syntax unified
     mov r1,r2
     .syntax divided
@@ -519,12 +519,12 @@ square256_asm:
     .syntax divided
  // START: sqr 64 Refined Karatsuba
  // Input operands in r6,r7
- // Result in r2,r3,r4,r5 
+ // Result in r2,r3,r4,r5
  // Clobbers: r0,r7,r6
  // START: sqr 32
- // Input operand in r6 
- // Result in r2 ,r3 
- // Clobbers: r4, r5 
+ // Input operand in r6
+ // Result in r2 ,r3
+ // Clobbers: r4, r5
     uxth r2,r6
     lsr r3,r6,#16
     .syntax unified
@@ -538,15 +538,15 @@ square256_asm:
     add r2,r4
     adc r3,r5
  // End: sqr 32
- // Result in r2 ,r3 
+ // Result in r2 ,r3
     sub r6,r7
     sbc r4,r4
     eor r6,r4
     sub r6,r4
  // START: sqr 32
- // Input operand in r7 
- // Result in r4 ,r5 
- // Clobbers: r0, r7 
+ // Input operand in r7
+ // Result in r4 ,r5
+ // Clobbers: r0, r7
     uxth r4,r7
     lsr r5,r7,#16
     .syntax unified
@@ -560,14 +560,14 @@ square256_asm:
     add r4,r0
     adc r5,r7
  // End: sqr 32
- // Result in r4 ,r5 
+ // Result in r4 ,r5
     mov r7,#0
     add r4,r3
     adc r5,r7
  // START: sqr 32
- // Input operand in r6 
- // Result in r7 ,r0 
- // Clobbers: r6, r3 
+ // Input operand in r6
+ // Result in r7 ,r0
+ // Clobbers: r6, r3
     uxth r7,r6
     lsr r0,r6,#16
     .syntax unified
@@ -581,7 +581,7 @@ square256_asm:
     add r7,r6
     adc r0,r3
  // End: sqr 32
- // Result in r7 ,r0 
+ // Result in r7 ,r0
     .syntax unified
     mov r3,r4
     .syntax divided
@@ -622,12 +622,12 @@ square256_asm:
     .syntax divided
  // START: sqr 64 Refined Karatsuba
  // Input operands in r2,r3
- // Result in r6,r7,r0,r1 
+ // Result in r6,r7,r0,r1
  // Clobbers: r2,r3,r4
  // START: sqr 32
- // Input operand in r2 
- // Result in r6 ,r7 
- // Clobbers: r0, r1 
+ // Input operand in r2
+ // Result in r6 ,r7
+ // Clobbers: r0, r1
     uxth r6,r2
     lsr r7,r2,#16
     .syntax unified
@@ -641,15 +641,15 @@ square256_asm:
     add r6,r0
     adc r7,r1
  // End: sqr 32
- // Result in r6 ,r7 
+ // Result in r6 ,r7
     sub r2,r3
     sbc r4,r4
     eor r2,r4
     sub r2,r4
  // START: sqr 32
- // Input operand in r3 
- // Result in r0 ,r1 
- // Clobbers: r3, r4 
+ // Input operand in r3
+ // Result in r0 ,r1
+ // Clobbers: r3, r4
     uxth r0,r3
     lsr r1,r3,#16
     .syntax unified
@@ -663,14 +663,14 @@ square256_asm:
     add r0,r3
     adc r1,r4
  // End: sqr 32
- // Result in r0 ,r1 
+ // Result in r0 ,r1
     mov r4,#0
     add r0,r7
     adc r1,r4
  // START: sqr 32
- // Input operand in r2 
- // Result in r3 ,r4 
- // Clobbers: r2, r7 
+ // Input operand in r2
+ // Result in r3 ,r4
+ // Clobbers: r2, r7
     uxth r3,r2
     lsr r4,r2,#16
     .syntax unified
@@ -684,7 +684,7 @@ square256_asm:
     add r3,r2
     adc r4,r7
  // End: sqr 32
- // Result in r3 ,r4 
+ // Result in r3 ,r4
     .syntax unified
     mov r7,r0
     .syntax divided
@@ -746,7 +746,7 @@ square256_asm:
     mov r0,r10
     .syntax divided
  // END: sqr 128 Refined Karatsuba
- // Result in r0 ... r7 
+ // Result in r0 ... r7
     .syntax unified
     mov r8,r4
     .syntax divided
@@ -804,9 +804,9 @@ square256_asm:
     sbc r6,r0
     sbc r7,r0
  // sqr 128 Refined Karatsuba
- // Input in r4 ... r7 
- // Result in r0 ... r7 
- // clobbers all registers except for r14 
+ // Input in r4 ... r7
+ // Result in r0 ... r7
+ // clobbers all registers except for r14
     .syntax unified
     mov r0,r4
     .syntax divided
@@ -834,9 +834,9 @@ square256_asm:
  // Result in r0,r1,r2,r3
  // Clobbers: r4-r6
  // START: sqr 32
- // Input operand in r4 
- // Result in r0 ,r1 
- // Clobbers: r2, r3 
+ // Input operand in r4
+ // Result in r0 ,r1
+ // Clobbers: r2, r3
     uxth r0,r4
     lsr r1,r4,#16
     .syntax unified
@@ -850,15 +850,15 @@ square256_asm:
     add r0,r2
     adc r1,r3
  // End: sqr 32
- // Result in r0 ,r1 
+ // Result in r0 ,r1
     sub r4,r5
     sbc r6,r6
     eor r4,r6
     sub r4,r6
  // START: sqr 32
- // Input operand in r5 
- // Result in r2 ,r3 
- // Clobbers: r5, r6 
+ // Input operand in r5
+ // Result in r2 ,r3
+ // Clobbers: r5, r6
     uxth r2,r5
     lsr r3,r5,#16
     .syntax unified
@@ -872,14 +872,14 @@ square256_asm:
     add r2,r5
     adc r3,r6
  // End: sqr 32
- // Result in r2 ,r3 
+ // Result in r2 ,r3
     mov r6,#0
     add r2,r1
     adc r3,r6
  // START: sqr 32
- // Input operand in r4 
- // Result in r4 ,r5 
- // Clobbers: r1, r6 
+ // Input operand in r4
+ // Result in r4 ,r5
+ // Clobbers: r1, r6
     lsr r5,r4,#16
     uxth r4,r4
     .syntax unified
@@ -893,7 +893,7 @@ square256_asm:
     add r4,r1
     adc r5,r6
  // End: sqr 32
- // Result in r4 ,r5 
+ // Result in r4 ,r5
     .syntax unified
     mov r1,r2
     .syntax divided
@@ -927,12 +927,12 @@ square256_asm:
     .syntax divided
  // START: sqr 64 Refined Karatsuba
  // Input operands in r6,r7
- // Result in r2,r3,r4,r5 
+ // Result in r2,r3,r4,r5
  // Clobbers: r0,r7,r6
  // START: sqr 32
- // Input operand in r6 
- // Result in r2 ,r3 
- // Clobbers: r4, r5 
+ // Input operand in r6
+ // Result in r2 ,r3
+ // Clobbers: r4, r5
     uxth r2,r6
     lsr r3,r6,#16
     .syntax unified
@@ -946,15 +946,15 @@ square256_asm:
     add r2,r4
     adc r3,r5
  // End: sqr 32
- // Result in r2 ,r3 
+ // Result in r2 ,r3
     sub r6,r7
     sbc r4,r4
     eor r6,r4
     sub r6,r4
  // START: sqr 32
- // Input operand in r7 
- // Result in r4 ,r5 
- // Clobbers: r0, r7 
+ // Input operand in r7
+ // Result in r4 ,r5
+ // Clobbers: r0, r7
     uxth r4,r7
     lsr r5,r7,#16
     .syntax unified
@@ -968,14 +968,14 @@ square256_asm:
     add r4,r0
     adc r5,r7
  // End: sqr 32
- // Result in r4 ,r5 
+ // Result in r4 ,r5
     mov r7,#0
     add r4,r3
     adc r5,r7
  // START: sqr 32
- // Input operand in r6 
- // Result in r7 ,r0 
- // Clobbers: r6, r3 
+ // Input operand in r6
+ // Result in r7 ,r0
+ // Clobbers: r6, r3
     uxth r7,r6
     lsr r0,r6,#16
     .syntax unified
@@ -989,7 +989,7 @@ square256_asm:
     add r7,r6
     adc r0,r3
  // End: sqr 32
- // Result in r7 ,r0 
+ // Result in r7 ,r0
     .syntax unified
     mov r3,r4
     .syntax divided
@@ -1030,12 +1030,12 @@ square256_asm:
     .syntax divided
  // START: sqr 64 Refined Karatsuba
  // Input operands in r2,r3
- // Result in r6,r7,r0,r1 
+ // Result in r6,r7,r0,r1
  // Clobbers: r2,r3,r4
  // START: sqr 32
- // Input operand in r2 
- // Result in r6 ,r7 
- // Clobbers: r0, r1 
+ // Input operand in r2
+ // Result in r6 ,r7
+ // Clobbers: r0, r1
     uxth r6,r2
     lsr r7,r2,#16
     .syntax unified
@@ -1049,15 +1049,15 @@ square256_asm:
     add r6,r0
     adc r7,r1
  // End: sqr 32
- // Result in r6 ,r7 
+ // Result in r6 ,r7
     sub r2,r3
     sbc r4,r4
     eor r2,r4
     sub r2,r4
  // START: sqr 32
- // Input operand in r3 
- // Result in r0 ,r1 
- // Clobbers: r3, r4 
+ // Input operand in r3
+ // Result in r0 ,r1
+ // Clobbers: r3, r4
     uxth r0,r3
     lsr r1,r3,#16
     .syntax unified
@@ -1071,14 +1071,14 @@ square256_asm:
     add r0,r3
     adc r1,r4
  // End: sqr 32
- // Result in r0 ,r1 
+ // Result in r0 ,r1
     mov r4,#0
     add r0,r7
     adc r1,r4
  // START: sqr 32
- // Input operand in r2 
- // Result in r3 ,r4 
- // Clobbers: r2, r7 
+ // Input operand in r2
+ // Result in r3 ,r4
+ // Clobbers: r2, r7
     uxth r3,r2
     lsr r4,r2,#16
     .syntax unified
@@ -1092,7 +1092,7 @@ square256_asm:
     add r3,r2
     adc r4,r7
  // End: sqr 32
- // Result in r3 ,r4 
+ // Result in r3 ,r4
     .syntax unified
     mov r7,r0
     .syntax divided
@@ -1154,7 +1154,7 @@ square256_asm:
     mov r0,r10
     .syntax divided
  // END: sqr 128 Refined Karatsuba
- // Result in r0 ... r7 
+ // Result in r0 ... r7
     mvn r0,r0
     mvn r1,r1
     mvn r2,r2
@@ -1293,4 +1293,4 @@ square256_asm:
     .syntax divided
     pop {r0,r4,r5,r6,r7,r15}
 //Cycle Count ASM-Version of 256 sqr (Refined Karatsuba) (Cortex M0): 793 (697 instructions).
-	.size	square256_asm, .-square256_asm
+    .size	square256_asm, .-square256_asm

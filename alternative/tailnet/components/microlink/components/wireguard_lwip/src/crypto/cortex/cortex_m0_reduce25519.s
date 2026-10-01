@@ -8,30 +8,30 @@
 // Generated and tested with C++ functions in the test subdirectory and on the target.
 //
 
-	.cpu cortex-m0
-	.fpu softvfp
-	.eabi_attribute 20, 1
-	.eabi_attribute 21, 1
-	.eabi_attribute 23, 3
-	.eabi_attribute 24, 1
-	.eabi_attribute 25, 1
-	.eabi_attribute 26, 1
-	.eabi_attribute 30, 2
-	.eabi_attribute 34, 0
-	.eabi_attribute 18, 4
-	.code	16
-	
-	.file	"cortex_m0_reduce25519.s"
-	
-	.text
-	.align	2
+    .cpu cortex-m0
+    .fpu softvfp
+    .eabi_attribute 20, 1
+    .eabi_attribute 21, 1
+    .eabi_attribute 23, 3
+    .eabi_attribute 24, 1
+    .eabi_attribute 25, 1
+    .eabi_attribute 26, 1
+    .eabi_attribute 30, 2
+    .eabi_attribute 34, 0
+    .eabi_attribute 18, 4
+    .code	16
 
-	.global	fe25519_reduceTo256Bits_asm
-	.code	16
-	.thumb_func
-	.type	fe25519_reduceTo256Bits_asm, %function
+    .file	"cortex_m0_reduce25519.s"
 
-fe25519_reduceTo256Bits_asm:	
+    .text
+    .align	2
+
+    .global	fe25519_reduceTo256Bits_asm
+    .code	16
+    .thumb_func
+    .type	fe25519_reduceTo256Bits_asm, %function
+
+fe25519_reduceTo256Bits_asm:
     push {r4,r5,r6,r7,r14}
     ldr r2,[r1,#60]
     lsr r3,r2,#16
@@ -171,6 +171,5 @@ fe25519_reduceTo256Bits_asm:
     add r4,r3
     str r4,[r0,#28]
     pop {r4,r5,r6,r7,r15}
-			
-	.size	fe25519_reduceTo256Bits_asm, .-fe25519_reduceTo256Bits_asm
-		    	
+
+    .size	fe25519_reduceTo256Bits_asm, .-fe25519_reduceTo256Bits_asm

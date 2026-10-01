@@ -1,6 +1,6 @@
 /*                          =======================
   ============================ C/C++ HEADER FILE =============================
-                            =======================                      
+                            =======================
 
     Collection of all required submodules from naclM0 required for curve25519
     scalar multiplication  (not including randomization, etc.) alone.
@@ -63,7 +63,7 @@
 //#define DH_SWAP_BY_POINTERS
 
 // Define the symbol to 0 in order to only use ladder steps
-//#define DH_REPLACE_LAST_THREE_LADDERSTEPS_WITH_DOUBLINGS 1 
+//#define DH_REPLACE_LAST_THREE_LADDERSTEPS_WITH_DOUBLINGS 1
 
 typedef uint8_t  uint8;
 typedef uint16_t uint16;
@@ -101,7 +101,7 @@ typedef union UN_512bitValue_
 typedef UN_256bitValue fe25519;
 
 // ****************************************************
-// Assembly functions. 
+// Assembly functions.
 // ****************************************************
 
 extern void
@@ -133,7 +133,7 @@ square256(
 );
 
 // ****************************************************
-// C functions for fe25519 
+// C functions for fe25519
 // ****************************************************
 
 static void
@@ -327,11 +327,11 @@ fe25519_invert_useProvidedScratchBuffers(
     const fe25519* x,
     fe25519*       t0,
     fe25519*       t1,
-    fe25519*       t2    
+    fe25519*       t2
 )
 {
     fe25519 *z11 = r; // store z11 in r (in order to save one temporary).
-    fe25519 *z2_10_0 = t1;    
+    fe25519 *z2_10_0 = t1;
     fe25519 *z2_50_0 = t2;
     fe25519 *z2_100_0 = z2_10_0;
 
@@ -345,10 +345,10 @@ fe25519_invert_useProvidedScratchBuffers(
         /* 8 */ fe25519_square(t0, t0);
         /* 9 */ fe25519_mul(z2_10_0, t0, x);
         /* 11 */ fe25519_mul(z11, z2_10_0, z2);
-        
+
         // z2 is dead.
     }
-	
+
     /* 22 */ fe25519_square(t0, z11);
     /* 2^5 - 2^0 = 31 */ fe25519_mul(z2_10_0, t0, z2_10_0);
 
@@ -483,16 +483,16 @@ fe25519_cswap(
 
     for (ctr = 0; ctr < 8; ctr++)
     {
-    	uint32 val1 = in1->as_uint32[ctr];
-    	uint32 val2 = in2->as_uint32[ctr];
-    	uint32 temp = val1;
+        uint32 val1 = in1->as_uint32[ctr];
+        uint32 val2 = in2->as_uint32[ctr];
+        uint32 temp = val1;
 
-    	val1 ^= mask & (val2 ^ val1);
-    	val2 ^= mask & (val2 ^ temp);
+        val1 ^= mask & (val2 ^ val1);
+        val2 ^= mask & (val2 ^ temp);
 
 
-    	in1->as_uint32[ctr] = val1;
-    	in2->as_uint32[ctr] = val2;
+        in1->as_uint32[ctr] = val1;
+        in2->as_uint32[ctr] = val2;
     }
 }
 
@@ -598,7 +598,7 @@ static void
 curve25519_doublePointP (ST_curve25519ladderstepWorkingState* pState)
 {
     // Implement the doubling formula "dbl-1987-m-3"
-    // from 1987 Montgomery "Speeding the Pollard and elliptic curve methods of factorization", 
+    // from 1987 Montgomery "Speeding the Pollard and elliptic curve methods of factorization",
     // page 261, sixth display, plus common-subexpression elimination.
     //
     // Three operand code:
@@ -611,7 +611,7 @@ curve25519_doublePointP (ST_curve25519ladderstepWorkingState* pState)
     // t0 = a24*C
     // t1 = BB+t0
     // Z3 = C*t1
- 
+
     // Double the point input in the state variable "P". Use the State variable "Q" as temporary
     // for storing A, AA and B, BB. Use the same temporary variable for A and AA respectively and
     // B, BB respectively.
@@ -626,7 +626,7 @@ curve25519_doublePointP (ST_curve25519ladderstepWorkingState* pState)
     fe25519 *pX = &pState->xp;
     fe25519 *pZ = &pState->zp;
     #endif
-    
+
     // A = X1+Z1
     fe25519_add(pA, pX, pZ);
     // AA = A^2
@@ -665,11 +665,11 @@ crypto_scalarmult_curve25519(
     {
         state.s.as_uint8 [i] = s[i];
     }
-#if DH_REPLACE_LAST_THREE_LADDERSTEPS_WITH_DOUBLINGS    
-    // Due to explicit final doubling for the last three bits instead of a full ladderstep, 
+#if DH_REPLACE_LAST_THREE_LADDERSTEPS_WITH_DOUBLINGS
+    // Due to explicit final doubling for the last three bits instead of a full ladderstep,
     // the following line is no longer necessary.
 #else
-    state.s.as_uint8 [0] &= 248; 
+    state.s.as_uint8 [0] &= 248;
 #endif
     state.s.as_uint8 [31] &= 127;
     state.s.as_uint8 [31] |= 64;
@@ -697,16 +697,16 @@ crypto_scalarmult_curve25519(
 
     state.previousProcessedBit = 0;
 
-#if DH_REPLACE_LAST_THREE_LADDERSTEPS_WITH_DOUBLINGS          
+#if DH_REPLACE_LAST_THREE_LADDERSTEPS_WITH_DOUBLINGS
     // Process all the bits except for the last three where we explicitly double the result.
     while (state.nextScalarBitToProcess >= 3)
 #else
     // Process all the bits except for the last three where we explicitly double the result.
     while (state.nextScalarBitToProcess >= 0)
-#endif    
+#endif
     {
-    	uint8 byteNo = state.nextScalarBitToProcess >> 3;
-    	uint8 bitNo = state.nextScalarBitToProcess & 7;
+        uint8 byteNo = state.nextScalarBitToProcess >> 3;
+        uint8 bitNo = state.nextScalarBitToProcess & 7;
         uint8 bit;
         uint8 swap;
 
@@ -720,7 +720,7 @@ crypto_scalarmult_curve25519(
 
     curve25519_cswap(&state,state.previousProcessedBit);
 
-#if DH_REPLACE_LAST_THREE_LADDERSTEPS_WITH_DOUBLINGS        
+#if DH_REPLACE_LAST_THREE_LADDERSTEPS_WITH_DOUBLINGS
     curve25519_doublePointP (&state);
     curve25519_doublePointP (&state);
     curve25519_doublePointP (&state);
@@ -735,7 +735,7 @@ crypto_scalarmult_curve25519(
     fe25519_pack (r, state.pXp);
 #else
     // optimize for stack usage.
-    fe25519_invert_useProvidedScratchBuffers (&state.zp, &state.zp, &state.xq, &state.zq, &state.x0);    
+    fe25519_invert_useProvidedScratchBuffers (&state.zp, &state.zp, &state.xq, &state.zq, &state.x0);
     fe25519_mul(&state.xp, &state.xp, &state.zp);
     fe25519_reduceCompletely(&state.xp);
 

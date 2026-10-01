@@ -43,7 +43,7 @@
 #define CHACHA20_KEY_SIZE		(32)
 
 struct chacha20_ctx {
-	uint32_t state[16];
+    uint32_t state[16];
 };
 
 void chacha20_init(struct chacha20_ctx *ctx, const uint8_t *key, const uint64_t nonce);

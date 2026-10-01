@@ -11,30 +11,30 @@
 // Not yet tested on target hardware.
 
 
-	.cpu cortex-m0
-	.fpu softvfp
-	.eabi_attribute 20, 1
-	.eabi_attribute 21, 1
-	.eabi_attribute 23, 3
-	.eabi_attribute 24, 1
-	.eabi_attribute 25, 1
-	.eabi_attribute 26, 1
-	.eabi_attribute 30, 2
-	.eabi_attribute 34, 0
-	.eabi_attribute 18, 4
-	.code	16
-	
-	.file	"cortex_m0_reduce25519.s"
-	
-	.text
-	.align	2
+    .cpu cortex-m0
+    .fpu softvfp
+    .eabi_attribute 20, 1
+    .eabi_attribute 21, 1
+    .eabi_attribute 23, 3
+    .eabi_attribute 24, 1
+    .eabi_attribute 25, 1
+    .eabi_attribute 26, 1
+    .eabi_attribute 30, 2
+    .eabi_attribute 34, 0
+    .eabi_attribute 18, 4
+    .code	16
 
-	.global	fe25519_mpyWith121666_asm
-	.code	16
-	.thumb_func
-	.type	fe25519_mpyWith121666_asm, %function
+    .file	"cortex_m0_reduce25519.s"
 
-fe25519_mpyWith121666_asm:	
+    .text
+    .align	2
+
+    .global	fe25519_mpyWith121666_asm
+    .code	16
+    .thumb_func
+    .type	fe25519_mpyWith121666_asm, %function
+
+fe25519_mpyWith121666_asm:
     push {r4,r5,r6,r7,r14}
     ldr r7,__label_for_immediate_56130
     ldr r2,[r1,#28]
@@ -191,9 +191,8 @@ fe25519_mpyWith121666_asm:
     str r6,[r0,#28]
     pop {r4,r5,r6,r7,r15}
 
-	.align	2
+    .align	2
 __label_for_immediate_56130:
-	.word 56130
-	    			
-	.size	fe25519_mpyWith121666_asm, .-fe25519_mpyWith121666_asm
-		    	
+    .word 56130
+
+    .size	fe25519_mpyWith121666_asm, .-fe25519_mpyWith121666_asm

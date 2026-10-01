@@ -90,138 +90,138 @@ typedef err_t (*wireguard_derp_output_fn)(const uint8_t *peer_public_key, const 
 typedef err_t (*wireguard_udp_output_fn)(uint32_t dest_ip, uint16_t dest_port, const uint8_t *data, size_t len, void *ctx);
 
 struct wireguard_keypair {
-	bool valid;
-	bool initiator; // Did we initiate this session (send the initiation packet rather than sending the response packet)
-	uint32_t keypair_millis;
+    bool valid;
+    bool initiator; // Did we initiate this session (send the initiation packet rather than sending the response packet)
+    uint32_t keypair_millis;
 
-	uint8_t sending_key[WIREGUARD_SESSION_KEY_LEN];
-	bool sending_valid;
-	uint64_t sending_counter;
+    uint8_t sending_key[WIREGUARD_SESSION_KEY_LEN];
+    bool sending_valid;
+    uint64_t sending_counter;
 
-	uint8_t receiving_key[WIREGUARD_SESSION_KEY_LEN];
-	bool receiving_valid;
+    uint8_t receiving_key[WIREGUARD_SESSION_KEY_LEN];
+    bool receiving_valid;
 
-	uint32_t last_tx;
-	uint32_t last_rx;
+    uint32_t last_tx;
+    uint32_t last_rx;
 
-	uint32_t replay_bitmap;
-	uint64_t replay_counter;
+    uint32_t replay_bitmap;
+    uint64_t replay_counter;
 
-	uint32_t local_index; // This is the index we generated for our end
-	uint32_t remote_index; // This is the index on the other end
+    uint32_t local_index; // This is the index we generated for our end
+    uint32_t remote_index; // This is the index on the other end
 };
 
 struct wireguard_handshake {
-	bool valid;
-	bool initiator;
-	uint32_t local_index;
-	uint32_t remote_index;
-	uint8_t ephemeral_private[WIREGUARD_PRIVATE_KEY_LEN];
-	uint8_t remote_ephemeral[WIREGUARD_PUBLIC_KEY_LEN];
-	uint8_t hash[WIREGUARD_HASH_LEN];
-	uint8_t chaining_key[WIREGUARD_HASH_LEN];
+    bool valid;
+    bool initiator;
+    uint32_t local_index;
+    uint32_t remote_index;
+    uint8_t ephemeral_private[WIREGUARD_PRIVATE_KEY_LEN];
+    uint8_t remote_ephemeral[WIREGUARD_PUBLIC_KEY_LEN];
+    uint8_t hash[WIREGUARD_HASH_LEN];
+    uint8_t chaining_key[WIREGUARD_HASH_LEN];
 };
 
 struct wireguard_allowed_ip {
-	bool valid;
-	ip_addr_t ip;
-	ip_addr_t mask;
+    bool valid;
+    ip_addr_t ip;
+    ip_addr_t mask;
 };
 
 struct wireguard_peer {
-	bool valid; // Is this peer initialised?
-	bool active; // Should we be actively trying to connect?
+    bool valid; // Is this peer initialised?
+    bool active; // Should we be actively trying to connect?
 
-	// This is the configured IP of the peer (endpoint)
-	ip_addr_t connect_ip;
-	u16_t connect_port;
-	// This is the latest received IP/port
-	ip_addr_t ip;
-	u16_t port;
-	// keep-alive interval in seconds, 0 is disable
-	uint16_t keepalive_interval;
+    // This is the configured IP of the peer (endpoint)
+    ip_addr_t connect_ip;
+    u16_t connect_port;
+    // This is the latest received IP/port
+    ip_addr_t ip;
+    u16_t port;
+    // keep-alive interval in seconds, 0 is disable
+    uint16_t keepalive_interval;
 
-	struct wireguard_allowed_ip allowed_source_ips[WIREGUARD_MAX_SRC_IPS];
+    struct wireguard_allowed_ip allowed_source_ips[WIREGUARD_MAX_SRC_IPS];
 
-	uint8_t public_key[WIREGUARD_PUBLIC_KEY_LEN];
-	uint8_t preshared_key[WIREGUARD_SESSION_KEY_LEN];
+    uint8_t public_key[WIREGUARD_PUBLIC_KEY_LEN];
+    uint8_t preshared_key[WIREGUARD_SESSION_KEY_LEN];
 
-	// Precomputed DH(Sprivi,Spubr) with device private key, and peer public key
-	uint8_t public_key_dh[WIREGUARD_PUBLIC_KEY_LEN];
+    // Precomputed DH(Sprivi,Spubr) with device private key, and peer public key
+    uint8_t public_key_dh[WIREGUARD_PUBLIC_KEY_LEN];
 
-	// Session keypairs
-	struct wireguard_keypair curr_keypair;
-	struct wireguard_keypair prev_keypair;
-	struct wireguard_keypair next_keypair;
+    // Session keypairs
+    struct wireguard_keypair curr_keypair;
+    struct wireguard_keypair prev_keypair;
+    struct wireguard_keypair next_keypair;
 
-	// 5.1 Silence is a Virtue: The responder keeps track of the greatest timestamp received per peer
-	uint8_t greatest_timestamp[WIREGUARD_TAI64N_LEN];
+    // 5.1 Silence is a Virtue: The responder keeps track of the greatest timestamp received per peer
+    uint8_t greatest_timestamp[WIREGUARD_TAI64N_LEN];
 
-	// The active handshake that is happening
-	struct wireguard_handshake handshake;
+    // The active handshake that is happening
+    struct wireguard_handshake handshake;
 
-	// Decrypted cookie from the responder
-	uint32_t cookie_millis;
-	uint8_t cookie[WIREGUARD_COOKIE_LEN];
+    // Decrypted cookie from the responder
+    uint32_t cookie_millis;
+    uint8_t cookie[WIREGUARD_COOKIE_LEN];
 
-	// The latest mac1 we sent with initiation
-	bool handshake_mac1_valid;
-	uint8_t handshake_mac1[WIREGUARD_COOKIE_LEN];
+    // The latest mac1 we sent with initiation
+    bool handshake_mac1_valid;
+    uint8_t handshake_mac1[WIREGUARD_COOKIE_LEN];
 
-	// Precomputed keys for use in mac validation
-	uint8_t label_cookie_key[WIREGUARD_SESSION_KEY_LEN];
-	uint8_t label_mac1_key[WIREGUARD_SESSION_KEY_LEN];
+    // Precomputed keys for use in mac validation
+    uint8_t label_cookie_key[WIREGUARD_SESSION_KEY_LEN];
+    uint8_t label_mac1_key[WIREGUARD_SESSION_KEY_LEN];
 
-	// The last time we received a valid initiation message
-	uint32_t last_initiation_rx;
-	// The last time we sent an initiation message to this peer
-	uint32_t last_initiation_tx;
+    // The last time we received a valid initiation message
+    uint32_t last_initiation_rx;
+    // The last time we sent an initiation message to this peer
+    uint32_t last_initiation_tx;
 
-	// last_tx and last_rx of data packets
-	uint32_t last_tx;
-	uint32_t last_rx;
+    // last_tx and last_rx of data packets
+    uint32_t last_tx;
+    uint32_t last_rx;
 
-	// We set this flag on RX/TX of packets if we think that we should initiate a new handshake
-	bool send_handshake;
+    // We set this flag on RX/TX of packets if we think that we should initiate a new handshake
+    bool send_handshake;
 
-	// Consecutive handshake init attempts since last successful session.
-	// Incremented in wireguard_start_handshake(), reset in wireguard_start_session().
-	// When >= MAX_HANDSHAKE_ATTEMPTS, should_send_initiation() stops emitting
-	// to avoid wasted retries against peers that have us trimmed. Outgoing
-	// traffic (ERR_CONN path in wireguardif_output_to_peer) re-arms.
-	uint8_t handshake_attempts;
+    // Consecutive handshake init attempts since last successful session.
+    // Incremented in wireguard_start_handshake(), reset in wireguard_start_session().
+    // When >= MAX_HANDSHAKE_ATTEMPTS, should_send_initiation() stops emitting
+    // to avoid wasted retries against peers that have us trimmed. Outgoing
+    // traffic (ERR_CONN path in wireguardif_output_to_peer) re-arms.
+    uint8_t handshake_attempts;
 };
 
 struct wireguard_device {
-	// Maybe have a "Device private" member to abstract these?
-	struct netif *netif;
-	struct udp_pcb *udp_pcb;
+    // Maybe have a "Device private" member to abstract these?
+    struct netif *netif;
+    struct udp_pcb *udp_pcb;
 
-	uint8_t public_key[WIREGUARD_PUBLIC_KEY_LEN];
-	uint8_t private_key[WIREGUARD_PRIVATE_KEY_LEN];
+    uint8_t public_key[WIREGUARD_PUBLIC_KEY_LEN];
+    uint8_t private_key[WIREGUARD_PRIVATE_KEY_LEN];
 
-	uint8_t cookie_secret[WIREGUARD_HASH_LEN];
-	uint32_t cookie_secret_millis;
+    uint8_t cookie_secret[WIREGUARD_HASH_LEN];
+    uint32_t cookie_secret_millis;
 
-	// Precalculated
- 	uint8_t label_cookie_key[WIREGUARD_SESSION_KEY_LEN];
-	uint8_t label_mac1_key[WIREGUARD_SESSION_KEY_LEN];
+    // Precalculated
+    uint8_t label_cookie_key[WIREGUARD_SESSION_KEY_LEN];
+    uint8_t label_mac1_key[WIREGUARD_SESSION_KEY_LEN];
 
-	// List of peers associated with this device
- 	struct wireguard_peer peers[WIREGUARD_MAX_PEERS];
+    // List of peers associated with this device
+    struct wireguard_peer peers[WIREGUARD_MAX_PEERS];
 
-	// DERP relay output callback for peers without direct endpoints
-	wireguard_derp_output_fn derp_output_fn;
-	void *derp_output_ctx;
+    // DERP relay output callback for peers without direct endpoints
+    wireguard_derp_output_fn derp_output_fn;
+    void *derp_output_ctx;
 
-	// UDP output callback for magicsock mode (external unified socket)
-	wireguard_udp_output_fn udp_output_fn;
-	void *udp_output_ctx;
+    // UDP output callback for magicsock mode (external unified socket)
+    wireguard_udp_output_fn udp_output_fn;
+    void *udp_output_ctx;
 
-	// Force all peer output through DERP relay (cellular mode)
-	bool force_derp_output;
+    // Force all peer output through DERP relay (cellular mode)
+    bool force_derp_output;
 
-	bool valid;
+    bool valid;
 };
 
 #define MESSAGE_INVALID					0
@@ -233,45 +233,45 @@ struct wireguard_device {
 
 // 5.4.2 First Message: Initiator to Responder
 struct message_handshake_initiation {
-	uint8_t type;
-	uint8_t reserved[3];
-	uint32_t sender;
-	uint8_t ephemeral[32];
-	uint8_t enc_static[32 + WIREGUARD_AUTHTAG_LEN];
-	uint8_t enc_timestamp[WIREGUARD_TAI64N_LEN + WIREGUARD_AUTHTAG_LEN];
-	uint8_t mac1[WIREGUARD_COOKIE_LEN];
-	uint8_t mac2[WIREGUARD_COOKIE_LEN];
+    uint8_t type;
+    uint8_t reserved[3];
+    uint32_t sender;
+    uint8_t ephemeral[32];
+    uint8_t enc_static[32 + WIREGUARD_AUTHTAG_LEN];
+    uint8_t enc_timestamp[WIREGUARD_TAI64N_LEN + WIREGUARD_AUTHTAG_LEN];
+    uint8_t mac1[WIREGUARD_COOKIE_LEN];
+    uint8_t mac2[WIREGUARD_COOKIE_LEN];
 } __attribute__ ((__packed__));
 
 // 5.4.3 Second Message: Responder to Initiator
 struct message_handshake_response {
-	uint8_t type;
-	uint8_t reserved[3];
-	uint32_t sender;
-	uint32_t receiver;
-	uint8_t ephemeral[32];
-	uint8_t enc_empty[0 + WIREGUARD_AUTHTAG_LEN];
-	uint8_t mac1[WIREGUARD_COOKIE_LEN];
-	uint8_t mac2[WIREGUARD_COOKIE_LEN];
+    uint8_t type;
+    uint8_t reserved[3];
+    uint32_t sender;
+    uint32_t receiver;
+    uint8_t ephemeral[32];
+    uint8_t enc_empty[0 + WIREGUARD_AUTHTAG_LEN];
+    uint8_t mac1[WIREGUARD_COOKIE_LEN];
+    uint8_t mac2[WIREGUARD_COOKIE_LEN];
 } __attribute__ ((__packed__));
 
 // 5.4.7 Under Load: Cookie Reply Message
 struct message_cookie_reply {
-	uint8_t type;
-	uint8_t reserved[3];
-	uint32_t receiver;
-	uint8_t nonce[COOKIE_NONCE_LEN];
-	uint8_t enc_cookie[WIREGUARD_COOKIE_LEN + WIREGUARD_AUTHTAG_LEN];
+    uint8_t type;
+    uint8_t reserved[3];
+    uint32_t receiver;
+    uint8_t nonce[COOKIE_NONCE_LEN];
+    uint8_t enc_cookie[WIREGUARD_COOKIE_LEN + WIREGUARD_AUTHTAG_LEN];
 } __attribute__ ((__packed__));
 
 // 5.4.6 Subsequent Messages: Transport Data Messages
 struct message_transport_data {
-	uint8_t type;
-	uint8_t reserved[3];
-	uint32_t receiver;
-	uint8_t counter[8];
-	// Followed by encrypted data
-	uint8_t enc_packet[];
+    uint8_t type;
+    uint8_t reserved[3];
+    uint32_t receiver;
+    uint8_t counter[8];
+    // Followed by encrypted data
+    uint8_t enc_packet[];
 } __attribute__ ((__packed__));
 
 // Initialise the WireGuard system - need to call this before anything else

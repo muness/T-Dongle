@@ -102,4 +102,3 @@ void crypto_zero(void *dest, size_t len);
 bool crypto_equal(const void *a, const void *b, size_t size);
 
 #endif /* _CRYPTO_H_ */
-

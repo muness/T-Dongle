@@ -94,7 +94,7 @@ static void propagate(fe x, limb_t over) {
     }
 }
 
-static void add(fe out, const fe a, const fe b) {      
+static void add(fe out, const fe a, const fe b) {
     unsigned i;
     limb_t carry = 0;
     for (i=0; i<NLIMBS; i++) {

@@ -46,29 +46,29 @@
 #define WIREGUARDIF_KEEPALIVE_DEFAULT	(0xFFFF)
 
 struct wireguardif_init_data {
-	// Required: the private key of this WireGuard network interface
-	const char *private_key;
-	// Required: What UDP port to listen on
-	u16_t listen_port;
-	// Optional: restrict send/receive of encapsulated WireGuard traffic to this network interface only (NULL to use routing table)
-	struct netif *bind_netif;
+    // Required: the private key of this WireGuard network interface
+    const char *private_key;
+    // Required: What UDP port to listen on
+    u16_t listen_port;
+    // Optional: restrict send/receive of encapsulated WireGuard traffic to this network interface only (NULL to use routing table)
+    struct netif *bind_netif;
 };
 
 struct wireguardif_peer {
-	const char *public_key;
-	// Optional pre-shared key (32 bytes) - make sure this is NULL if not to be used
-	const uint8_t *preshared_key;
-	// tai64n of largest timestamp we have seen during handshake to avoid replays
-	uint8_t greatest_timestamp[12];
+    const char *public_key;
+    // Optional pre-shared key (32 bytes) - make sure this is NULL if not to be used
+    const uint8_t *preshared_key;
+    // tai64n of largest timestamp we have seen during handshake to avoid replays
+    uint8_t greatest_timestamp[12];
 
-	// Allowed ip/netmask (can add additional later but at least one is required)
-	ip_addr_t allowed_ip;
-	ip_addr_t allowed_mask;
+    // Allowed ip/netmask (can add additional later but at least one is required)
+    ip_addr_t allowed_ip;
+    ip_addr_t allowed_mask;
 
-	// End-point details (may be blank)
-	ip_addr_t endpoint_ip;
-	u16_t endport_port;
-	u16_t keep_alive;
+    // End-point details (may be blank)
+    ip_addr_t endpoint_ip;
+    u16_t endport_port;
+    u16_t keep_alive;
 };
 
 #define WIREGUARDIF_INVALID_INDEX (0xFF)
