@@ -235,14 +235,24 @@ static esp_err_t failure(httpd_req_t *req, const char *message) {
     httpd_resp_set_status(req, "400 Bad Request");
     return json_reply(req, j);
 }
+static bool usb_peer_address(const struct sockaddr *address, socklen_t length) {
+    uint32_t ipv4;
+    if (address->sa_family == AF_INET && length >= sizeof(struct sockaddr_in)) {
+        ipv4 = ((const struct sockaddr_in *)address)->sin_addr.s_addr;
+    } else if (address->sa_family == AF_INET6 && length >= sizeof(struct sockaddr_in6)) {
+        const uint8_t *bytes = (const uint8_t *)&((const struct sockaddr_in6 *)address)->sin6_addr;
+        static const uint8_t mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
+        if (memcmp(bytes, mapped_prefix, sizeof(mapped_prefix))) return false;
+        memcpy(&ipv4, bytes + 12, sizeof(ipv4));
+    } else return false;
+    return (ntohl(ipv4) & 0xffffff00) == 0xc0a84d00;
+}
 static bool local_request(httpd_req_t *req) {
-    struct sockaddr_in peer;
+    /* HTTPD uses a dual-stack socket: IPv4 clients may be IPv4-mapped IPv6. */
+    struct sockaddr_storage peer = {0};
     socklen_t n = sizeof(peer);
-    if (getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&peer, &n) !=
-        0)
-        return false;
-    if ((ntohl(peer.sin_addr.s_addr) & 0xffffff00) != 0xc0a84d00)
-        return false;
+    if (getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&peer, &n) != 0 ||
+        !usb_peer_address((const struct sockaddr *)&peer, n)) return false;
     char host[64], origin[96];
     if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK)
         return false;
