@@ -35,3 +35,9 @@ USB `/status` includes firmware version, current/minimum internal heap, largest 
 Map error codes: 1 workspace busy; 2 Noise transport failure (Noise code distinguishes header/read, invalid framing, capacity, allocation, payload read, authentication); 3 no data; 4 invalid padding; 5 SETTINGS acknowledgement; 6 assembly capacity; 7 invalid/oversized length prefix; 8 malformed/deep JSON; 9 object allocation/parse failure; 10 GOAWAY/RST; 11 flow-control write failure; 12 incomplete message. Human-readable protocol errors retain the exact stage instead of a generic unsupported-map message.
 
 The public relay-map regression fixture was retrieved from https://controlplane.tailscale.com/derpmap/default on 2026-10-01; it contains no private membership map. Host tests run against the saved fixture without internet access.
+
+## Known devices and routing status (0.2.2)
+
+The setup page retains peer addresses during a control connection failure. These can come from saved peers or an earlier successful map; their presence does not establish current connectivity. `/status` now reports `routing_ready` using the same membership conditions as the USB outbound routing gate. The UI shows that status separately and labels retained peers as known devices whose availability has not been verified. Each peer uses one compact row with its name, qualified hostname, visible USB IP address, and copy action. A ready routing gate still does not prove end-to-end peer reachability or tailnet policy permission.
+
+Validation: `tools/test-onboarding.mjs` executes the actual renderer against failed and ready membership fixtures, checking retained peers, compact structure, visible IP addresses, and distinct status copy. The gateway build and host tests pass. Native Android layout and real-device connectivity remain hardware acceptance checks.

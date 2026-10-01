@@ -288,7 +288,7 @@ static esp_err_t status(httpd_req_t *req) {
     if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(1000)) != pdTRUE)
         return failure(req, "Memberships are busy; retry shortly");
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root,"firmware","0.2.1");
+    cJSON_AddStringToObject(root,"firmware","0.2.2");
     cJSON_AddBoolToObject(root, "wifi", online);
     cJSON_AddBoolToObject(root, "route_storage_ok", route_storage_ok);
     cJSON_AddNumberToObject(root, "free_memory", esp_get_free_heap_size());
@@ -302,6 +302,7 @@ static esp_err_t status(httpd_req_t *req) {
         cJSON_AddBoolToObject(j, "enabled", m->enabled);
         cJSON_AddStringToObject(j, "error", m->error);
         cJSON_AddNumberToObject(j, "state", m->client ? m->client->state : 0);
+        cJSON_AddBoolToObject(j, "routing_ready", m->enabled && m->client && m->client->wg_netif && m->client->state == ML_STATE_CONNECTED && !m->client->key_expired && !m->client->last_error[0]);
         if (m->client) {
             cJSON *diag=cJSON_AddObjectToObject(j,"map_diagnostics");
 #define MD(field) cJSON_AddNumberToObject(diag,#field,m->client->field)

@@ -20,3 +20,28 @@ attempt([{label:'tailnet',enabled:true,state:3,login_url:'https://login.tailscal
 vm.runInContext("joining='tailnet'",c);attempt([{label:'tailnet',enabled:true,state:4}]);assert.equal(vm.runInContext('joining',c),'');
 vm.runInContext("joining='tailnet'",c);attempt([{label:'tailnet',enabled:false,state:3,login_url:'https://login.tailscale.com/a/fixture'}]);assert.equal(opens.length,1);
 console.log('Onboarding checks passed: unique suggested names, intended membership, safe login origin, one-time handoff, approved/disabled recovery.');
+
+class Element {
+  constructor(tag,text=''){this.tagName=tag.toUpperCase();this.textContent=text;this.children=[];this.style={};}
+  append(...children){this.children.push(...children)}
+  replaceChildren(...children){this.children=children}
+  contains(){return false}
+  setAttribute(){}
+}
+const root=new Element('div');
+const renderContext=vm.createContext({URL,document:{activeElement:null},$:()=>root,el:(tag,text)=>new Element(tag,text),copyAddress(){},command(){},confirm:()=>false});
+vm.runInContext('let lastMembers="";'+between('function renderMembers','async function refresh'),renderContext);
+const render=m=>{renderContext.members=[m];vm.runInContext('renderMembers(members)',renderContext);return root.children[0]};
+const peer={name:'server.example.ts.net',qualifiedName:'server.work.tailnet',address:'100.77.1.4'};
+const texts=e=>[e.textContent,...e.children.flatMap(texts)].filter(Boolean);
+let card=render({id:1,label:'work',enabled:true,state:5,protocol_error:'Registration failed',routing_ready:false,peers:[peer]});
+assert(texts(card).includes('Registration retrying · routing unavailable'));
+assert(texts(card).some(t=>t.includes('saved or earlier map')));
+const row=card.children.find(e=>e.className==='peer');
+assert.equal(row.children.length,2,'one address block and one copy control');
+assert.deepEqual(texts(row.children[0]),['server','server.work.tailnet','100.77.1.4']);
+assert(!row.children.some(e=>e.tagName==='INPUT'||e.tagName==='DETAILS'));
+card=render({id:1,label:'work',enabled:true,state:4,routing_ready:true,peers:[peer]});
+assert(texts(card).includes('Connected · USB routing ready'));
+assert(!texts(card).some(t=>t.includes('saved or earlier map')));
+console.log('Device presentation checks passed: current routing status, retained known peers, visible IP, compact row.');
