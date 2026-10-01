@@ -76,7 +76,7 @@ static void state(int itf, cdcacm_event_t *e) {
         mgmt_write("T-Dongle-S3 adapter 0.1.0. Type help. Input is not echoed.\r\n");
 }
 void console_init(void) {
-    output = xQueueCreate(32, 128);
+    output = xQueueCreate(8, 128);
     assert(output);
     assert(xTaskCreate(writer, "console_tx", 3072, NULL, 2, NULL) == pdPASS);
     tinyusb_config_cdcacm_t c = {

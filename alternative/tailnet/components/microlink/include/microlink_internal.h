@@ -478,6 +478,11 @@ struct microlink_s {
     char auth_url[384];
     char last_error[64];
     char transport_error[64];
+    unsigned noise_error, noise_frame_bytes;
+    uint32_t map_attempts, map_failures, map_bytes, map_declared_bytes, map_projected_bytes;
+    uint32_t map_heap_before, map_heap_after, map_largest_before;
+    unsigned map_error, map_stream_id, map_frame_type;
+
     uint8_t node_key_challenge[32];
     bool has_node_key_challenge;
     uint8_t *server_extra_data;
@@ -487,7 +492,8 @@ struct microlink_s {
     uint8_t stream_header[9], stream_special[8];
     size_t stream_header_used, stream_special_used;
     uint32_t stream_remaining, stream_id;
-    uint8_t stream_type, stream_flags;
+    uint8_t stream_type, stream_flags, stream_padding;
+    bool stream_padding_pending;
     unsigned map_generation;
     /* Configuration (immutable after init) */
     microlink_config_t config;

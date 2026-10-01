@@ -602,6 +602,7 @@ static int coord_recv(microlink_t *ml, uint8_t *buf, size_t len) {
     while (recvd < len) {
         int n = ml_conn_read(ml, buf + recvd, len - recvd);
         if (n <= 0) {
+            if(n==0){errno=ECONNRESET;return -1;}
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 if (recvd == 0) {
                     /* No data consumed yet — timeout is fine, caller can retry */
@@ -658,27 +659,29 @@ static int noise_send(microlink_t *ml, ml_noise_state_t *noise,
 }
 
 /* Receive and decrypt a Noise transport frame, returns plaintext length */
-static int noise_recv(microlink_t *ml, ml_noise_state_t *noise,
-                        uint8_t *plaintext, size_t max_len) {
+static int noise_recv_buffer(microlink_t *ml, ml_noise_state_t *noise,
+                        uint8_t *plaintext, size_t max_len, bool in_place) {
     /* Read 3-byte frame header */
     uint8_t hdr[3];
-    if (coord_recv(ml, hdr, 3) < 0) return -1;
+    ml->noise_error = 0;
+    if (coord_recv(ml, hdr, 3) < 0) { ml->noise_error = 1; return -1; }
 
     if (hdr[0] != 0x04) {
         ESP_LOGE(TAG, "Unexpected Noise frame type: 0x%02x", hdr[0]);
-        return -1;
+        ml->noise_error = 2; errno=EPROTO; return -1;
     }
 
     uint16_t ct_len = (hdr[1] << 8) | hdr[2];
-    if (ct_len < 16) return -1;
+    ml->noise_frame_bytes=ct_len;
+    if (ct_len < 16) {ml->noise_error=2;errno=EPROTO;return -1;}
     size_t pt_len = ct_len - 16;
-    if (pt_len > max_len) {
+    if ((in_place ? ct_len : pt_len) > max_len) {
         ESP_LOGE(TAG, "Noise frame too large: %d > %d", (int)pt_len, (int)max_len);
-        return -1;
+        ml->noise_error=3;errno=EMSGSIZE;return -1;
     }
 
-    uint8_t *ciphertext = ml_psram_malloc(ct_len);
-    if (!ciphertext) return -1;
+    uint8_t *ciphertext = in_place ? plaintext : ml_psram_malloc(ct_len);
+    if (!ciphertext) {ml->noise_error=4;errno=ENOMEM;return -1;}
 
     /* Header already consumed — payload read MUST complete or stream
      * alignment is permanently lost. Retry EAGAIN (coord_recv returns -1
@@ -691,7 +694,8 @@ static int noise_recv(microlink_t *ml, ml_noise_state_t *noise,
         }
         ESP_LOGE(TAG, "noise_recv payload failed: ct_len=%d retries=%d errno=%d",
                  ct_len, payload_retries, errno);
-        free(ciphertext);
+        ml->noise_error=5;
+        if (!in_place) free(ciphertext);
         return -1;
     }
 
@@ -700,13 +704,21 @@ static int noise_recv(microlink_t *ml, ml_noise_state_t *noise,
                           ciphertext, ct_len,
                           plaintext) != ESP_OK) {
         ESP_LOGE(TAG, "Noise decrypt failed (nonce=%llu)", (unsigned long long)noise->rx_nonce);
-        free(ciphertext);
+        ml->noise_error=6;errno=EBADMSG;
+        if (!in_place) free(ciphertext);
         return -1;
     }
     noise->rx_nonce++;
 
-    free(ciphertext);
+    if (!in_place) free(ciphertext);
     return (int)pt_len;
+}
+
+static int noise_recv(microlink_t *ml, ml_noise_state_t *noise, uint8_t *plaintext, size_t max_len) {
+    return noise_recv_buffer(ml,noise,plaintext,max_len,false);
+}
+static int noise_recv_inplace(microlink_t *ml, ml_noise_state_t *noise, uint8_t *buffer, size_t capacity) {
+    return noise_recv_buffer(ml,noise,buffer,capacity,true);
 }
 
 /* ============================================================================
@@ -2284,6 +2296,7 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
 
 
     if (send_request) {
+    ml->transport_error[0]=0;
     /* Build MapRequest JSON */
     cJSON *root = cJSON_CreateObject();
     if (!root) return -1;
@@ -2354,7 +2367,7 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
     return gateway_read_map(ml, noise, send_request ? 3 : 5, true);
 }
 
-static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise) {
+static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise, bool omit_peers) {
     cJSON *root = cJSON_CreateObject();
     if (!root) return -1;
 
@@ -2382,7 +2395,7 @@ static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise) {
     cJSON_AddBoolToObject(root, "Stream", true);
     cJSON_AddBoolToObject(root, "KeepAlive", true);
     cJSON_AddStringToObject(root, "Compress", "");    /* Disable compression */
-    cJSON_AddBoolToObject(root, "OmitPeers", true);   /* Already have peers */
+    cJSON_AddBoolToObject(root, "OmitPeers", omit_peers); /* Initial stream must request peers. */
 
     /* NOTE: With Version >= 68, the control plane IGNORES Endpoints and
      * Hostinfo in Stream=true MapRequests. Endpoints are sent via separate
@@ -2580,6 +2593,7 @@ static void apply_long_poll_map(microlink_t *ml, cJSON *update_json) {
     }
 }
 
+#include "gateway_project.inc"
 #include "gateway_stream.inc"
 
 /* ============================================================================
@@ -2729,7 +2743,7 @@ void ml_coord_task(void *arg) {
                 int fp_rc = do_map_exchange(ml, &noise, true);
                 if (fp_rc < 0) {
                     ESP_LOGW(TAG, "MapRequest failed, will retry");
-                    strlcpy(ml->transport_error, "Could not read a supported tailnet map; retrying", sizeof(ml->transport_error));
+                    if (!ml->transport_error[0]) strlcpy(ml->transport_error, "Map request failed before response", sizeof(ml->transport_error));
                     ml_conn_close(ml);
                     state = COORD_RECONNECTING;
                     break;
@@ -2742,7 +2756,7 @@ void ml_coord_task(void *arg) {
                      * consume the initial full map from it with the same
                      * robust reader/parser the classic fetch uses. */
                     ESP_LOGI(TAG, "Reading initial netmap from the long-poll stream");
-                    if (do_start_long_poll(ml, &noise) < 0) {
+                    if (do_start_long_poll(ml, &noise, false) < 0) {
                         ESP_LOGW(TAG, "Failed to start long-poll");
                         ml_conn_close(ml);
                         state = COORD_RECONNECTING;
@@ -2750,13 +2764,13 @@ void ml_coord_task(void *arg) {
                     }
                     lp_started = true;
                     if (do_map_exchange(ml, &noise, false) < 0) {
-                        /* Not fatal: poll_map_update may still pick up
-                         * (small) updates from the stream. */
-                        ESP_LOGW(TAG, "No initial netmap on the long-poll stream yet");
+                        ESP_LOGW(TAG, "Initial long-poll map failed: %s",ml->transport_error);
+                        ml_conn_close(ml);state=COORD_RECONNECTING;break;
                     }
                 }
 
                 if (!ml->vpn_ip || !ml->map_generation || ml->auth_url[0] || ml->key_expired) {
+                    if(!ml->transport_error[0])strlcpy(ml->transport_error,"Map missing node address or authorization pending",sizeof(ml->transport_error));
                     ml_conn_close(ml); state = COORD_RECONNECTING; break;
                 }
                 /* Signal registration only now — the wg_mgr task wakes on
@@ -2779,7 +2793,7 @@ void ml_coord_task(void *arg) {
                 }
 
                 /* Start streaming long-poll for incremental updates */
-                if (!lp_started && do_start_long_poll(ml, &noise) < 0) {
+                if (!lp_started && do_start_long_poll(ml, &noise, true) < 0) {
                     ESP_LOGW(TAG, "Failed to start long-poll (non-fatal)");
                 }
             }

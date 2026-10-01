@@ -288,9 +288,12 @@ static esp_err_t status(httpd_req_t *req) {
     if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(1000)) != pdTRUE)
         return failure(req, "Memberships are busy; retry shortly");
     cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root,"firmware","0.2.1");
     cJSON_AddBoolToObject(root, "wifi", online);
     cJSON_AddBoolToObject(root, "route_storage_ok", route_storage_ok);
     cJSON_AddNumberToObject(root, "free_memory", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(root,"largest_free_block",heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(root,"minimum_free_memory",heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
     cJSON *list = cJSON_AddArrayToObject(root, "members");
     for (membership_t *m = members; m; m = m->next) {
         cJSON *j = cJSON_CreateObject();
@@ -300,6 +303,12 @@ static esp_err_t status(httpd_req_t *req) {
         cJSON_AddStringToObject(j, "error", m->error);
         cJSON_AddNumberToObject(j, "state", m->client ? m->client->state : 0);
         if (m->client) {
+            cJSON *diag=cJSON_AddObjectToObject(j,"map_diagnostics");
+#define MD(field) cJSON_AddNumberToObject(diag,#field,m->client->field)
+            MD(map_attempts);MD(map_failures);MD(map_error);MD(map_bytes);MD(map_declared_bytes);MD(map_projected_bytes);
+            MD(map_heap_before);MD(map_heap_after);MD(map_largest_before);MD(map_stream_id);MD(map_frame_type);
+            MD(noise_error);MD(noise_frame_bytes);MD(map_generation);
+#undef MD
             cJSON_AddStringToObject(j, "login_url", m->client->auth_url);
             cJSON_AddStringToObject(j, "protocol_error",
                                     m->client->last_error[0]
