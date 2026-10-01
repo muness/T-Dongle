@@ -40,6 +40,7 @@ static bool save_members(void) {
     for (membership_t *m = members; m; m = m->next) {
         cJSON *j = cJSON_CreateObject();
         cJSON_AddNumberToObject(j, "id", m->id);
+        cJSON_AddNumberToObject(j,"start_heap_before",m->start_heap_before);cJSON_AddNumberToObject(j,"start_heap_after",m->start_heap_after);
         cJSON_AddStringToObject(j, "label", m->label);
         cJSON_AddStringToObject(j, "key", m->key);
         cJSON_AddBoolToObject(j, "enabled", m->enabled);
@@ -119,6 +120,20 @@ static bool stop_member(membership_t *m) {
     m->client = NULL;
     return true;
 }
+/* Account for the allocations requested by microlink_init/start, plus
+ * allocator/task bookkeeping and 16 KiB retained for HTTP/control recovery.
+ * Shared registration/map byte buffers are static, not charged per member. */
+static size_t member_start_budget(void) {
+    size_t tasks = ML_TASK_NET_IO_STACK + 2 * ML_TASK_DERP_TX_STACK +
+                   ML_TASK_COORD_STACK + ML_TASK_WG_MGR_STACK;
+    size_t queues = ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
+                    (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH +
+                     ML_STUN_RX_QUEUE_DEPTH) * sizeof(ml_rx_packet_t) +
+                    ML_COORD_CMD_QUEUE_DEPTH * sizeof(ml_coord_cmd_t) +
+                    ML_PEER_UPDATE_QUEUE_DEPTH * sizeof(ml_peer_update_t *);
+    return sizeof(microlink_t) + tasks + queues + 6 * sizeof(StaticQueue_t) +
+           5 * sizeof(StaticTask_t) + 2048 + 16384;
+}
 static void start_member(membership_t *m) {
     if (!m->enabled || m->client || !online)
         return;
@@ -128,9 +143,9 @@ static void start_member(membership_t *m) {
                 sizeof(m->error));
         return;
     }
-    /* The reserve covers the bounded shared control workspace's transient
-     * ciphertext/JSON/TLS allocations, networking and recovery HTTP service. */
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < 120000 ||
+    /* Reserve for parsed JSON, networking and recovery HTTP. Shared receive
+     * buffers are static. Runtime peak sufficiency needs board qualification. */
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < member_start_budget() ||
         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < 24000) {
         strlcpy(m->error, "Not enough free memory to activate this membership",
                 sizeof(m->error));
@@ -143,6 +158,7 @@ static void start_member(membership_t *m) {
                                  .enable_stun = true,
                                  .enable_disco = true,
                                  .max_peers = 8};
+    m->start_heap_before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     m->client = microlink_init(&config);
     if (!m->client) {
         strlcpy(m->error, "Could not allocate or save this identity",
@@ -150,6 +166,7 @@ static void start_member(membership_t *m) {
         return;
     }
     esp_err_t err = microlink_start(m->client);
+    m->start_heap_after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     if (err != ESP_OK) {
         if (!stop_member(m)) {
             m->enabled = false;
@@ -288,7 +305,9 @@ static esp_err_t status(httpd_req_t *req) {
     if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(1000)) != pdTRUE)
         return failure(req, "Memberships are busy; retry shortly");
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root,"firmware","0.2.3");
+    cJSON_AddStringToObject(root,"firmware","0.2.4");
+    cJSON_AddNumberToObject(root,"membership_start_budget",member_start_budget());
+    cJSON_AddNumberToObject(root,"membership_context_bytes",sizeof(microlink_t));
     cJSON_AddBoolToObject(root, "wifi", online);
     cJSON_AddBoolToObject(root, "route_storage_ok", route_storage_ok);
     cJSON_AddNumberToObject(root, "free_memory", esp_get_free_heap_size());
@@ -298,6 +317,7 @@ static esp_err_t status(httpd_req_t *req) {
     for (membership_t *m = members; m; m = m->next) {
         cJSON *j = cJSON_CreateObject();
         cJSON_AddNumberToObject(j, "id", m->id);
+        cJSON_AddNumberToObject(j,"start_heap_before",m->start_heap_before);cJSON_AddNumberToObject(j,"start_heap_after",m->start_heap_after);
         cJSON_AddStringToObject(j, "label", m->label);
         cJSON_AddBoolToObject(j, "enabled", m->enabled);
         cJSON_AddStringToObject(j, "error", m->error);

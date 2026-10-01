@@ -4,6 +4,7 @@
 typedef struct membership {
     struct membership *next;
     uint32_t id;
+    size_t start_heap_before,start_heap_after;
     char label[24], ns[16], key[160], hostname[48], error[64];
     bool enabled;
     microlink_t *client;

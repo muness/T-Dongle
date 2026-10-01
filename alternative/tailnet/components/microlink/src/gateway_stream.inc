@@ -1,10 +1,7 @@
 /* A single bounded control-plane workspace, serialized across memberships.
  * Dataplane tasks and per-membership identities remain independent. */
-static uint8_t gateway_plain[20480 + 16];
-static uint8_t gateway_json[49152];
-static StaticSemaphore_t gateway_lock_storage;
-static SemaphoreHandle_t gateway_lock;
-static portMUX_TYPE gateway_init_lock = portMUX_INITIALIZER_UNLOCKED;
+#include "gateway_project_stream.inc"
+static gs_parser gateway_projection;
 static int gateway_map_fail(microlink_t *ml, unsigned code,
                             const char *message) {
     ml->map_error = code;
@@ -28,6 +25,9 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
         return initial ? gateway_map_fail(ml, 1, "Map workspace busy; retrying")
                        : 0;
     size_t used = 0, expected = 0;
+    uint8_t prefix[4];
+    gs_init(&gateway_projection, (char *)gateway_json, sizeof(gateway_json));
+    gateway_projection.home = ml->derp_region_default;
     int result = 0;
     bool applied = false;
     uint64_t deadline = ml_get_time_ms() + (initial ? 15000 : 4000);
@@ -116,34 +116,51 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                 }
             } else if (ml->stream_type == 0 && ml->stream_id == wanted &&
                        ml->stream_remaining > ml->stream_padding) {
-                if (used >= sizeof(gateway_json)) {
+                ml->map_bytes++;
+                if (used < 4)
+                    prefix[used] = b;
+                else if (ml->config.map_callback) {
+                    if (used - 4 >= sizeof(gateway_json) - 1) {
+                        result = gateway_map_fail(
+                            ml, 6, "Raw callback map exceeds capacity");
+                        goto done;
+                    }
+                    gateway_json[used - 4] = b;
+                } else if (!gs_byte(&gateway_projection, b)) {
                     result = gateway_map_fail(
-                        ml, 6, "Map exceeds 48 KiB assembly capacity");
+                        ml, gateway_projection.overflow ? 6 : 8,
+                        gateway_projection.overflow
+                            ? "Retained map exceeds capacity"
+                            : "Map JSON exceeds parser bounds or is malformed");
                     goto done;
                 }
-                gateway_json[used++] = b;
-                ml->map_bytes++;
+                used++;
                 if (used == 4) {
-                    uint32_t length = (uint32_t)gateway_json[0] |
-                                      ((uint32_t)gateway_json[1] << 8) |
-                                      ((uint32_t)gateway_json[2] << 16) |
-                                      ((uint32_t)gateway_json[3] << 24);
+                    uint32_t length = (uint32_t)prefix[0] |
+                                      ((uint32_t)prefix[1] << 8) |
+                                      ((uint32_t)prefix[2] << 16) |
+                                      ((uint32_t)prefix[3] << 24);
                     ml->map_declared_bytes = length;
-                    if (!length || length > sizeof(gateway_json) - 5) {
-                        result = gateway_map_fail(
-                            ml, 7, "Invalid or oversized map length prefix");
+                    if (!length || length > 1024 * 1024) {
+                        result = gateway_map_fail(ml, 7,
+                                                  "Invalid map length or raw "
+                                                  "map exceeds 1 MiB limit");
                         goto done;
                     }
                     expected = 4 + (size_t)length;
                 }
                 if (expected && used == expected) {
-                    gateway_json[used] = 0;
                     size_t json_len = used - 4;
                     if (!ml->config.map_callback) {
-                        json_len =
-                            gateway_project((char *)gateway_json + 4, json_len,
-                                            ml->derp_region_default);
+                        if (!gs_finish(&gateway_projection)) {
+                            result = gateway_map_fail(
+                                ml, 8,
+                                "Incomplete or malformed projected JSON");
+                            goto done;
+                        }
+                        json_len = gateway_projection.used;
                     }
+                    gateway_json[json_len] = 0;
                     ml->map_projected_bytes = json_len;
                     if (!json_len) {
                         result = gateway_map_fail(
@@ -155,7 +172,7 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                         heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
                     ml->map_largest_before =
                         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-                    cJSON *map = cJSON_ParseWithLength((char *)gateway_json + 4,
+                    cJSON *map = cJSON_ParseWithLength((char *)gateway_json,
                                                        json_len + 1);
                     ml->map_heap_after =
                         heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -171,6 +188,9 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                     ml->ctrl_stream_rx_ms = ml_get_time_ms();
                     applied = true;
                     used = expected = 0;
+                    gs_init(&gateway_projection, (char *)gateway_json,
+                            sizeof(gateway_json));
+                    gateway_projection.home = ml->derp_region_default;
                 }
             } else if (ml->stream_type == 6 && ml->stream_special_used < 8) {
                 ml->stream_special[ml->stream_special_used++] = b;

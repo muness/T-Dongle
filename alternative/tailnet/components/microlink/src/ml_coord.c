@@ -1267,16 +1267,7 @@ static int do_h2_preface(microlink_t *ml, ml_noise_state_t *noise) {
     ESP_LOGI(TAG, "H2 preface sent (%d bytes, conn window=%luKB)",
              pos, (unsigned long)(ML_H2_BUFFER_SIZE / 1024));
 
-    /* Read and process server's response (SETTINGS, SETTINGS_ACK, WINDOW_UPDATE, etc.) */
-    uint8_t recv_buf[4096];
-    int recv_len = noise_recv(ml, noise, recv_buf, sizeof(recv_buf));
-    if (recv_len < 0) {
-        ESP_LOGW(TAG, "No immediate H2 response from server (may come later)");
-        /* Not fatal - server may send its frames later */
-    } else {
-        ESP_LOGI(TAG, "Server H2 response: %d bytes", recv_len);
-    }
-
+    /* Registration consumes and acknowledges the server SETTINGS; never discard it here. */
     int64_t t_h2_done = esp_timer_get_time();
     ESP_LOGI(TAG, "[TIMING] H2 preface: %lld ms", (t_h2_done - t_h2_start) / 1000);
 
@@ -1322,7 +1313,9 @@ static cJSON *build_hostinfo(microlink_t *ml) {
     return hostinfo;
 }
 
-static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
+#include "gateway_workspace.inc"
+#include "gateway_register_response.inc"
+static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     int64_t t_reg_start = esp_timer_get_time();
 
     /* Build RegisterRequest JSON */
@@ -1421,105 +1414,10 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
 
     /* Read RegisterResponse - accumulate all Noise frames into H2 buffer first,
      * then parse H2 frames (same pattern as MapResponse). */
-    uint8_t *h2_resp = ml_psram_malloc(16384);
-    if (!h2_resp) return -1;
-    size_t h2_resp_len = 0;
-
-    uint8_t *resp_buf = ml_psram_malloc(8192);
-    if (!resp_buf) { free(h2_resp); return -1; }
-    size_t resp_total = 0;
-
-    /* Accumulate Noise frames into H2 buffer.
-     * Scan each frame for H2 END_STREAM on stream 1 to break early
-     * instead of blocking 60s waiting for more data that won't come. */
-    bool got_register_end = false;
-    for (int frame_count = 0; frame_count < 10 && !got_register_end; frame_count++) {
-        uint8_t *frame_buf = ml_psram_malloc(4096);
-        if (!frame_buf) break;
-
-        int frame_len = noise_recv(ml, noise, frame_buf, 4096);
-        if (frame_len <= 0) {
-            free(frame_buf);
-            break;
-        }
-
-        ESP_LOGI(TAG, "RegisterResponse Noise frame %d: %d bytes", frame_count, frame_len);
-
-        if (h2_resp_len + frame_len < 16384) {
-            memcpy(h2_resp + h2_resp_len, frame_buf, frame_len);
-            h2_resp_len += frame_len;
-        }
-        free(frame_buf);
-
-        /* Scan accumulated buffer for H2 END_STREAM on stream 1 */
-        int scan = 0;
-        while (scan + 9 <= (int)h2_resp_len) {
-            uint32_t fl = (h2_resp[scan] << 16) | (h2_resp[scan+1] << 8) | h2_resp[scan+2];
-            uint8_t ft = h2_resp[scan+3];
-            uint8_t ff = h2_resp[scan+4];
-            uint32_t fs = ((h2_resp[scan+5] & 0x7F) << 24) | (h2_resp[scan+6] << 16) |
-                          (h2_resp[scan+7] << 8) | h2_resp[scan+8];
-            if (fl > 1000000 || scan + 9 + (int)fl > (int)h2_resp_len) break;
-            /* END_STREAM (0x01) on stream 1 in DATA(0x00) or HEADERS(0x01) frame */
-            if (fs == 1 && (ft == 0x00 || ft == 0x01) && (ff & 0x01)) {
-                got_register_end = true;
-                break;
-            }
-            scan += 9 + fl;
-        }
-    }
-
-    /* Parse H2 frames from accumulated buffer */
-    bool got_end_stream = false;
-    int fpos = 0;
-    while (fpos + 9 <= (int)h2_resp_len) {
-        uint32_t f_len = (h2_resp[fpos] << 16) | (h2_resp[fpos + 1] << 8) | h2_resp[fpos + 2];
-        uint8_t f_type = h2_resp[fpos + 3];
-        uint8_t f_flags = h2_resp[fpos + 4];
-        uint32_t f_stream = ((h2_resp[fpos + 5] & 0x7F) << 24) | (h2_resp[fpos + 6] << 16) |
-                             (h2_resp[fpos + 7] << 8) | h2_resp[fpos + 8];
-        fpos += 9;
-
-        ESP_LOGD(TAG, "  Register H2 frame: type=%d flags=0x%02x len=%lu stream=%lu",
-                 f_type, f_flags, (unsigned long)f_len, (unsigned long)f_stream);
-
-        if (f_len > 1000000 || fpos + (int)f_len > (int)h2_resp_len) {
-            ESP_LOGW(TAG, "  Invalid H2 frame length %lu at pos %d, stopping", (unsigned long)f_len, fpos - 9);
-            break;
-        }
-
-        /* Only process frames on stream 1 (our RegisterResponse).
-         * Stream 0 = connection-level (SETTINGS, WINDOW_UPDATE, PING) */
-        if (f_stream == 1) {
-            if (f_type == 0x00 && f_len > 0) {  /* DATA frame */
-                if (resp_total + f_len < 8192) {
-                    memcpy(resp_buf + resp_total, h2_resp + fpos, f_len);
-                    resp_total += f_len;
-                }
-                if (f_flags & 0x01) got_end_stream = true;
-            }
-            if (f_type == 0x01 && (f_flags & 0x01)) got_end_stream = true;
-        }
-
-        fpos += f_len;
-    }
-    free(h2_resp);
-
-    /* Send connection-level WINDOW_UPDATE for RegisterResponse.
-     * Stream 1 is closed (END_STREAM received), only update connection level. */
-    if (resp_total > 0) {
-        uint8_t wu_buf[13];
-        int wu_len = ml_h2_build_window_update(wu_buf, 13, 0, (uint32_t)resp_total);
-        noise_send(ml, noise, wu_buf, wu_len);
-    }
-
-    ESP_LOGI(TAG, "RegisterResponse: %d bytes total data", (int)resp_total);
-
-    if (resp_total == 0) {
-        ESP_LOGW(TAG, "No DATA frame in RegisterResponse");
-        free(resp_buf);
-        return -1;
-    }
+    uint8_t *resp_buf=gateway_json;
+    int received=gateway_read_registration(ml,noise);
+    if(received<=0){strlcpy(ml->transport_error,"Registration response incomplete or invalid",sizeof(ml->transport_error));return -1;}
+    size_t resp_total=(size_t)received;
 
     uint8_t *json_data = resp_buf;
     size_t json_data_len = resp_total;
@@ -1540,7 +1438,7 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
         parse_len -= json_offset;
     } else if (json_offset < 0) {
         ESP_LOGW(TAG, "No '{' found in RegisterResponse data");
-        free(resp_buf);
+
         return -1;
     }
 
@@ -1553,11 +1451,11 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
         ESP_LOGW(TAG, "Failed to parse RegisterResponse JSON (len=%d)", (int)parse_len);
 
         parse_start[parse_len] = saved;
-        free(resp_buf);
+
         return -1;
     }
     parse_start[parse_len] = saved;
-    free(resp_buf);
+
 
     /* Check the RegisterResponse status fields the reference client acts on.
      *
@@ -2547,6 +2445,22 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     return 0;
 }
 
+/* Serialize transient registration storage with map storage across memberships. */
+static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
+    portENTER_CRITICAL(&gateway_init_lock);
+    if (!gateway_lock)
+        gateway_lock = xSemaphoreCreateMutexStatic(&gateway_lock_storage);
+    portEXIT_CRITICAL(&gateway_init_lock);
+    if (xSemaphoreTake(gateway_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        strlcpy(ml->transport_error, "Control workspace busy; registration deferred",
+                sizeof(ml->transport_error));
+        return -1;
+    }
+    int result = do_register_locked(ml, noise);
+    xSemaphoreGive(gateway_lock);
+    return result;
+}
+
 /* Try to read one incremental MapResponse update (non-blocking) */
 /* Apply one fully-decoded MapResponse from the long-poll stream.
  * Extracted from poll_map_update so the caller can drive it once per COMPLETE message rather than
@@ -2732,7 +2646,8 @@ void ml_coord_task(void *arg) {
             ESP_LOGI(TAG, "Registering...");
             if (do_register(ml, &noise) < 0) {
                 ESP_LOGE(TAG, "Registration failed");
-                strlcpy(ml->transport_error, ml->auth_url[0] ? "Waiting for browser authorization" : "Registration failed; check the auth key or upstream connection", sizeof(ml->transport_error));
+                if(ml->auth_url[0])strlcpy(ml->transport_error,"Waiting for browser authorization",sizeof(ml->transport_error));
+                else if(!ml->transport_error[0])strlcpy(ml->transport_error,"Control server registration failed",sizeof(ml->transport_error));
                 ml_conn_close(ml);
                 state = COORD_RECONNECTING;
                 break;
