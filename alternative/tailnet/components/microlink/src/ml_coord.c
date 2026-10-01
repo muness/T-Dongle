@@ -598,35 +598,33 @@ static int coord_send(microlink_t *ml, const uint8_t *data, size_t len) {
     return 0;
 }
 
+/* A timeout before consuming anything is retryable. After consuming a prefix,
+ * finish that exact record within a bounded deadline or close the session. */
 static int coord_recv(microlink_t *ml, uint8_t *buf, size_t len) {
-    size_t recvd = 0;
-    int retries = 0;
-    while (recvd < len) {
-        int n = ml_conn_read(ml, buf + recvd, len - recvd);
-        if (n <= 0) {
-            if(n==0){errno=ECONNRESET;return -1;}
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                if (recvd == 0) {
-                    /* No data consumed yet — timeout is fine, caller can retry */
-                    return -1;
-                }
-                /* Partial data consumed — we MUST finish this read or the
-                 * Noise frame stream will be misaligned. Retry with backoff. */
-                if (++retries > 300) {  /* ~3 seconds */
-                    ESP_LOGE(TAG, "coord_recv partial timeout: %d/%d bytes",
-                             (int)recvd, (int)len);
-                    errno = EIO;
-                    return -1;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
-                continue;
-            }
-            ESP_LOGE(TAG, "coord_recv failed: %d (errno %d, recvd %d/%d)",
-                     n, errno, (int)recvd, (int)len);
+    size_t used = 0;
+    int64_t deadline = esp_timer_get_time() + 10000000;
+    while (used < len) {
+        int n = ml_conn_read(ml, buf + used, len - used);
+        if (n > 0) { used += n; continue; }
+        if (!n) { errno = ECONNRESET; return -1; }
+        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
+            return -1;
+        if (!used && errno != EINTR) return -1;
+        if (esp_timer_get_time() >= deadline) {
+            errno = ETIMEDOUT;
             return -1;
         }
-        recvd += n;
-        retries = 0;  /* Reset on successful read */
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return 0;
+}
+/* Used once a record is committed (e.g. its header is already consumed). */
+static int coord_recv_committed(microlink_t *ml, uint8_t *buf, size_t len) {
+    int64_t deadline = esp_timer_get_time() + 10000000;
+    while (coord_recv(ml, buf, len) < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) return -1;
+        if (esp_timer_get_time() >= deadline) { errno = ETIMEDOUT; return -1; }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     return 0;
 }
@@ -703,18 +701,8 @@ static int noise_recv_buffer(microlink_t *ml, ml_noise_state_t *noise,
     uint8_t *ciphertext = in_place ? plaintext : ml_psram_malloc(ct_len);
     if (!ciphertext) {ml->noise_error=4;errno=ENOMEM;return -1;}
 
-    /* Header already consumed — payload read MUST complete or stream
-     * alignment is permanently lost. Retry EAGAIN (coord_recv returns -1
-     * with errno==EAGAIN if recvd==0 on first byte). */
-    int payload_retries = 0;
-    while (coord_recv(ml, ciphertext, ct_len) < 0) {
-        if ((errno == EAGAIN || errno == EWOULDBLOCK) && ++payload_retries <= 300) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-        ESP_LOGE(TAG, "noise_recv payload failed: ct_len=%d retries=%d errno=%d",
-                 ct_len, payload_retries, errno);
-        ml->noise_error=5;
+    if (coord_recv_committed(ml, ciphertext, ct_len) < 0) {
+        ml->noise_error = 5;
         if (!in_place) free(ciphertext);
         return -1;
     }
@@ -882,9 +870,13 @@ static int do_tcp_connect(microlink_t *ml) {
 
 
 
+#include "gateway_handshake.inc"
+
 static int do_noise_handshake(microlink_t *ml, ml_noise_state_t *noise) {
     ml->stream_header_used = ml->stream_remaining = 0;
     ml->map_generation = 0;
+    ml->noise_error = ml->noise_frame_bytes = ml->map_h2_error = ml->map_h2_last_stream = 0;
+    ml->control_stage = 2; ml->h2_debug[0] = 0;
     int64_t t_noise_start = esp_timer_get_time();
 
     /* For custom control planes (Headscale / Ionscale / dev coordinators),
@@ -949,322 +941,12 @@ static int do_noise_handshake(microlink_t *ml, ml_noise_state_t *noise) {
     }
     free(http_req);
 
-    /* Read HTTP response - use large recv() because server often sends
-     * HTTP 101 headers + Noise msg2 + proactive frames in the same TCP segment */
-    uint8_t *resp = ml_psram_malloc(2048);
-    if (!resp) return -1;
-
-    int total = ml_conn_read(ml, resp, 2047);
-    if (total <= 0) {
-        ESP_LOGE(TAG, "Handshake recv failed: %d (errno=%d)", total, errno);
-        free(resp);
-        return -1;
-    }
-    resp[total] = '\0';
-
-    ESP_LOGI(TAG, "HTTP response received: %d bytes", total);
-
-    /* Verify 101 Switching Protocols */
-    if (strstr((char *)resp, "101") == NULL) {
-        ESP_LOGE(TAG, "Noise upgrade rejected: %.200s", resp);
-        free(resp);
-        return -1;
-    }
-    ESP_LOGI(TAG, "HTTP 101 received, looking for Noise msg2...");
-
-    /* Find end of HTTP headers */
-    uint8_t *body_start = (uint8_t *)strstr((char *)resp, "\r\n\r\n");
-    if (!body_start) {
-        ESP_LOGE(TAG, "No header terminator found");
-        free(resp);
-        return -1;
-    }
-    body_start += 4; /* Skip past \r\n\r\n */
-
-    int body_len = total - (body_start - resp);
-    ESP_LOGI(TAG, "Body after HTTP headers: %d bytes", body_len);
-
-    /* Copy entire body to working buffer (may contain msg2 + extra frames) */
-    uint8_t *body_buf = NULL;
-    int body_buf_len = 0;
-
-    if (body_len > 0) {
-        body_buf = ml_psram_malloc(body_len);
-        if (body_buf) {
-            memcpy(body_buf, body_start, body_len);
-            body_buf_len = body_len;
-        }
-    }
-    free(resp);
-
-    /* Ensure we have at least the 3-byte Noise frame header */
-    if (body_buf_len < 3) {
-        ESP_LOGI(TAG, "Reading Noise msg2 header from socket (have %d bytes)...", body_buf_len);
-        /* Need to read from socket - allocate buffer if not yet */
-        if (!body_buf) {
-            body_buf = ml_psram_malloc(512);
-            if (!body_buf) return -1;
-        }
-        if (coord_recv(ml, body_buf + body_buf_len, 3 - body_buf_len) < 0) {
-            ESP_LOGE(TAG, "Failed to read Noise msg2 header");
-            free(body_buf);
-            return -1;
-        }
-        body_buf_len = 3;
-    }
-
-    /* Parse 3-byte Noise frame header */
-    uint8_t msg_type = body_buf[0];
-    uint16_t payload_len = (body_buf[1] << 8) | body_buf[2];
-
-    ESP_LOGI(TAG, "Noise frame: type=0x%02x, payload_len=%d", msg_type, payload_len);
-
-    if (msg_type != 0x02) {
-        ESP_LOGE(TAG, "Unexpected Noise msg type: 0x%02x (expected 0x02)", msg_type);
-        free(body_buf);
-        return -1;
-    }
-
-    int msg2_total = 3 + payload_len;  /* Total msg2 frame size */
-
-    /* Read remaining msg2 payload bytes from socket if needed */
-    if (body_buf_len < msg2_total) {
-        ESP_LOGI(TAG, "Reading remaining msg2 payload: have %d, need %d", body_buf_len, msg2_total);
-        /* Grow buffer if needed */
-        uint8_t *tmp = ml_psram_malloc(msg2_total + 512);
-        if (!tmp) { free(body_buf); return -1; }
-        memcpy(tmp, body_buf, body_buf_len);
-        free(body_buf);
-        body_buf = tmp;
-
-        if (coord_recv(ml, body_buf + body_buf_len, msg2_total - body_buf_len) < 0) {
-            ESP_LOGE(TAG, "Failed to read Noise msg2 payload");
-            free(body_buf);
-            return -1;
-        }
-        body_buf_len = msg2_total;
-    }
-
-    ESP_LOGI(TAG, "Noise msg2 complete: %d bytes (payload=%d)", msg2_total, payload_len);
-
-    /* Strip 3-byte header, pass raw payload to noise processing */
-    if (ml_noise_read_msg2(noise, body_buf + 3, payload_len) != ESP_OK) {
-        ESP_LOGE(TAG, "Noise msg2 processing failed");
-        free(body_buf);
-        return -1;
-    }
-
-    int64_t t_noise_done = esp_timer_get_time();
-    ESP_LOGI(TAG, "[TIMING] Noise handshake: %lld ms", (t_noise_done - t_noise_start) / 1000);
-    ESP_LOGI(TAG, "Noise handshake complete, transport keys derived");
-
-    /* Save extra data after msg2 (proactive server transport frames)
-     * Server sends these immediately after handshake - each one increments
-     * server's tx_nonce. We must process them to keep nonces in sync.
-     * (Matches v1 g_server_extra_data logic)
-     *
-     * On fast connections (WiFi), the proactive frames often arrive in
-     * the same TCP segment as the HTTP 101 + msg2. On slow connections
-     * (cellular PPP), they arrive in separate TCP segments. We must
-     * read from the socket if they weren't in the initial buffer. */
-    int extra_len = body_buf_len - msg2_total;
-    uint8_t *extra_data = NULL;
-
-    if (extra_len > 0) {
-        /* Fast path: proactive frames were in the initial recv buffer */
-        ESP_LOGI(TAG, "Found %d bytes of extra data after msg2 (proactive frames)", extra_len);
-        extra_data = ml_psram_malloc(extra_len);
-        if (extra_data) {
-            memcpy(extra_data, body_buf + msg2_total, extra_len);
-        }
-    } else {
-        /* Slow path: proactive frames arrive in subsequent TCP segments.
-         * Set a short recv timeout and read them from the socket.
-         * Server sends EarlyNoise immediately after msg2, so they should
-         * arrive within a few hundred ms even on slow cellular links. */
-        ESP_LOGI(TAG, "No extra data in initial buffer, reading proactive frames from socket...");
-        struct timeval short_tv = { .tv_sec = 2, .tv_usec = 0 };
-        ml_setsockopt(ml_conn_sockfd(ml), SOL_SOCKET, SO_RCVTIMEO, &short_tv, sizeof(short_tv));
-
-        extra_data = ml_psram_malloc(1024);
-        if (extra_data) {
-            int n = ml_conn_read(ml, extra_data, 1024);
-            if (n > 0) {
-                extra_len = n;
-                ESP_LOGI(TAG, "Read %d bytes of proactive frames from socket", extra_len);
-            } else {
-                ESP_LOGI(TAG, "No proactive frames from server (n=%d errno=%d)", n, errno);
-                free(extra_data);
-                extra_data = NULL;
-                extra_len = 0;
-            }
-        }
-
-        /* Restore normal recv timeout */
-        struct timeval normal_tv = { .tv_sec = 2, .tv_usec = 0 };
-        ml_setsockopt(ml_conn_sockfd(ml), SOL_SOCKET, SO_RCVTIMEO, &normal_tv, sizeof(normal_tv));
-    }
-
-    if (extra_data && extra_len > 0) {
-        /* Count proactive transport frames */
-        int offset = 0;
-        int frame_count = 0;
-        while (offset + 3 <= extra_len) {
-            uint8_t ft = extra_data[offset];
-            uint16_t fl = (extra_data[offset + 1] << 8) | extra_data[offset + 2];
-            if (offset + 3 + fl > extra_len) {
-                ESP_LOGW(TAG, "Incomplete proactive frame at offset %d", offset);
-                break;
-            }
-            ESP_LOGI(TAG, "Proactive frame %d: type=0x%02x, len=%u", frame_count, ft, fl);
-            frame_count++;
-            offset += 3 + fl;
-        }
-        ESP_LOGI(TAG, "Server sent %d proactive transport frames", frame_count);
-
-        /* Store for processing after handshake */
-        if (ml->server_extra_data) free(ml->server_extra_data);
-        ml->server_extra_data = extra_data;
-        ml->server_extra_data_len = extra_len;
-    } else {
-        if (extra_data) free(extra_data);
-    }
-
-    free(body_buf);
+    if (gateway_read_upgrade(ml) < 0) return -1;
+    ml->control_stage = 3;
+    if (gateway_read_msg2(ml, noise) < 0) return -1;
+    ESP_LOGI(TAG, "[TIMING] Noise handshake: %lld ms",
+             (esp_timer_get_time() - t_noise_start) / 1000);
     return 0;
-}
-
-/* ============================================================================
- * Process proactive server frames sent after Noise handshake
- * Copied from v1: decrypt EarlyNoise (frame 0) to get nodeKeyChallenge,
- * then count all frames and set rx_nonce = total count.
- * Frames 1-3 may not decrypt with any nonce/key combo (v1 observation).
- * ========================================================================== */
-
-static void process_proactive_frames(microlink_t *ml, ml_noise_state_t *noise) {
-    if (!ml->server_extra_data || ml->server_extra_data_len <= 0) {
-        return;
-    }
-
-    ESP_LOGI(TAG, "Processing %d bytes of server proactive data", ml->server_extra_data_len);
-    ml->has_node_key_challenge = false;
-
-    /* Decrypt ALL proactive frames and accumulate plaintext.
-     * EarlyNoise content (magic + length + JSON) is split across
-     * multiple Noise transport frames:
-     *   Frame 0: \xff\xff\xffTS (5 bytes magic)
-     *   Frame 1: 4 bytes (big-endian JSON length)
-     *   Frame 2: ~95 bytes (JSON with nodeKeyChallenge)
-     *   Frame 3: H2 SETTINGS (optional) */
-    uint8_t *combined = ml_psram_malloc(1024);
-    size_t combined_len = 0;
-    int offset = 0;
-    int frame_count = 0;
-    uint64_t nonce = 0;
-
-    while (offset + 3 <= ml->server_extra_data_len) {
-        uint8_t ft = ml->server_extra_data[offset];
-        uint16_t fl = (ml->server_extra_data[offset + 1] << 8) | ml->server_extra_data[offset + 2];
-
-        if (offset + 3 + fl > ml->server_extra_data_len) break;
-
-        ESP_LOGI(TAG, "Proactive frame %d: type=0x%02x, len=%u", frame_count, ft, fl);
-
-        if (ft == 0x04 && fl >= ML_NOISE_MAC_LEN && combined) {
-            size_t pt_len = fl - ML_NOISE_MAC_LEN;
-            uint8_t *plaintext = ml_psram_malloc(pt_len + 1);
-
-            if (plaintext) {
-                esp_err_t ret = ml_noise_decrypt(noise->rx_key, nonce,
-                                                  NULL, 0,
-                                                  ml->server_extra_data + offset + 3, fl,
-                                                  plaintext);
-                if (ret == ESP_OK) {
-                    ESP_LOGI(TAG, "  Decrypted frame %d: %d bytes (nonce=%d)",
-                             frame_count, (int)pt_len, (int)nonce);
-                    if (combined_len + pt_len < 1024) {
-                        memcpy(combined + combined_len, plaintext, pt_len);
-                        combined_len += pt_len;
-                    }
-                } else {
-                    ESP_LOGW(TAG, "  Frame %d decrypt failed (nonce=%d)", frame_count, (int)nonce);
-                }
-                free(plaintext);
-            }
-        }
-
-        nonce++;
-        frame_count++;
-        offset += 3 + fl;
-    }
-
-    ESP_LOGI(TAG, "Decrypted %d bytes from %d proactive frames", (int)combined_len, frame_count);
-
-    /* Search combined plaintext for nodeKeyChallenge JSON */
-    if (combined && combined_len > 0) {
-        combined[combined_len < 1024 ? combined_len : 1023] = '\0';
-
-        /* Find JSON start (skip magic + length prefix) */
-        char *json_start = NULL;
-        for (int i = 0; i < (int)combined_len; i++) {
-            if (combined[i] == '{') {
-                json_start = (char *)combined + i;
-                break;
-            }
-        }
-
-        if (json_start) {
-            ESP_LOGI(TAG, "EarlyNoise JSON: %.80s", json_start);
-            cJSON *early_json = cJSON_Parse(json_start);
-            if (early_json) {
-                cJSON *challenge = cJSON_GetObjectItem(early_json, "nodeKeyChallenge");
-                if (challenge && cJSON_IsString(challenge)) {
-                    const char *chal_str = challenge->valuestring;
-                    ESP_LOGI(TAG, "Found nodeKeyChallenge: %.40s...", chal_str);
-
-                    /* Parse "chalpub:hex..." format (v1 lines 1402-1424) */
-                    if (strncmp(chal_str, "chalpub:", 8) == 0) {
-                        const char *hex = chal_str + 8;
-                        if (strlen(hex) >= 64) {
-                            hex_to_bytes(hex, ml->node_key_challenge, 32);
-                            ml->has_node_key_challenge = true;
-                            ESP_LOGI(TAG, "NodeKeyChallenge decoded (32 bytes)");
-                        }
-                    }
-                }
-                cJSON_Delete(early_json);
-            }
-        }
-    }
-    /* EarlyNoise has an exact binary length; preserve subsequent HTTP/2 bytes
-     * for the registration reader, which acknowledges each SETTINGS once. */
-    free(ml->h2_acc);
-    ml->h2_acc = NULL;
-    ml->h2_acc_len = 0;
-    if (combined && combined_len >= 9 &&
-        memcmp(combined, "\xff\xff\xffTS", 5) == 0) {
-        uint32_t json_len = ((uint32_t)combined[5] << 24) |
-                            ((uint32_t)combined[6] << 16) |
-                            ((uint32_t)combined[7] << 8) | combined[8];
-        if (json_len <= combined_len - 9) {
-            size_t tail = combined_len - 9 - json_len;
-            if (tail) {
-                memmove(combined, combined + 9 + json_len, tail);
-                ml->h2_acc = combined;
-                ml->h2_acc_len = tail;
-                combined = NULL;
-            }
-        }
-    }
-    if (combined) free(combined);
-
-    /* Set rx_nonce to skip all proactive frames */
-    ESP_LOGI(TAG, "Setting rx_nonce=%d (skipping %d proactive frames)", frame_count, frame_count);
-    noise->rx_nonce = frame_count;
-
-    free(ml->server_extra_data);
-    ml->server_extra_data = NULL;
-    ml->server_extra_data_len = 0;
 }
 
 /* ============================================================================
@@ -1350,6 +1032,7 @@ static cJSON *build_hostinfo(microlink_t *ml) {
 }
 
 #include "gateway_workspace.inc"
+#include "gateway_h2_close.inc"
 #include "gateway_register_response.inc"
 static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     int64_t t_reg_start = esp_timer_get_time();
@@ -2664,7 +2347,9 @@ void ml_coord_task(void *arg) {
 
         case COORD_DNS_RESOLVE:
         case COORD_TCP_CONNECT:
+            ml->control_stage = 1;
             if (do_tcp_connect(ml) < 0) {
+                gateway_diag_record(ml, GATEWAY_DIAG_TCP_FAILURE, errno);
                 ESP_LOGE(TAG, "TCP connect failed, retrying...");
                 state = COORD_RECONNECTING;
                 break;
@@ -2677,20 +2362,19 @@ void ml_coord_task(void *arg) {
         case COORD_NOISE_HANDSHAKE:
             ml->state = ML_STATE_REGISTERING;
             if (do_noise_handshake(ml, &noise) < 0) {
+                gateway_diag_record(ml, GATEWAY_DIAG_NOISE_FAILURE, errno);
                 ESP_LOGE(TAG, "Noise handshake failed");
                 ml_conn_close(ml);
                 state = COORD_RECONNECTING;
                 break;
             }
-            /* Process proactive server frames (EarlyNoise, H2 SETTINGS)
-             * before sending our H2 preface. Extracts nodeKeyChallenge
-             * and adjusts rx_nonce. */
-            process_proactive_frames(ml, &noise);
             state = COORD_H2_PREFACE;
             break;
 
         case COORD_H2_PREFACE:
-            if (do_h2_preface(ml, &noise) < 0) {
+            ml->control_stage = 4;
+            if (do_h2_preface(ml, &noise) < 0 || gateway_read_early(ml, &noise) < 0) {
+                gateway_diag_record(ml, GATEWAY_DIAG_H2_FAILURE, errno);
                 ESP_LOGE(TAG, "H2 preface failed");
                 strlcpy(ml->transport_error, "Control-plane transport failed; retrying", sizeof(ml->transport_error));
                 ml_conn_close(ml);
@@ -2701,13 +2385,13 @@ void ml_coord_task(void *arg) {
             break;
 
         case COORD_REGISTER:
+            ml->control_stage = 5;
             ESP_LOGI(TAG, "Registering...");
             if (do_register(ml, &noise) < 0) {
                 ESP_LOGE(TAG, "Registration failed");
-                gateway_diag_record(ml, GATEWAY_DIAG_REGISTER_FAILURE,
-                                    ml->map_h2_error);
                 if(ml->auth_url[0])strlcpy(ml->transport_error,"Waiting for browser authorization",sizeof(ml->transport_error));
                 else if(!ml->transport_error[0])strlcpy(ml->transport_error,"Control server registration failed",sizeof(ml->transport_error));
+                gateway_diag_record(ml, GATEWAY_DIAG_REGISTER_FAILURE, ml->map_h2_error);
                 ml_conn_close(ml);
                 state = COORD_RECONNECTING;
                 break;
@@ -2716,6 +2400,7 @@ void ml_coord_task(void *arg) {
             break;
 
         case COORD_FETCH_PEERS:
+            ml->control_stage = 6;
             ESP_LOGI(TAG, "Fetching peers...");
             {
                 bool lp_started = false;
@@ -2723,6 +2408,7 @@ void ml_coord_task(void *arg) {
                 if (fp_rc < 0) {
                     ESP_LOGW(TAG, "MapRequest failed, will retry");
                     if (!ml->transport_error[0]) strlcpy(ml->transport_error, "Map request failed before response", sizeof(ml->transport_error));
+                    gateway_diag_record(ml, GATEWAY_DIAG_MAP_FAILURE, ml->map_error);
                     ml_conn_close(ml);
                     state = COORD_RECONNECTING;
                     break;
@@ -2816,6 +2502,7 @@ void ml_coord_task(void *arg) {
             break;
 
         case COORD_LONG_POLL:
+            ml->control_stage = 7;
             {
                 uint64_t now = ml_get_time_ms();
 
@@ -3053,6 +2740,7 @@ void ml_coord_task(void *arg) {
                      * writes. That climb is the wedge fingerprint. */
                     ml->ctrl_last_rx_ms = now;
                 } else if (poll_ret < 0) {
+                    gateway_diag_record(ml, GATEWAY_DIAG_MAP_FAILURE, ml->map_error);
                     ESP_LOGW(TAG, "Long-poll connection lost");
                     ml->rc_coord_transport++;
                     state = COORD_RECONNECTING;

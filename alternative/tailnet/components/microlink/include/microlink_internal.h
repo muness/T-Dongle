@@ -486,6 +486,8 @@ struct microlink_s {
     char last_error[64];
     char transport_error[64];
     unsigned noise_error, noise_frame_bytes;
+    uint32_t control_stage;
+    char h2_debug[49];
     uint32_t map_attempts, map_failures, map_bytes, map_declared_bytes, map_projected_bytes;
     uint32_t map_heap_before, map_heap_after, map_largest_before;
     unsigned map_error, map_stream_id, map_frame_type;
@@ -493,11 +495,9 @@ struct microlink_s {
 
     uint8_t node_key_challenge[32];
     bool has_node_key_challenge;
-    uint8_t *server_extra_data;
-    int server_extra_data_len;
     void *wg_output_pcb;
     uint64_t last_stun_ms, last_derp_keepalive_ms, last_expiry_check_ms, last_h2_ping_ms;
-    uint8_t stream_header[9], stream_special[8];
+    uint8_t stream_header[9], stream_special[56];
     size_t stream_header_used, stream_special_used;
     uint32_t stream_remaining, stream_id;
     uint8_t stream_type, stream_flags, stream_padding;
@@ -752,7 +752,12 @@ struct microlink_s {
 /* Implemented by the gateway app. Writes are rate-limited and kept in a small
  * NVS ring so failures survive USB loss or reboot without a RAM log buffer. */
 enum { GATEWAY_DIAG_MAP_FAILURE = 1, GATEWAY_DIAG_REGISTER_FAILURE = 2,
-       GATEWAY_DIAG_CONNECTED = 3 };
+       GATEWAY_DIAG_CONNECTED = 3, GATEWAY_DIAG_START_BLOCKED = 4,
+       GATEWAY_DIAG_START_ATTEMPT = 5, GATEWAY_DIAG_START_FAILED = 6,
+       GATEWAY_DIAG_TCP_FAILURE = 7, GATEWAY_DIAG_NOISE_FAILURE = 8,
+       GATEWAY_DIAG_H2_FAILURE = 9, GATEWAY_DIAG_SOCKET_FAILURE = 10,
+       GATEWAY_DIAG_BOOT = 11, GATEWAY_DIAG_UPSTREAM = 12 };
+void gateway_diag_membership(uint32_t member_id, uint32_t event, uint32_t detail);
 void gateway_diag_record(const microlink_t *ml, uint32_t event,
                          uint32_t detail);
 

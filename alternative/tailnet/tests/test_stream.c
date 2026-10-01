@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
 #define ML_MAX_DERP_REGIONS 4
 #define MALLOC_CAP_INTERNAL 1
@@ -20,24 +21,27 @@ typedef int portMUX_TYPE;
 #define pdMS_TO_TICKS(x) (x)
 #define pdTRUE 1
 static int xSemaphoreCreateMutexStatic(int *s) { return 1; }
-static int xSemaphoreTake(int s, int n) { return 1; }
-static void xSemaphoreGive(int s) {}
+static pthread_mutex_t test_workspace_lock=PTHREAD_MUTEX_INITIALIZER;
+static int xSemaphoreTake(int s, int n) {return pthread_mutex_lock(&test_workspace_lock)==0;}
+static void xSemaphoreGive(int s) {assert(!pthread_mutex_unlock(&test_workspace_lock));}
 typedef struct {
     uint8_t *h2_acc;
     size_t h2_acc_len;
-    uint8_t stream_header[9], stream_special[8];
+    uint8_t stream_header[9], stream_special[56];
     size_t stream_header_used, stream_special_used;
     uint32_t stream_remaining, stream_id;
     uint8_t stream_type, stream_flags, stream_padding;
     bool stream_padding_pending;
     uint64_t ctrl_last_rx_ms, ctrl_stream_rx_ms;
-    unsigned maps;
+    unsigned maps, identity;
+    const uint8_t *session_input; size_t session_len, session_pos, session_chunk;
     char transport_error[64];
     unsigned noise_error, noise_frame_bytes;
     uint32_t map_attempts, map_failures, map_bytes, map_declared_bytes,
         map_projected_bytes, map_heap_before, map_heap_after,
         map_largest_before;
     unsigned map_error, map_stream_id, map_frame_type, derp_region_default;
+    char h2_debug[49];
     uint32_t map_h2_error, map_h2_last_stream;
     struct {
         void *map_callback;
@@ -52,6 +56,11 @@ static uint64_t now;
 static uint64_t ml_get_time_ms(void) { return ++now; }
 static int noise_recv_inplace(microlink_t *ml, int *noise, uint8_t *b,
                               size_t max) {
+    if(ml->session_input){
+        if(ml->session_pos==ml->session_len){errno=EAGAIN;now+=20000;return -1;}
+        size_t n=ml->session_len-ml->session_pos;if(n>ml->session_chunk)n=ml->session_chunk;
+        assert(n<=max);memcpy(b,ml->session_input+ml->session_pos,n);ml->session_pos+=n;return n;
+    }
     if (input_pos == input_len) {
         errno = EAGAIN;
         now += 20000;
@@ -78,6 +87,11 @@ static int ml_h2_build_window_update(uint8_t *b, size_t n, uint32_t stream,
 }
 static void apply_long_poll_map(microlink_t *ml, cJSON *map) {
     assert(cJSON_IsObject(map));
+    if(ml->identity){char expected[16];snprintf(expected,sizeof(expected),"identity-%u",ml->identity);
+        assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(map,"Node"),"Name")->valuestring,expected));
+        cJSON *peer=cJSON_GetArrayItem(cJSON_GetObjectItem(map,"Peers"),0);
+        assert(!strcmp(cJSON_GetObjectItem(peer,"Name")->valuestring,expected));
+    }
     ml->maps++;
 }
 #include "../components/microlink/src/gateway_project.inc"
@@ -85,6 +99,7 @@ static void apply_long_poll_map(microlink_t *ml, cJSON *map) {
 #define ESP_LOGI(...) ((void)0)
 #define ESP_LOGD(...) ((void)0)
 #define ESP_LOGW(...) ((void)0)
+#include "../components/microlink/src/gateway_h2_close.inc"
 #include "../components/microlink/src/gateway_register_response.inc"
 #include "../components/microlink/src/gateway_stream.inc"
 static void frame(uint8_t type, uint8_t flags, uint32_t stream,
@@ -102,7 +117,31 @@ static void reset(void) {
     input_len = input_pos = now = replies = settings_acks = 0;
     chunk = 1024;
 }
+static void *fragmented_membership(void *arg) {
+    unsigned identity=(uintptr_t)arg;
+    for(unsigned chunk=1;chunk<25;chunk++){
+        char json[128];int length=snprintf(json,sizeof(json),"{\"Node\":{\"Name\":\"identity-%u\"},\"Peers\":[{\"Name\":\"identity-%u\"}]}",identity,identity);
+        uint8_t wire[256]={0,0,0,0,1,0,0,0,5};wire[2]=length+4;
+        for(unsigned i=0;i<4;i++)wire[9+i]=length>>(8*i);memcpy(wire+13,json,length);
+        microlink_t member={.identity=identity,.session_input=wire,.session_len=13+length,.session_chunk=chunk};int noise=0;
+        assert(!gateway_read_map(&member,&noise,5,true)&&member.maps==1&&member.session_pos==member.session_len);
+    }
+    return NULL;
+}
 int main(void) {
+    microlink_t debug={0};uint8_t close_frame[64]={0,0,0,7,0,0,0,1};
+    const char *reason="too many settings acknowledgements";memcpy(close_frame+8,reason,strlen(reason));
+    gateway_h2_close(&debug,7,0,close_frame,8+strlen(reason));
+    assert(debug.map_h2_error==1&&debug.map_h2_last_stream==7&&!strcmp(debug.h2_debug,reason));
+    memcpy(close_frame+8,"auth token secret",17);gateway_h2_close(&debug,7,0,close_frame,25);assert(!debug.h2_debug[0]);
+
+    reset();microlink_t coalesced={0};int test_noise=0;
+    frame(0,1,1,(const uint8_t*)"{}",2);
+    frame(4,0,0,NULL,0);
+    assert(gateway_read_registration(&coalesced,&test_noise)==2 && settings_acks==0 && coalesced.h2_acc_len==9);
+    uint8_t later[]={2,0,0,0,'{','}'};frame(0,1,3,later,sizeof(later));
+    assert(!gateway_read_map(&coalesced,&test_noise,3,true)&&settings_acks==1&&!coalesced.h2_acc);
+
     int noise = 0;
     uint8_t map[] = {2, 0, 0, 0, '{', '}'};
     for (chunk = 1; chunk <= 40; chunk++) {
@@ -280,5 +319,7 @@ int main(void) {
     m.config.map_callback = (void *)1;
     frame(0, 1, 3, map, sizeof(map));
     assert(gateway_read_map(&m, &noise, 3, true) == 0 && m.maps == 1);
+    pthread_t a,b;assert(!pthread_create(&a,NULL,fragmented_membership,(void*)1));assert(!pthread_create(&b,NULL,fragmented_membership,(void*)2));pthread_join(a,NULL);pthread_join(b,NULL);
+    puts("Concurrent fragmented maps preserve each membership's node and peer identity");
     return 0;
 }

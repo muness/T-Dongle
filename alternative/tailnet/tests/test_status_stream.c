@@ -5,6 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../main/socket_budget.h"
+#define CONFIG_LWIP_MAX_SOCKETS 20
+gateway_socket_stats gateway_sockets_snapshot(void) {return (gateway_socket_stats){.open=10,.peak=12,.last_errno=23,.failures=1};}
+static int esp_reset_reason(void) {return 1;}
 #define ML_MAX_PEERS 8
 #define ML_STATE_CONNECTED 4
 #define pdTRUE 1
@@ -23,6 +27,8 @@ typedef struct {
     bool fail;
 } httpd_req_t;
 typedef struct {
+    char h2_debug[49]; unsigned control_stage;
+    uint32_t map_h2_error, map_h2_last_stream;
     unsigned peer_generation,state, vpn_ip;
     void *wg_netif;
     bool key_expired, stop_incomplete;
@@ -149,6 +155,7 @@ static void setup(void) {
     members->client = calloc(1, sizeof(microlink_t));
     microlink_t *c = members->client;
     c->state = 4;
+    c->map_h2_error=1;c->map_h2_last_stream=7;
     c->wg_netif = c;
     c->vpn_ip = 0x64010203;
     strcpy(c->self_dns_name, "dongle.ts.net");
@@ -181,6 +188,11 @@ int main(void) {
                                "net_io")
                ->valueint == 101);
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(m, "peers")) == 1);
+    cJSON *diagnostics=cJSON_GetObjectItem(m,"map_diagnostics");
+    assert(cJSON_GetObjectItem(diagnostics,"h2_error")->valueint==1);
+    assert(cJSON_GetObjectItem(diagnostics,"h2_last_stream")->valueint==7);
+    assert(cJSON_GetObjectItem(root,"sockets_open")->valueint==10);
+    assert(cJSON_GetObjectItem(root,"socket_limit")->valueint==20);
     cJSON_Delete(root);
     setup();
     r = (httpd_req_t){.fail = true};

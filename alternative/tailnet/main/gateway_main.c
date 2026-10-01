@@ -8,6 +8,8 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "gateway.h"
+#include "socket_budget.h"
+#include "esp_system.h"
 #include "lwip/inet.h"
 #include "lwip/tcpip.h"
 #include "nvs_flash.h"
@@ -33,52 +35,81 @@ static uint32_t next_id = 1;
 static nvs_handle_t store;
 static nvs_handle_t diag_store;
 static SemaphoreHandle_t diag_lock;
-enum { DIAG_RING_MAGIC = 0x54444731, DIAG_RING_COUNT = 8 };
+enum { DIAG_RING_MAGIC = 0x54444732, DIAG_RING_COUNT = 8 };
 typedef struct {
     uint32_t uptime_ms, member_id, event, detail, state, map_attempts;
     uint32_t map_bytes, map_error, h2_error, h2_stream, heap_free, heap_largest;
+    char reason[64], h2_debug[49];
+    uint32_t stage, noise_error, noise_frame_bytes, reset_reason, wifi;
+    uint32_t sockets_open, sockets_peak, socket_failures, socket_errno, socket_operation;
 } gateway_diag_record_t;
 typedef struct {
     uint32_t magic;
     uint8_t count, next;
     gateway_diag_record_t entries[DIAG_RING_COUNT];
 } gateway_diag_ring_t;
-void gateway_diag_record(const microlink_t *ml, uint32_t event,
-                         uint32_t detail) {
-    if (!ml || !diag_lock || xSemaphoreTake(diag_lock, 0) != pdTRUE) return;
-    gateway_diag_ring_t ring = {.magic = DIAG_RING_MAGIC};
-    size_t length = sizeof(ring);
-    if (nvs_get_blob(diag_store, "events", &ring, &length) != ESP_OK ||
-        length != sizeof(ring) || ring.magic != DIAG_RING_MAGIC ||
-        ring.count > DIAG_RING_COUNT || ring.next >= DIAG_RING_COUNT) {
-        memset(&ring, 0, sizeof(ring));
-        ring.magic = DIAG_RING_MAGIC;
+/* Import the previous small journal on firmware update without erasing NVS. */
+static void gateway_diag_load(gateway_diag_ring_t *ring) {
+    memset(ring, 0, sizeof(*ring)); ring->magic = DIAG_RING_MAGIC;
+    size_t length = sizeof(*ring);
+    if (nvs_get_blob(diag_store, "events2", ring, &length) == ESP_OK &&
+        length == sizeof(*ring) && ring->magic == DIAG_RING_MAGIC &&
+        ring->count <= DIAG_RING_COUNT && ring->next < DIAG_RING_COUNT) return;
+    memset(ring, 0, sizeof(*ring)); ring->magic = DIAG_RING_MAGIC;
+    struct { uint32_t magic; uint8_t count, next; uint32_t entries[8][12]; } old;
+    length = sizeof(old);
+    if (nvs_get_blob(diag_store, "events", &old, &length) == ESP_OK &&
+        length == sizeof(old) && old.magic == 0x54444731 && old.count <= 8 && old.next < 8) {
+        ring->count = old.count; ring->next = old.next;
+        for (unsigned i = 0; i < 8; i++) memcpy(&ring->entries[i], old.entries[i], sizeof(old.entries[i]));
     }
+}
+static void gateway_diag_write(const microlink_t *ml, uint32_t member_id,
+                               uint32_t event, uint32_t detail) {
+    if (!diag_lock || xSemaphoreTake(diag_lock, pdMS_TO_TICKS(20)) != pdTRUE) return;
+    gateway_diag_ring_t ring;
+    gateway_diag_load(&ring);
     uint32_t uptime = (uint32_t)(esp_timer_get_time() / 1000);
-    if (ring.count) {
-        unsigned last = (ring.next + DIAG_RING_COUNT - 1) % DIAG_RING_COUNT;
-        gateway_diag_record_t *prev = &ring.entries[last];
-        if (prev->member_id == ml->config.diagnostic_id &&
-            prev->event == event && prev->detail == detail &&
-            (uint32_t)(uptime - prev->uptime_ms) < 30000) {
-            xSemaphoreGive(diag_lock);
-            return;
+    for (unsigned i = 0; event != GATEWAY_DIAG_BOOT && event != GATEWAY_DIAG_UPSTREAM && i < ring.count; i++) {
+        gateway_diag_record_t *prev = &ring.entries[i];
+        if (prev->member_id == member_id && prev->event == event &&
+            prev->detail == detail && (uint32_t)(uptime - prev->uptime_ms) < 30000) {
+            xSemaphoreGive(diag_lock); return;
         }
     }
+    gateway_socket_stats sockets = gateway_sockets_snapshot();
     gateway_diag_record_t *entry = &ring.entries[ring.next];
     *entry = (gateway_diag_record_t){
-        .uptime_ms = uptime, .member_id = ml->config.diagnostic_id,
-        .event = event, .detail = detail, .state = ml->state,
-        .map_attempts = ml->map_attempts, .map_bytes = ml->map_bytes,
-        .map_error = ml->map_error, .h2_error = ml->map_h2_error,
-        .h2_stream = ml->map_h2_last_stream,
+        .uptime_ms = uptime, .member_id = member_id, .event = event, .detail = detail,
+        .state = ml ? ml->state : 0, .map_attempts = ml ? ml->map_attempts : 0,
+        .map_bytes = ml ? ml->map_bytes : 0, .map_error = ml ? ml->map_error : 0,
+        .h2_error = ml ? ml->map_h2_error : 0, .h2_stream = ml ? ml->map_h2_last_stream : 0,
+        .stage = ml ? ml->control_stage : 0, .noise_error = ml ? ml->noise_error : 0,
+        .noise_frame_bytes = ml ? ml->noise_frame_bytes : 0,
         .heap_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
-        .heap_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)};
+        .heap_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        .reset_reason = esp_reset_reason(), .wifi = online,
+        .sockets_open = sockets.open, .sockets_peak = sockets.peak,
+        .socket_failures = sockets.failures, .socket_errno = sockets.last_errno,
+        .socket_operation = sockets.last_operation};
+    if (ml) {
+        strlcpy(entry->reason, ml->transport_error, sizeof(entry->reason));
+        for (unsigned i=0; entry->reason[i]; i++)
+            if (entry->reason[i] == '"' || entry->reason[i] == '\\' || (unsigned char)entry->reason[i] < 32)
+                entry->reason[i] = ' ';
+        strlcpy(entry->h2_debug, ml->h2_debug, sizeof(entry->h2_debug));
+    }
     ring.next = (ring.next + 1) % DIAG_RING_COUNT;
     if (ring.count < DIAG_RING_COUNT) ring.count++;
-    if (nvs_set_blob(diag_store, "events", &ring, sizeof(ring)) == ESP_OK)
+    if (nvs_set_blob(diag_store, "events2", &ring, sizeof(ring)) == ESP_OK)
         nvs_commit(diag_store);
     xSemaphoreGive(diag_lock);
+}
+void gateway_diag_record(const microlink_t *ml, uint32_t event, uint32_t detail) {
+    if (ml) gateway_diag_write(ml, ml->config.diagnostic_id, event, detail);
+}
+void gateway_diag_membership(uint32_t member_id, uint32_t event, uint32_t detail) {
+    gateway_diag_write(NULL, member_id, event, detail);
 }
 static wifi_config_t wifi_config;
 extern const char setup_html_start[] asm("_binary_setup_html_start");
@@ -191,6 +222,7 @@ static void start_member(membership_t *m) {
         strlcpy(m->error,
                 "Routing storage is damaged; tailnet access is disabled",
                 sizeof(m->error));
+        gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 1);
         return;
     }
     /* Reserve for parsed JSON, networking and recovery HTTP. Shared receive
@@ -199,8 +231,19 @@ static void start_member(membership_t *m) {
         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < 24000) {
         strlcpy(m->error, "Not enough free memory to activate this membership",
                 sizeof(m->error));
+        gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 2);
         return;
     }
+    unsigned active = 0;
+    for (membership_t *other = members; other; other = other->next)
+        if (other->client) active++;
+    gateway_socket_stats sockets = gateway_sockets_snapshot();
+    if (!gateway_socket_admit(CONFIG_LWIP_MAX_SOCKETS, active, sockets.open)) {
+        strlcpy(m->error, "Socket capacity reserved for USB setup and DNS", sizeof(m->error));
+        gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 3);
+        return;
+    }
+    gateway_diag_membership(m->id, GATEWAY_DIAG_START_ATTEMPT, 0);
     microlink_config_t config = {.identity_namespace = m->ns,
                                  .auth_key = m->key,
                                  .device_name = m->hostname,
@@ -214,11 +257,13 @@ static void start_member(membership_t *m) {
     if (!m->client) {
         strlcpy(m->error, "Could not allocate or save this identity",
                 sizeof(m->error));
+        gateway_diag_membership(m->id, GATEWAY_DIAG_START_FAILED, 1);
         return;
     }
     esp_err_t err = microlink_start(m->client);
     m->start_heap_after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     if (err != ESP_OK) {
+        gateway_diag_record(m->client, GATEWAY_DIAG_START_FAILED, err);
         if (!stop_member(m)) {
             m->enabled = false;
             save_members();
@@ -231,7 +276,18 @@ static void start_member(membership_t *m) {
     m->error[0] = 0;
 }
 static void manager(void *arg) {
+    unsigned last_socket_failures = 0;
+    bool last_online = !online;
     for (;;) {
+        if (last_online != online) {
+            gateway_diag_membership(0, GATEWAY_DIAG_UPSTREAM, online);
+            last_online = online;
+        }
+        gateway_socket_stats sockets = gateway_sockets_snapshot();
+        if (sockets.failures != last_socket_failures) {
+            gateway_diag_membership(0, GATEWAY_DIAG_SOCKET_FAILURE, sockets.last_errno);
+            last_socket_failures = sockets.failures;
+        }
         if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
             for (membership_t *m = members; m; m = m->next) {
                 if(m->client && m->client->stop_incomplete && !stop_member(m)) continue;
@@ -340,37 +396,37 @@ static esp_err_t diagnostics(httpd_req_t *req) {
     if (!local_request(req))
         return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "USB access required");
     gateway_diag_ring_t ring = {.magic = DIAG_RING_MAGIC};
-    size_t length = sizeof(ring);
     bool available = false;
     if (diag_lock && xSemaphoreTake(diag_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
-        if (nvs_get_blob(diag_store, "events", &ring, &length) != ESP_OK ||
-            length != sizeof(ring) || ring.magic != DIAG_RING_MAGIC ||
-            ring.count > DIAG_RING_COUNT || ring.next >= DIAG_RING_COUNT)
-            ring = (gateway_diag_ring_t){.magic = DIAG_RING_MAGIC};
-        available = true;
+        gateway_diag_load(&ring); available = true;
         xSemaphoreGive(diag_lock);
     }
     httpd_resp_set_type(req, "application/json");
     char prefix[64];
     int prefix_len = snprintf(prefix, sizeof(prefix),
-                              "{\"schema\":1,\"available\":%s,\"events\":[",
+                              "{\"schema\":2,\"available\":%s,\"events\":[",
                               available ? "true" : "false");
     if (prefix_len < 0 || prefix_len >= sizeof(prefix) ||
         httpd_resp_send_chunk(req, prefix, prefix_len) != ESP_OK)
         return ESP_FAIL;
-    char row[256];
+    char row[1024];
     unsigned first = (ring.next + DIAG_RING_COUNT - ring.count) % DIAG_RING_COUNT;
     for (unsigned i = 0; i < ring.count; i++) {
         gateway_diag_record_t *e = &ring.entries[(first + i) % DIAG_RING_COUNT];
         int n = snprintf(row, sizeof(row),
-            "%s{\"uptime_ms\":%lu,\"member_id\":%lu,\"event\":%lu,\"detail\":%lu,\"state\":%lu,\"map_attempts\":%lu,\"map_bytes\":%lu,\"map_error\":%lu,\"h2_error\":%lu,\"h2_stream\":%lu,\"free_memory\":%lu,\"largest_free_block\":%lu}",
+            "%s{\"uptime_ms\":%lu,\"member_id\":%lu,\"event\":%lu,\"detail\":%lu,\"state\":%lu,\"map_attempts\":%lu,\"map_bytes\":%lu,\"map_error\":%lu,\"h2_error\":%lu,\"h2_stream\":%lu,\"free_memory\":%lu,\"largest_free_block\":%lu,\"control_stage\":%lu,\"noise_error\":%lu,\"noise_frame_bytes\":%lu,\"reset_reason\":%lu,\"wifi\":%lu,\"sockets_open\":%lu,\"sockets_peak\":%lu,\"socket_failures\":%lu,\"socket_errno\":%lu,\"socket_operation\":%lu,\"reason\":\"%s\",\"h2_debug\":\"%s\"}",
             i ? "," : "", (unsigned long)e->uptime_ms,
             (unsigned long)e->member_id, (unsigned long)e->event,
             (unsigned long)e->detail, (unsigned long)e->state,
             (unsigned long)e->map_attempts, (unsigned long)e->map_bytes,
             (unsigned long)e->map_error, (unsigned long)e->h2_error,
             (unsigned long)e->h2_stream, (unsigned long)e->heap_free,
-            (unsigned long)e->heap_largest);
+            (unsigned long)e->heap_largest, (unsigned long)e->stage,
+            (unsigned long)e->noise_error, (unsigned long)e->noise_frame_bytes,
+            (unsigned long)e->reset_reason, (unsigned long)e->wifi,
+            (unsigned long)e->sockets_open, (unsigned long)e->sockets_peak,
+            (unsigned long)e->socket_failures, (unsigned long)e->socket_errno,
+            (unsigned long)e->socket_operation, e->reason, e->h2_debug);
         if (n < 0 || n >= sizeof(row) || httpd_resp_send_chunk(req, row, n) != ESP_OK)
             return ESP_FAIL;
     }
@@ -396,7 +452,8 @@ typedef struct {
     uint32_t id, state, vpn_ip;
     size_t start_heap_before, start_heap_after;
     bool enabled, has_client, routing_ready;
-    char label[24], error[64], dns[128], login[384], protocol_error[64];
+    char label[24], error[64], dns[128], login[384], protocol_error[64], h2_debug[49];
+    unsigned control_stage;
     uint32_t diagnostics[16], stack_free[5];
     unsigned peers;
     struct {
@@ -466,6 +523,7 @@ static esp_err_t status(httpd_req_t *req) {
         strlcpy(v->protocol_error,
                 c->last_error[0] ? c->last_error : c->transport_error,
                 sizeof(v->protocol_error));
+        strlcpy(v->h2_debug,c->h2_debug,sizeof(v->h2_debug));v->control_stage=c->control_stage;
         v->diagnostics[0] = c->map_attempts;
         v->diagnostics[1] = c->map_failures;
         v->diagnostics[2] = c->map_error;
@@ -527,9 +585,19 @@ static esp_err_t status(httpd_req_t *req) {
         jw_bool(w, value);                                                     \
         jw_char(w, ',');                                                       \
     } while (0)
-    STR("firmware", "0.2.7");
+    STR("firmware", "0.2.8");
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
+    gateway_socket_stats sockets = gateway_sockets_snapshot();
+    NUM("socket_limit", CONFIG_LWIP_MAX_SOCKETS);
+    NUM("socket_recovery_reserve", GATEWAY_SOCKET_RECOVERY);
+    NUM("sockets_open", sockets.open);
+    NUM("sockets_peak", sockets.peak);
+    NUM("socket_failures", sockets.failures);
+    NUM("socket_last_errno", sockets.last_errno);
+    NUM("socket_last_operation", sockets.last_operation);
+    NUM("socket_last_at_ms", sockets.last_at_ms);
+    NUM("reset_reason", esp_reset_reason());
     BOOL("wifi", online);
     BOOL("route_storage_ok", route_storage_ok);
     NUM("free_memory", esp_get_free_heap_size());
@@ -570,7 +638,7 @@ static esp_err_t status(httpd_req_t *req) {
             if (v->dns[0])
                 STR("tailnet_dns_name", v->dns);
             jw_raw(w, "\"map_diagnostics\":{");
-            for (unsigned d = 0; d < 14; d++) {
+            for (unsigned d = 0; d < sizeof(diagnostic_names) / sizeof(diagnostic_names[0]); d++) {
                 if (d)
                     jw_char(w, ',');
                 jw_key(w, diagnostic_names[d]);
@@ -586,6 +654,8 @@ static esp_err_t status(httpd_req_t *req) {
             jw_raw(w, "},");
             STR("login_url", v->login);
             STR("protocol_error", v->protocol_error);
+            STR("h2_debug", v->h2_debug);
+            NUM("control_stage", v->control_stage);
             jw_raw(w, "\"peers\":[");
             for (unsigned j = 0; j < v->peers && !w->failed; j++) {
                 if (j)
@@ -773,6 +843,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(nvs_open("tn_settings", NVS_READWRITE, &store));
     if (nvs_open("tn_diag", NVS_READWRITE, &diag_store) == ESP_OK)
         diag_lock = xSemaphoreCreateMutex();
+    gateway_diag_membership(0, GATEWAY_DIAG_BOOT, esp_reset_reason());
     members_lock = xSemaphoreCreateMutex();
     load_members();
     extern bool gateway_routes_init(void);
@@ -858,6 +929,9 @@ void app_main(void) {
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     http.stack_size = 6144;
     http.max_uri_handlers = 5;
+    http.max_open_sockets = 2;
+    http.lru_purge_enable = true;
+    http.recv_wait_timeout = http.send_wait_timeout = 2;
     httpd_handle_t server;
     ESP_ERROR_CHECK(httpd_start(&server, &http));
     httpd_uri_t page = {.uri = "/", .method = HTTP_GET, .handler = home},

@@ -568,7 +568,6 @@ void microlink_destroy(microlink_t *ml) {
 
     extern void ml_gateway_release_netif(microlink_t *);
     ml_gateway_release_netif(ml);
-    if (ml->server_extra_data) free(ml->server_extra_data);
 
     /* Deinitialize peer NVS */
 

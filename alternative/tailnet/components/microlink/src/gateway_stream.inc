@@ -36,8 +36,14 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
     bool applied = false;
     uint64_t deadline = ml_get_time_ms() + (initial ? 15000 : 4000);
     do {
-        int n =
-            noise_recv_inplace(ml, noise, gateway_plain, sizeof(gateway_plain));
+        int n;
+        if (ml->h2_acc_len) {
+            if (ml->h2_acc_len > sizeof(gateway_plain)) {
+                result = gateway_map_fail(ml, 3, "Pending HTTP/2 bytes exceed capacity"); break;
+            }
+            n = ml->h2_acc_len; memcpy(gateway_plain, ml->h2_acc, n);
+            free(ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0;
+        } else n = noise_recv_inplace(ml, noise, gateway_plain, sizeof(gateway_plain));
         if (n < 0) {
             if ((errno == EAGAIN || errno == EWOULDBLOCK) && !used && !initial)
                 break;
@@ -241,7 +247,7 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                     gateway_projection.home = ml->derp_region_default;
 #endif
                 }
-            } else if ((ml->stream_type == 6 || ml->stream_type == 7 || ml->stream_type == 3) && ml->stream_special_used < 8) {
+            } else if ((ml->stream_type == 6 || ml->stream_type == 7 || ml->stream_type == 3) && ml->stream_special_used < sizeof(ml->stream_special)) {
                 ml->stream_special[ml->stream_special_used++] = b;
             }
             if (--ml->stream_remaining == 0) {
@@ -288,15 +294,9 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                     char reason[64];
                     size_t e = ml->stream_type == 7 ? 4 : 0;
                     if (ml->stream_special_used >= e + 4) {
-                        const uint8_t *p = ml->stream_special + e;
-                        uint32_t code = ((uint32_t)p[0] << 24) |
-                            ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
-                        ml->map_h2_error = code;
-                        ml->map_h2_last_stream = ml->stream_type == 7 ?
-                            (((uint32_t)ml->stream_special[0] << 24) |
-                             ((uint32_t)ml->stream_special[1] << 16) |
-                             ((uint32_t)ml->stream_special[2] << 8) |
-                             ml->stream_special[3]) : ml->stream_id;
+                        gateway_h2_close(ml, ml->stream_type, ml->stream_id,
+                                          ml->stream_special, ml->stream_special_used);
+                        uint32_t code = ml->map_h2_error;
                         snprintf(reason, sizeof(reason), "HTTP/2 %s error=%lu",
                             ml->stream_type == 7 ? "GOAWAY" : "RST_STREAM",
                             (unsigned long)code);

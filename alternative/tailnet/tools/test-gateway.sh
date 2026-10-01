@@ -5,7 +5,7 @@ mkdir -p build-host
 cc -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
 build-host/test_router
 : "${IDF_PATH:?Source ESP-IDF for the same cJSON used by the firmware}"
-cc -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_stream
+cc -std=c11 -fsanitize=address,undefined -g -pthread -I "$IDF_PATH/components/json/cJSON" tests/test_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_stream
 cc -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_projection.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_projection
 build-host/test_projection
 build-host/test_stream
@@ -77,8 +77,16 @@ build-host/test_control_send
 
 python - <<'PYCODE'
 from pathlib import Path
-s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static void process_proactive_frames(');b=s.index('/* ============================================================================\n * State: REGISTER',a)
-Path('build-host/h2_handshake.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_coord.c').read_text()
+a=s.index('static int coord_recv(');b=s.index('/* ============================================================================\n * Noise-encrypted',a)
+c=s.index('static int noise_recv_buffer(');d=s.index('/* ============================================================================\n * State: DNS_RESOLVE',c)
+e=s.index('static int do_h2_preface(');f=s.index('/* ============================================================================\n * State: REGISTER',e)
+Path('build-host/receive_core.inc').write_text(s[a:b]+s[c:d])
+Path('build-host/h2_preface.inc').write_text(s[e:f])
+h=Path('components/microlink/src/ml_h2.c').read_text();Path('build-host/h2_core.inc').write_text(h[h.index('static const char *TAG'):])
 PYCODE
-cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_h2_handshake.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_h2_handshake
+cc -std=c11 -fsanitize=address,undefined -g -pthread -I build-host -I "$IDF_PATH/components/json/cJSON" -I "$mbed/include" -I "$mbed/library" tests/test_h2_handshake.c "$IDF_PATH/components/json/cJSON/cJSON.c" "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_h2_handshake
 build-host/test_h2_handshake
+python tools/test-sockets.py
+python tools/test-control-interop.py
+python tools/test-journal.py

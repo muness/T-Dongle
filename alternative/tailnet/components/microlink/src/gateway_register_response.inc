@@ -44,14 +44,8 @@ static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
                 const uint8_t *payload = h2_resp + scan + 9;
                 size_t e = ft == 7 ? 4 : 0;
                 if (fl >= e + 4) {
-                    uint32_t code = ((uint32_t)payload[e] << 24) |
-                        ((uint32_t)payload[e+1] << 16) |
-                        ((uint32_t)payload[e+2] << 8) | payload[e+3];
-                    ml->map_h2_error = code;
-                    ml->map_h2_last_stream = ft == 7 ?
-                        (((uint32_t)payload[0] << 24) |
-                         ((uint32_t)payload[1] << 16) |
-                         ((uint32_t)payload[2] << 8) | payload[3]) : fs;
+                    gateway_h2_close(ml, ft, fs, payload, fl);
+                    uint32_t code = ml->map_h2_error;
                     snprintf(ml->transport_error, sizeof(ml->transport_error),
                         "HTTP/2 %s error=%lu during registration",
                         ft == 7 ? "GOAWAY" : "RST_STREAM", (unsigned long)code);
@@ -86,6 +80,18 @@ static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
 
     if (!got_register_end)
         return -1;
+    /* Preserve frames coalesced after the response END_STREAM before compacting
+     * response DATA in place. They belong to the same encrypted session. */
+    size_t end = scan + 9 + ((size_t)h2_resp[scan] << 16) +
+                 ((size_t)h2_resp[scan + 1] << 8) + h2_resp[scan + 2];
+    size_t pending = h2_resp_len - end;
+    if (pending) {
+        if (pending > 4096) { errno = EMSGSIZE; return -1; }
+        ml->h2_acc = malloc(pending);
+        if (!ml->h2_acc) { errno = ENOMEM; return -1; }
+        memcpy(ml->h2_acc, h2_resp + end, pending); ml->h2_acc_len = pending;
+    }
+    h2_resp_len = end;
     /* Parse H2 frames from accumulated buffer */
     int fpos = 0;
     while (fpos + 9 <= (int)h2_resp_len) {

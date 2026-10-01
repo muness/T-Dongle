@@ -30,6 +30,9 @@ typedef struct {
 } microlink_route_t;
 #include "semantic_types.inc"
 typedef struct {
+    uint8_t *h2_acc; size_t h2_acc_len;
+    char h2_debug[49];
+    uint32_t map_h2_error, map_h2_last_stream;
     volatile uint32_t peer_generation;
     volatile bool map_batch_pending;
     unsigned vpn_ip, map_generation;
@@ -41,7 +44,7 @@ typedef struct {
     struct {
         bool connected;
     } derp;
-    uint8_t stream_header[9], stream_special[8];
+    uint8_t stream_header[9], stream_special[56];
     size_t stream_header_used, stream_special_used;
     uint32_t stream_remaining, stream_id;
     uint8_t stream_type, stream_flags, stream_padding;
@@ -127,12 +130,12 @@ static union {
 #include "../components/microlink/src/gateway_project.inc"
 #include "../components/microlink/src/gateway_project_stream.inc"
 #include "../components/microlink/src/gateway_stage.inc"
+static const char *feed_failure;
 static bool feed(microlink_t *ml, const char *json) {
     gs_parser p;
     gateway_stage_init(&p, ml);
     for (size_t i = 0; i < strlen(json); i++)
-        if (!gs_byte(&p, json[i]))
-            return false;
+        if (!gs_byte(&p, json[i])) {feed_failure=((gateway_stage*)p.context)->failure;return false;}
     assert(!allocations);
     if (!gs_finish(&p))
         return false;
@@ -181,6 +184,7 @@ static void apply_long_poll_map(microlink_t *m, cJSON *map) {
     assert(!"semantic branch must not construct a full map DOM");
 }
 #define GATEWAY_SEMANTIC_MAP 1
+#include "../components/microlink/src/gateway_h2_close.inc"
 #include "../components/microlink/src/gateway_stream.inc"
 static int xQueueReceive(int q, void *out, int ticks) {
     if (!batch)
@@ -299,6 +303,7 @@ int main(void) {
         strcat(many, i ? ",{}" : "{}");
     strcat(many, "]}");
     assert(!feed(&m, many) && !m.map_generation && !allocations);
+    assert(!strcmp(feed_failure,"Map peer update section exceeds configured capacity"));
     reset();
     m = (microlink_t){0};
     assert(feed(&m, "{\"Peers\":[{\"Key\":\"nodekey:" KEY "\"}]}"));
