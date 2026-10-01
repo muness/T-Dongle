@@ -45,3 +45,7 @@ card=render({id:1,label:'work',enabled:true,state:4,routing_ready:true,peers:[pe
 assert(texts(card).includes('Connected · USB routing ready'));
 assert(!texts(card).some(t=>t.includes('saved or earlier map')));
 console.log('Device presentation checks passed: current routing status, retained known peers, visible IP, compact row.');
+card=render({id:1,label:'work',enabled:true,state:4,routing_ready:true,tailnet_ip:'100.90.212.29',tailnet_dns_name:'tdongle-tailnet-1.tail434280.ts.net',peers:[]});
+assert(texts(card).includes('Dongle on this tailnet'));assert(texts(card).includes('100.90.212.29'));assert(texts(card).includes('tdongle-tailnet-1.tail434280.ts.net'));
+card=render({id:1,label:'work',enabled:true,state:5,routing_ready:false,tailnet_ip:'100.90.212.29',peers:[]});assert(texts(card).includes('Assigned address; connection is not ready.'));
+console.log('Dongle identity checks passed: reported IP/DNS and explicit disconnected assignment.');

@@ -1652,6 +1652,8 @@ static int do_register(microlink_t *ml, ml_noise_state_t *noise) {
     /* Extract our VPN IP from Node.Addresses */
     cJSON *node = cJSON_GetObjectItem(resp_json, "Node");
     if (node) {
+        cJSON *name=cJSON_GetObjectItem(node,"Name");
+        if(cJSON_IsString(name)&&name->valuestring&&strlen(name->valuestring)<sizeof(ml->self_dns_name))strlcpy(ml->self_dns_name,name->valuestring,sizeof(ml->self_dns_name));
         cJSON *addresses = cJSON_GetObjectItem(node, "Addresses");
         if (addresses && cJSON_GetArraySize(addresses) > 0) {
             const char *addr = cJSON_GetArrayItem(addresses, 0)->valuestring;
@@ -2559,6 +2561,8 @@ static void apply_long_poll_map(microlink_t *ml, cJSON *update_json) {
     /* Update VPN IP if present */
     cJSON *node = cJSON_GetObjectItem(update_json, "Node");
     if (node) {
+        cJSON *name=cJSON_GetObjectItem(node,"Name");
+        if(cJSON_IsString(name)&&name->valuestring&&strlen(name->valuestring)<sizeof(ml->self_dns_name))strlcpy(ml->self_dns_name,name->valuestring,sizeof(ml->self_dns_name));
         cJSON *addresses = cJSON_GetObjectItem(node, "Addresses");
         if (addresses && cJSON_GetArraySize(addresses) > 0) {
             const char *addr = cJSON_GetArrayItem(addresses, 0)->valuestring;

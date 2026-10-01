@@ -288,7 +288,7 @@ static esp_err_t status(httpd_req_t *req) {
     if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(1000)) != pdTRUE)
         return failure(req, "Memberships are busy; retry shortly");
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root,"firmware","0.2.2");
+    cJSON_AddStringToObject(root,"firmware","0.2.3");
     cJSON_AddBoolToObject(root, "wifi", online);
     cJSON_AddBoolToObject(root, "route_storage_ok", route_storage_ok);
     cJSON_AddNumberToObject(root, "free_memory", esp_get_free_heap_size());
@@ -304,6 +304,8 @@ static esp_err_t status(httpd_req_t *req) {
         cJSON_AddNumberToObject(j, "state", m->client ? m->client->state : 0);
         cJSON_AddBoolToObject(j, "routing_ready", m->enabled && m->client && m->client->wg_netif && m->client->state == ML_STATE_CONNECTED && !m->client->key_expired && !m->client->last_error[0]);
         if (m->client) {
+            if(m->client->vpn_ip){char ip[16];microlink_ip_to_str(m->client->vpn_ip,ip);cJSON_AddStringToObject(j,"tailnet_ip",ip);}
+            if(m->client->self_dns_name[0])cJSON_AddStringToObject(j,"tailnet_dns_name",m->client->self_dns_name);
             cJSON *diag=cJSON_AddObjectToObject(j,"map_diagnostics");
 #define MD(field) cJSON_AddNumberToObject(diag,#field,m->client->field)
             MD(map_attempts);MD(map_failures);MD(map_error);MD(map_bytes);MD(map_declared_bytes);MD(map_projected_bytes);
