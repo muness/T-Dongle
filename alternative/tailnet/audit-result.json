@@ -1,0 +1,54 @@
+{
+  "measurement": "Compile-time lower bound for adversarial retained-state case: each live stream has fragmented HTTP/2 and buffered JSON; not an observed runtime peak.",
+  "chip_sram_bytes": 524288,
+  "excluded": [
+    "Wi-Fi",
+    "USB",
+    "TLS allocations",
+    "WireGuard state",
+    "task/queue control blocks",
+    "packet queues",
+    "JSON parse tree",
+    "gateway",
+    "map-exchange transients",
+    "allocator overhead"
+  ],
+  "abi_metrics": {
+    "context_bytes": 23936,
+    "peer_bytes": 456,
+    "task_stack_bytes": 47104,
+    "map_exchange_h2_bytes": 65536,
+    "map_exchange_json_bytes": 65536,
+    "queue_item_bytes": 6544,
+    "peer_update_bytes": 288
+  },
+  "per_member_lower_bound_bytes": 208656,
+  "memberships": [
+    {
+      "count": 0,
+      "lower_bound_bytes": 0,
+      "exceeds_entire_chip_sram": false
+    },
+    {
+      "count": 1,
+      "lower_bound_bytes": 208656,
+      "exceeds_entire_chip_sram": false
+    },
+    {
+      "count": 2,
+      "lower_bound_bytes": 417312,
+      "exceeds_entire_chip_sram": false
+    },
+    {
+      "count": 3,
+      "lower_bound_bytes": 625968,
+      "exceeds_entire_chip_sram": true
+    },
+    {
+      "count": 4,
+      "lower_bound_bytes": 834624,
+      "exceeds_entire_chip_sram": true
+    }
+  ],
+  "hardware_qualified": false
+}
