@@ -23,6 +23,8 @@ static int xSemaphoreCreateMutexStatic(int *s) { return 1; }
 static int xSemaphoreTake(int s, int n) { return 1; }
 static void xSemaphoreGive(int s) {}
 typedef struct {
+    uint8_t *h2_acc;
+    size_t h2_acc_len;
     uint8_t stream_header[9], stream_special[8];
     size_t stream_header_used, stream_special_used;
     uint32_t stream_remaining, stream_id;
@@ -43,7 +45,7 @@ typedef struct {
 typedef int ml_noise_state_t;
 static uint8_t input[100000];
 static size_t input_len, input_pos, chunk;
-static unsigned replies;
+static unsigned replies, settings_acks;
 static uint64_t now;
 static uint64_t ml_get_time_ms(void) { return ++now; }
 static int noise_recv_inplace(microlink_t *ml, int *noise, uint8_t *b,
@@ -63,6 +65,7 @@ static int noise_recv_inplace(microlink_t *ml, int *noise, uint8_t *b,
 }
 static int noise_send(microlink_t *ml, int *noise, uint8_t *b, size_t n) {
     replies++;
+    if (n == 9 && b[3] == 4 && b[4] == 1) settings_acks++;
     return n;
 }
 static int ml_h2_build_window_update(uint8_t *b, size_t n, uint32_t stream,
@@ -94,7 +97,7 @@ static void frame(uint8_t type, uint8_t flags, uint32_t stream,
     }
 }
 static void reset(void) {
-    input_len = input_pos = now = replies = 0;
+    input_len = input_pos = now = replies = settings_acks = 0;
     chunk = 1024;
 }
 int main(void) {
@@ -210,11 +213,37 @@ int main(void) {
     chunk = 7;
     assert(gateway_read_registration(&m, &noise) == strlen(registration));
     assert(!strcmp((char *)gateway_json, registration));
-    assert(replies >= 3);
+    assert(replies == 3 && settings_acks == 1);
+    reset();
+    memset(&m, 0, sizeof(m));
+    frame(4, 0, 0, settings, sizeof(settings));
+    m.h2_acc_len = input_len;
+    m.h2_acc = malloc(input_len);
+    memcpy(m.h2_acc, input, input_len);
+    input_len = 0;
+    frame(4, 0, 0, settings, sizeof(settings));
+    frame(4, 1, 0, NULL, 0);
+    frame(0, 1, 1, (const uint8_t *)registration, strlen(registration));
+    chunk = 1;
+    assert(gateway_read_registration(&m, &noise) == strlen(registration));
+    assert(settings_acks == 2 && !m.h2_acc && !m.h2_acc_len);
     reset();
     memset(&m, 0, sizeof(m));
     frame(0, 0, 1, (const uint8_t *)registration, strlen(registration));
     assert(gateway_read_registration(&m, &noise) < 0);
+    reset();
+    memset(&m, 0, sizeof(m));
+    uint8_t goaway[8] = {0,0,0,1,0,0,0,1};
+    frame(7, 0, 0, goaway, sizeof(goaway));
+    chunk = 1;
+    assert(gateway_read_registration(&m, &noise) < 0);
+    assert(strstr(m.transport_error, "GOAWAY error=1"));
+    reset();
+    memset(&m, 0, sizeof(m));
+    frame(7, 0, 0, goaway, sizeof(goaway));
+    chunk = 1;
+    assert(gateway_read_map(&m, &noise, 3, true) < 0);
+    assert(strstr(m.transport_error, "GOAWAY error=1"));
     reset();
     memset(&m, 0, sizeof(m));
     char big_registration[12000];

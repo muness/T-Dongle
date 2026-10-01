@@ -74,3 +74,11 @@ Path('build-host/control_send.inc').write_text(s[a:b]+s[c:d])
 PYCODE
 cc -std=c11 -fsanitize=address,undefined -g -pthread -I build-host -I "$mbed/include" -I "$mbed/library" tests/test_control_send.c "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_control_send
 build-host/test_control_send
+
+python - <<'PYCODE'
+from pathlib import Path
+s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static void process_proactive_frames(');b=s.index('/* ============================================================================\n * State: REGISTER',a)
+Path('build-host/h2_handshake.inc').write_text(s[a:b])
+PYCODE
+cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_h2_handshake.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_h2_handshake
+build-host/test_h2_handshake

@@ -1,7 +1,12 @@
 /* Caller holds gateway_lock. No transient receive allocation. */
 static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
     uint8_t *h2_resp = gateway_json;
-    size_t h2_resp_len = 0;
+    size_t h2_resp_len = ml->h2_acc_len;
+    if (h2_resp_len >= sizeof(gateway_json)) return -1;
+    if (h2_resp_len) memcpy(h2_resp, ml->h2_acc, h2_resp_len);
+    free(ml->h2_acc);
+    ml->h2_acc = NULL;
+    ml->h2_acc_len = 0;
 
     uint8_t *resp_buf = h2_resp;
     size_t resp_total = 0;
@@ -13,21 +18,6 @@ static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
     int scan = 0;
     for (int frame_count = 0; frame_count < 128 && !got_register_end;
          frame_count++) {
-        uint8_t *frame_buf = gateway_plain;
-        int frame_len =
-            noise_recv_inplace(ml, noise, frame_buf, sizeof(gateway_plain));
-        if (frame_len <= 0) {
-
-            break;
-        }
-
-        if (h2_resp_len + frame_len < sizeof(gateway_json)) {
-            memcpy(h2_resp + h2_resp_len, frame_buf, frame_len);
-            h2_resp_len += frame_len;
-        } else {
-            return -1;
-        }
-
         /* Scan accumulated buffer for H2 END_STREAM on stream 1 */
         while (scan + 9 <= (int)h2_resp_len) {
             uint32_t fl = (h2_resp[scan] << 16) | (h2_resp[scan + 1] << 8) |
@@ -50,8 +40,19 @@ static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
                 if (noise_send(ml, noise, ack, sizeof(ack)) < 0)
                     return -1;
             }
-            if (ft == 7 || (ft == 3 && fs == 1))
+            if (ft == 7 || (ft == 3 && fs == 1)) {
+                const uint8_t *payload = h2_resp + scan + 9;
+                size_t e = ft == 7 ? 4 : 0;
+                if (fl >= e + 4) {
+                    uint32_t code = ((uint32_t)payload[e] << 24) |
+                        ((uint32_t)payload[e+1] << 16) |
+                        ((uint32_t)payload[e+2] << 8) | payload[e+3];
+                    snprintf(ml->transport_error, sizeof(ml->transport_error),
+                        "HTTP/2 %s error=%lu during registration",
+                        ft == 7 ? "GOAWAY" : "RST_STREAM", (unsigned long)code);
+                }
                 return -1;
+            }
             /* END_STREAM (0x01) on stream 1 in DATA(0x00) or HEADERS(0x01)
              * frame */
             if (fs == 1 && (ft == 0x00 || ft == 0x01) && (ff & 0x01)) {
@@ -60,6 +61,22 @@ static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
             }
             scan += 9 + fl;
         }
+        if (got_register_end) break;
+        uint8_t *frame_buf = gateway_plain;
+        int frame_len =
+            noise_recv_inplace(ml, noise, frame_buf, sizeof(gateway_plain));
+        if (frame_len <= 0) {
+
+            break;
+        }
+
+        if (h2_resp_len + frame_len < sizeof(gateway_json)) {
+            memcpy(h2_resp + h2_resp_len, frame_buf, frame_len);
+            h2_resp_len += frame_len;
+        } else {
+            return -1;
+        }
+
     }
 
     if (!got_register_end)

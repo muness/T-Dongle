@@ -570,6 +570,8 @@ static void ml_conn_close(microlink_t *ml) {
      * into the next one prepends stale bytes to its FIRST framed message -
      * which is the initial full netmap, the most valuable message on the
      * stream. It would be lost to the length-prefix guard. */
+    free(ml->h2_acc);
+    ml->h2_acc = NULL;
     ml->h2_acc_len = 0;
     ml->lp_acc_len = 0;
 }
@@ -1234,6 +1236,26 @@ static void process_proactive_frames(microlink_t *ml, ml_noise_state_t *noise) {
             }
         }
     }
+    /* EarlyNoise has an exact binary length; preserve subsequent HTTP/2 bytes
+     * for the registration reader, which acknowledges each SETTINGS once. */
+    free(ml->h2_acc);
+    ml->h2_acc = NULL;
+    ml->h2_acc_len = 0;
+    if (combined && combined_len >= 9 &&
+        memcmp(combined, "\xff\xff\xffTS", 5) == 0) {
+        uint32_t json_len = ((uint32_t)combined[5] << 24) |
+                            ((uint32_t)combined[6] << 16) |
+                            ((uint32_t)combined[7] << 8) | combined[8];
+        if (json_len <= combined_len - 9) {
+            size_t tail = combined_len - 9 - json_len;
+            if (tail) {
+                memmove(combined, combined + 9 + json_len, tail);
+                ml->h2_acc = combined;
+                ml->h2_acc_len = tail;
+                combined = NULL;
+            }
+        }
+    }
     if (combined) free(combined);
 
     /* Set rx_nonce to skip all proactive frames */
@@ -1253,7 +1275,7 @@ static int do_h2_preface(microlink_t *ml, ml_noise_state_t *noise) {
     int64_t t_h2_start = esp_timer_get_time();
 
     /* Build H2 preface (24+6=30) + SETTINGS with INITIAL_WINDOW_SIZE (9+6=15)
-     * + SETTINGS_ACK (9) + connection-level WINDOW_UPDATE (13) = 67 bytes */
+     * + connection-level WINDOW_UPDATE (13). ACK only received SETTINGS. */
     uint8_t h2_init[128];
     int pos = 0;
 
@@ -1261,15 +1283,11 @@ static int do_h2_preface(microlink_t *ml, ml_noise_state_t *noise) {
     if (preface_len < 0) return -1;
     pos = preface_len;
 
-    int ack_len = ml_h2_build_settings_ack(h2_init + pos, sizeof(h2_init) - pos);
-    if (ack_len < 0) return -1;
-    pos += ack_len;
-
     /* Connection-level WINDOW_UPDATE (stream 0) to expand the connection window
      * beyond the 65535 default. SETTINGS INITIAL_WINDOW_SIZE only sets per-stream
      * window; the connection-level window starts at 65535 and must be explicitly
      * expanded with WINDOW_UPDATE on stream 0. */
-    uint32_t conn_window_delta = ML_H2_BUFFER_SIZE - 65535;
+    uint32_t conn_window_delta = ML_H2_BUFFER_SIZE > 65535 ? ML_H2_BUFFER_SIZE - 65535 : 0;
     if (conn_window_delta > 0) {
         int wu_len = ml_h2_build_window_update(h2_init + pos, sizeof(h2_init) - pos,
                                                 0, conn_window_delta);
@@ -1433,8 +1451,9 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     /* Read RegisterResponse - accumulate all Noise frames into H2 buffer first,
      * then parse H2 frames (same pattern as MapResponse). */
     uint8_t *resp_buf=gateway_json;
+    ml->transport_error[0] = 0;
     int received=gateway_read_registration(ml,noise);
-    if(received<=0){strlcpy(ml->transport_error,"Registration response incomplete or invalid",sizeof(ml->transport_error));return -1;}
+    if(received<=0){if (!ml->transport_error[0]) strlcpy(ml->transport_error,"Registration response incomplete or invalid",sizeof(ml->transport_error));return -1;}
     size_t resp_total=(size_t)received;
 
     uint8_t *json_data = resp_buf;

@@ -241,7 +241,7 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                     gateway_projection.home = ml->derp_region_default;
 #endif
                 }
-            } else if (ml->stream_type == 6 && ml->stream_special_used < 8) {
+            } else if ((ml->stream_type == 6 || ml->stream_type == 7 || ml->stream_type == 3) && ml->stream_special_used < 8) {
                 ml->stream_special[ml->stream_special_used++] = b;
             }
             if (--ml->stream_remaining == 0) {
@@ -285,8 +285,19 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                     goto done;
                 } else if (ml->stream_type == 7 ||
                            (ml->stream_type == 3 && ml->stream_id == wanted)) {
-                    result = gateway_map_fail(
-                        ml, 10, "Control server closed or reset map stream");
+                    char reason[64];
+                    size_t e = ml->stream_type == 7 ? 4 : 0;
+                    if (ml->stream_special_used >= e + 4) {
+                        const uint8_t *p = ml->stream_special + e;
+                        uint32_t code = ((uint32_t)p[0] << 24) |
+                            ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+                        snprintf(reason, sizeof(reason), "HTTP/2 %s error=%lu",
+                            ml->stream_type == 7 ? "GOAWAY" : "RST_STREAM",
+                            (unsigned long)code);
+                    } else {
+                        snprintf(reason, sizeof(reason), "Truncated HTTP/2 close frame");
+                    }
+                    result = gateway_map_fail(ml, 10, reason);
                     goto done;
                 }
                 ml->stream_header_used = 0;
