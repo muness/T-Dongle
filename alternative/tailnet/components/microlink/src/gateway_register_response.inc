@@ -47,6 +47,11 @@ static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
                     uint32_t code = ((uint32_t)payload[e] << 24) |
                         ((uint32_t)payload[e+1] << 16) |
                         ((uint32_t)payload[e+2] << 8) | payload[e+3];
+                    ml->map_h2_error = code;
+                    ml->map_h2_last_stream = ft == 7 ?
+                        (((uint32_t)payload[0] << 24) |
+                         ((uint32_t)payload[1] << 16) |
+                         ((uint32_t)payload[2] << 8) | payload[3]) : fs;
                     snprintf(ml->transport_error, sizeof(ml->transport_error),
                         "HTTP/2 %s error=%lu during registration",
                         ft == 7 ? "GOAWAY" : "RST_STREAM", (unsigned long)code);

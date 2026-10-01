@@ -88,6 +88,10 @@ typedef struct {
      * compile-time fallback (Frankfurt). This value is also sent as
      * MapRequest.Hostinfo.NetInfo.PreferredDERP so peers know our home. */
     uint16_t preferred_derp_region;
+
+    /* Optional compact diagnostic identity used by the gateway's persistent
+     * fault journal. Zero disables journal attribution. */
+    uint32_t diagnostic_id;
 } microlink_config_t;
 
 /* Single CIDR route entry — used for subnet-router advertisements. */

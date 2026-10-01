@@ -291,6 +291,12 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                         const uint8_t *p = ml->stream_special + e;
                         uint32_t code = ((uint32_t)p[0] << 24) |
                             ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+                        ml->map_h2_error = code;
+                        ml->map_h2_last_stream = ml->stream_type == 7 ?
+                            (((uint32_t)ml->stream_special[0] << 24) |
+                             ((uint32_t)ml->stream_special[1] << 16) |
+                             ((uint32_t)ml->stream_special[2] << 8) |
+                             ml->stream_special[3]) : ml->stream_id;
                         snprintf(reason, sizeof(reason), "HTTP/2 %s error=%lu",
                             ml->stream_type == 7 ? "GOAWAY" : "RST_STREAM",
                             (unsigned long)code);

@@ -489,6 +489,7 @@ struct microlink_s {
     uint32_t map_attempts, map_failures, map_bytes, map_declared_bytes, map_projected_bytes;
     uint32_t map_heap_before, map_heap_after, map_largest_before;
     unsigned map_error, map_stream_id, map_frame_type;
+    uint32_t map_h2_error, map_h2_last_stream;
 
     uint8_t node_key_challenge[32];
     bool has_node_key_challenge;
@@ -747,6 +748,13 @@ struct microlink_s {
     ml_zerocopy_t zc;
 #endif
 };
+
+/* Implemented by the gateway app. Writes are rate-limited and kept in a small
+ * NVS ring so failures survive USB loss or reboot without a RAM log buffer. */
+enum { GATEWAY_DIAG_MAP_FAILURE = 1, GATEWAY_DIAG_REGISTER_FAILURE = 2,
+       GATEWAY_DIAG_CONNECTED = 3 };
+void gateway_diag_record(const microlink_t *ml, uint32_t event,
+                         uint32_t detail);
 
 /* ============================================================================
  * Internal Function Declarations (per-module)

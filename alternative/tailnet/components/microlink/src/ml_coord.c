@@ -1452,6 +1452,8 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
      * then parse H2 frames (same pattern as MapResponse). */
     uint8_t *resp_buf=gateway_json;
     ml->transport_error[0] = 0;
+    ml->map_h2_error = 0;
+    ml->map_h2_last_stream = 0;
     int received=gateway_read_registration(ml,noise);
     if(received<=0){if (!ml->transport_error[0]) strlcpy(ml->transport_error,"Registration response incomplete or invalid",sizeof(ml->transport_error));return -1;}
     size_t resp_total=(size_t)received;
@@ -2242,7 +2244,8 @@ static int gateway_read_map(microlink_t *, ml_noise_state_t *, uint32_t, bool);
 
 static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_request) {
 
-
+    ml->map_h2_error=0;
+    ml->map_h2_last_stream=0;
     if (send_request) {
     ml->transport_error[0]=0;
     /* Build MapRequest JSON */
@@ -2312,7 +2315,11 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
     free(h2_buf);
     }  /* if (send_request) */
 
-    return gateway_read_map(ml, noise, send_request ? 3 : 5, true);
+    int result = gateway_read_map(ml, noise, send_request ? 3 : 5, true);
+    if (result < 0)
+        gateway_diag_record(ml, GATEWAY_DIAG_MAP_FAILURE,
+                            ml->map_h2_error ? ml->map_h2_error : ml->map_error);
+    return result;
 }
 
 static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise, bool omit_peers) {
@@ -2697,6 +2704,8 @@ void ml_coord_task(void *arg) {
             ESP_LOGI(TAG, "Registering...");
             if (do_register(ml, &noise) < 0) {
                 ESP_LOGE(TAG, "Registration failed");
+                gateway_diag_record(ml, GATEWAY_DIAG_REGISTER_FAILURE,
+                                    ml->map_h2_error);
                 if(ml->auth_url[0])strlcpy(ml->transport_error,"Waiting for browser authorization",sizeof(ml->transport_error));
                 else if(!ml->transport_error[0])strlcpy(ml->transport_error,"Control server registration failed",sizeof(ml->transport_error));
                 ml_conn_close(ml);
@@ -2789,6 +2798,7 @@ void ml_coord_task(void *arg) {
 
             state = COORD_LONG_POLL;
             ml->state = ML_STATE_CONNECTED;
+            gateway_diag_record(ml, GATEWAY_DIAG_CONNECTED, 0);
             ml->transport_error[0] = 0;
             ml->connected_at_ms = ml_get_time_ms();
             reconnect_attempts = 0;

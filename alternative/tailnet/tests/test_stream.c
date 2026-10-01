@@ -38,6 +38,7 @@ typedef struct {
         map_projected_bytes, map_heap_before, map_heap_after,
         map_largest_before;
     unsigned map_error, map_stream_id, map_frame_type, derp_region_default;
+    uint32_t map_h2_error, map_h2_last_stream;
     struct {
         void *map_callback;
     } config;
@@ -46,6 +47,7 @@ typedef int ml_noise_state_t;
 static uint8_t input[100000];
 static size_t input_len, input_pos, chunk;
 static unsigned replies, settings_acks;
+static void gateway_diag_record(const microlink_t *ml, uint32_t event, uint32_t detail) {}
 static uint64_t now;
 static uint64_t ml_get_time_ms(void) { return ++now; }
 static int noise_recv_inplace(microlink_t *ml, int *noise, uint8_t *b,
