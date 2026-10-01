@@ -73,15 +73,15 @@ extern "C" {
 /* TX 16->64 (2026-05-27): absorb speedtest bursts so packets queue instead of
  * being dropped at enqueue; relay buffers are SPIRAM-backed (ml_psram_malloc),
  * the queue control struct itself is ~64×48B internal (negligible). */
-#define ML_DERP_TX_QUEUE_DEPTH  64
+#define ML_DERP_TX_QUEUE_DEPTH  8
 #define ML_DISCO_RX_QUEUE_DEPTH 8
 /* WG RX 8->32 (2026-05-27): download-direction frames arrive in bursts via DERP;
  * depth 8 overflowed and silently dropped → TCP loss → exit-node throughput
  * collapse. ml_rx_packet_t is small (ptr+len+meta); 32 is ~1KB internal. */
-#define ML_WG_RX_QUEUE_DEPTH    32
+#define ML_WG_RX_QUEUE_DEPTH    8
 #define ML_STUN_RX_QUEUE_DEPTH  4
 #define ML_COORD_CMD_QUEUE_DEPTH 4
-#define ML_PEER_UPDATE_QUEUE_DEPTH 400
+#define ML_PEER_UPDATE_QUEUE_DEPTH 16
 
 /* Protocol limits */
 #define ML_MAX_PEERS            CONFIG_ML_MAX_PEERS
@@ -399,8 +399,8 @@ typedef struct {
  * (16 MB); anything beyond what fits in one read buffer can never complete. */
 #define ML_H2_MAX_FRAME_LEN     32768
 
-#define ML_MAX_DERP_REGIONS     32
-#define ML_MAX_DERP_NODES       4
+#define ML_MAX_DERP_REGIONS     4
+#define ML_MAX_DERP_NODES       2
 
 typedef struct {
     char hostname[64];
@@ -458,7 +458,37 @@ typedef struct {
  * Main Context
  * ========================================================================== */
 
+typedef struct {
+    uint8_t txid[12];
+    uint32_t dest_ip;
+    uint16_t dest_port;
+    uint64_t sent_ms;
+    int peer_index;
+    bool active;
+} ml_disco_probe_t;
+
+
 struct microlink_s {
+    uint8_t txid_v4[12], txid_v6[12];
+    bool txid_v4_valid, txid_v6_valid;
+    ml_disco_probe_t pending_probes[32];
+    int disco_probe_start_idx, burst_count;
+    uint64_t last_burst_ms;
+    char identity_namespace[16];
+    char auth_url[384];
+    char last_error[64];
+    char transport_error[64];
+    uint8_t node_key_challenge[32];
+    bool has_node_key_challenge;
+    uint8_t *server_extra_data;
+    int server_extra_data_len;
+    void *wg_output_pcb;
+    uint64_t last_stun_ms, last_derp_keepalive_ms, last_expiry_check_ms, last_h2_ping_ms;
+    uint8_t stream_header[9], stream_special[8];
+    size_t stream_header_used, stream_special_used;
+    uint32_t stream_remaining, stream_id;
+    uint8_t stream_type, stream_flags;
+    unsigned map_generation;
     /* Configuration (immutable after init) */
     microlink_config_t config;
 
@@ -746,9 +776,9 @@ esp_err_t ml_stun_send_probe_ipv6(microlink_t *ml, const uint8_t *server_ip6, ui
  * a STUN binding request in parallel, measures RTT, returns the
  * region_id with the lowest RTT. Returns 0 if nothing responded. */
 uint16_t ml_netcheck_pick_best_derp(microlink_t *ml);
-bool ml_stun_parse_response(const uint8_t *data, size_t len,
+bool ml_stun_parse_response(microlink_t *ml, const uint8_t *data, size_t len,
                              uint32_t *out_ip, uint16_t *out_port);
-bool ml_stun_parse_response_ipv6(const uint8_t *data, size_t len,
+bool ml_stun_parse_response_ipv6(microlink_t *ml, const uint8_t *data, size_t len,
                                   uint8_t *out_ip6, uint16_t *out_port);
 
 /* ml_noise.c */

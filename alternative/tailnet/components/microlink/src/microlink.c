@@ -55,70 +55,28 @@ static void generate_keypair(uint8_t *private_key, uint8_t *public_key) {
 
 static esp_err_t load_or_generate_keys(microlink_t *ml) {
     nvs_handle_t nvs;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "NVS open failed (%d), generating ephemeral keys", err);
-        generate_keypair(ml->machine_private_key, ml->machine_public_key);
-        generate_keypair(ml->wg_private_key, ml->wg_public_key);
-        generate_keypair(ml->disco_private_key, ml->disco_public_key);
-        ml->identity_persistent = false;
-        return ESP_OK;
-    }
-
-    size_t key_len = 32;
-    bool need_save = false;
-
-    /* Machine key */
-    if (nvs_get_blob(nvs, NVS_KEY_MACHINE_PRI, ml->machine_private_key, &key_len) != ESP_OK) {
-        generate_keypair(ml->machine_private_key, ml->machine_public_key);
-        need_save = true;
-        ESP_LOGI(TAG, "Generated new machine key");
-    } else {
-        key_len = 32;
-        nvs_get_blob(nvs, NVS_KEY_MACHINE_PUB, ml->machine_public_key, &key_len);
-    }
-
-    /* WireGuard key */
-    key_len = 32;
-    if (nvs_get_blob(nvs, NVS_KEY_WG_PRI, ml->wg_private_key, &key_len) != ESP_OK) {
-        generate_keypair(ml->wg_private_key, ml->wg_public_key);
-        need_save = true;
-        ESP_LOGI(TAG, "Generated new WireGuard key");
-    } else {
-        key_len = 32;
-        nvs_get_blob(nvs, NVS_KEY_WG_PUB, ml->wg_public_key, &key_len);
-    }
-
-    /* DISCO key */
-    key_len = 32;
-    if (nvs_get_blob(nvs, NVS_KEY_DISCO_PRI, ml->disco_private_key, &key_len) != ESP_OK) {
-        generate_keypair(ml->disco_private_key, ml->disco_public_key);
-        need_save = true;
-        ESP_LOGI(TAG, "Generated new DISCO key");
-    } else {
-        key_len = 32;
-        nvs_get_blob(nvs, NVS_KEY_DISCO_PUB, ml->disco_public_key, &key_len);
-    }
-
-    if (need_save) {
-        nvs_set_blob(nvs, NVS_KEY_MACHINE_PRI, ml->machine_private_key, 32);
-        nvs_set_blob(nvs, NVS_KEY_MACHINE_PUB, ml->machine_public_key, 32);
-        nvs_set_blob(nvs, NVS_KEY_WG_PRI, ml->wg_private_key, 32);
-        nvs_set_blob(nvs, NVS_KEY_WG_PUB, ml->wg_public_key, 32);
-        nvs_set_blob(nvs, NVS_KEY_DISCO_PRI, ml->disco_private_key, 32);
-        nvs_set_blob(nvs, NVS_KEY_DISCO_PUB, ml->disco_public_key, 32);
-        nvs_commit(nvs);
-        ESP_LOGI(TAG, "Keys saved to NVS");
-    } else {
-        ESP_LOGI(TAG, "Keys loaded from NVS");
-    }
-    /* All three keypairs survived = persistent identity. Surfaced to
-     * applications via microlink_diag_t so the UI can tell the operator
-     * whether the device is registered-but-stale vs genuinely fresh. */
-    ml->identity_persistent = !need_save;
-
+    esp_err_t err = nvs_open(ml->identity_namespace, NVS_READWRITE, &nvs);
+    if (err != ESP_OK) return err;
+    uint8_t keys[96]; size_t len = sizeof(keys);
+    err = nvs_get_blob(nvs, "identity_v1", keys, &len);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        uint8_t pub[32];
+        for (int i = 0; i < 3; i++) generate_keypair(keys + 32*i, pub);
+        err = nvs_set_blob(nvs, "identity_v1", keys, sizeof(keys));
+        if (err == ESP_OK) err = nvs_commit(nvs);
+    } else if (err == ESP_OK && len != sizeof(keys)) err = ESP_ERR_INVALID_SIZE;
     nvs_close(nvs);
-    return ESP_OK;
+    if (err == ESP_OK) {
+        memcpy(ml->machine_private_key, keys, 32);
+        memcpy(ml->wg_private_key, keys + 32, 32);
+        memcpy(ml->disco_private_key, keys + 64, 32);
+        ml_x25519_base(ml->machine_public_key, ml->machine_private_key, 1);
+        ml_x25519_base(ml->wg_public_key, ml->wg_private_key, 1);
+        ml_x25519_base(ml->disco_public_key, ml->disco_private_key, 1);
+        ml->identity_persistent = true;
+    }
+    memset(keys, 0, sizeof(keys));
+    return err;
 }
 
 /* ============================================================================
@@ -147,9 +105,9 @@ esp_err_t microlink_factory_reset(void) {
     }
 
     /* Erase cached peers */
-    ml_peer_nvs_init();
-    ml_peer_nvs_clear();
-    ml_peer_nvs_deinit();
+    /* Global peer cache disabled in multi-instance firmware. */
+
+
 
     ESP_LOGI(TAG, "Factory reset complete");
     return ESP_OK;
@@ -179,6 +137,10 @@ microlink_t *microlink_init(const microlink_config_t *config) {
         return NULL;
     }
 
+    if (!config->identity_namespace || !config->identity_namespace[0] || strlen(config->identity_namespace) > 15) {
+        free(ml); return NULL;
+    }
+    snprintf(ml->identity_namespace, sizeof(ml->identity_namespace), "%s", config->identity_namespace);
     /* Copy config */
     ml->config = *config;
     if (ml->config.max_peers == 0) ml->config.max_peers = ML_MAX_PEERS;
@@ -236,7 +198,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
             base_seconds = (uint64_t)wallclock;
         } else {
             nvs_handle_t h;
-            if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+            if (nvs_open(ml->identity_namespace, NVS_READWRITE, &h) == ESP_OK) {
                 uint64_t prev = 0;
                 size_t sz = sizeof(prev);
                 nvs_get_blob(h, "wg_tai_base", &prev, &sz);
@@ -252,10 +214,10 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     }
 
     /* Initialize peer NVS cache */
-    ml_peer_nvs_init();
+    /* Global peer cache disabled in multi-instance firmware. */
 
     /* Initialize HTTP config server (loads NVS peer allowlist + settings) */
-    ml->config_httpd = ml_config_httpd_init();
+    ml->config_httpd = NULL;
 
     /* Override config with NVS-saved settings (web UI save → restart flow).
      * NVS settings take priority over Kconfig defaults.  Strings are copied
@@ -399,7 +361,7 @@ bsd_socket_fallback:
     if (ml->disco_sock4 >= 0) {
         struct sockaddr_in bind_addr = {
             .sin_family = AF_INET,
-            .sin_port = htons(51820),
+            .sin_port = 0,
             .sin_addr.s_addr = INADDR_ANY,
         };
         if (ml_bind(ml->disco_sock4, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) < 0) {
@@ -604,8 +566,12 @@ void microlink_destroy(microlink_t *ml) {
     if (ml->h2_acc) { free(ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0; }
     if (ml->lp_acc) { free(ml->lp_acc); ml->lp_acc = NULL; ml->lp_acc_len = 0; }
 
+    extern void ml_gateway_release_netif(microlink_t *);
+    ml_gateway_release_netif(ml);
+    if (ml->server_extra_data) free(ml->server_extra_data);
+
     /* Deinitialize peer NVS */
-    ml_peer_nvs_deinit();
+
 
     /* Deinitialize HTTP config server */
     if (ml->config_httpd) {

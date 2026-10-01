@@ -3,3 +3,7 @@
 Vendored from https://github.com/Csontikka/microlink at 7de6a93684a34991fdfa1eeb9281e08523646ef7. MIT notices and the X25519 notice are included. Nested wireguard_lwip notices are preserved. Native integration removes PlatformIO-specific include paths; ESP-IDF REQUIRES exports the headers. Vendored text is normalized to LF with trailing whitespace removed and leading indentation tabs expanded; no protocol logic is changed. vendor-sha256.json fingerprints the normalized copy.
 
 This alternative project is initially a compile-time audit instrument, not working multi-tailnet firmware. It does not start networking, accept credentials, or enroll a node. Do not distribute its binary as a gateway or install it through the companion app.
+
+## Gateway fork
+
+The current project now starts the gateway described in README.md. Fork changes isolate keys/NVS, challenge/auth URL, UDP output state and timers per instance; bound queues and DERP caching; use internal SRAM packet buffers; serialize map assembly in a bounded shared workspace; and synchronize WireGuard operations with lwIP. `vendor-sha256.json` fingerprints the normalized import baseline and is intentionally retained for comparison, not claimed to hash the modified fork. Runtime code differs from upstream. MIT and nested notices remain included.

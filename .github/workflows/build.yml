@@ -29,7 +29,7 @@ jobs:
           name: tdongle-0.1.0-${{ matrix.variant }}
           path: dist/tdongle-0.1.0-${{ matrix.variant }}/
 
-  tailnet-audit:
+  tailnet-gateway:
     runs-on: [self-hosted, linux, x64, linux-general]
     steps:
       - uses: actions/checkout@v4
@@ -38,10 +38,9 @@ jobs:
       - shell: bash
         run: |
           . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
-          alternative/tailnet/tools/build-audit.sh
+          alternative/tailnet/tools/build-gateway.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: tailnet-audit-evidence-not-firmware
+          name: tailnet-gateway-experimental
           path: |
-            alternative/tailnet/build/memory-audit.json
-            alternative/tailnet/AUDIT.md
+            alternative/tailnet/dist/

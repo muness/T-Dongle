@@ -1,4 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
-set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/microlink/components/wireguard_lwip")
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/microlink/components/wireguard_lwip" "${CMAKE_CURRENT_LIST_DIR}/../../components/esp_tinyusb")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(tdongle_tailnet_audit)
+project(tdongle_tailnet)
+target_include_directories(__idf_lwip PRIVATE "${CMAKE_CURRENT_LIST_DIR}/main")
+target_compile_definitions(__idf_lwip PRIVATE ESP_IDF_LWIP_HOOK_FILENAME="gateway_hooks.h")

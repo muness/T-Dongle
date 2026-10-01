@@ -50,10 +50,6 @@ static const char STUN_SOFTWARE[] = "tailnode";
 static esp_err_t ensure_stun_socket6(microlink_t *ml);
 
 /* Separate transaction IDs for IPv4 and IPv6 (they race each other) */
-static uint8_t txid_v4[12];
-static bool txid_v4_valid = false;
-static uint8_t txid_v6[12];
-static bool txid_v6_valid = false;
 
 /* ============================================================================
  * CRC32 FINGERPRINT (IEEE 802.3, matches Tailscale's crc32.ChecksumIEEE)
@@ -268,7 +264,7 @@ esp_err_t ml_stun_send_probe(microlink_t *ml, const char *server, uint16_t port)
             return ESP_FAIL;
         }
         sock = ml->stun_sock6;
-        txid = txid_v6;
+        txid = ml->txid_v6;
     } else {
         /* Use disco_sock4 for IPv4 STUN to match NAT mapping */
         if (ml->disco_sock4 >= 0) {
@@ -280,16 +276,16 @@ esp_err_t ml_stun_send_probe(microlink_t *ml, const char *server, uint16_t port)
             }
             sock = ml->stun_sock;
         }
-        txid = txid_v4;
+        txid = ml->txid_v4;
     }
 
     /* Build Tailscale-compatible STUN request */
     uint8_t request[STUN_REQUEST_SIZE];
     size_t req_len = build_stun_request(request, txid);
     if (res->ai_family == AF_INET6)
-        txid_v6_valid = true;
+        ml->txid_v6_valid = true;
     else
-        txid_v4_valid = true;
+        ml->txid_v4_valid = true;
 
     /* Send */
     int n = ml_sendto(sock, request, req_len, 0,
@@ -332,8 +328,8 @@ esp_err_t ml_stun_send_probe_to(microlink_t *ml, uint32_t server_ip, uint16_t po
 
     /* Build Tailscale-compatible STUN request */
     uint8_t request[STUN_REQUEST_SIZE];
-    size_t req_len = build_stun_request(request, txid_v4);
-    txid_v4_valid = true;
+    size_t req_len = build_stun_request(request, ml->txid_v4);
+    ml->txid_v4_valid = true;
 
     /* Send */
     int n = ml_sendto(sock, request, req_len, 0,
@@ -353,7 +349,7 @@ esp_err_t ml_stun_send_probe_to(microlink_t *ml, uint32_t server_ip, uint16_t po
  * Parse Response
  * ========================================================================== */
 
-bool ml_stun_parse_response(const uint8_t *data, size_t len,
+bool ml_stun_parse_response(microlink_t *ml, const uint8_t *data, size_t len,
                               uint32_t *out_ip, uint16_t *out_port) {
     if (len < STUN_HEADER_SIZE) {
         ESP_LOGW(TAG, "STUN response too short: %d", (int)len);
@@ -375,7 +371,7 @@ bool ml_stun_parse_response(const uint8_t *data, size_t len,
     }
 
     /* Check txid against IPv4 txid (IPv6 responses use separate parser) */
-    if (txid_v4_valid && memcmp(data + 8, txid_v4, 12) != 0) {
+    if (ml->txid_v4_valid && memcmp(data + 8, ml->txid_v4, 12) != 0) {
         /* Could be an IPv6 response arriving on IPv4 queue — don't warn */
         ESP_LOGD(TAG, "STUN IPv4 txid mismatch (may be IPv6 response)");
         return false;
@@ -418,7 +414,7 @@ bool ml_stun_parse_response(const uint8_t *data, size_t len,
                 char ip_str[16];
                 microlink_ip_to_str(*out_ip, ip_str);
                 ESP_LOGI(TAG, "STUN mapped: %s:%u", ip_str, *out_port);
-                txid_v4_valid = false;
+                ml->txid_v4_valid = false;
                 return true;
             }
             if (family == 0x02) {
@@ -445,7 +441,7 @@ bool ml_stun_parse_response(const uint8_t *data, size_t len,
             char ip_str[16];
             microlink_ip_to_str(*out_ip, ip_str);
             ESP_LOGI(TAG, "STUN mapped (legacy): %s:%u", ip_str, *out_port);
-            txid_v4_valid = false;
+            ml->txid_v4_valid = false;
             return true;
         }
 
@@ -503,8 +499,8 @@ esp_err_t ml_stun_send_probe_ipv6(microlink_t *ml, const uint8_t *server_ip6, ui
 
     /* Build Tailscale-compatible STUN request (separate txid from IPv4) */
     uint8_t request[STUN_REQUEST_SIZE];
-    size_t req_len = build_stun_request(request, txid_v6);
-    txid_v6_valid = true;
+    size_t req_len = build_stun_request(request, ml->txid_v6);
+    ml->txid_v6_valid = true;
 
     int n = ml_sendto(ml->stun_sock6, request, req_len, 0,
                    (struct sockaddr *)&dest, sizeof(dest));
@@ -522,7 +518,7 @@ esp_err_t ml_stun_send_probe_ipv6(microlink_t *ml, const uint8_t *server_ip6, ui
     return ESP_OK;
 }
 
-bool ml_stun_parse_response_ipv6(const uint8_t *data, size_t len,
+bool ml_stun_parse_response_ipv6(microlink_t *ml, const uint8_t *data, size_t len,
                                   uint8_t *out_ip6, uint16_t *out_port) {
     if (len < STUN_HEADER_SIZE) return false;
 
@@ -536,12 +532,12 @@ bool ml_stun_parse_response_ipv6(const uint8_t *data, size_t len,
 
     /* Check txid against IPv6 txid first, then try IPv4 txid
      * (response may arrive on shared queue from either socket) */
-    bool matched_v6 = (txid_v6_valid && memcmp(data + 8, txid_v6, 12) == 0);
-    bool matched_v4 = (!matched_v6 && txid_v4_valid && memcmp(data + 8, txid_v4, 12) == 0);
+    bool matched_v6 = (ml->txid_v6_valid && memcmp(data + 8, ml->txid_v6, 12) == 0);
+    bool matched_v4 = (!matched_v6 && ml->txid_v4_valid && memcmp(data + 8, ml->txid_v4, 12) == 0);
     if (!matched_v6 && !matched_v4) return false;
 
     /* Use whichever txid matched for XOR decoding */
-    const uint8_t *matched_txid = matched_v6 ? txid_v6 : txid_v4;
+    const uint8_t *matched_txid = matched_v6 ? ml->txid_v6 : ml->txid_v4;
 
     uint16_t msg_len = (data[2] << 8) | data[3];
     if (STUN_HEADER_SIZE + msg_len > len) return false;
@@ -574,8 +570,8 @@ bool ml_stun_parse_response_ipv6(const uint8_t *data, size_t len,
                 }
 
                 ESP_LOGI(TAG, "STUN IPv6 mapped: port %u", *out_port);
-                if (matched_v6) txid_v6_valid = false;
-                else txid_v4_valid = false;
+                if (matched_v6) ml->txid_v6_valid = false;
+                else ml->txid_v4_valid = false;
                 return true;
             }
 

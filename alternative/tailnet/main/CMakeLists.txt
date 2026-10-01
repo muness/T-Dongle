@@ -1,1 +1,1 @@
-idf_component_register(SRCS "audit_main.c" INCLUDE_DIRS "." REQUIRES microlink)
+idf_component_register(SRCS "gateway_main.c" "router.c" "dns.c" "console.c" "control.c" INCLUDE_DIRS "." REQUIRES microlink esp_tinyusb esp_http_server nvs_flash esp_wifi esp_netif lwip json EMBED_TXTFILES "setup.html")

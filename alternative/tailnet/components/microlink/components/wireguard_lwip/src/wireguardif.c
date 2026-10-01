@@ -194,7 +194,7 @@ static err_t wireguardif_peer_output(struct netif *netif, struct pbuf *q, struct
      * DRAM, the alloc fails (ERR_MEM, errno=-1) and the packet drops.
      * SPIRAM has 8 MB headroom; per-packet latency is ~10 us extra,
      * negligible vs the rest of the WG path. */
-    #define WG_OUT_ALLOC(sz)  heap_caps_malloc((sz), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+    #define WG_OUT_ALLOC(sz)  malloc((sz))
     #define WG_OUT_FREE(p)    heap_caps_free(p)
 
     // Check if peer has a direct endpoint (non-zero IP and port)

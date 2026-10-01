@@ -25,6 +25,9 @@ typedef struct microlink_s microlink_t;
 
 /* Configuration */
 typedef struct {
+    const char *identity_namespace; /* Unique NVS namespace, <=15 characters. */
+    void (*map_callback)(microlink_t *, const void *, void *);
+    void *map_callback_context;
     const char *auth_key;       /* Tailscale auth key (tskey-auth-...) */
     const char *device_name;    /* Device hostname on the tailnet */
     const char *ipn_version;    /* Hostinfo.IPNVersion, version.Long() shape
