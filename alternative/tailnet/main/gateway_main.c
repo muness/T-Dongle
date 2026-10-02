@@ -30,6 +30,8 @@ static void usb_event(tinyusb_event_t *event, void *arg) {
     }
 }
 static bool online;
+static volatile bool wifi_scan_pauses_reconnect;
+static SemaphoreHandle_t wifi_scan_lock;
 static bool route_storage_ok;
 bool gateway_online(void) { return online; }
 static uint32_t next_id = 1;
@@ -334,7 +336,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
         esp_wifi_connect();
     if (base == WIFI_EVENT && event == WIFI_EVENT_STA_DISCONNECTED) {
         online = false;
-        if (wifi_config.sta.ssid[0])
+        if (wifi_config.sta.ssid[0] && !wifi_scan_pauses_reconnect)
             esp_wifi_connect();
     }
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
@@ -359,6 +361,102 @@ static esp_err_t failure(httpd_req_t *req, const char *message) {
     cJSON_AddStringToObject(j, "error", message);
     httpd_resp_set_status(req, "400 Bad Request");
     return json_reply(req, j);
+}
+static bool local_request(httpd_req_t *req);
+static void wifi_scan_resume(bool was_connected) {
+    wifi_scan_pauses_reconnect = false;
+    wifi_ap_record_t current = {0};
+    if (wifi_config.sta.ssid[0] &&
+        (!was_connected || esp_wifi_sta_get_ap_info(&current) != ESP_OK))
+        esp_wifi_connect();
+}
+static esp_err_t wifi_scan(httpd_req_t *req) {
+    if (!local_request(req))
+        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
+                                   "USB access required");
+    if (xSemaphoreTake(wifi_scan_lock, 0) != pdTRUE)
+        return failure(req, "A Wi-Fi scan is already running");
+
+    wifi_ap_record_t current = {0};
+    bool connected = esp_wifi_sta_get_ap_info(&current) == ESP_OK;
+    wifi_scan_pauses_reconnect = true;
+    if (!connected) {
+        /* Stop a failed saved-network reconnect loop so it cannot starve a scan. */
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(150));
+    }
+
+    wifi_scan_config_t config = {
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .show_hidden = false,
+        .scan_time.active = {.min = 100, .max = 250},
+    };
+    esp_err_t result = esp_wifi_scan_start(&config, true);
+    if (result != ESP_OK) {
+        wifi_scan_resume(connected);
+        xSemaphoreGive(wifi_scan_lock);
+        return failure(req, result == ESP_ERR_WIFI_STATE
+                                ? "Wi-Fi is still connecting. Wait a moment, then scan again."
+                                : "The dongle could not scan for Wi-Fi. Try again.");
+    }
+
+    uint16_t total = 0;
+    if (esp_wifi_scan_get_ap_num(&total) != ESP_OK) {
+        esp_wifi_clear_ap_list();
+        wifi_scan_resume(connected);
+        xSemaphoreGive(wifi_scan_lock);
+        return failure(req, "The Wi-Fi scan finished without readable results. Try again.");
+    }
+
+    enum { WIFI_SCAN_RESULT_LIMIT = 12 };
+    uint16_t count = total < WIFI_SCAN_RESULT_LIMIT ? total : WIFI_SCAN_RESULT_LIMIT;
+    wifi_ap_record_t *records = count ? calloc(count, sizeof(*records)) : NULL;
+    if (count && !records) {
+        esp_wifi_clear_ap_list();
+        wifi_scan_resume(connected);
+        xSemaphoreGive(wifi_scan_lock);
+        return failure(req, "The dongle is low on memory. Try the scan again.");
+    }
+    if (count && esp_wifi_scan_get_ap_records(&count, records) != ESP_OK) {
+        free(records);
+        esp_wifi_clear_ap_list();
+        wifi_scan_resume(connected);
+        xSemaphoreGive(wifi_scan_lock);
+        return failure(req, "The Wi-Fi scan finished without readable results. Try again.");
+    }
+    if (!count)
+        esp_wifi_clear_ap_list();
+
+    cJSON *response = cJSON_CreateObject();
+    cJSON *networks = cJSON_CreateArray();
+    if (!response || !networks) {
+        cJSON_Delete(response);
+        cJSON_Delete(networks);
+        free(records);
+        wifi_scan_resume(connected);
+        xSemaphoreGive(wifi_scan_lock);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "Out of memory returning Wi-Fi scan");
+    }
+    cJSON_AddBoolToObject(response, "ok", true);
+    cJSON_AddNumberToObject(response, "count", count);
+    cJSON_AddBoolToObject(response, "truncated", total > count);
+    cJSON_AddItemToObject(response, "networks", networks);
+    for (uint16_t i = 0; i < count; i++) {
+        cJSON *network = cJSON_CreateObject();
+        if (!network)
+            continue;
+        cJSON_AddStringToObject(network, "ssid",
+                                (const char *)records[i].ssid);
+        cJSON_AddNumberToObject(network, "rssi", records[i].rssi);
+        cJSON_AddBoolToObject(network, "secure",
+                              records[i].authmode != WIFI_AUTH_OPEN);
+        cJSON_AddItemToArray(networks, network);
+    }
+    free(records);
+    wifi_scan_resume(connected);
+    xSemaphoreGive(wifi_scan_lock);
+    return json_reply(req, response);
 }
 static bool usb_peer_address(const struct sockaddr *address, socklen_t length) {
     uint32_t ipv4;
@@ -598,7 +696,7 @@ static esp_err_t status(httpd_req_t *req) {
         jw_bool(w, value);                                                     \
         jw_char(w, ',');                                                       \
     } while (0)
-    STR("firmware", "0.2.9");
+    STR("firmware", "0.2.10");
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
     gateway_socket_stats sockets = gateway_sockets_snapshot();
@@ -863,6 +961,8 @@ void app_main(void) {
         diag_lock = xSemaphoreCreateMutex();
     gateway_diag_membership(0, GATEWAY_DIAG_BOOT, esp_reset_reason());
     members_lock = xSemaphoreCreateMutex();
+    wifi_scan_lock = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(wifi_scan_lock ? ESP_OK : ESP_ERR_NO_MEM);
     load_members();
     extern bool gateway_routes_init(void);
     route_storage_ok = gateway_routes_init();
@@ -959,11 +1059,15 @@ void app_main(void) {
                 diag = {.uri = "/diagnostics",
                         .method = HTTP_GET,
                         .handler = diagnostics},
+                scan = {.uri = "/wifi-scan",
+                        .method = HTTP_GET,
+                        .handler = wifi_scan},
                 api = {
                     .uri = "/command", .method = HTTP_POST, .handler = command};
     httpd_register_uri_handler(server, &page);
     httpd_register_uri_handler(server, &state);
     httpd_register_uri_handler(server, &diag);
+    httpd_register_uri_handler(server, &scan);
     httpd_register_uri_handler(server, &api);
     xTaskCreate(manager, "members", 4096, NULL, 4, NULL);
 }
