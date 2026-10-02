@@ -16,13 +16,15 @@
 #define pdTRUE 1
 #define pdMS_TO_TICKS(x) (x)
 #define ML_STATE_CONNECTED 4
+typedef unsigned TickType_t;
+static unsigned ticks;static unsigned xTaskGetTickCount(void){return ticks;}
 typedef int esp_err_t;
 typedef void *TaskHandle_t;
 typedef struct {char hostname[64];uint32_t vpn_ip;} ml_peer_update_t;
-typedef struct {int state;struct {bool session_valid;unsigned count;} directory;} client_t;
+typedef struct {int state;struct {bool session_valid;unsigned count,generation;} directory;} client_t;
 typedef struct membership {struct membership *next;client_t *client;uint32_t id;char label[24];} membership_t;
 static membership_t *members;static int members_lock;
-static int xSemaphoreTake(int lock,int wait){return 1;}
+static int lock_ok=1;static int xSemaphoreTake(int lock,int wait){return lock_ok;}
 static void xSemaphoreGive(int lock){}
 static int reads,closes,sends,forwards,live,fail_at;static size_t task_stack;
 static void *task_arg;static void (*task_fn)(void *);static jmp_buf finished;
@@ -48,10 +50,12 @@ static const ip_addr_t *dns_getserver(int i){resolver.addr=htonl(0x08080808);ret
 #define ip_2_ip4(p) (p)
 #define ip4_addr_get_u32(p) ((p)->addr)
 static int connect_socket(int fd,const struct sockaddr *a,socklen_t n){return 0;}
-static int option(int fd,int l,int key,const void *v,socklen_t n){return 0;}
+static int option(int fd,int l,int key,const void *v,socklen_t n){return fail_at==5?-1:0;}
 static int send_packet(int fd,const void *p,size_t n,int flags){forwards++;return n;}
-static int receive_packet(int fd,void *p,size_t n,int flags){assert(n==1500);memcpy(p,query,query_size);((uint8_t *)p)[2]|=128;return query_size;}
-static bool ml_directory_at(client_t *c,unsigned i,ml_peer_update_t *out){strcpy(out->hostname,"server.example.ts.net");out->vpn_ip=0x64400001;return true;}
+static bool upstream_ready=true;
+static int receive_packet(int fd,void *p,size_t n,int flags){if(!upstream_ready)return -1;assert(n==1500);memcpy(p,query,query_size);((uint8_t *)p)[2]|=128;return query_size;}
+static int directory_reads;static bool directory_ok=true,change_generation=false;static const char *record_name="server.example.ts.net";
+static bool ml_directory_at(client_t *c,unsigned i,ml_peer_update_t *out){directory_reads++;if(!directory_ok)return false;if(change_generation)c->directory.generation++;strcpy(out->hostname,record_name);out->vpn_ip=0x64400001;return true;}
 static uint32_t gateway_alias(uint32_t id,uint32_t peer){assert(id==1 && peer==0x64400001);return 0xc6120003;}
 #define calloc allocate
 #define free release
@@ -75,16 +79,34 @@ static void question(const char *name){
 }
 static void run(void){reads=sends=forwards=0;response_size=0;if(!setjmp(finished))task_fn(task_arg);}
 int main(void){
-    for(fail_at=1;fail_at<=4;fail_at++){closes=0;assert(gateway_dns_start()!=0);assert(live==0);assert(closes==(fail_at>=3));}
+    for(fail_at=1;fail_at<=5;fail_at++){closes=0;assert(gateway_dns_start()!=0);assert(live==0);assert(closes==(fail_at>=3));}
     fail_at=0;assert(gateway_dns_start()==0 && live==1 && task_stack==4096);assert(gateway_dns_stack_free()==3000);
-    question("example.com");run();assert(sends==1 && forwards==1 && response_size==query_size);
+    question("example.com");run();assert(forwards==1);((dns_workspace *)task_arg)->upstream_sock=-1;
     client_t client={.state=4,.directory={.session_valid=true,.count=1}};
     membership_t member={.client=&client,.id=1,.label="work"};members=&member;
     question("server.work.tailnet");run();assert(sends==1 && forwards==0 && response[7]==1 && response_size==query_size+16);
     assert(!memcmp(response+response_size-4,"\xc6\x12\x00\x03",4));
+    directory_reads=0;question("server.work.tailnet");run();assert(response[7]==1 && directory_reads==0);
+    client.directory.generation++;run();assert(response[7]==1 && directory_reads==1);
+    ticks=30001;directory_reads=0;run();assert(directory_reads==1);ticks=0;
+    upstream_ready=false;((dns_workspace *)task_arg)->upstream_sock=8;directory_reads=0;
+    run();assert(response[7]==1 && forwards==0);assert(((dns_workspace *)task_arg)->upstream_sock==8);
+    ticks=2001;run();assert(((dns_workspace *)task_arg)->upstream_sock==-1);ticks=0;upstream_ready=true;
+    client.state=0;run();assert((response[3]&15)==2 && response[7]==0);client.state=4;
+    lock_ok=0;run();assert((response[3]&15)==2);lock_ok=1;
+    client.directory.generation++;directory_ok=false;run();assert((response[3]&15)==2);directory_ok=true;
+    question("server.work.tailnet");query[query_size-3]=28;run();assert((response[3]&15)==0 && response[7]==0);
+    question("server.work.tailnet");client.directory.generation++;change_generation=true;run();assert((response[3]&15)==2);change_generation=false;
+    members=NULL;run();assert((response[3]&15)==3 && response[7]==0);members=&member;
+    for(unsigned i=0;i<5;i++){char name[64],record[64];snprintf(name,sizeof(name),"peer%u.work.tailnet",i);snprintf(record,sizeof(record),"peer%u.example.ts.net",i);record_name=record;question(name);run();assert(response[7]==1);}
+    record_name="peer0.example.ts.net";question("peer0.work.tailnet");directory_reads=0;run();assert(directory_reads==1);
+    record_name="server.example.ts.net";
     question("missing.work.tailnet");run();assert(sends==1 && (response[3]&15)==3 && forwards==0);
     for(size_t n=0;n<12;n++){query_size=n;run();assert(!sends && !forwards);}
     question("server.work.tailnet");query[12]=255;run();assert(!sends && !forwards);
+    question("example.com");upstream_ready=false;((dns_workspace *)task_arg)->upstream_sock=8;run();assert((response[3]&15)==2 && forwards==0);((dns_workspace *)task_arg)->upstream_sock=-1;upstream_ready=true;
+    assert(sizeof(((dns_workspace *)task_arg)->cache)<=640);
+    assert(gateway_dns_count(1)>0 && gateway_dns_count(2)>0 && gateway_dns_count(3)>0);
     release(task_arg);assert(live==0);
     puts("DNS: ordinary forwarding and flash-directory aliases use full workspace; malformed queries and every startup allocation/socket/task failure are bounded");
 }
