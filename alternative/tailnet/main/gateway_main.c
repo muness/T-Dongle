@@ -10,6 +10,8 @@
 #include "esp_wifi.h"
 #include "gateway.h"
 #include "boot_health.h"
+#include "lcd.h"
+#include "lcd_view.h"
 #include "socket_budget.h"
 #include "esp_system.h"
 #include "lwip/inet.h"
@@ -271,6 +273,20 @@ static void start_member(membership_t *m) {
         return;
     }
     m->error[0] = 0;
+}
+bool gateway_display_state(lcd_state *s) {
+    s->wifi=online;s->recovery=gateway_boot_needs_attention();
+    if(xSemaphoreTake(members_lock,pdMS_TO_TICKS(10))!=pdTRUE)return false;
+    s->saved_wifi=wifi_config.sta.ssid[0]!=0;
+    for(membership_t *m=members;m;m=m->next){
+        s->saved++;if(!m->enabled)continue;s->enabled++;
+        microlink_t *c=m->client;
+        if(m->error[0] || (c && c->last_error[0]))s->failed++;
+        if(c && c->auth_url[0])s->login++;
+        if(c && c->wg_netif && c->state==ML_STATE_CONNECTED && !c->key_expired &&
+           !c->last_error[0] && c->directory.session_valid)s->ready++;
+    }
+    xSemaphoreGive(members_lock);return true;
 }
 static void manager(void *arg) {
     unsigned last_socket_failures = 0;
@@ -1115,6 +1131,7 @@ static esp_err_t start_dns(void) {
 static esp_err_t start_manager(void) {
     return xTaskCreate(manager,"members",4096,NULL,4,NULL)==pdPASS?ESP_OK:ESP_ERR_NO_MEM;
 }
+static esp_err_t start_display(void){return gateway_display_start();}
 static bool start_step(unsigned stage,esp_err_t (*start)(void)) {
     gateway_boot_stage(stage);
     esp_err_t result=start();gateway_boot_result(stage,result);
@@ -1127,4 +1144,5 @@ void app_main(void) {
     members_lock=xSemaphoreCreateMutexStatic(&members_mutex);
     wifi_scan_lock=xSemaphoreCreateMutexStatic(&scan_mutex);
     gateway_startup_sequence();
+    gateway_display_tick();
 }

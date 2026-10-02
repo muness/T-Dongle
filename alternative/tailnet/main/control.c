@@ -3,6 +3,7 @@
 #include "esp_timer.h"
 #include "gateway.h"
 #include "boot_health.h"
+#include "lcd.h"
 #include "soc/rtc_cntl_reg.h"
 #include "tusb.h"
 extern void mgmt_write(const char *s);
@@ -27,7 +28,8 @@ bool control_submit(const char *line) {
 static void command_task(void *arg) {
     char line[128], reply[384];
     for (;;) {
-        if (xQueueReceive(commands, line, portMAX_DELAY) != pdTRUE)
+        gateway_display_tick();
+        if (xQueueReceive(commands, line, pdMS_TO_TICKS(1000)) != pdTRUE)
             continue;
         if (!strcmp(line, "help"))
             mgmt_write("T-Dongle tailnet gateway protocol=1\r\nCommands: status, list, "
@@ -55,6 +57,7 @@ static void command_task(void *arg) {
             vTaskDelay(pdMS_TO_TICKS(200));
             esp_restart();
         } else if (!strcmp(line, "bootloader")) {
+            gateway_display_installing();
             mgmt_write("OK rebooting into ROM download mode\r\ndone>\r\n");
             vTaskDelay(pdMS_TO_TICKS(200));
             REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);

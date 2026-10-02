@@ -5,6 +5,7 @@ static void gateway_startup_sequence(void) {
     bool settings=start_step(BOOT_SETTINGS,start_settings);
     bool network=start_step(BOOT_NETWORK,start_network);
     if(network)start_step(BOOT_HTTP,start_http);
+    start_step(BOOT_DISPLAY,start_display);
     /* A crash quarantines automatic tailnet activation, not USB management.
      * Wi-Fi settings and saved identities remain untouched. */
     if(!gateway_boot_recovery()) {

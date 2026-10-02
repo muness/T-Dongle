@@ -31,7 +31,7 @@ static int errors[BOOT_STAGE_COUNT];
 static unsigned current_stage;
 static const char *stage_name(unsigned s) {
     static const char *const names[] = {"none","usb","settings","network","http",
-        "directory","routes","wifi","dns","manager","running"};
+        "directory","routes","wifi","dns","manager","running","display"};
     return s<BOOT_STAGE_COUNT ? names[s] : "unknown";
 }
 void gateway_boot_begin(void) {
@@ -89,6 +89,11 @@ void gateway_boot_result(unsigned stage,int error) {
     if(stage<BOOT_STAGE_COUNT)errors[stage]=error;
 }
 bool gateway_boot_recovery(void) {return recovery;}
+bool gateway_boot_needs_attention(void) {
+    if(recovery)return true;
+    for(unsigned i=1;i<BOOT_STAGE_COUNT;i++)if(i!=BOOT_DISPLAY && errors[i])return true;
+    return false;
+}
 void gateway_boot_complete(void) {
     gateway_boot_stage(BOOT_RUNNING);rtc_boot.pending=0;
     if(boot_store){nvs_set_blob(boot_store,"guard",&rtc_boot,sizeof(rtc_boot));nvs_commit(boot_store);}

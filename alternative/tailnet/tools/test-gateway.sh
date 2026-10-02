@@ -113,3 +113,5 @@ cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_jit_queue.c
 build-host/test_jit_queue
 
 python tools/test-resilience.py
+
+python tools/test-lcd.py

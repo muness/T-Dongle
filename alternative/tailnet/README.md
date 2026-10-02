@@ -57,3 +57,11 @@ A saved Android v119 capture identified repeated task stack overflows in the exa
 ## Runtime resilience (0.2.12)
 
 V120's saved evidence confirmed a runtime panic and repeated four-second map truncation. Maps now use progress-based inactivity deadlines with a total bound; one DERP task owns all TLS I/O and reconnect, saving a 10 KiB task stack per membership. TCP MSS is bounded for the routed packet size, and oversized peer packets cannot bypass queue ownership. Startup isolates optional failures, preserves USB management and saved settings, and latches recovery after a crash in the same binary. A new coredump partition preserves task/PC/backtrace evidence; Android automatically archives an allowlisted summary and exposes Restart services. See [evidence, fault-injection checks and remaining hardware limits](docs/runtime-resilience-2026-10-02.md).
+
+## Setup and LCD clarity (0.2.15)
+
+Networks now keeps Wi-Fi settings, sign-in and saved memberships together. Each membership shows its reported identity and routing state; Devices expands to compact name/IP/copy rows and stays expanded across status refreshes. Saved devices remain labeled as unverified when routing is unavailable. Wi-Fi discovery and password visibility controls are available without typing a network name.
+
+The original 160 × 80 LCD now shows setup, sign-in, routing readiness, reconnection, recovery and installation handoff, with the firmware version and USB state. Its renderer uses one 320-byte static DMA scanline, fixed flash-resident glyphs, and the existing control task; the SPI driver has its own initialization allocations. Unchanged frames are skipped. A transfer failure stops drawing without stopping USB or networking. There is no framebuffer, new display task or per-refresh heap allocation. The ROM bootloader cannot report live progress to this renderer; installation progress remains in Android. Panel orientation, colors and behavior still require physical-board confirmation.
+
+See [polish validation](docs/ui-lcd-polish-2026-10-02.md). This build also contains the DNS and USB transmit ownership corrections from 0.2.13–0.2.14.

@@ -9,7 +9,7 @@ static bool recovery;
 #define STAGE(name,code) static int start_##name(void){assert(code==BOOT_USB || usb_alive);seen[code]=++sequence;if(code==BOOT_USB && code!=fail_at)usb_alive=1;return code==fail_at?-1:0;}
 STAGE(usb,BOOT_USB) STAGE(settings,BOOT_SETTINGS) STAGE(network,BOOT_NETWORK)
 STAGE(http,BOOT_HTTP) STAGE(directory,BOOT_DIRECTORY) STAGE(routes,BOOT_ROUTES)
-STAGE(wifi,BOOT_WIFI) STAGE(dns,BOOT_DNS) STAGE(manager,BOOT_MANAGER)
+STAGE(display,BOOT_DISPLAY) STAGE(wifi,BOOT_WIFI) STAGE(dns,BOOT_DNS) STAGE(manager,BOOT_MANAGER)
 static bool start_step(unsigned stage,int(*start)(void)){int result=start();if(stage==BOOT_USB && !result)usb_alive=1;if(result)failed=stage;return !result;}
 void gateway_boot_begin(void){assert(usb_alive);}
 void gateway_boot_result(unsigned stage,int error){if(error)failed=stage;}
@@ -17,8 +17,8 @@ bool gateway_boot_recovery(void){return recovery;}
 void gateway_boot_complete(void){complete++;}
 #include "../main/startup_sequence.inc"
 int main(void) {
-    for(unsigned fault=0;fault<=BOOT_MANAGER;fault++) {
-        if(fault==BOOT_USB)continue; // physical USB failure cannot provide USB recovery
+    for(unsigned fault=0;fault<BOOT_STAGE_COUNT;fault++) {
+        if(fault==BOOT_USB || fault==BOOT_RUNNING)continue; // physical USB failure cannot provide USB recovery
         memset(seen,0,sizeof(seen));sequence=complete=failed=usb_alive=0;fail_at=fault;
         gateway_startup_sequence();assert(complete==1 && usb_alive && seen[BOOT_USB]==1);
         assert(!fault || failed==fault);

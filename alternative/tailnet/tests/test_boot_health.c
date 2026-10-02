@@ -48,6 +48,9 @@ static int sink(void *ctx,const char *bytes,size_t n){assert(report_used+n<sizeo
 int main(void) {
     memset(build_sha,'a',64);build_sha[64]=0;
     new_boot(ESP_RST_POWERON);assert(!recovery);gateway_boot_complete();
+    gateway_boot_result(BOOT_DISPLAY,1);assert(!gateway_boot_needs_attention());
+    gateway_boot_result(BOOT_DNS,1);assert(gateway_boot_needs_attention());
+    gateway_boot_result(BOOT_DNS,0);
     new_boot(ESP_RST_POWERON);assert(!recovery); // normal unplug is not a failed startup
     gateway_boot_stage(BOOT_ROUTES);gateway_route_mark(4,7);
     raw=(esp_core_dump_summary_t){.exc_pc=0x40370000,.exc_task="ml_wg_mgr",.exc_bt_info={.depth=2,.bt={0x40370000,0x40371111}}};strcpy((char*)raw.app_elf_sha256,build_sha);raw_present=true;
