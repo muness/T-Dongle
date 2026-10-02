@@ -2,6 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build-host
+# The USB wrapper is shared with the original bridge; test its real code too.
+(cd ../.. && TEST_CFLAGS="-fsanitize=address,undefined -g" python3 tools/test_net.py)
 cc -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
 build-host/test_router
 : "${IDF_PATH:?Source ESP-IDF for the same cJSON used by the firmware}"
