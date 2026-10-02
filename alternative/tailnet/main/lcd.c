@@ -55,7 +55,7 @@ esp_err_t gateway_display_start(void) {
     // The control task already exists. Publish availability only while holding
     // the same lock used by its refreshes, including this first DMA frame.
     xSemaphoreTake(lock,portMAX_DELAY);
-    available=true;lcd_state state={.starting=true,.usb=tud_ready()};lcd_view view;lcd_compose(&state,GATEWAY_VERSION,&view);draw(&view);
+    available=true;lcd_state state={.starting=true,.usb=tud_ready(),.usb_configured=tud_mounted(),.usb_suspended=tud_suspended()};lcd_view view;lcd_compose(&state,GATEWAY_VERSION,&view);draw(&view);
     if(available)gpio_set_level(BOARD_LCD_BL,0);
     xSemaphoreGive(lock);
     return available?ESP_OK:ESP_FAIL;
@@ -66,11 +66,11 @@ fail:
 }
 void gateway_display_tick(void) {
     if(!available || !lock || xSemaphoreTake(lock,0)!=pdTRUE)return;
-    lcd_state state={0};if(!gateway_display_state(&state)){xSemaphoreGive(lock);return;}state.installing=installing;state.usb=tud_ready();
+    lcd_state state={0};if(!gateway_display_state(&state)){xSemaphoreGive(lock);return;}state.installing=installing;state.usb=tud_ready();state.usb_configured=tud_mounted();state.usb_suspended=tud_suspended();
     lcd_view view;lcd_compose(&state,GATEWAY_VERSION,&view);draw(&view);xSemaphoreGive(lock);
 }
 void gateway_display_installing(void) {
     if(!available || xSemaphoreTake(lock,pdMS_TO_TICKS(100))!=pdTRUE)return;
-    installing=true;lcd_state state={.installing=true,.usb=tud_ready()};lcd_view view;
+    installing=true;lcd_state state={.installing=true,.usb=tud_ready(),.usb_configured=tud_mounted(),.usb_suspended=tud_suspended()};lcd_view view;
     lcd_compose(&state,GATEWAY_VERSION,&view);draw(&view);xSemaphoreGive(lock);
 }

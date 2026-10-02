@@ -14,6 +14,10 @@ int main(int argc,char **argv) {
     assert(!strcmp(v.hint,"Add a 2.4 GHz network"));
     s.saved_wifi=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.detail,"Trying saved Wi-Fi"));s.saved_wifi=false;
     s.bridge=true;s.wifi=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.title,"WI-FI BRIDGE") && !strstr(v.detail,"internet"));assert(!strcmp(v.hint,"Waiting for USB host"));s.usb=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.hint,"USB host connected"));frame(out,"bridge",&s);s=(lcd_state){0};
+    s=(lcd_state){.wifi=true,.bridge=true,.usb_configured=true,.usb_suspended=true};lcd_compose(&s,"0.2.22",&v);assert(!strcmp(v.hint,"USB suspended") && strstr(v.footer,"USB SUSPENDED"));frame(out,"suspended",&s);
+    s.bridge=false;s.ready=s.enabled=1;lcd_compose(&s,"0.2.22",&v);assert(!strcmp(v.title,"TAILNET READY") && !strcmp(v.hint,"USB suspended"));
+    s.usb_configured=false;lcd_compose(&s,"0.2.22",&v);assert(!strcmp(v.hint,"Waiting for USB host"));
+    s.usb_configured=true;s.usb_suspended=false;s.usb=true;lcd_compose(&s,"0.2.22",&v);assert(!strcmp(v.hint,"USB routing is ready"));s=(lcd_state){0};
     s.starting=true;frame(out,"starting",&s);s.starting=false;
     s.wifi=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.title,"ADD A TAILNET"));frame(out,"empty",&s);
     s.saved=s.enabled=s.login=1;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.title,"APPROVE LOGIN"));frame(out,"signin",&s);

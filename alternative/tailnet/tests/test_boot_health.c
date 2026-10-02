@@ -1,3 +1,4 @@
+unsigned gateway_usb_health(unsigned i){return 0;}
 unsigned gateway_dns_count(unsigned i){return 0;}
 #include <assert.h>
 #include <stdbool.h>

@@ -134,6 +134,11 @@ int gateway_boot_report(void *context,int (*sink)(void *,const char *,size_t)) {
     const char *dns_keys[]={"queries","cache_hits","lock_failures","temporary_failures","absent_names","upstream_busy_drops","max_lookup_ticks","upstream_forwarded","upstream_replies","upstream_timeouts","upstream_pending_peak"};
     for(unsigned i=0;i<11;i++){if(i)jw_raw(w,",");jw_string(w,dns_keys[i]);jw_raw(w,":");jw_number(w,gateway_dns_count(i));}
     jw_raw(w,"}");
+    extern unsigned gateway_usb_health(unsigned);
+    jw_raw(w,",\"usb\":{");
+    const char *usb_keys[]={"suspend_count","resume_count","last_suspend_uptime_ms","last_resume_uptime_ms","remote_wakeup_enabled","configured","suspended","ready"};
+    for(unsigned i=0;i<8;i++){if(i)jw_raw(w,",");jw_string(w,usb_keys[i]);jw_raw(w,":");if(i<4)jw_number(w,gateway_usb_health(i));else jw_bool(w,gateway_usb_health(i)!=0);}
+    jw_raw(w,"}");
     jw_raw(w,",\"errors\":[");bool comma=false;
     for(unsigned i=1;i<BOOT_STAGE_COUNT;i++)if(errors[i]) {
         if(comma)jw_char(w,',');
