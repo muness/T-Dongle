@@ -317,6 +317,12 @@ err_t gateway_tunnel_input(struct pbuf *p, struct netif *wg) {
     size_t n = p->tot_len;
     pbuf_copy_partial(p, b, n, 0);
     pbuf_free(p);
+    /* The decryptor passes authenticated WireGuard padding with the IP
+     * packet. Normally lwIP trims it; our custom input bypasses that path.
+     * Use the inner IPv4 length without relaxing USB-side packet validation. */
+    if (n < 20 || b[0] >> 4 != 4 || rd16(b + 2) > n)
+        goto drop;
+    n = rd16(b + 2);
     unsigned h;
     if (!valid(b, n, &h) || !clamp_mss(b,n,h))
         goto drop;

@@ -35,9 +35,71 @@ static struct pbuf *packet(uint32_t src, uint32_t dst, uint16_t sport,
     checksums(b, 32, 20);
     return p;
 }
+/* Real WireGuard plaintext retains up to 15 bytes of encryption padding.
+ * SYN/ACK can happen to align while data and ACK-only packets do not. */
+static void padded_replies(void) {
+    struct netif wg = {.output = output}, other = {.output = output};
+    microlink_t client = {&wg, 0x64400001, 4};
+    membership_t member = {NULL, 42, &client};
+    members = &member;
+    uint32_t alias = gateway_alias(42, 0x64400002);
+    for (unsigned proto = 6; proto <= 17; proto += 11) {
+        for (unsigned payload = 0; payload < 64; payload++) {
+            unsigned inner = 20 + (proto == 6 ? 20 : 8) + payload;
+            struct pbuf *request = pbuf_alloc(0, inner, 0);
+            uint8_t *b = request->payload;
+            b[0] = 0x45; b[8] = 64; b[9] = proto;
+            wr16(b+2, inner); wr32(b+12, 0xc0a84d02); wr32(b+16, alias);
+            wr16(b+20, 1234); wr16(b+22, 8768);
+            if (proto == 6) {b[32] = 0x50; b[33] = 0x10;}
+            else wr16(b+24, inner-20);
+            checksums(b, inner, 20);
+            unsigned before = sends;
+            gateway_host_input(request, &usb);
+            assert(sends == before+1 && sent_on == &wg);
+            uint16_t mapped = rd16(sent+20);
+            unsigned padded = (inner+15)&~15;
+            struct pbuf *reply = pbuf_alloc(0, padded, 0);
+            b = reply->payload;
+            memcpy(b, sent, inner);
+            wr32(b+12, 0x64400002); wr32(b+16, client.vpn_ip);
+            wr16(b+20, 8768); wr16(b+22, mapped);
+            for (unsigned i=inner-payload; i<inner; i++) b[i]=(uint8_t)i;
+            checksums(b, inner, 20);
+            struct pbuf *wrong_member=pbuf_alloc(0,padded,0);
+            pbuf_take(wrong_member,b,padded);
+            gateway_tunnel_input(wrong_member,&other);
+            assert(sends == before+1);
+            struct pbuf *truncated=pbuf_alloc(0,inner-1,0);
+            pbuf_take(truncated,b,inner-1);
+            gateway_tunnel_input(truncated,&wg);
+            assert(sends == before+1);
+            gateway_tunnel_input(reply, &wg);
+            assert(sends == before+2 && sent_on == &usb);
+            assert(sent_size == inner && rd16(sent+2) == inner);
+            assert(rd32(sent+12) == alias && rd32(sent+16) == 0xc0a84d02);
+            assert(rd16(sent+20) == 8768 && rd16(sent+22) == 1234);
+            assert(finish(sum(sent,20,0)) == 0);
+            assert(finish(sum(sent+20,inner-20,sum(sent+12,8,0)+proto+inner-20)) == 0);
+            for (unsigned i=inner-payload; i<inner; i++) assert(sent[i] == (uint8_t)i);
+            /* Padding tolerance belongs only at authenticated WG ingress. */
+            if (inner != padded) {
+                struct pbuf *bad_host=pbuf_alloc(0,padded,0);
+                b=bad_host->payload;memcpy(b,sent,inner);
+                wr32(b+12,0xc0a84d02);wr32(b+16,alias);checksums(b,inner,20);
+                gateway_host_input(bad_host,&usb);
+                assert(sends == before+2);
+            }
+        }
+    }
+    gateway_forget(42);
+    members=NULL;
+}
 int main(void) {
     usb_interface=&usb;
     usb.output = output;
+    padded_replies();
+    sends=0;
     struct netif wg1 = {.output = output}, wg2 = {.output = output},
                  wg3 = {.output = output};
     microlink_t c1 = {&wg1, 0x64400001, 4}, c2 = {&wg2, 0x64400001, 4},
