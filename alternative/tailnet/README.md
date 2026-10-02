@@ -53,3 +53,7 @@ The firmware configures twenty socket descriptors. Eight are reserved for the HT
 ## Startup recovery (0.2.11)
 
 A saved Android v119 capture identified repeated task stack overflows in the exact 0.2.10 image. The journal writer now uses short-lived heap workspace instead of a large automatic ring, reducing its compiled Xtensa frame from 1776 to 160 bytes. Main startup stack is 7168 bytes and is released when initialization finishes. USB CDC management starts before peerstore mounting, diagnostic journal writes and Wi-Fi initialization. The build checks the effective sdkconfig and compiled journal frame. These changes require actual-board boot verification; they do not establish tailnet traffic acceptance. See [upstream comparison and salvage](docs/upstream-salvage-2026-10-01.md).
+
+## Runtime resilience (0.2.12)
+
+V120's saved evidence confirmed a runtime panic and repeated four-second map truncation. Maps now use progress-based inactivity deadlines with a total bound; one DERP task owns all TLS I/O and reconnect, saving a 10 KiB task stack per membership. TCP MSS is bounded for the routed packet size, and oversized peer packets cannot bypass queue ownership. Startup isolates optional failures, preserves USB management and saved settings, and latches recovery after a crash in the same binary. A new coredump partition preserves task/PC/backtrace evidence; Android automatically archives an allowlisted summary and exposes Restart services. See [evidence, fault-injection checks and remaining hardware limits](docs/runtime-resilience-2026-10-02.md).

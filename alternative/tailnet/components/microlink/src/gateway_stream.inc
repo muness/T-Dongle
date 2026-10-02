@@ -34,8 +34,13 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
 #endif
     int result = 0;
     bool applied = false;
-    uint64_t deadline = ml_get_time_ms() + (initial ? 15000 : 4000);
+    uint64_t started=ml_get_time_ms();
+    uint64_t hard_deadline=started+90000;
+    uint64_t deadline=started+(initial?15000:4000);
+    /* A flash-backed full map can take more than one poll slice. Continue
+     * while its DATA advances, but bound both silence and total ownership. */
     do {
+        size_t before=used;
         int n;
         if (ml->h2_acc_len) {
             if (ml->h2_acc_len > sizeof(gateway_plain)) {
@@ -327,10 +332,14 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
         }
         if (applied && !used)
             break;
+        if(used>before) {
+            uint64_t progress_deadline=ml_get_time_ms()+15000;
+            deadline=progress_deadline<hard_deadline?progress_deadline:hard_deadline;
+        }
     } while (ml_get_time_ms() < deadline);
     if (result >= 0 && (used || (initial && !applied && result != 1)))
         result = gateway_map_fail(
-            ml, 12, "Map ended before a complete message arrived");
+            ml, 12, "Map read deadline expired before the message completed");
 done:
 #if defined(GATEWAY_FLASH_DIRECTORY) && defined(GATEWAY_SEMANTIC_MAP)
     ml_directory_abort(ml);

@@ -9,15 +9,7 @@ static void write16(uint8_t *p, uint16_t n) {
     p[1] = n;
 }
 static void dns_task(void *arg) {
-    int sock = socket(AF_INET, SOCK_DGRAM, 0);
-    struct sockaddr_in local = {
-        .sin_family = AF_INET, .sin_port = htons(53), .sin_addr.s_addr = htonl(0xc0a84d01)};
-    if (sock < 0 || bind(sock, (struct sockaddr *)&local, sizeof(local)) < 0) {
-        if (sock >= 0)
-            close(sock);
-        vTaskDelete(NULL);
-        return;
-    }
+    int sock = (int)(intptr_t)arg;
     uint8_t packet[1500];
     for (;;) {
         struct sockaddr_in host;
@@ -112,4 +104,11 @@ static void dns_task(void *arg) {
         close(out);
     }
 }
-void gateway_dns_start(void) { xTaskCreate(dns_task, "gateway_dns", 4096, NULL, 3, NULL); }
+esp_err_t gateway_dns_start(void) {
+    int sock=socket(AF_INET,SOCK_DGRAM,0);
+    struct sockaddr_in local={.sin_family=AF_INET,.sin_port=htons(53),.sin_addr.s_addr=htonl(0xc0a84d01)};
+    if(sock<0)return ESP_ERR_NO_MEM;
+    if(bind(sock,(struct sockaddr *)&local,sizeof(local))<0){close(sock);return ESP_FAIL;}
+    if(xTaskCreate(dns_task,"gateway_dns",4096,(void *)(intptr_t)sock,3,NULL)!=pdPASS){close(sock);return ESP_ERR_NO_MEM;}
+    return ESP_OK;
+}

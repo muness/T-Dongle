@@ -36,6 +36,7 @@ static struct pbuf *packet(uint32_t src, uint32_t dst, uint16_t sport,
     return p;
 }
 int main(void) {
+    usb_interface=&usb;
     usb.output = output;
     struct netif wg1 = {.output = output}, wg2 = {.output = output},
                  wg3 = {.output = output};
@@ -96,6 +97,12 @@ int main(void) {
     assert(sends == before);
     gateway_host_input(packet(0xc0a84d02, b, 1234, 443), &usb);
     assert(rd16(sent + 20) != detach_port);
+    // Both SYN directions must advertise a safe segment size. Lower values
+    // survive, malformed option lengths are rejected without out-of-bounds reads.
+    uint8_t syn[44]={0};syn[9]=6;syn[32]=0x60;syn[33]=2;syn[40]=2;syn[41]=4;
+    wr16(syn+42,1460);assert(clamp_mss(syn,sizeof(syn),20) && rd16(syn+42)==1360);
+    wr16(syn+42,1200);assert(clamp_mss(syn,sizeof(syn),20) && rd16(syn+42)==1200);
+    syn[41]=255;assert(!clamp_mss(syn,sizeof(syn),20));
     /* Exercise malformed headers under sanitizers without creating routes. */
     for (unsigned n = 0; n < 10000; n++) {
         struct pbuf *p = pbuf_alloc(0, n % 80, 0);

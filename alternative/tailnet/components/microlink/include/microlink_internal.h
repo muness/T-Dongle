@@ -779,7 +779,6 @@ void ml_net_io_task(void *arg);
 
 /* ml_derp.c */
 void ml_derp_tx_task(void *arg);
-void ml_derp_rx_task(void *arg);
 esp_err_t ml_derp_connect(microlink_t *ml);
 void ml_derp_disconnect(microlink_t *ml);
 

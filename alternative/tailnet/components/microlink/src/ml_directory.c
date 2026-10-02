@@ -5,6 +5,7 @@
 #include "microlink_internal.h"
 #include "esp_vfs_fat.h"
 #include "wear_levelling.h"
+#include "esp_partition.h"
 #include <unistd.h>
 static SemaphoreHandle_t directory_lock;
 static StaticSemaphore_t directory_lock_storage;
@@ -14,8 +15,19 @@ static wl_handle_t directory_wl = WL_INVALID_HANDLE;
 #define ROOT "/peers"
 bool ml_directory_mount(void) {
     directory_lock = xSemaphoreCreateMutexStatic(&directory_lock_storage);
+    const esp_partition_t *partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_FAT,"peerstore");
+    if(!partition)return false;
+    /* Only a completely blank, never-used partition may be formatted. A bad
+     * mount must not silently erase peer records or stable USB alias mappings. */
+    bool blank=true;uint8_t bytes[256];
+    for(size_t offset=0;blank && offset<partition->size;offset+=sizeof(bytes)) {
+        size_t n=partition->size-offset;if(n>sizeof(bytes))n=sizeof(bytes);
+        if(esp_partition_read(partition,offset,bytes,n)!=ESP_OK)return false;
+        for(size_t i=0;i<n;i++)if(bytes[i]!=0xff){blank=false;break;}
+        if(!(offset%16384))vTaskDelay(1);
+    }
     esp_vfs_fat_mount_config_t config = {
-        .format_if_mount_failed = true, .max_files = 4,
+        .format_if_mount_failed = blank, .max_files = 4,
         .allocation_unit_size = 4096};
     return esp_vfs_fat_spiflash_mount_rw_wl(ROOT, "peerstore", &config,
                                            &directory_wl) == ESP_OK;

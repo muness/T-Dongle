@@ -9,6 +9,7 @@
 #define ESP_OK 0
 #define ESP_FAIL -1
 #define HTTPD_403_FORBIDDEN 403
+#define HTTPD_500_INTERNAL_SERVER_ERROR 500
 #define MALLOC_CAP_INTERNAL 1
 #define pdTRUE 1
 #define pdMS_TO_TICKS(n) (n)

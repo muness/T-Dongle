@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // CDC plumbing adapted from DrWhax/esp32-usb-wifi; see licenses/.
 #include "gateway.h"
+#include "boot_health.h"
 bool control_submit(const char *line);
 #include "sdkconfig.h"
 #include <stdarg.h>
@@ -12,6 +13,10 @@ static char line[512];
 static size_t used;
 static bool overflow;
 static QueueHandle_t output;
+static StaticQueue_t output_queue;
+static uint8_t output_bytes[8*128];
+static StaticTask_t writer_tcb;
+static StackType_t writer_stack[3072];
 static void writer(void *arg) {
     char b[128];
     for (;;)
@@ -36,7 +41,10 @@ void mgmt_write(const char *s) {
         if (n > 127)
             n = 127;
         memcpy(b, s, n);
-        xQueueSend(output, b, 0);
+        /* Bounded backpressure: boot reports must not silently lose chunks.
+         * CDC callbacks never block the TinyUSB task. */
+        TickType_t wait=!strcmp(pcTaskGetName(NULL),"gateway_control")?pdMS_TO_TICKS(300):0;
+        xQueueSend(output, b, wait);
         s += n;
     }
 }
@@ -73,19 +81,18 @@ static void rx(int itf, cdcacm_event_t *e) {
 }
 static void state(int itf, cdcacm_event_t *e) {
     if (e->line_state_changed_data.dtr)
-        mgmt_write("T-Dongle-S3 adapter 0.1.0. Type help. Input is not echoed.\r\n");
+        mgmt_write("T-Dongle-S3 tailnet " GATEWAY_VERSION ". Type help. Input is not echoed.\r\n");
 }
-void console_init(void) {
-    output = xQueueCreate(8, 128);
-    assert(output);
-    assert(xTaskCreate(writer, "console_tx", 3072, NULL, 2, NULL) == pdPASS);
+esp_err_t console_init(void) {
+    output = xQueueCreateStatic(8,128,output_bytes,&output_queue);
+    if(!xTaskCreateStatic(writer,"console_tx",sizeof(writer_stack),NULL,2,writer_stack,&writer_tcb))return ESP_ERR_NO_MEM;
     tinyusb_config_cdcacm_t c = {
         .cdc_port = TINYUSB_CDC_ACM_0, .callback_rx = rx, .callback_line_state_changed = state};
-    ESP_ERROR_CHECK(tinyusb_cdcacm_init(&c));
+    return tinyusb_cdcacm_init(&c);
 }
 #else
 void mgmt_write(const char *s) { (void)s; }
-void console_init(void) {}
+esp_err_t console_init(void) {return ESP_ERR_NOT_SUPPORTED;}
 #endif
 void console_printf(const char *fmt, ...) {
     char b[512];

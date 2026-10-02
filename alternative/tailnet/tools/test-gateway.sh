@@ -109,3 +109,5 @@ s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('esp_err_t 
 PYQUEUE
 cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_jit_queue.c -o build-host/test_jit_queue
 build-host/test_jit_queue
+
+python tools/test-resilience.py

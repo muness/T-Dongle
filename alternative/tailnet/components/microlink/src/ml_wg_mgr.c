@@ -27,6 +27,13 @@
 #include "lwip/ip.h"
 #include "lwip/tcpip.h"
 #include "nacl_box.h"
+#ifdef ESP_PLATFORM
+extern void gateway_route_mark(unsigned stage,uint32_t member);
+#define ROUTE_MARK(stage) gateway_route_mark(stage,ml->config.diagnostic_id)
+#else
+#define ROUTE_MARK(stage) ((void)0)
+#endif
+
 #include "wireguardif.h"
 #include "wireguard.h"
 #include "mbedtls/base64.h"
@@ -411,6 +418,10 @@ static esp_err_t wg_init_interface_impl(microlink_t *ml) {
          * Avoiding udp_bind keeps WG responses on the DISCO BSD socket;
          * udp_sendto only needs local_port set on the PCB. */
         wg_udp_pcb_create_cb(ml);
+        if(!ml->wg_output_pcb) {
+            wireguardif_shutdown(netif);netif_set_link_down(netif);netif_set_down(netif);
+            netif_remove(netif);wireguardif_free(netif);free(netif);return ESP_ERR_NO_MEM;
+        }
     }
 
     /* Register output callbacks for magicsock mode */
@@ -911,6 +922,7 @@ static void apply_peer_update(microlink_t *ml, const ml_peer_update_t *update) {
 #ifdef ESP_PLATFORM
 /* Called only by the peer owner. Keep hot peers; never evict recent traffic. */
 static int directory_activate(microlink_t *ml, const ml_peer_update_t *record) {
+    ROUTE_MARK(2);
     if(!ml->directory.session_valid)return -1;
     int idx=find_peer_by_key(ml,record->public_key);
     if(idx>=0) {ml->jit_hits++;ml->peers[idx].jit_used_ms=ml_get_time_ms();return idx;}
@@ -988,7 +1000,9 @@ static void directory_flush_packets(microlink_t *ml) {
                 pbuf_take(b,(uint8_t *)(packet+1)+sizeof(len),len);
                 ip4_addr_t ip={.addr=htonl(packet->vpn_ip)};
                 struct netif *wg=ml->wg_netif;
+                ROUTE_MARK(4);
                 GATEWAY_WG_CALL(wg->output(wg,b,&ip));pbuf_free(b);
+                ROUTE_MARK(0);
                 ml->peers[idx].jit_used_ms=ml_get_time_ms();
             }
             discard=true;
@@ -1013,7 +1027,8 @@ static void process_peer_updates(microlink_t *ml) {
             bool kept=false;
             if(idx>=0)for(unsigned i=0;i<4;i++)if(!ml->jit_pending[i].packet) {
                 ml->jit_pending[i].packet=update;ml->jit_pending[i].expires=ml_get_time_ms()+5000;
-                ml_wg_mgr_trigger_handshake(ml,update->vpn_ip);kept=true;break;
+                ROUTE_MARK(3);
+                ml_wg_mgr_trigger_handshake(ml,update->vpn_ip);ROUTE_MARK(0);kept=true;break;
             }
             if(!kept) {ml->jit_dropped++;free(update);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);}
             __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);continue;
@@ -1774,7 +1789,9 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
 
     /* Call WG RX handler — pbuf is PBUF_RAM so data survives async delivery */
     LOCK_TCPIP_CORE();
+    ROUTE_MARK(5);
     wireguardif_network_rx(device, NULL, p, &addr, pkt->src_port);
+    ROUTE_MARK(0);
     UNLOCK_TCPIP_CORE();
 }
 
@@ -2456,7 +2473,9 @@ void ml_wg_mgr_task(void *arg) {
         if (ml->wg_netif && now - last_wg_periodic_ms >= 400) {
             uint64_t t0 = now;
             LOCK_TCPIP_CORE();
+            ROUTE_MARK(6);
             wireguardif_periodic((struct netif *)ml->wg_netif);
+            ROUTE_MARK(0);
             UNLOCK_TCPIP_CORE();
             uint64_t dt = ml_get_time_ms() - t0;
             last_wg_periodic_ms = now;
@@ -2524,17 +2543,18 @@ void ml_wg_mgr_task(void *arg) {
      * before it is torn down, not after it was freed. */
     if (ml->wg_netif) {
         struct netif *netif = (struct netif *)ml->wg_netif;
+        LOCK_TCPIP_CORE();
         ml->wg_netif = NULL;
         wireguardif_shutdown(netif);
         netif_set_link_down(netif);
         netif_set_down(netif);
-        vTaskDelay(pdMS_TO_TICKS(100));
         netif_remove(netif);
         /* The struct wireguard_device behind netif->state (every peer's
          * keypairs; ~14.7 KB on the S3 build) was never released: only the
          * netif around it was, so each stop/start cycle leaked it. */
         wireguardif_free(netif);
         free(netif);
+        UNLOCK_TCPIP_CORE();
     }
 
     ESP_LOGI(TAG, "WG Manager task exiting");

@@ -6,6 +6,7 @@
 #include "esp_netif_net_stack.h"
 #include "esp_timer.h"
 #include "gateway.h"
+#include "boot_health.h"
 #include "lwip/inet.h"
 #include "lwip/tcpip.h"
 #endif
@@ -37,8 +38,10 @@ bool gateway_routes_init(void) {
         ml_directory_alias_t record={aliases[i].id,aliases[i].peer,aliases[i].alias},old;
         if(!ml_directory_alias_find(record.id,record.peer,record.alias,&old) && !ml_directory_alias_save(&record))routes_ready=false;
     }
+    if(!routes_ready)return false;
     route_queue=xQueueCreate(4,sizeof(struct {struct pbuf *packet;struct netif *input;unsigned generation;}));
-    if(!route_queue || xTaskCreate(route_task,"usb_routes",4096,NULL,3,NULL)!=pdPASS)routes_ready=false;
+    if(!route_queue)return false;
+    if(xTaskCreate(route_task,"usb_routes",4096,NULL,3,NULL)!=pdPASS){vQueueDelete(route_queue);route_queue=NULL;routes_ready=false;}
     return routes_ready;
 }
 #else
@@ -143,6 +146,20 @@ static void checksums(uint8_t *b, size_t n, unsigned h) {
     uint16_t c = finish(s);
     wr16(t + offset, c ? c : 65535);
 }
+/* Clamp both SYN directions so ordinary TCP data fits the queue/WG MTU.
+ * Never enlarge an existing smaller offer; malformed options fail closed. */
+static bool clamp_mss(uint8_t *b,size_t n,unsigned h) {
+    if(b[9]!=6 || !(b[h+13]&2))return true;
+    unsigned end=h+(b[h+12]>>4)*4;
+    if(end>n)return false;
+    for(unsigned pos=h+20;pos<end;) {
+        unsigned kind=b[pos];if(!kind)break;if(kind==1){pos++;continue;}
+        if(pos+2>end || b[pos+1]<2 || pos+b[pos+1]>end)return false;
+        if(kind==2) {if(b[pos+1]!=4)return false;if(rd16(b+pos+2)>1360)wr16(b+pos+2,1360);}
+        pos+=b[pos+1];
+    }
+    return true;
+}
 static bool valid(uint8_t *b, size_t n, unsigned *h) {
     if (n < 20 || b[0] >> 4 != 4)
         return false;
@@ -160,8 +177,9 @@ static bool valid(uint8_t *b, size_t n, unsigned *h) {
         return false;
     return finish(sum(b, *h, 0)) == 0;
 }
-/* Called on the lwIP thread. Consumes only synthetic tailnet destinations. */
+/* Synthetic USB traffic runs on usb_routes; non-USB ingress is filtered in lwIP. */
 static int gateway_process_host_input(struct pbuf *p, struct netif *input) {
+    if(!usb_interface){pbuf_free(p);return 1;}
     uint8_t first[20];
     if (p->tot_len < 20 || pbuf_copy_partial(p, first, 20, 0) != 20)
         return 0;
@@ -199,7 +217,7 @@ static int gateway_process_host_input(struct pbuf *p, struct netif *input) {
     pbuf_copy_partial(p, b, n, 0);
     pbuf_free(p);
     unsigned h;
-    if (!valid(b, n, &h) || b[8] < 2)
+    if (!valid(b, n, &h) || !clamp_mss(b,n,h) || b[8] < 2)
         goto drop;
     if (xSemaphoreTake(members_lock, 0) != pdTRUE)
         goto drop;
@@ -275,7 +293,13 @@ static int gateway_process_host_input(struct pbuf *p, struct netif *input) {
         wr16(b + h, f->mapped);
         b[8]--;
         checksums(b, n, h);
+#ifndef GATEWAY_HOST_TEST
+        gateway_route_mark(1,m->id);
+#endif
         ml_gateway_queue_packet(m->client,a->peer,b,n);
+#ifndef GATEWAY_HOST_TEST
+        gateway_route_mark(0,0);
+#endif
     }
     xSemaphoreGive(members_lock);
 drop:
@@ -294,7 +318,7 @@ err_t gateway_tunnel_input(struct pbuf *p, struct netif *wg) {
     pbuf_copy_partial(p, b, n, 0);
     pbuf_free(p);
     unsigned h;
-    if (!valid(b, n, &h))
+    if (!valid(b, n, &h) || !clamp_mss(b,n,h))
         goto drop;
     if (xSemaphoreTake(members_lock, 0) != pdTRUE)
         goto drop;
@@ -322,7 +346,7 @@ err_t gateway_tunnel_input(struct pbuf *p, struct netif *wg) {
                 pbuf_take(out, b, n);
                 ip4_addr_t ip = {.addr = htonl(f->host)};
                 struct netif *usb = esp_netif_get_netif_impl(usb_interface);
-                usb->output(usb, out, &ip);
+                if(usb)usb->output(usb, out, &ip);
                 pbuf_free(out);
             }
             break;
@@ -347,10 +371,10 @@ static void route_task(void *context) {
 int gateway_host_input(struct pbuf *p,struct netif *input) {
 #ifndef GATEWAY_HOST_TEST
     uint8_t first[20];
-    if(input==esp_netif_get_netif_impl(usb_interface) && p->tot_len<=1400 &&
+    if(usb_interface && input==esp_netif_get_netif_impl(usb_interface) &&
        pbuf_copy_partial(p,first,20,0)==20 && (rd32(first+16)&0xfffe0000)==0xc6120000) {
         route_item item={p,input,atomic_load(&usb_generation)};
-        if(!route_queue || xQueueSend(route_queue,&item,0)!=pdTRUE)pbuf_free(p);
+        if(p->tot_len>1400 || !routes_ready || !route_queue || xQueueSend(route_queue,&item,0)!=pdTRUE)pbuf_free(p);
         return 1;
     }
 #endif

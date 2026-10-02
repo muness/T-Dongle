@@ -1,3 +1,5 @@
+#include "../main/boot_health.h"
+bool gateway_boot_recovery(void){return false;}
 #include "cJSON.h"
 #include <assert.h>
 #include <stdbool.h>

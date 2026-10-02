@@ -52,10 +52,11 @@ static uint8_t input[100000];
 static size_t input_len, input_pos, chunk;
 static unsigned replies, settings_acks;
 static void gateway_diag_record(const microlink_t *ml, uint32_t event, uint32_t detail) {}
-static uint64_t now;
+static uint64_t now, receive_delay;
 static uint64_t ml_get_time_ms(void) { return ++now; }
 static int noise_recv_inplace(microlink_t *ml, int *noise, uint8_t *b,
                               size_t max) {
+    now+=receive_delay;
     if(ml->session_input){
         if(ml->session_pos==ml->session_len){errno=EAGAIN;now+=20000;return -1;}
         size_t n=ml->session_len-ml->session_pos;if(n>ml->session_chunk)n=ml->session_chunk;
@@ -115,7 +116,7 @@ static void frame(uint8_t type, uint8_t flags, uint32_t stream,
 }
 static void reset(void) {
     input_len = input_pos = now = replies = settings_acks = 0;
-    chunk = 1024;
+    chunk = 1024;receive_delay=0;
 }
 static void *fragmented_membership(void *arg) {
     unsigned identity=(uintptr_t)arg;
@@ -244,6 +245,22 @@ int main(void) {
     assert(gateway_read_map(&m, &noise, 3, true) == 0 && m.maps == 1 &&
            m.map_declared_bytes == 80000 && m.map_projected_bytes == 2);
     free(large);
+    // Reproduce the device's ~50 KB streaming map: advancing flash work must
+    // not be discarded merely because the four-second poll slice expired.
+    reset();memset(&m,0,sizeof(m));
+    const char *slow="{\"Unused\":\"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\"}";
+    size_t slow_len=strlen(slow);uint8_t slow_map[256];
+    for(unsigned i=0;i<4;i++)slow_map[i]=slow_len>>(8*i);
+    memcpy(slow_map+4,slow,slow_len);frame(0,0,5,slow_map,slow_len+4);
+    chunk=15;receive_delay=5000;
+    assert(!poll_map_update(&m,&noise) && m.maps==1 && now>15000);
+    // Drip-fed input cannot hold the shared workspace indefinitely.
+    reset();memset(&m,0,sizeof(m));frame(0,0,5,slow_map,slow_len+4);
+    chunk=10;receive_delay=14000;
+    assert(poll_map_update(&m,&noise)<0 && m.map_error==12 && !m.maps && now>=90000);
+    // A stopped partial message still times out and cannot become a saved map.
+    reset();memset(&m,0,sizeof(m));frame(0,0,5,slow_map,5);
+    assert(poll_map_update(&m,&noise)<0 && !m.maps);
     reset();
     memset(&m, 0, sizeof(m));
     uint8_t settings[6] = {0}, ping[8] = {1};

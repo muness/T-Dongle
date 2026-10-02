@@ -9,6 +9,7 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "gateway.h"
+#include "boot_health.h"
 #include "socket_budget.h"
 #include "esp_system.h"
 #include "lwip/inet.h"
@@ -33,6 +34,8 @@ static bool online;
 static volatile bool wifi_scan_pauses_reconnect;
 static SemaphoreHandle_t wifi_scan_lock;
 static bool route_storage_ok;
+static bool settings_ok, wifi_ready;
+static StaticSemaphore_t members_mutex, scan_mutex;
 bool gateway_online(void) { return online; }
 static uint32_t next_id = 1;
 static nvs_handle_t store;
@@ -120,76 +123,64 @@ static wifi_config_t wifi_config;
 extern const char setup_html_start[] asm("_binary_setup_html_start");
 extern const char setup_html_end[] asm("_binary_setup_html_end");
 static bool save_members(void) {
-    cJSON *root = cJSON_CreateObject(),
-          *list = cJSON_AddArrayToObject(root, "members");
-    cJSON_AddNumberToObject(root, "next_id", next_id);
-    for (membership_t *m = members; m; m = m->next) {
-        cJSON *j = cJSON_CreateObject();
-        cJSON_AddNumberToObject(j, "id", m->id);
-        cJSON_AddNumberToObject(j,"start_heap_before",m->start_heap_before);cJSON_AddNumberToObject(j,"start_heap_after",m->start_heap_after);
-        cJSON_AddStringToObject(j, "label", m->label);
-        cJSON_AddStringToObject(j, "key", m->key);
-        cJSON_AddBoolToObject(j, "enabled", m->enabled);
-        cJSON_AddItemToArray(list, j);
+    if(!settings_ok)return false;
+    cJSON *root=cJSON_CreateObject(), *list=NULL;
+    bool ok=root && (list=cJSON_AddArrayToObject(root,"members")) &&
+        cJSON_AddNumberToObject(root,"next_id",next_id);
+    for(membership_t *m=members;ok && m;m=m->next) {
+        cJSON *j=cJSON_CreateObject();
+        ok=j && cJSON_AddNumberToObject(j,"id",m->id) &&
+            cJSON_AddStringToObject(j,"label",m->label) &&
+            cJSON_AddStringToObject(j,"key",m->key) &&
+            cJSON_AddBoolToObject(j,"enabled",m->enabled) && cJSON_AddItemToArray(list,j);
+        if(!ok)cJSON_Delete(j);
     }
-    char *json = cJSON_PrintUnformatted(root);
+    char *json=ok?cJSON_PrintUnformatted(root):NULL;
     cJSON_Delete(root);
-    if (!json)
-        return false;
-    if (strlen(json) >= 16384) {
-        free(json);
-        return false;
-    }
-    esp_err_t err = nvs_set_str(store, "members", json);
+    if(!json)return false;
+    bool fits=strlen(json)<16384;
+    esp_err_t result=fits?nvs_set_str(store,"members",json):ESP_ERR_INVALID_SIZE;
     free(json);
-    if (err != ESP_OK)
-        return false;
-    return nvs_commit(store) == ESP_OK;
+    return result==ESP_OK && nvs_commit(store)==ESP_OK;
 }
 static void identify(membership_t *m) {
     snprintf(m->ns, sizeof(m->ns), "tn_%08lx", (unsigned long)m->id);
     snprintf(m->hostname, sizeof(m->hostname), "tdongle-%s-%lx", m->label,
              (unsigned long)m->id);
 }
-static void load_members(void) {
-    size_t n = 0;
-    if (nvs_get_str(store, "members", NULL, &n) != ESP_OK || n > 16384)
-        return;
-    char *s = malloc(n);
-    if (!s)
-        return;
-    if (nvs_get_str(store, "members", s, &n) != ESP_OK) {
-        free(s);
-        return;
-    }
-    cJSON *root = cJSON_Parse(s);
-    free(s);
-    if (!root)
-        return;
-    cJSON *id = cJSON_GetObjectItem(root, "next_id");
-    if (cJSON_IsNumber(id) && id->valuedouble > 0 &&
-        id->valuedouble < UINT32_MAX)
-        next_id = id->valuedouble;
+static bool load_members(void) {
+    size_t n=0;esp_err_t result=nvs_get_str(store,"members",NULL,&n);
+    if(result==ESP_ERR_NVS_NOT_FOUND)return true;
+    if(result!=ESP_OK || n<2 || n>16384)return false;
+    char *s=malloc(n);if(!s)return false;
+    if(nvs_get_str(store,"members",s,&n)!=ESP_OK){free(s);return false;}
+    cJSON *root=cJSON_Parse(s);free(s);
+    if(!root)return false;
+    cJSON *id=cJSON_GetObjectItem(root,"next_id"), *list=cJSON_GetObjectItem(root,"members");
+    bool ok=cJSON_IsNumber(id) && id->valuedouble>=1 && id->valuedouble<UINT32_MAX &&
+        id->valuedouble==(uint32_t)id->valuedouble && cJSON_IsArray(list);
+    membership_t *loaded=NULL;
     cJSON *j;
-    cJSON_ArrayForEach(j, cJSON_GetObjectItem(root, "members")) {
-        cJSON *label = cJSON_GetObjectItem(j, "label"),
-              *key = cJSON_GetObjectItem(j, "key"),
-              *mid = cJSON_GetObjectItem(j, "id");
-        if (!cJSON_IsString(label) || !cJSON_IsString(key) ||
-            !cJSON_IsNumber(mid) || mid->valuedouble <= 0)
-            continue;
-        membership_t *m = calloc(1, sizeof(*m));
-        if (!m)
-            break;
-        m->id = mid->valuedouble;
-        strlcpy(m->label, label->valuestring, sizeof(m->label));
-        strlcpy(m->key, key->valuestring, sizeof(m->key));
-        m->enabled = cJSON_IsTrue(cJSON_GetObjectItem(j, "enabled"));
-        identify(m);
-        m->next = members;
-        members = m;
+    cJSON_ArrayForEach(j,list) {
+        if(!ok)break;
+        cJSON *label=cJSON_GetObjectItem(j,"label"),*key=cJSON_GetObjectItem(j,"key"),
+              *mid=cJSON_GetObjectItem(j,"id"),*enabled=cJSON_GetObjectItem(j,"enabled");
+        ok=cJSON_IsString(label) && label->valuestring[0] && strlen(label->valuestring)<=20 &&
+           cJSON_IsString(key) && strlen(key->valuestring)<160 && cJSON_IsBool(enabled) &&
+           cJSON_IsNumber(mid) && mid->valuedouble>=1 && mid->valuedouble<id->valuedouble &&
+           mid->valuedouble==(uint32_t)mid->valuedouble;
+        if(!ok)break;
+        for(membership_t *m=loaded;m;m=m->next)
+            if(m->id==(uint32_t)mid->valuedouble || !strcasecmp(m->label,label->valuestring))ok=false;
+        if(!ok)break;
+        membership_t *m=calloc(1,sizeof(*m));if(!m){ok=false;break;}
+        m->id=(uint32_t)mid->valuedouble;strlcpy(m->label,label->valuestring,sizeof(m->label));
+        strlcpy(m->key,key->valuestring,sizeof(m->key));m->enabled=cJSON_IsTrue(enabled);
+        identify(m);m->next=loaded;loaded=m;
     }
-    cJSON_Delete(root);
+    if(ok){members=loaded;next_id=(uint32_t)id->valuedouble;}
+    else while(loaded){membership_t *next=loaded->next;memset(loaded,0,sizeof(*loaded));free(loaded);loaded=next;}
+    cJSON_Delete(root);return ok;
 }
 static bool stop_member(membership_t *m) {
     extern void gateway_suspend(uint32_t id);
@@ -207,10 +198,11 @@ static bool stop_member(membership_t *m) {
     return true;
 }
 /* Account for the allocations requested by microlink_init/start, plus
- * allocator/task bookkeeping and 16 KiB retained for HTTP/control recovery.
+ * allocator/task bookkeeping, deferred WG/TLS allocations (40,000 bytes), and
+ * 16 KiB retained for HTTP/control recovery.
  * Shared registration/map byte buffers are static, not charged per member. */
 static size_t member_start_budget(void) {
-    size_t tasks = ML_TASK_NET_IO_STACK + 2 * ML_TASK_DERP_TX_STACK +
+    size_t tasks = ML_TASK_NET_IO_STACK + ML_TASK_DERP_TX_STACK +
                    ML_TASK_COORD_STACK + ML_TASK_WG_MGR_STACK;
     size_t queues = ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
                     (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH +
@@ -218,7 +210,7 @@ static size_t member_start_budget(void) {
                     ML_COORD_CMD_QUEUE_DEPTH * sizeof(ml_coord_cmd_t) +
                     ML_PEER_UPDATE_QUEUE_DEPTH * sizeof(ml_peer_update_t *);
     return sizeof(microlink_t) + tasks + queues + 6 * sizeof(StaticQueue_t) +
-           5 * sizeof(StaticTask_t) + 2048 + 16384;
+           4 * sizeof(StaticTask_t) + 2048 + 16384 + 40000;
 }
 static void start_member(membership_t *m) {
     if (!m->enabled || m->client || !online)
@@ -325,6 +317,7 @@ static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
 static void usb_free_tx(void *buffer, void *ctx) { free(buffer); }
 static void usb_free_rx(void *handle, void *buffer) { free(buffer); }
 static esp_err_t usb_rx(void *buffer, uint16_t len, void *ctx) {
+    if (!usb_interface) return ESP_ERR_INVALID_STATE;
     void *copy = malloc(len);
     if (!copy)
         return ESP_ERR_NO_MEM;
@@ -376,6 +369,7 @@ static esp_err_t wifi_scan(httpd_req_t *req) {
     if (!local_request(req))
         return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
                                    "USB access required");
+    if (!wifi_ready) return failure(req, "Wi-Fi startup failed; saved diagnostics contain the reason");
     if (xSemaphoreTake(wifi_scan_lock, 0) != pdTRUE)
         return failure(req, "A Wi-Fi scan is already running");
 
@@ -440,10 +434,11 @@ static esp_err_t wifi_scan(httpd_req_t *req) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    "Out of memory returning Wi-Fi scan");
     }
-    bool json_ok = cJSON_AddBoolToObject(response, "ok", true) &&
+    bool attached = cJSON_AddItemToObject(response, "networks", networks);
+    if (!attached) cJSON_Delete(networks);
+    bool json_ok = attached && cJSON_AddBoolToObject(response, "ok", true) &&
                    cJSON_AddNumberToObject(response, "count", count) &&
-                   cJSON_AddBoolToObject(response, "truncated", total > count) &&
-                   cJSON_AddItemToObject(response, "networks", networks);
+                   cJSON_AddBoolToObject(response, "truncated", total > count);
     for (uint16_t i = 0; i < count; i++) {
         if (!json_ok)
             break;
@@ -504,10 +499,12 @@ static bool local_request(httpd_req_t *req) {
 static esp_err_t diagnostics(httpd_req_t *req) {
     if (!local_request(req))
         return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "USB access required");
-    gateway_diag_ring_t ring = {.magic = DIAG_RING_MAGIC};
+    gateway_diag_ring_t *ring=calloc(1,sizeof(*ring));
+    if(!ring)return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Out of memory reading journal");
+    ring->magic=DIAG_RING_MAGIC;
     bool available = false;
     if (diag_lock && xSemaphoreTake(diag_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
-        gateway_diag_load(&ring); available = true;
+        gateway_diag_load(ring); available = true;
         xSemaphoreGive(diag_lock);
     }
     httpd_resp_set_type(req, "application/json");
@@ -517,11 +514,11 @@ static esp_err_t diagnostics(httpd_req_t *req) {
                               available ? "true" : "false");
     if (prefix_len < 0 || prefix_len >= sizeof(prefix) ||
         httpd_resp_send_chunk(req, prefix, prefix_len) != ESP_OK)
-        return ESP_FAIL;
+        {free(ring);return ESP_FAIL;}
     char row[1024];
-    unsigned first = (ring.next + DIAG_RING_COUNT - ring.count) % DIAG_RING_COUNT;
-    for (unsigned i = 0; i < ring.count; i++) {
-        gateway_diag_record_t *e = &ring.entries[(first + i) % DIAG_RING_COUNT];
+    unsigned first = (ring->next + DIAG_RING_COUNT - ring->count) % DIAG_RING_COUNT;
+    for (unsigned i = 0; i < ring->count; i++) {
+        gateway_diag_record_t *e = &ring->entries[(first + i) % DIAG_RING_COUNT];
         int n = snprintf(row, sizeof(row),
             "%s{\"uptime_ms\":%lu,\"member_id\":%lu,\"event\":%lu,\"detail\":%lu,\"state\":%lu,\"map_attempts\":%lu,\"map_bytes\":%lu,\"map_error\":%lu,\"h2_error\":%lu,\"h2_stream\":%lu,\"free_memory\":%lu,\"largest_free_block\":%lu,\"control_stage\":%lu,\"noise_error\":%lu,\"noise_frame_bytes\":%lu,\"reset_reason\":%lu,\"wifi\":%lu,\"sockets_open\":%lu,\"sockets_peak\":%lu,\"socket_failures\":%lu,\"socket_errno\":%lu,\"socket_operation\":%lu,\"reason\":\"%s\",\"h2_debug\":\"%s\"}",
             i ? "," : "", (unsigned long)e->uptime_ms,
@@ -537,8 +534,9 @@ static esp_err_t diagnostics(httpd_req_t *req) {
             (unsigned long)e->socket_failures, (unsigned long)e->socket_errno,
             (unsigned long)e->socket_operation, e->reason, e->h2_debug);
         if (n < 0 || n >= sizeof(row) || httpd_resp_send_chunk(req, row, n) != ESP_OK)
-            return ESP_FAIL;
+            {free(ring);return ESP_FAIL;}
     }
+    free(ring);
     esp_err_t ret = httpd_resp_send_chunk(req, "]}", 2);
     if (ret != ESP_OK) return ret;
     return httpd_resp_send_chunk(req, NULL, 0);
@@ -706,7 +704,8 @@ static esp_err_t status(httpd_req_t *req) {
         jw_bool(w, value);                                                     \
         jw_char(w, ',');                                                       \
     } while (0)
-    STR("firmware", "0.2.11");
+    STR("firmware", GATEWAY_VERSION);
+    BOOL("recovery", gateway_boot_recovery());
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
     gateway_socket_stats sockets = gateway_sockets_snapshot();
@@ -843,7 +842,10 @@ static esp_err_t command(httpd_req_t *req) {
         cJSON_Delete(j);
         return failure(req, "Memberships are busy; retry shortly");
     }
-    if (action && !strcmp(action, "wifi")) {
+    if (!settings_ok || gateway_boot_recovery()) {
+        error = "Recovery mode: settings are preserved. Use Restart services in the app after saving diagnostics.";
+    } else if (action && !strcmp(action, "wifi")) {
+        if(!wifi_ready){xSemaphoreGive(members_lock);cJSON_Delete(j);return failure(req,"Wi-Fi did not start; restart services after saving diagnostics");}
         const char *ssid = cJSON_GetStringValue(cJSON_GetObjectItem(j, "ssid")),
                    *password =
                        cJSON_GetStringValue(cJSON_GetObjectItem(j, "password"));
@@ -861,8 +863,8 @@ static esp_err_t command(httpd_req_t *req) {
             else {
                 wifi_config = candidate;
                 esp_wifi_disconnect();
-                esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-                esp_wifi_connect();
+                if(esp_wifi_set_config(WIFI_IF_STA, &wifi_config)!=ESP_OK || esp_wifi_connect()!=ESP_OK)
+                    error="Wi-Fi saved, but activation failed; restart services";
             }
         }
     } else if (action && !strcmp(action, "add")) {
@@ -963,36 +965,16 @@ static esp_err_t command(httpd_req_t *req) {
     cJSON_AddBoolToObject(ok, "ok", true);
     return json_reply(req, ok);
 }
-void app_main(void) {
-    ESP_ERROR_CHECK(nvs_flash_init());
-    ESP_ERROR_CHECK(nvs_open("tn_settings", NVS_READWRITE, &store));
-    members_lock = xSemaphoreCreateMutex();
-    wifi_scan_lock = xSemaphoreCreateMutex();
-    ESP_ERROR_CHECK(members_lock && wifi_scan_lock ? ESP_OK : ESP_ERR_NO_MEM);
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_ip_info_t ip = {0};
-    IP4_ADDR(&ip.ip, 192, 168, 77, 1);
-    ip.gw = ip.ip;
-    IP4_ADDR(&ip.netmask, 255, 255, 255, 0);
-    esp_netif_inherent_config_t base = ESP_NETIF_INHERENT_DEFAULT_ETH();
-    base.flags = ESP_NETIF_DHCP_SERVER | ESP_NETIF_FLAG_AUTOUP;
-    base.ip_info = &ip;
-    base.if_key = "USB";
-    base.if_desc = "usb";
-    base.route_prio = 0;
-    esp_netif_driver_ifconfig_t driver = {.handle = &usb_interface,
-                                          .transmit = usb_tx,
-                                          .driver_free_rx_buffer = usb_free_rx};
-    esp_netif_config_t config = {.base = &base,
-                                 .driver = &driver,
-                                 .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH};
-    usb_interface = esp_netif_new(&config);
-    assert(usb_interface);
-    uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    mac[0] = (mac[0] | 2) & ~1;
-    esp_netif_set_mac(usb_interface, mac);
+/* Recovery endpoints never depend on a successful tailnet/Wi-Fi startup. */
+static esp_err_t boot_status(httpd_req_t *req) {
+    if(!local_request(req))return httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"USB access required");
+    httpd_resp_set_type(req,"application/json");
+    httpd_resp_set_hdr(req,"Cache-Control","no-store");
+    if(gateway_boot_report(req,status_chunk))return ESP_FAIL;
+    return httpd_resp_send_chunk(req,NULL,0);
+}
+#define START_TRY(call) do {esp_err_t result_=(call);if(result_!=ESP_OK)return result_;}while(0)
+static esp_err_t start_usb(void) {
     static char serial[13];
     uint8_t identity_mac[6];
     esp_read_mac(identity_mac, ESP_MAC_WIFI_STA);
@@ -1011,59 +993,66 @@ void app_main(void) {
     usb.event_cb = usb_event;
     usb.descriptor.string = strings;
     usb.descriptor.string_count = sizeof(strings) / sizeof(strings[0]);
-    ESP_ERROR_CHECK(tinyusb_driver_install(&usb));
+    esp_err_t result=tinyusb_driver_install(&usb);
+    if(result!=ESP_OK)return result;
     tinyusb_net_config_t net = {.on_recv_callback = usb_rx,
                                 .free_tx_buffer = usb_free_tx};
-    memcpy(net.mac_addr, mac, 6);
-    ESP_ERROR_CHECK(tinyusb_net_init(&net));
-    extern void gateway_console_start(void);
-    gateway_console_start();
-    /* Keep CDC recovery reachable before flash formatting, NVS journals or Wi-Fi. */
-    if (nvs_open("tn_diag", NVS_READWRITE, &diag_store) == ESP_OK)
-        diag_lock = xSemaphoreCreateMutex();
-    gateway_diag_membership(0, GATEWAY_DIAG_BOOT, esp_reset_reason());
-    if (!ml_directory_mount()) ESP_LOGE("peerstore", "Peer flash storage could not mount");
-    load_members();
-    extern bool gateway_routes_init(void);
-    route_storage_ok = gateway_routes_init();
-    size_t n = sizeof(wifi_config);
-    nvs_get_blob(store, "wifi", &wifi_config, &n);
-    esp_netif_create_default_wifi_sta();
-    wifi_init_config_t w = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&w));
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                               wifi_event, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                               wifi_event, NULL));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    identity_mac[0]=(identity_mac[0]|2)&~1;
+    memcpy(net.mac_addr, identity_mac, 6);
+    result=tinyusb_net_init(&net);
+    extern esp_err_t gateway_console_start(void);
+    esp_err_t console=gateway_console_start();
+    return console!=ESP_OK?console:result;
 
+}
+static esp_err_t start_network(void) {
+    START_TRY(esp_netif_init());
+    START_TRY(esp_event_loop_create_default());
+    esp_netif_ip_info_t ip = {0};
+    IP4_ADDR(&ip.ip, 192, 168, 77, 1);
+    ip.gw = ip.ip;
+    IP4_ADDR(&ip.netmask, 255, 255, 255, 0);
+    esp_netif_inherent_config_t base = ESP_NETIF_INHERENT_DEFAULT_ETH();
+    base.flags = ESP_NETIF_DHCP_SERVER | ESP_NETIF_FLAG_AUTOUP;
+    base.ip_info = &ip;
+    base.if_key = "USB";
+    base.if_desc = "usb";
+    base.route_prio = 0;
+    esp_netif_driver_ifconfig_t driver = {.handle = &usb_interface,
+                                          .transmit = usb_tx,
+                                          .driver_free_rx_buffer = usb_free_rx};
+    esp_netif_config_t config = {.base = &base,
+                                 .driver = &driver,
+                                 .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH};
+    usb_interface = esp_netif_new(&config);
+    if(!usb_interface)return ESP_ERR_NO_MEM;
+    uint8_t mac[6];
+    START_TRY(esp_read_mac(mac, ESP_MAC_WIFI_STA));
+    mac[0] = (mac[0] | 2) & ~1;
+    START_TRY(esp_netif_set_mac(usb_interface, mac));
     esp_netif_dns_info_t dns = {0};
     IP_SET_TYPE_VAL(dns.ip, IPADDR_TYPE_V4);
     IP4_ADDR(ip_2_ip4(&dns.ip), 192, 168, 77, 1);
-    ESP_ERROR_CHECK(
+    START_TRY(
         esp_netif_set_dns_info(usb_interface, ESP_NETIF_DNS_MAIN, &dns));
     uint8_t offer = 1;
-    ESP_ERROR_CHECK(esp_netif_dhcps_option(usb_interface, ESP_NETIF_OP_SET,
+    START_TRY(esp_netif_dhcps_option(usb_interface, ESP_NETIF_OP_SET,
                                            ESP_NETIF_DOMAIN_NAME_SERVER, &offer,
                                            sizeof(offer)));
     esp_netif_action_start(usb_interface, NULL, 0, NULL);
     esp_netif_action_connected(usb_interface, NULL, 0, NULL);
-    ESP_ERROR_CHECK(esp_netif_napt_enable(usb_interface));
-    extern void gateway_dns_start(void);
-    gateway_dns_start();
-    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0, "pool.ntp.org");
-    esp_sntp_init();
+
+    return ESP_OK;
+}
+static esp_err_t start_http(void) {
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     http.stack_size = 6144;
-    http.max_uri_handlers = 5;
+    http.max_uri_handlers = 6;
     http.max_open_sockets = 2;
     http.lru_purge_enable = true;
     http.recv_wait_timeout = http.send_wait_timeout = 2;
     httpd_handle_t server;
-    ESP_ERROR_CHECK(httpd_start(&server, &http));
+    START_TRY(httpd_start(&server, &http));
     httpd_uri_t page = {.uri = "/", .method = HTTP_GET, .handler = home},
                 state = {.uri = "/status",
                          .method = HTTP_GET,
@@ -1076,10 +1065,66 @@ void app_main(void) {
                         .handler = wifi_scan},
                 api = {
                     .uri = "/command", .method = HTTP_POST, .handler = command};
-    httpd_register_uri_handler(server, &page);
-    httpd_register_uri_handler(server, &state);
-    httpd_register_uri_handler(server, &diag);
-    httpd_register_uri_handler(server, &scan);
-    httpd_register_uri_handler(server, &api);
-    ESP_ERROR_CHECK(xTaskCreate(manager, "members", 4096, NULL, 4, NULL) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+    httpd_uri_t boot = {.uri="/boot-status",.method=HTTP_GET,.handler=boot_status};
+    const httpd_uri_t *handlers[]={&page,&state,&diag,&scan,&api,&boot};
+    for(unsigned i=0;i<sizeof(handlers)/sizeof(handlers[0]);i++) {
+        esp_err_t result=httpd_register_uri_handler(server,handlers[i]);
+        if(result!=ESP_OK){httpd_stop(server);return result;}
+    }
+    return ESP_OK;
+
+}
+static esp_err_t start_settings(void) {
+    START_TRY(nvs_flash_init()); /* Never erase identities on a storage error. */
+    gateway_boot_storage();
+    START_TRY(nvs_open("tn_settings",NVS_READWRITE,&store));
+    if(nvs_open("tn_diag",NVS_READWRITE,&diag_store)==ESP_OK)diag_lock=xSemaphoreCreateMutex();
+    if(!load_members())return ESP_ERR_INVALID_STATE;
+    size_t n=sizeof(wifi_config);
+    esp_err_t result=nvs_get_blob(store,"wifi",&wifi_config,&n);
+    if(result!=ESP_ERR_NVS_NOT_FOUND && (result!=ESP_OK || n!=sizeof(wifi_config)))return ESP_ERR_INVALID_STATE;
+    settings_ok=true;
+    gateway_diag_membership(0,GATEWAY_DIAG_BOOT,esp_reset_reason());
+    return ESP_OK;
+}
+static esp_err_t start_directory(void) {return ml_directory_mount()?ESP_OK:ESP_FAIL;}
+static esp_err_t start_routes(void) {
+    extern bool gateway_routes_init(void);
+    route_storage_ok=gateway_routes_init();return route_storage_ok?ESP_OK:ESP_FAIL;
+}
+static esp_err_t start_wifi(void) {
+    if(!esp_netif_create_default_wifi_sta())return ESP_ERR_NO_MEM;
+    wifi_init_config_t w=WIFI_INIT_CONFIG_DEFAULT();
+    START_TRY(esp_wifi_init(&w));
+    START_TRY(esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_event,NULL));
+    START_TRY(esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,wifi_event,NULL));
+    START_TRY(esp_wifi_set_storage(WIFI_STORAGE_RAM)); /* tn_settings owns credentials. */
+    START_TRY(esp_wifi_set_mode(WIFI_MODE_STA));
+    START_TRY(esp_wifi_set_config(WIFI_IF_STA,&wifi_config));
+    START_TRY(esp_wifi_start());
+    wifi_ready=true;
+    esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    esp_sntp_setservername(0,"pool.ntp.org");esp_sntp_init();
+    return ESP_OK;
+}
+static esp_err_t start_dns(void) {
+    START_TRY(esp_netif_napt_enable(usb_interface));
+    extern esp_err_t gateway_dns_start(void);
+    return gateway_dns_start();
+}
+static esp_err_t start_manager(void) {
+    return xTaskCreate(manager,"members",4096,NULL,4,NULL)==pdPASS?ESP_OK:ESP_ERR_NO_MEM;
+}
+static bool start_step(unsigned stage,esp_err_t (*start)(void)) {
+    gateway_boot_stage(stage);
+    esp_err_t result=start();gateway_boot_result(stage,result);
+    if(result!=ESP_OK)ESP_LOGE("startup","stage %u failed: %s; management stays available",stage,esp_err_to_name(result));
+    return result==ESP_OK;
+}
+/* Compiled unchanged by the host fault-injection harness. */
+#include "startup_sequence.inc"
+void app_main(void) {
+    members_lock=xSemaphoreCreateMutexStatic(&members_mutex);
+    wifi_scan_lock=xSemaphoreCreateMutexStatic(&scan_mutex);
+    gateway_startup_sequence();
 }
