@@ -277,6 +277,7 @@ typedef struct {
         ML_PEER_REMOVE,
         ML_PEER_UPDATE_ENDPOINT,
         ML_PEER_BATCH,
+        ML_PEER_PACKET,
     } action;
     uint32_t vpn_ip;
     uint8_t public_key[32];
@@ -319,6 +320,7 @@ typedef struct {
 
 typedef struct {
     /* Identity */
+    uint64_t jit_used_ms;
     uint32_t vpn_ip;
     uint8_t public_key[32];
     uint8_t disco_key[32];
@@ -475,6 +477,8 @@ typedef struct {
 } ml_disco_probe_t;
 
 
+#include "ml_directory.h"
+
 struct microlink_s {
     uint8_t txid_v4[12], txid_v6[12];
     bool txid_v4_valid, txid_v6_valid;
@@ -565,6 +569,11 @@ struct microlink_s {
     QueueHandle_t stun_rx_queue;        /* net_io -> coord */
     QueueHandle_t coord_cmd_queue;      /* any -> coord */
     volatile uint32_t peer_generation; /* even = peer metadata stable, odd = owner applying updates */
+    struct { ml_peer_update_t *packet; uint64_t expires; } jit_pending[4];
+    volatile unsigned jit_packet_count;
+    uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
+    uint32_t directory_applied;
+    ml_directory_t directory;
     volatile bool map_batch_pending; /* at most one owned semantic batch per membership */
     QueueHandle_t peer_update_queue;    /* coord -> wg_mgr */
 
@@ -1009,3 +1018,5 @@ static inline void *ml_psram_calloc(size_t n, size_t size) {
 #ifdef __cplusplus
 }
 #endif
+
+esp_err_t ml_gateway_queue_packet(microlink_t *ml, uint32_t ip, const uint8_t *data, size_t len);

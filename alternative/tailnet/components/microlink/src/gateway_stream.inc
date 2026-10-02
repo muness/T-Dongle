@@ -332,6 +332,9 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
         result = gateway_map_fail(
             ml, 12, "Map ended before a complete message arrived");
 done:
+#if defined(GATEWAY_FLASH_DIRECTORY) && defined(GATEWAY_SEMANTIC_MAP)
+    ml_directory_abort(ml);
+#endif
     if (result < 0) {
         ml->stream_header_used = 0;
         ml->stream_remaining = 0;

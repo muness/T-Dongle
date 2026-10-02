@@ -53,9 +53,11 @@ static void dns_task(void *arg) {
             xSemaphoreTake(members_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
             unsigned matches = 0;
             for (membership_t *m = members; m; m = m->next)
-                if (m->client && m->client->state == ML_STATE_CONNECTED) {
-                    for (int i = 0; i < m->client->peer_count; i++) {
-                        ml_peer_t *p = &m->client->peers[i];
+                if (m->client && m->client->state == ML_STATE_CONNECTED && m->client->directory.session_valid) {
+                    for (unsigned i = 0; i < m->client->directory.count; i++) {
+                        ml_peer_update_t record;
+                        if(!ml_directory_at(m->client,i,&record))continue;
+                        ml_peer_update_t *p=&record;
                         char peer[64], qualified[128];
                         strlcpy(peer, p->hostname, sizeof(peer));
                         char *dot = strchr(peer, '.');

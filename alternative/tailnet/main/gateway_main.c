@@ -1,3 +1,4 @@
+#include "esp_log.h"
 #include "cJSON.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
@@ -455,7 +456,8 @@ typedef struct {
     char label[24], error[64], dns[128], login[384], protocol_error[64], h2_debug[49];
     unsigned control_stage;
     uint32_t diagnostics[16], stack_free[5];
-    unsigned peers;
+    unsigned peers, directory_count, peer_offset, page_start;
+    uint32_t jit[5];
     struct {
         char name[64];
         uint32_t address;
@@ -495,6 +497,13 @@ static esp_err_t status(httpd_req_t *req) {
         free(snapshot);
         return status_busy(req);
     }
+    unsigned peer_offset=0,peer_member=0;char query[64]={0},offset_text[16];
+    if(httpd_req_get_url_query_str(req,query,sizeof(query))==ESP_OK &&
+       httpd_query_key_value(query,"peer_offset",offset_text,sizeof(offset_text))==ESP_OK)
+        peer_offset=strtoul(offset_text,NULL,10);
+    if(httpd_query_key_value(query,"peer_member",offset_text,sizeof(offset_text))==ESP_OK)
+        peer_member=strtoul(offset_text,NULL,10);
+    if(peer_offset>100000)peer_offset=0;
     size_t count = 0;
     for (membership_t *m = members; m; m = m->next) {
         if (count == capacity) {
@@ -517,7 +526,7 @@ static esp_err_t status(httpd_req_t *req) {
         v->vpn_ip = c->vpn_ip;
         v->routing_ready = m->enabled && c->wg_netif &&
                            c->state == ML_STATE_CONNECTED && !c->key_expired &&
-                           !c->last_error[0];
+                           !c->last_error[0] && c->directory.session_valid;
         strlcpy(v->dns, c->self_dns_name, sizeof(v->dns));
         strlcpy(v->login, c->auth_url, sizeof(v->login));
         strlcpy(v->protocol_error,
@@ -550,15 +559,19 @@ static esp_err_t status(httpd_req_t *req) {
         }
         uint32_t peer_generation=__atomic_load_n(&c->peer_generation,__ATOMIC_ACQUIRE);
         if(peer_generation&1){xSemaphoreGive(members_lock);free(snapshot);return status_busy(req);}
-        for (int i = 0; i < c->peer_count && i < ML_MAX_PEERS; i++) {
-            if (!c->peers[i].vpn_ip)
-                continue;
-            unsigned j = v->peers++;
-            strlcpy(v->peer[j].name, c->peers[i].hostname,
-                    sizeof(v->peer[j].name));
-            v->peer[j].address = c->peers[i].vpn_ip;
+        uint32_t directory_generation=__atomic_load_n(&c->directory.generation,__ATOMIC_ACQUIRE);
+        v->jit[0]=c->jit_hits;v->jit[1]=c->jit_misses;v->jit[2]=c->jit_evictions;
+        v->jit[3]=c->jit_rejected;v->jit[4]=c->jit_dropped;
+        v->directory_count=c->directory.count;v->page_start=peer_member==m->id?peer_offset:0;v->peer_offset=v->page_start;
+        for(unsigned i=v->page_start;i<c->directory.count && v->peers<ML_MAX_PEERS;i++) {
+            ml_peer_update_t record;
+            if(!ml_directory_at(c,i,&record))continue;
+            unsigned j=v->peers++;
+            strlcpy(v->peer[j].name,record.hostname,sizeof(v->peer[j].name));
+            v->peer[j].address=record.vpn_ip;
+            v->peer_offset=i+1;
         }
-        if(peer_generation!=__atomic_load_n(&c->peer_generation,__ATOMIC_ACQUIRE)){xSemaphoreGive(members_lock);free(snapshot);return status_busy(req);}
+        if(peer_generation!=__atomic_load_n(&c->peer_generation,__ATOMIC_ACQUIRE) || directory_generation!=__atomic_load_n(&c->directory.generation,__ATOMIC_ACQUIRE)){xSemaphoreGive(members_lock);free(snapshot);return status_busy(req);}
         for(unsigned j=0;j<v->peers;j++)v->peer[j].address=gateway_alias(m->id,v->peer[j].address);
     }
     xSemaphoreGive(members_lock);
@@ -585,7 +598,7 @@ static esp_err_t status(httpd_req_t *req) {
         jw_bool(w, value);                                                     \
         jw_char(w, ',');                                                       \
     } while (0)
-    STR("firmware", "0.2.8");
+    STR("firmware", "0.2.9");
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
     gateway_socket_stats sockets = gateway_sockets_snapshot();
@@ -656,6 +669,10 @@ static esp_err_t status(httpd_req_t *req) {
             STR("protocol_error", v->protocol_error);
             STR("h2_debug", v->h2_debug);
             NUM("control_stage", v->control_stage);
+            NUM("jit_hits",v->jit[0]);NUM("jit_misses",v->jit[1]);NUM("jit_evictions",v->jit[2]);
+            NUM("jit_rejected",v->jit[3]);NUM("jit_dropped",v->jit[4]);
+            NUM("directory_records",v->directory_count);
+            NUM("next_peer_offset",v->peer_offset);NUM("peer_page_start",v->page_start);
             jw_raw(w, "\"peers\":[");
             for (unsigned j = 0; j < v->peers && !w->failed; j++) {
                 if (j)
@@ -840,6 +857,7 @@ static esp_err_t command(httpd_req_t *req) {
 }
 void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_init());
+    if (!ml_directory_mount()) ESP_LOGE("peerstore", "Peer flash storage could not mount");
     ESP_ERROR_CHECK(nvs_open("tn_settings", NVS_READWRITE, &store));
     if (nvs_open("tn_diag", NVS_READWRITE, &diag_store) == ESP_OK)
         diag_lock = xSemaphoreCreateMutex();

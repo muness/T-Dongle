@@ -1338,6 +1338,9 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
 
 /* Defined below with the long-poll reader; both map paths share one framed stream. */
 
+#ifdef ESP_PLATFORM
+#define GATEWAY_FLASH_DIRECTORY 1
+#endif
 #include "gateway_stage_types.inc"
 
 static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
@@ -1377,7 +1380,7 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
         ml_peer_update_t *update = gateway_peer_alloc();
         if (!update) continue;
 
-        update->action = ML_PEER_ADD;
+        update->action = cJSON_IsTrue(cJSON_GetObjectItem(peer,"Expired")) ? ML_PEER_REMOVE : ML_PEER_ADD;
 
         /* NodeID — Tailscale int64 wire ID. Needed so PeersChangedPatch
          * deltas (which key off ID, not nodekey) can find the peer slot. */
@@ -1617,6 +1620,7 @@ check_removed:
             if (!update) continue;
             update->action = ML_PEER_UPDATE_ENDPOINT;
 
+            update->endpoint_count = -1;
             /* NodeID is the primary peer key in PeersChangedPatch. */
             cJSON *id_item = cJSON_GetObjectItem(patch, "NodeID");
             if (id_item && cJSON_IsNumber(id_item)) {
@@ -1632,6 +1636,12 @@ check_removed:
                 hex_to_bytes(hex, update->public_key, 32);
             }
 
+            cJSON *disco_item = cJSON_GetObjectItem(patch, "DiscoKey");
+            if (cJSON_IsString(disco_item)) {
+                const char *hex=disco_item->valuestring;
+                if (!strncmp(hex,"discokey:",9)) hex+=9;
+                hex_to_bytes(hex,update->disco_key,32);
+            }
             /* DERP region. */
             cJSON *patch_derp_region = cJSON_GetObjectItem(patch, "DERPRegion");
             if (patch_derp_region && cJSON_IsNumber(patch_derp_region) && patch_derp_region->valueint > 0) {

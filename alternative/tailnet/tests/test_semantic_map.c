@@ -29,7 +29,15 @@ typedef struct {
     uint8_t prefix_len;
 } microlink_route_t;
 #include "semantic_types.inc"
+#ifdef GATEWAY_FLASH_DIRECTORY
+typedef struct microlink_s microlink_t;
+#include "ml_directory.h"
+struct microlink_s {
+    ml_directory_t directory;
+    uint8_t wg_public_key[32];
+#else
 typedef struct {
+#endif
     uint8_t *h2_acc; size_t h2_acc_len;
     char h2_debug[49];
     uint32_t map_h2_error, map_h2_last_stream;
@@ -64,7 +72,14 @@ typedef struct {
         char hostname[64];
         uint8_t public_key[32];
     } peers[8];
+#ifdef GATEWAY_FLASH_DIRECTORY
+};
+#define ML_DIRECTORY_HOST_TEST 1
+#define ROOT "/tmp/tdongle-semantic-directory"
+#include "../components/microlink/src/ml_directory.c"
+#else
 } microlink_t;
+#endif
 static size_t allocations, live;
 static bool fail_alloc, reject_queue, legacy;
 static unsigned queued_count;

@@ -90,3 +90,22 @@ build-host/test_h2_handshake
 python tools/test-sockets.py
 python tools/test-control-interop.py
 python tools/test-journal.py
+
+cc -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_peer_directory.c -o build-host/test_peer_directory
+build-host/test_peer_directory
+cc -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_directory.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_directory
+build-host/test_semantic_directory
+
+python - <<'PYJIT'
+from pathlib import Path
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate(');b=s.index('/* The queue owns copies',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+PYJIT
+cc -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_jit_directory.c -o build-host/test_jit_directory
+build-host/test_jit_directory
+
+python - <<'PYQUEUE'
+from pathlib import Path
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('esp_err_t ml_gateway_queue_packet(');b=s.index('#endif',a);Path('build-host/jit_queue.inc').write_text(s[a:b])
+PYQUEUE
+cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_jit_queue.c -o build-host/test_jit_queue
+build-host/test_jit_queue

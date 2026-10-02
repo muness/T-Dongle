@@ -39,6 +39,8 @@ typedef struct {
         noise_error, noise_frame_bytes, map_generation;
     TaskHandle_t net_io_task, derp_tx_task, derp_rx_task, coord_task,
         wg_mgr_task;
+    struct {unsigned count,generation;bool session_valid;} directory;
+    uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
     int peer_count;
     struct {
         char hostname[64];
@@ -81,6 +83,16 @@ static void xSemaphoreGive(int lock) {
     }
 }
 
+typedef struct {char hostname[64];unsigned vpn_ip;} ml_peer_update_t;
+static bool mutate_peer;
+static bool ml_directory_at(microlink_t *m,unsigned i,ml_peer_update_t *out) {
+    if(i>=m->directory.count)return false;
+    strcpy(out->hostname,m->peers[i].hostname);out->vpn_ip=m->peers[i].vpn_ip;
+    if(mutate_peer)m->directory.generation++;
+    return true;
+}
+static int httpd_req_get_url_query_str(httpd_req_t *r,char *out,size_t size){return -1;}
+static int httpd_query_key_value(const char *q,const char *key,char *out,size_t size){return -1;}
 static int local_request(httpd_req_t *r) { return 1; }
 static int httpd_resp_send_err(httpd_req_t *r, int code, const char *msg) {
     r->status = code;
@@ -138,7 +150,6 @@ static size_t test_strlcpy(char *out,const char *src,size_t size) {
     if(size){size_t n=length<size-1?length:size-1;memcpy(out,src,n);out[n]=0;}
     return length;
 }
-static bool mutate_peer;
 static size_t checked_strlcpy(char *out,const char *src,size_t size){size_t n=test_strlcpy(out,src,size);if(mutate_peer&&members&&members->client&&src==members->client->peers[0].hostname)members->client->peer_generation+=2;return n;}
 #define strlcpy checked_strlcpy
 #define calloc checked_calloc
@@ -160,6 +171,7 @@ static void setup(void) {
     c->vpn_ip = 0x64010203;
     strcpy(c->self_dns_name, "dongle.ts.net");
     strcpy(c->auth_url, "https://login/?x=\"\\");
+    c->directory.count=1;c->directory.session_valid=true;
     c->peer_count = 1;
     strcpy(c->peers[0].hostname, "server.ts.net");
     c->peers[0].vpn_ip = 0x64020304;

@@ -849,6 +849,7 @@ static void remove_peer(microlink_t *ml, const ml_peer_update_t *update) {
 
 static void apply_peer_update(microlink_t *ml, const ml_peer_update_t *update) {
     switch (update->action) {
+    case ML_PEER_PACKET:
     case ML_PEER_BATCH:
         break; /* envelope handled by queue consumer */
     case ML_PEER_ADD:
@@ -878,7 +879,7 @@ static void apply_peer_update(microlink_t *ml, const ml_peer_update_t *update) {
             }
             if (idx >= 0) {
                 ml_peer_t *p = &ml->peers[idx];
-                if (update->endpoint_count > 0) {
+                if (update->endpoint_count >= 0) {
                     p->endpoint_count = update->endpoint_count;
                     for (int i = 0;
                          i < update->endpoint_count && i < ML_MAX_ENDPOINTS;
@@ -907,15 +908,123 @@ static void apply_peer_update(microlink_t *ml, const ml_peer_update_t *update) {
         break;
     }
 }
+#ifdef ESP_PLATFORM
+/* Called only by the peer owner. Keep hot peers; never evict recent traffic. */
+static int directory_activate(microlink_t *ml, const ml_peer_update_t *record) {
+    if(!ml->directory.session_valid)return -1;
+    int idx=find_peer_by_key(ml,record->public_key);
+    if(idx>=0) {ml->jit_hits++;ml->peers[idx].jit_used_ms=ml_get_time_ms();return idx;}
+    ml->jit_misses++;
+    bool full=true;
+    for(int i=0;i<ML_MAX_PEERS;i++)if(!ml->peers[i].active)full=false;
+    if(full) {
+        int victim=-1;uint64_t oldest=UINT64_MAX,now=ml_get_time_ms();
+        for(int i=0;i<ML_MAX_PEERS;i++) {
+            uint64_t used=ml->peers[i].jit_used_ms;
+            if(now-used>=10000 && used<oldest && ml->peers[i].vpn_ip!=ml->config.priority_peer_ip) {oldest=used;victim=i;}
+        }
+        if(victim<0){ml->jit_rejected++;return -1;}
+        ml->jit_evictions++;
+        ml_peer_update_t rm={.action=ML_PEER_REMOVE};
+        memcpy(rm.public_key,ml->peers[victim].public_key,32);remove_peer(ml,&rm);
+    }
+    idx=add_peer(ml,record);
+    if(idx>=0)ml->peers[idx].jit_used_ms=ml_get_time_ms();
+    return idx;
+}
+static int directory_by_disco(microlink_t *ml,const uint8_t *key) {
+    int idx=find_peer_by_disco_key(ml,key);
+    if(idx<0) {ml_peer_update_t record;
+        if(ml_directory_find(ml,0,NULL,key,0,&record))idx=directory_activate(ml,&record);}
+    if(idx>=0)ml->peers[idx].jit_used_ms=ml_get_time_ms();
+    return idx;
+}
+static void directory_reconcile(microlink_t *ml) {
+    uint32_t generation=__atomic_load_n(&ml->directory.generation,__ATOMIC_ACQUIRE);
+    if(generation==ml->directory_applied)return;
+            for(int i=0;i<ML_MAX_PEERS;i++) {
+                ml_peer_t *peer=&ml->peers[i];if(!peer->active)continue;
+                ml_peer_update_t record;
+                bool present=ml_directory_find(ml,0,NULL,NULL,peer->node_id,&record);
+                if(!peer->node_id)present=ml_directory_find(ml,peer->vpn_ip,NULL,NULL,0,&record);
+                if(!present || memcmp(peer->public_key,record.public_key,32) || peer->vpn_ip!=record.vpn_ip ||
+                   peer->is_exit_node!=record.is_exit_node || peer->subnet_route_count!=record.subnet_route_count ||
+                   memcmp(peer->subnet_routes,record.subnet_routes,sizeof(record.subnet_routes))) {
+                    ml_peer_update_t rm={.action=ML_PEER_REMOVE};memcpy(rm.public_key,peer->public_key,32);remove_peer(ml,&rm);
+                } else {
+                    uint64_t used=peer->jit_used_ms;
+                    ml_peer_update_t patch=record;patch.action=ML_PEER_UPDATE_ENDPOINT;
+                    apply_peer_update(ml,&patch);
+                    memcpy(peer->disco_key,record.disco_key,32);
+                    peer->disco_shared_valid=false;peer->jit_used_ms=used;
+                }
+            }
+    ml->directory_applied=generation;
+}
+/* The queue owns copies, at most four packets per membership including pending.
+ * Network callbacks never provision peers or read flash. */
+esp_err_t ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *data,size_t len) {
+    if(!ml || !data || !len || len>1400 || ml->state!=ML_STATE_CONNECTED)return ESP_ERR_INVALID_STATE;
+    unsigned old=__atomic_fetch_add(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
+    if(old>=4) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+    ml_peer_update_t *packet=calloc(1,sizeof(*packet)+sizeof(size_t)+len);
+    if(!packet) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+    packet->action=ML_PEER_PACKET;packet->vpn_ip=ip;
+    memcpy(packet+1,&len,sizeof(len));memcpy((uint8_t *)(packet+1)+sizeof(len),data,len);
+    if(xQueueSend(ml->peer_update_queue,&packet,0)!=pdTRUE) {
+        free(packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+    return ESP_OK;
+}
+static void directory_flush_packets(microlink_t *ml) {
+    for(unsigned i=0;i<4;i++) {
+        ml_peer_update_t *packet=ml->jit_pending[i].packet;if(!packet)continue;
+        int idx=find_peer_by_ip(ml,packet->vpn_ip);
+        bool discard=idx<0 || ml_get_time_ms()>=ml->jit_pending[i].expires;
+        if(discard)ml->jit_dropped++;
+        if(!discard && ml_wg_mgr_peer_is_up(ml,packet->vpn_ip)) {
+            size_t len;memcpy(&len,packet+1,sizeof(len));
+            struct pbuf *b=pbuf_alloc(PBUF_IP,len,PBUF_RAM);
+            if(b) {
+                pbuf_take(b,(uint8_t *)(packet+1)+sizeof(len),len);
+                ip4_addr_t ip={.addr=htonl(packet->vpn_ip)};
+                struct netif *wg=ml->wg_netif;
+                GATEWAY_WG_CALL(wg->output(wg,b,&ip));pbuf_free(b);
+                ml->peers[idx].jit_used_ms=ml_get_time_ms();
+            }
+            discard=true;
+        }
+        if(discard) {free(packet);ml->jit_pending[i].packet=NULL;
+            __atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);}
+    }
+}
+#endif
 static void process_peer_updates(microlink_t *ml) {
     ml_peer_update_t *update;
     while (xQueueReceive(ml->peer_update_queue, &update, 0) == pdTRUE) {
         if (!update)
             continue;
         __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
+#ifdef ESP_PLATFORM
+        if(update->action==ML_PEER_PACKET) {
+            ml_peer_update_t record;int idx=-1;
+            idx=find_peer_by_ip(ml,update->vpn_ip);
+            if(idx>=0){ml->jit_hits++;ml->peers[idx].jit_used_ms=ml_get_time_ms();}
+            else if(ml_directory_find(ml,update->vpn_ip,NULL,NULL,0,&record))idx=directory_activate(ml,&record);
+            bool kept=false;
+            if(idx>=0)for(unsigned i=0;i<4;i++)if(!ml->jit_pending[i].packet) {
+                ml->jit_pending[i].packet=update;ml->jit_pending[i].expires=ml_get_time_ms()+5000;
+                ml_wg_mgr_trigger_handshake(ml,update->vpn_ip);kept=true;break;
+            }
+            if(!kept) {ml->jit_dropped++;free(update);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);}
+            __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);continue;
+        }
+#endif
         bool is_batch = update->action == ML_PEER_BATCH;
         if (is_batch) {
             ml_peer_batch_t *batch = (ml_peer_batch_t *)update;
+#ifdef ESP_PLATFORM
+            directory_reconcile(ml);
+#else
             /* Authoritative omission is evaluated by the peer owner after
              * earlier batches, not against a stale coordination snapshot. */
             if (batch->authoritative) {
@@ -943,6 +1052,7 @@ static void process_peer_updates(microlink_t *ml) {
             for (size_t i = 0; i < batch->count; i++)
                 if (batch->updates[i].action != ML_PEER_ADD)
                     apply_peer_update(ml, &batch->updates[i]);
+#endif
         } else
             apply_peer_update(ml, update);
         __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
@@ -1148,7 +1258,7 @@ static void process_disco_ping(microlink_t *ml, const ml_rx_packet_t *pkt,
     const uint8_t *txid = decrypted + 2;
 
     /* Find peer by disco key */
-    int peer_idx = find_peer_by_disco_key(ml, sender_disco_key);
+    int peer_idx = directory_by_disco(ml, sender_disco_key);
     if (peer_idx < 0) {
         ESP_LOGW(TAG, "DISCO ping from unknown peer");
         return;
@@ -1401,7 +1511,7 @@ static void process_disco_pong(microlink_t *ml, const ml_rx_packet_t *pkt,
         uint64_t now_ms = ml_get_time_ms();
         if (now_ms - last_unmatched_log_ms > 10000) {
             /* Find peer by disco key for logging */
-            int peer_idx = find_peer_by_disco_key(ml, sender_disco_key);
+            int peer_idx = directory_by_disco(ml, sender_disco_key);
             const char *name = peer_idx >= 0 ? ml->peers[peer_idx].hostname : "?";
             int active_count = 0;
             for (int i = 0; i < MAX_PENDING_PROBES; i++) {
@@ -1447,7 +1557,7 @@ static void process_disco_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
      * belong to a peer). A key that matches no peer -- a rotation the netmap
      * has not delivered yet, or a stranger -- is dropped without an X25519;
      * the handlers below could do nothing with it anyway. */
-    int sender_idx = find_peer_by_disco_key(ml, sender_disco_key);
+    int sender_idx = directory_by_disco(ml, sender_disco_key);
     if (sender_idx < 0) {
         static uint64_t last_unknown_log_ms = 0;
         static uint32_t unknown_suppressed = 0;
@@ -1501,7 +1611,7 @@ static void process_disco_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
         {
             /* CallMeMaybe: after type(1)+version(1), payload is N x 18-byte entries
              * Each entry: 16-byte IP (IPv6 or IPv4-mapped) + 2-byte port (big-endian) */
-            int peer_idx = find_peer_by_disco_key(ml, sender_disco_key);
+            int peer_idx = directory_by_disco(ml, sender_disco_key);
             if (peer_idx < 0) {
                 ESP_LOGW(TAG, "CallMeMaybe from unknown peer");
                 break;
@@ -1620,6 +1730,14 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
              (int)pkt->len, pkt->via_derp,
              pkt->len >= 4 ? pkt->data[0] : -1,
              pkt->src_pubkey[0], pkt->src_pubkey[1], pkt->src_pubkey[2], pkt->src_pubkey[3]);
+#ifdef ESP_PLATFORM
+    if(pkt->via_derp) {
+        ml_peer_update_t record;
+        int idx=find_peer_by_key(ml,pkt->src_pubkey);
+        if(idx>=0)ml->peers[idx].jit_used_ms=ml_get_time_ms();
+        else if(!ml_directory_find(ml,0,pkt->src_pubkey,NULL,0,&record) || directory_activate(ml,&record)<0) {free(pkt->data);return;}
+    }
+#endif
     if (!ml->wg_netif) {
         free(pkt->data);
         return;
@@ -2248,7 +2366,13 @@ void ml_wg_mgr_task(void *arg) {
         budget_start_ms = ml_get_time_ms();   /* DISCO budget window */
 
         /* Process peer updates from coord task */
+#ifdef ESP_PLATFORM
+        directory_reconcile(ml);
+#endif
         process_peer_updates(ml);
+#ifdef ESP_PLATFORM
+        directory_flush_packets(ml);
+#endif
 
         /* Track DERP connection state for DISCO.
          * Note: We DON'T re-initiate WG handshakes on DERP connect because

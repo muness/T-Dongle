@@ -60,10 +60,12 @@ static bool gateway_stage_record(microlink_t *ml, gateway_stage *s) {
                             ml->derp_region_default, &regions);
         s->region_count += count;
     } else {
+#ifndef GATEWAY_FLASH_DIRECTORY
         if (++s->group_count[s->kind] > ML_MAX_PEERS) {
             s->failure = "Map peer update section exceeds configured capacity";
             return false;
         }
+#endif
         const char *name = s->kind == 3   ? "PeersRemoved"
                            : s->kind == 4 ? "PeersChangedPatch"
                                           : "PeersChanged";
@@ -151,6 +153,7 @@ static void gateway_stage_init(gs_parser *p, microlink_t *ml) {
     gateway_stage *s = (gateway_stage *)gateway_json;
     memset(s, 0, sizeof(*s));
     s->reader_context = ml;
+
     gs_init(p, NULL, 0);
     p->home = ml->derp_region_default;
     p->context = s;
@@ -164,9 +167,13 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
     ml_peer_batch_t *batch = NULL;
     unsigned count = 0;
     if (!s->expired) {
+#ifdef GATEWAY_FLASH_DIRECTORY
+        count=s->count;
+#else
         for (unsigned i = 0; i < s->count; i++)
             if (!(s->authoritative && s->group[i] == 6))
                 count++;
+#endif
         if (count || s->authoritative) {
             uint64_t deadline = ml_get_time_ms() + 1000;
             while (__atomic_load_n(&ml->map_batch_pending, __ATOMIC_ACQUIRE)) {
@@ -178,6 +185,15 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
                 vTaskDelay(pdMS_TO_TICKS(5));
             }
             __atomic_store_n(&ml->map_batch_pending, true, __ATOMIC_RELEASE);
+#ifdef GATEWAY_FLASH_DIRECTORY
+            batch=ml_psram_calloc(1,sizeof(*batch));
+            if (!batch || (!s->count && !ml_directory_begin(ml)) || !ml_directory_commit(ml,s->authoritative)) {
+                free(batch);s->failure="Peer flash commit failed; previous directory retained";
+                __atomic_store_n(&ml->map_batch_pending,false,__ATOMIC_RELEASE);return false;
+            }
+            batch->header.action=ML_PEER_BATCH;
+            batch->authoritative=true;
+#else
             batch = ml_psram_calloc(1, sizeof(*batch) +
                                            count * sizeof(ml_peer_update_t));
             if (!batch) {
@@ -202,6 +218,7 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
                     if (order == pass)
                         batch->updates[n++] = *u;
                 }
+#endif
             if (xQueueSend(ml->peer_update_queue, &batch, pdMS_TO_TICKS(100)) !=
                 pdTRUE) {
                 free(batch);

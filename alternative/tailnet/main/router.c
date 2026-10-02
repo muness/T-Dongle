@@ -19,6 +19,9 @@ static alias_t aliases[64];
 #include "nvs.h"
 static nvs_handle_t route_store;
 static bool routes_ready;
+static QueueHandle_t route_queue;
+static void route_task(void *context);
+
 bool gateway_routes_init(void) {
     if (nvs_open("tn_routes", NVS_READWRITE, &route_store) != ESP_OK)
         return false;
@@ -29,13 +32,14 @@ bool gateway_routes_init(void) {
     for (unsigned i = 0; routes_ready && i < 64; i++)
         if (aliases[i].alias && aliases[i].alias != 0xc6120001 + i)
             routes_ready = false;
+    /* Migrate existing addresses before replacing the RAM table with a cache. */
+    for(unsigned i=0;routes_ready && i<64;i++)if(aliases[i].alias) {
+        ml_directory_alias_t record={aliases[i].id,aliases[i].peer,aliases[i].alias},old;
+        if(!ml_directory_alias_find(record.id,record.peer,record.alias,&old) && !ml_directory_alias_save(&record))routes_ready=false;
+    }
+    route_queue=xQueueCreate(4,sizeof(struct {struct pbuf *packet;struct netif *input;unsigned generation;}));
+    if(!route_queue || xTaskCreate(route_task,"usb_routes",4096,NULL,3,NULL)!=pdPASS)routes_ready=false;
     return routes_ready;
-}
-static bool persist_aliases(void) {
-    return routes_ready &&
-           nvs_set_blob(route_store, "aliases", aliases, sizeof(aliases)) ==
-               ESP_OK &&
-           nvs_commit(route_store) == ESP_OK;
 }
 #else
 static bool persist_aliases(void) { return true; }
@@ -62,6 +66,24 @@ static void wr32(uint8_t *p, uint32_t v) {
     wr16(p, v >> 16);
     wr16(p + 2, v);
 }
+#ifndef GATEWAY_HOST_TEST
+static unsigned alias_hand;
+uint32_t gateway_alias(uint32_t id,uint32_t peer) {
+    for(unsigned i=0;i<64;i++)if(aliases[i].id==id && aliases[i].peer==peer)return aliases[i].alias;
+    ml_directory_alias_t record;
+    if(!ml_directory_alias_find(id,peer,0,&record)) {
+        if(!routes_ready)return 0;
+        uint32_t next=64;esp_err_t err=nvs_get_u32(route_store,"next_alias",&next);
+        if(err!=ESP_OK && err!=ESP_ERR_NVS_NOT_FOUND)return 0;
+        if(next>=0x1fffe)return 0;
+        /* Reserve before exposing: even an interrupted write never reuses an IP. */
+        if(nvs_set_u32(route_store,"next_alias",next+1)!=ESP_OK || nvs_commit(route_store)!=ESP_OK)return 0;
+        record=(ml_directory_alias_t){id,peer,0xc6120001+next};
+        if(!ml_directory_alias_save(&record))return 0;
+    }
+    aliases[alias_hand++%64]=(alias_t){record.id,record.peer,record.alias};return record.alias;
+}
+#else
 uint32_t gateway_alias(uint32_t id, uint32_t peer) {
     for (unsigned i = 0; i < 64; i++)
         if (aliases[i].id == id && aliases[i].peer == peer)
@@ -77,6 +99,7 @@ uint32_t gateway_alias(uint32_t id, uint32_t peer) {
         }
     return 0;
 }
+#endif
 void gateway_suspend(uint32_t id) {
     for (unsigned i = 0; i < 64; i++)
         if (flows[i].id == id)
@@ -89,7 +112,9 @@ void gateway_forget(uint32_t id) {
         if (flows[i].id == id)
             memset(&flows[i], 0, sizeof(flows[i]));
     }
+#ifdef GATEWAY_HOST_TEST
     persist_aliases();
+#endif
 }
 static uint32_t sum(const uint8_t *p, size_t n, uint32_t s) {
     while (n > 1) {
@@ -136,7 +161,7 @@ static bool valid(uint8_t *b, size_t n, unsigned *h) {
     return finish(sum(b, *h, 0)) == 0;
 }
 /* Called on the lwIP thread. Consumes only synthetic tailnet destinations. */
-int gateway_host_input(struct pbuf *p, struct netif *input) {
+static int gateway_process_host_input(struct pbuf *p, struct netif *input) {
     uint8_t first[20];
     if (p->tot_len < 20 || pbuf_copy_partial(p, first, 20, 0) != 20)
         return 0;
@@ -176,16 +201,22 @@ int gateway_host_input(struct pbuf *p, struct netif *input) {
     unsigned h;
     if (!valid(b, n, &h) || b[8] < 2)
         goto drop;
+    if (xSemaphoreTake(members_lock, 0) != pdTRUE)
+        goto drop;
     alias_t *a = NULL;
     for (unsigned i = 0; i < 64; i++)
         if (aliases[i].alias == dest && aliases[i].id) {
             a = &aliases[i];
             break;
         }
-    if (!a)
-        goto drop;
-    if (xSemaphoreTake(members_lock, 0) != pdTRUE)
-        goto drop;
+#ifndef GATEWAY_HOST_TEST
+    alias_t cold;
+    if(!a) {
+        ml_directory_alias_t stored;
+        if(ml_directory_alias_find(0,0,dest,&stored)) {cold=(alias_t){stored.id,stored.peer,stored.alias};a=&cold;}
+    }
+#endif
+    if(!a) {xSemaphoreGive(members_lock);goto drop;}
     membership_t *m = members;
     while (m && m->id != a->id)
         m = m->next;
@@ -244,14 +275,7 @@ int gateway_host_input(struct pbuf *p, struct netif *input) {
         wr16(b + h, f->mapped);
         b[8]--;
         checksums(b, n, h);
-        struct pbuf *out = pbuf_alloc(PBUF_IP, n, PBUF_RAM);
-        if (out) {
-            pbuf_take(out, b, n);
-            ip4_addr_t ip = {.addr = htonl(a->peer)};
-            struct netif *wg = m->client->wg_netif;
-            wg->output(wg, out, &ip);
-            pbuf_free(out);
-        }
+        ml_gateway_queue_packet(m->client,a->peer,b,n);
     }
     xSemaphoreGive(members_lock);
 drop:
@@ -308,4 +332,27 @@ err_t gateway_tunnel_input(struct pbuf *p, struct netif *wg) {
 drop:
     free(b);
     return ERR_OK;
+}
+
+#ifndef GATEWAY_HOST_TEST
+typedef struct {struct pbuf *packet;struct netif *input;unsigned generation;} route_item;
+static void route_task(void *context) {
+    route_item item;
+    for(;;)if(xQueueReceive(route_queue,&item,portMAX_DELAY)==pdTRUE) {
+        if(item.generation!=atomic_load(&usb_generation))pbuf_free(item.packet);
+        else if(!gateway_process_host_input(item.packet,item.input))pbuf_free(item.packet);
+    }
+}
+#endif
+int gateway_host_input(struct pbuf *p,struct netif *input) {
+#ifndef GATEWAY_HOST_TEST
+    uint8_t first[20];
+    if(input==esp_netif_get_netif_impl(usb_interface) && p->tot_len<=1400 &&
+       pbuf_copy_partial(p,first,20,0)==20 && (rd32(first+16)&0xfffe0000)==0xc6120000) {
+        route_item item={p,input,atomic_load(&usb_generation)};
+        if(!route_queue || xQueueSend(route_queue,&item,0)!=pdTRUE)pbuf_free(p);
+        return 1;
+    }
+#endif
+    return gateway_process_host_input(p,input);
 }

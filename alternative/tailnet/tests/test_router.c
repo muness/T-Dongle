@@ -1,4 +1,10 @@
 #define GATEWAY_HOST_TEST
+#include "router_stubs.h"
+static int ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *data,size_t len) {
+    struct pbuf *p=pbuf_alloc(0,len,0);memcpy(p->payload,data,len);
+    ip4_addr_t dest={.addr=ip};struct netif *wg=ml->wg_netif;
+    int result=wg->output(wg,p,&dest);pbuf_free(p);return result;
+}
 #include "../main/router.c"
 static uint8_t sent[1500];
 static size_t sent_size;

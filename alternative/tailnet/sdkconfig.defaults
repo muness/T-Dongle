@@ -34,3 +34,6 @@ CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
 
 # Management/DNS reservation and dynamic membership admission use this total.
 CONFIG_LWIP_MAX_SOCKETS=20
+
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=128

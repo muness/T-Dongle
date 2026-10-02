@@ -562,6 +562,8 @@ void microlink_destroy(microlink_t *ml) {
      * and the long-poll accumulators (two PSRAM buffers of
      * ML_JSON_BUFFER_SIZE) were never released here before: every
      * stop/start cycle lost ~650 KB on the reference router. */
+    ml_directory_abort(ml);
+    for(unsigned i=0;i<4;i++)free(ml->jit_pending[i].packet);
     ml_derp_disconnect(ml);
     if (ml->h2_acc) { free(ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0; }
     if (ml->lp_acc) { free(ml->lp_acc); ml->lp_acc = NULL; ml->lp_acc_len = 0; }
