@@ -70,18 +70,19 @@ static void gateway_diag_load(gateway_diag_ring_t *ring) {
 static void gateway_diag_write(const microlink_t *ml, uint32_t member_id,
                                uint32_t event, uint32_t detail) {
     if (!diag_lock || xSemaphoreTake(diag_lock, pdMS_TO_TICKS(20)) != pdTRUE) return;
-    gateway_diag_ring_t ring;
-    gateway_diag_load(&ring);
+    gateway_diag_ring_t *ring = malloc(sizeof(*ring));
+    if (!ring) { xSemaphoreGive(diag_lock); return; }
+    gateway_diag_load(ring);
     uint32_t uptime = (uint32_t)(esp_timer_get_time() / 1000);
-    for (unsigned i = 0; event != GATEWAY_DIAG_BOOT && event != GATEWAY_DIAG_UPSTREAM && i < ring.count; i++) {
-        gateway_diag_record_t *prev = &ring.entries[i];
+    for (unsigned i = 0; event != GATEWAY_DIAG_BOOT && event != GATEWAY_DIAG_UPSTREAM && i < ring->count; i++) {
+        gateway_diag_record_t *prev = &ring->entries[i];
         if (prev->member_id == member_id && prev->event == event &&
             prev->detail == detail && (uint32_t)(uptime - prev->uptime_ms) < 30000) {
-            xSemaphoreGive(diag_lock); return;
+            free(ring); xSemaphoreGive(diag_lock); return;
         }
     }
     gateway_socket_stats sockets = gateway_sockets_snapshot();
-    gateway_diag_record_t *entry = &ring.entries[ring.next];
+    gateway_diag_record_t *entry = &ring->entries[ring->next];
     *entry = (gateway_diag_record_t){
         .uptime_ms = uptime, .member_id = member_id, .event = event, .detail = detail,
         .state = ml ? ml->state : 0, .map_attempts = ml ? ml->map_attempts : 0,
@@ -102,10 +103,11 @@ static void gateway_diag_write(const microlink_t *ml, uint32_t member_id,
                 entry->reason[i] = ' ';
         strlcpy(entry->h2_debug, ml->h2_debug, sizeof(entry->h2_debug));
     }
-    ring.next = (ring.next + 1) % DIAG_RING_COUNT;
-    if (ring.count < DIAG_RING_COUNT) ring.count++;
-    if (nvs_set_blob(diag_store, "events2", &ring, sizeof(ring)) == ESP_OK)
+    ring->next = (ring->next + 1) % DIAG_RING_COUNT;
+    if (ring->count < DIAG_RING_COUNT) ring->count++;
+    if (nvs_set_blob(diag_store, "events2", ring, sizeof(*ring)) == ESP_OK)
         nvs_commit(diag_store);
+    free(ring);
     xSemaphoreGive(diag_lock);
 }
 void gateway_diag_record(const microlink_t *ml, uint32_t event, uint32_t detail) {
@@ -704,7 +706,7 @@ static esp_err_t status(httpd_req_t *req) {
         jw_bool(w, value);                                                     \
         jw_char(w, ',');                                                       \
     } while (0)
-    STR("firmware", "0.2.10");
+    STR("firmware", "0.2.11");
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
     gateway_socket_stats sockets = gateway_sockets_snapshot();
@@ -963,31 +965,12 @@ static esp_err_t command(httpd_req_t *req) {
 }
 void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_init());
-    if (!ml_directory_mount()) ESP_LOGE("peerstore", "Peer flash storage could not mount");
     ESP_ERROR_CHECK(nvs_open("tn_settings", NVS_READWRITE, &store));
-    if (nvs_open("tn_diag", NVS_READWRITE, &diag_store) == ESP_OK)
-        diag_lock = xSemaphoreCreateMutex();
-    gateway_diag_membership(0, GATEWAY_DIAG_BOOT, esp_reset_reason());
     members_lock = xSemaphoreCreateMutex();
     wifi_scan_lock = xSemaphoreCreateMutex();
-    ESP_ERROR_CHECK(wifi_scan_lock ? ESP_OK : ESP_ERR_NO_MEM);
-    load_members();
-    extern bool gateway_routes_init(void);
-    route_storage_ok = gateway_routes_init();
-    size_t n = sizeof(wifi_config);
-    nvs_get_blob(store, "wifi", &wifi_config, &n);
+    ESP_ERROR_CHECK(members_lock && wifi_scan_lock ? ESP_OK : ESP_ERR_NO_MEM);
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-    wifi_init_config_t w = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&w));
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
-                                               wifi_event, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
-                                               wifi_event, NULL));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
     esp_netif_ip_info_t ip = {0};
     IP4_ADDR(&ip.ip, 192, 168, 77, 1);
     ip.gw = ip.ip;
@@ -1035,6 +1018,27 @@ void app_main(void) {
     ESP_ERROR_CHECK(tinyusb_net_init(&net));
     extern void gateway_console_start(void);
     gateway_console_start();
+    /* Keep CDC recovery reachable before flash formatting, NVS journals or Wi-Fi. */
+    if (nvs_open("tn_diag", NVS_READWRITE, &diag_store) == ESP_OK)
+        diag_lock = xSemaphoreCreateMutex();
+    gateway_diag_membership(0, GATEWAY_DIAG_BOOT, esp_reset_reason());
+    if (!ml_directory_mount()) ESP_LOGE("peerstore", "Peer flash storage could not mount");
+    load_members();
+    extern bool gateway_routes_init(void);
+    route_storage_ok = gateway_routes_init();
+    size_t n = sizeof(wifi_config);
+    nvs_get_blob(store, "wifi", &wifi_config, &n);
+    esp_netif_create_default_wifi_sta();
+    wifi_init_config_t w = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&w));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                                               wifi_event, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
+                                               wifi_event, NULL));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
     esp_netif_dns_info_t dns = {0};
     IP_SET_TYPE_VAL(dns.ip, IPADDR_TYPE_V4);
     IP4_ADDR(ip_2_ip4(&dns.ip), 192, 168, 77, 1);
@@ -1077,5 +1081,5 @@ void app_main(void) {
     httpd_register_uri_handler(server, &diag);
     httpd_register_uri_handler(server, &scan);
     httpd_register_uri_handler(server, &api);
-    xTaskCreate(manager, "members", 4096, NULL, 4, NULL);
+    ESP_ERROR_CHECK(xTaskCreate(manager, "members", 4096, NULL, 4, NULL) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }

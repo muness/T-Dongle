@@ -43,8 +43,15 @@ static int httpd_resp_send_err(httpd_req_t *r,int code,const char *reason) {retu
 static int httpd_resp_set_type(httpd_req_t *r,const char *type) {return 0;}
 static int httpd_resp_send_chunk(httpd_req_t *r,const char *data,size_t length){assert(!held&&r->used+length<sizeof(r->output));if(length){memcpy(r->output+r->used,data,length);r->used+=length;r->output[r->used]=0;}return 0;}
 #define strlcpy test_strlcpy
+static bool fail_journal_allocation;
+static void *journal_malloc(size_t n) {return fail_journal_allocation ? NULL : malloc(n);}
+#define malloc journal_malloc
 #include "diagnostic_journal.inc"
+#undef malloc
 int main(void) {
+ fail_journal_allocation=true;gateway_diag_membership(0,GATEWAY_DIAG_BOOT,9);
+ assert(!held && !commits); // Recovery logging must not crash or retain the lock on OOM.
+ fail_journal_allocation=false;
  gateway_diag_ring_t ring;held=1;gateway_diag_load(&ring);held=0;
  assert(ring.count==1&&ring.entries[0].h2_error==1); // v1 migrates on firmware update
  time_ms=1000;gateway_diag_membership(8,4,3); // refusal without a live client
