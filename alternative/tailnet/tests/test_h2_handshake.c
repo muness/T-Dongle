@@ -25,6 +25,7 @@ typedef struct {
     bool paused, has_node_key_challenge, truncate;
     uint8_t node_key_challenge[32];
     unsigned noise_error, noise_frame_bytes, delays;
+    uint32_t read_expected,read_received,read_elapsed_ms,read_errno;int32_t read_tls_result,conn_tls_result;
 } microlink_t;
 static atomic_uint_fast64_t ticks;
 static int64_t esp_timer_get_time(void) { return atomic_fetch_add(&ticks,1000); }

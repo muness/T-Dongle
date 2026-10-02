@@ -523,6 +523,7 @@ static int ml_conn_write(microlink_t *ml, const uint8_t *buf, size_t len) {
 static int ml_conn_read(microlink_t *ml, uint8_t *buf, size_t len) {
     if (ml->use_tls) {
         ssize_t n = esp_tls_conn_read(ml->coord_tls, buf, len);
+        ml->conn_tls_result = (int)n;
         if (n == ESP_TLS_ERR_SSL_WANT_READ || n == ESP_TLS_ERR_SSL_WANT_WRITE) {
             errno = EWOULDBLOCK;
             return -1;
@@ -533,6 +534,7 @@ static int ml_conn_read(microlink_t *ml, uint8_t *buf, size_t len) {
         }
         return (int)n;
     }
+    ml->conn_tls_result=0;
     return ml_recv(ml->coord_sock, buf, len, 0);
 }
 
@@ -598,36 +600,7 @@ static int coord_send(microlink_t *ml, const uint8_t *data, size_t len) {
     return 0;
 }
 
-/* A timeout before consuming anything is retryable. After consuming a prefix,
- * finish that exact record within a bounded deadline or close the session. */
-static int coord_recv(microlink_t *ml, uint8_t *buf, size_t len) {
-    size_t used = 0;
-    int64_t deadline = esp_timer_get_time() + 10000000;
-    while (used < len) {
-        int n = ml_conn_read(ml, buf + used, len - used);
-        if (n > 0) { used += n; continue; }
-        if (!n) { errno = ECONNRESET; return -1; }
-        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)
-            return -1;
-        if (!used && errno != EINTR) return -1;
-        if (esp_timer_get_time() >= deadline) {
-            errno = ETIMEDOUT;
-            return -1;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    return 0;
-}
-/* Used once a record is committed (e.g. its header is already consumed). */
-static int coord_recv_committed(microlink_t *ml, uint8_t *buf, size_t len) {
-    int64_t deadline = esp_timer_get_time() + 10000000;
-    while (coord_recv(ml, buf, len) < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) return -1;
-        if (esp_timer_get_time() >= deadline) { errno = ETIMEDOUT; return -1; }
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
-    return 0;
-}
+#include "coord_read.inc"
 
 /* ============================================================================
  * Noise-encrypted transport I/O

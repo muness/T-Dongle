@@ -108,6 +108,10 @@ static void gateway_diag_write(const microlink_t *ml, uint32_t member_id,
                 entry->reason[i] = ' ';
         strlcpy(entry->h2_debug, ml->h2_debug, sizeof(entry->h2_debug));
     }
+    if(ml && ml->noise_error==5){
+        uint32_t read[7]={uptime,member_id,ml->read_expected,ml->read_received,ml->read_elapsed_ms,ml->read_errno,(uint32_t)ml->read_tls_result};
+        nvs_set_blob(diag_store,"last_read",read,sizeof(read));
+    }
     ring->next = (ring->next + 1) % DIAG_RING_COUNT;
     if (ring->count < DIAG_RING_COUNT) ring->count++;
     if (nvs_set_blob(diag_store, "events2", ring, sizeof(*ring)) == ESP_OK)
@@ -122,6 +126,9 @@ void gateway_diag_membership(uint32_t member_id, uint32_t event, uint32_t detail
     gateway_diag_write(NULL, member_id, event, detail);
 }
 static wifi_config_t wifi_config;
+#include "core.h"
+#include "wifi_policy.h"
+#include "wifi_profiles.inc"
 extern const char setup_html_start[] asm("_binary_setup_html_start");
 extern const char setup_html_end[] asm("_binary_setup_html_end");
 static bool save_members(void) {
@@ -277,7 +284,7 @@ static void start_member(membership_t *m) {
 bool gateway_display_state(lcd_state *s) {
     s->wifi=online;s->recovery=gateway_boot_needs_attention();
     if(xSemaphoreTake(members_lock,pdMS_TO_TICKS(10))!=pdTRUE)return false;
-    s->saved_wifi=wifi_config.sta.ssid[0]!=0;
+    s->saved_wifi=wifi_saved.count!=0;
     for(membership_t *m=members;m;m=m->next){
         s->saved++;if(!m->enabled)continue;s->enabled++;
         microlink_t *c=m->client;
@@ -292,6 +299,7 @@ static void manager(void *arg) {
     unsigned last_socket_failures = 0;
     bool last_online = !online;
     for (;;) {
+        wifi_maintain();
         if (last_online != online) {
             gateway_diag_membership(0, GATEWAY_DIAG_UPSTREAM, online);
             last_online = online;
@@ -344,11 +352,12 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
                        void *data) {
     if (base == WIFI_EVENT && event == WIFI_EVENT_STA_START &&
         wifi_config.sta.ssid[0])
-        esp_wifi_connect();
+        wifi_rescan=true;
     if (base == WIFI_EVENT && event == WIFI_EVENT_STA_DISCONNECTED) {
         online = false;
-        if (wifi_config.sta.ssid[0] && !wifi_scan_pauses_reconnect)
-            esp_wifi_connect();
+        if(!wifi_scan_pauses_reconnect && wifi_current>=0)
+            wifi_retry_after[wifi_current]=(uint32_t)(esp_timer_get_time()/1000)+60000;
+        /* Worker rescans with backoff; never reconnect recursively here. */
     }
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
         online = true;
@@ -379,7 +388,7 @@ static void wifi_scan_resume(bool was_connected) {
     wifi_ap_record_t current = {0};
     if (wifi_config.sta.ssid[0] &&
         (!was_connected || esp_wifi_sta_get_ap_info(&current) != ESP_OK))
-        esp_wifi_connect();
+        wifi_rescan=true;
 }
 static esp_err_t wifi_scan(httpd_req_t *req) {
     if (!local_request(req))
@@ -518,9 +527,12 @@ static esp_err_t diagnostics(httpd_req_t *req) {
     gateway_diag_ring_t *ring=calloc(1,sizeof(*ring));
     if(!ring)return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Out of memory reading journal");
     ring->magic=DIAG_RING_MAGIC;
+    uint32_t last_read[7]={0};
     bool available = false;
     if (diag_lock && xSemaphoreTake(diag_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
         gateway_diag_load(ring); available = true;
+        size_t read_size=sizeof(last_read);
+        if(nvs_get_blob(diag_store,"last_read",last_read,&read_size)!=ESP_OK || read_size!=sizeof(last_read))memset(last_read,0,sizeof(last_read));
         xSemaphoreGive(diag_lock);
     }
     httpd_resp_set_type(req, "application/json");
@@ -553,7 +565,8 @@ static esp_err_t diagnostics(httpd_req_t *req) {
             {free(ring);return ESP_FAIL;}
     }
     free(ring);
-    esp_err_t ret = httpd_resp_send_chunk(req, "]}", 2);
+    int read_len=snprintf(row,sizeof(row),"],\"last_read_failure\":{\"uptime_ms\":%lu,\"member_id\":%lu,\"expected\":%lu,\"received\":%lu,\"elapsed_ms\":%lu,\"errno\":%lu,\"tls_result\":%ld}}",(unsigned long)last_read[0],(unsigned long)last_read[1],(unsigned long)last_read[2],(unsigned long)last_read[3],(unsigned long)last_read[4],(unsigned long)last_read[5],(long)(int32_t)last_read[6]);
+    esp_err_t ret = httpd_resp_send_chunk(req,row,read_len);
     if (ret != ESP_OK) return ret;
     return httpd_resp_send_chunk(req, NULL, 0);
 }
@@ -577,7 +590,7 @@ typedef struct {
     bool enabled, has_client, routing_ready;
     char label[24], error[64], dns[128], login[384], protocol_error[64], h2_debug[49];
     unsigned control_stage;
-    uint32_t diagnostics[16], stack_free[5];
+    uint32_t diagnostics[21], stack_free[5];
     unsigned peers, directory_count, peer_offset, page_start;
     uint32_t jit[5];
     struct {
@@ -671,6 +684,9 @@ static esp_err_t status(httpd_req_t *req) {
         v->diagnostics[13] = c->map_generation;
         v->diagnostics[14] = c->map_h2_error;
         v->diagnostics[15] = c->map_h2_last_stream;
+        v->diagnostics[16]=c->read_expected;v->diagnostics[17]=c->read_received;
+        v->diagnostics[18]=c->read_elapsed_ms;v->diagnostics[19]=c->read_errno;
+        v->diagnostics[20]=(uint32_t)c->read_tls_result;
         TaskHandle_t tasks[5] = {c->net_io_task, c->derp_tx_task,
                                  c->derp_rx_task, c->coord_task,
                                  c->wg_mgr_task};
@@ -696,6 +712,8 @@ static esp_err_t status(httpd_req_t *req) {
         if(peer_generation!=__atomic_load_n(&c->peer_generation,__ATOMIC_ACQUIRE) || directory_generation!=__atomic_load_n(&c->directory.generation,__ATOMIC_ACQUIRE)){xSemaphoreGive(members_lock);free(snapshot);return status_busy(req);}
         for(unsigned j=0;j<v->peers;j++)v->peer[j].address=gateway_alias(m->id,v->peer[j].address);
     }
+    char saved_ssids[8][33];unsigned saved_count=wifi_saved.count;
+    for(unsigned i=0;i<saved_count;i++)strlcpy(saved_ssids[i],wifi_saved.profiles[i].ssid,33);
     xSemaphoreGive(members_lock);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -735,6 +753,10 @@ static esp_err_t status(httpd_req_t *req) {
     NUM("socket_last_at_ms", sockets.last_at_ms);
     NUM("reset_reason", esp_reset_reason());
     BOOL("wifi", online);
+    jw_raw(w,"\"saved_wifi\":[");
+    for(unsigned i=0;i<saved_count;i++){if(i)jw_char(w,',');jw_string(w,saved_ssids[i]);}
+    jw_raw(w,"],");
+
     BOOL("route_storage_ok", route_storage_ok);
     NUM("free_memory", esp_get_free_heap_size());
     NUM("largest_free_block",
@@ -747,7 +769,8 @@ static esp_err_t status(httpd_req_t *req) {
         "map_bytes",         "map_declared_bytes", "map_projected_bytes",
         "map_heap_before",   "map_heap_after",     "map_largest_before",
         "map_stream_id",     "map_frame_type",     "noise_error",
-        "noise_frame_bytes", "map_generation", "h2_error", "h2_last_stream"};
+        "noise_frame_bytes", "map_generation", "h2_error", "h2_last_stream",
+        "read_expected", "read_received", "read_elapsed_ms", "read_errno", "read_tls_result"};
     const char *stack_names[] = {"net_io", "derp_tx", "derp_rx", "coord",
                                  "wg_mgr"};
     for (size_t i = 0; i < count && !w->failed; i++) {
@@ -778,7 +801,7 @@ static esp_err_t status(httpd_req_t *req) {
                 if (d)
                     jw_char(w, ',');
                 jw_key(w, diagnostic_names[d]);
-                jw_number(w, v->diagnostics[d]);
+                if(d==20){char value[24];snprintf(value,sizeof(value),"%ld",(long)(int32_t)v->diagnostics[d]);jw_raw(w,value);}else jw_number(w,v->diagnostics[d]);
             }
             jw_raw(w, "},\"stack_free_bytes\":{");
             for (unsigned t = 0; t < 5; t++) {
@@ -869,20 +892,11 @@ static esp_err_t command(httpd_req_t *req) {
             strlen(password) > 63)
             error = "Enter a valid Wi-Fi name and password";
         else {
-            wifi_config_t candidate = {0};
-            memcpy(candidate.sta.ssid, ssid, strlen(ssid));
-            memcpy(candidate.sta.password, password, strlen(password));
-            if (nvs_set_blob(store, "wifi", &candidate, sizeof(candidate)) !=
-                    ESP_OK ||
-                nvs_commit(store) != ESP_OK)
-                error = "Wi-Fi could not be saved";
-            else {
-                wifi_config = candidate;
-                esp_wifi_disconnect();
-                if(esp_wifi_set_config(WIFI_IF_STA, &wifi_config)!=ESP_OK || esp_wifi_connect()!=ESP_OK)
-                    error="Wi-Fi saved, but activation failed; restart services";
-            }
+            if(!wifi_save_profile(ssid,password,false))error="Could not save Wi-Fi; at most eight networks can be saved";
         }
+    } else if(action && !strcmp(action,"wifi_remove")) {
+        const char *ssid=cJSON_GetStringValue(cJSON_GetObjectItem(j,"ssid"));
+        if(!ssid || !wifi_save_profile(ssid,"",true))error="Could not remove that saved network";
     } else if (action && !strcmp(action, "add")) {
         const char *label =
                        cJSON_GetStringValue(cJSON_GetObjectItem(j, "label")),
@@ -1099,6 +1113,7 @@ static esp_err_t start_settings(void) {
     size_t n=sizeof(wifi_config);
     esp_err_t result=nvs_get_blob(store,"wifi",&wifi_config,&n);
     if(result!=ESP_ERR_NVS_NOT_FOUND && (result!=ESP_OK || n!=sizeof(wifi_config)))return ESP_ERR_INVALID_STATE;
+    if(!wifi_load_profiles())return ESP_ERR_INVALID_STATE;
     settings_ok=true;
     gateway_diag_membership(0,GATEWAY_DIAG_BOOT,esp_reset_reason());
     return ESP_OK;
@@ -1119,6 +1134,7 @@ static esp_err_t start_wifi(void) {
     START_TRY(esp_wifi_set_config(WIFI_IF_STA,&wifi_config));
     START_TRY(esp_wifi_start());
     wifi_ready=true;
+    wifi_rescan=true;
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0,"pool.ntp.org");esp_sntp_init();
     return ESP_OK;

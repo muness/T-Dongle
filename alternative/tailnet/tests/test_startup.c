@@ -22,7 +22,8 @@ int main(void) {
         memset(seen,0,sizeof(seen));sequence=complete=failed=usb_alive=0;fail_at=fault;
         gateway_startup_sequence();assert(complete==1 && usb_alive && seen[BOOT_USB]==1);
         assert(!fault || failed==fault);
-        if(fault==BOOT_SETTINGS || fault==BOOT_DIRECTORY || fault==BOOT_ROUTES)assert(!seen[BOOT_MANAGER]);
+        if(fault==BOOT_SETTINGS || fault==BOOT_WIFI)assert(!seen[BOOT_MANAGER]);
+        if(fault==BOOT_DIRECTORY || fault==BOOT_ROUTES)assert(seen[BOOT_MANAGER]); // Wi-Fi recovery remains alive; start_member independently gates routes.
         if(fault!=BOOT_NETWORK)assert(seen[BOOT_HTTP]);
         if(fault==BOOT_NETWORK)assert(!seen[BOOT_HTTP] && !seen[BOOT_WIFI]);
         if(fault==BOOT_HTTP)assert(seen[BOOT_MANAGER]); // HTTP isn't a routing dependency

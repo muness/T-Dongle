@@ -39,6 +39,7 @@ typedef struct {
         map_declared_bytes, map_projected_bytes, map_heap_before,
         map_heap_after, map_largest_before, map_stream_id, map_frame_type,
         noise_error, noise_frame_bytes, map_generation;
+    uint32_t read_expected,read_received,read_elapsed_ms,read_errno;int32_t read_tls_result;
     TaskHandle_t net_io_task, derp_tx_task, derp_rx_task, coord_task,
         wg_mgr_task;
     struct {unsigned count,generation;bool session_valid;} directory;
@@ -155,6 +156,7 @@ static size_t test_strlcpy(char *out,const char *src,size_t size) {
 static size_t checked_strlcpy(char *out,const char *src,size_t size){size_t n=test_strlcpy(out,src,size);if(mutate_peer&&members&&members->client&&src==members->client->peers[0].hostname)members->client->peer_generation+=2;return n;}
 #define strlcpy checked_strlcpy
 #define calloc checked_calloc
+static struct {unsigned count;struct {char ssid[33];} profiles[8];} wifi_saved;
 #include "status_stream.inc"
 #undef calloc
 #undef strlcpy

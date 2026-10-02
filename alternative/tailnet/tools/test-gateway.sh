@@ -2,6 +2,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build-host
+python - <<'PYWIFI'
+from pathlib import Path
+s=Path('main/wifi_profiles.inc').read_text();a=s.index('/* Scanning and reconnecting');Path('build-host/wifi_store.inc').write_text(s[:a]);Path('build-host/wifi_worker.inc').write_text(s[a:])
+PYWIFI
+for name in coord_read wifi_policy wifi_profiles; do
+ cc -std=gnu11 -I build-host -fsanitize=address,undefined -g tests/test_${name}.c -o build-host/test_${name}
+ build-host/test_${name}
+done
 # The USB wrapper is shared with the original bridge; test its real code too.
 (cd ../.. && TEST_CFLAGS="-fsanitize=address,undefined -g" python3 tools/test_net.py)
 cc -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
@@ -71,7 +79,7 @@ cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/componen
 build-host/test_semantic_map
 python - <<'PYCODE'
 from pathlib import Path
-s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static int coord_send(');b=s.index('static int coord_recv(',a);c=s.index('static int noise_send_owned(');d=s.index('/* Receive and decrypt',c)
+s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static int coord_send(');b=s.index('#include "coord_read.inc"',a);c=s.index('static int noise_send_owned(');d=s.index('/* Receive and decrypt',c)
 Path('build-host/control_send.inc').write_text(s[a:b]+s[c:d])
 PYCODE
 cc -std=c11 -fsanitize=address,undefined -g -pthread -I build-host -I "$mbed/include" -I "$mbed/library" tests/test_control_send.c "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_control_send
@@ -80,10 +88,10 @@ build-host/test_control_send
 python - <<'PYCODE'
 from pathlib import Path
 s=Path('components/microlink/src/ml_coord.c').read_text()
-a=s.index('static int coord_recv(');b=s.index('/* ============================================================================\n * Noise-encrypted',a)
+a=s.index('#include "coord_read.inc"');b=s.index('/* ============================================================================\n * Noise-encrypted',a)
 c=s.index('static int noise_recv_buffer(');d=s.index('/* ============================================================================\n * State: DNS_RESOLVE',c)
 e=s.index('static int do_h2_preface(');f=s.index('/* ============================================================================\n * State: REGISTER',e)
-Path('build-host/receive_core.inc').write_text(s[a:b]+s[c:d])
+Path('build-host/receive_core.inc').write_text(s[a:b]+s[c:d]);Path('build-host/coord_read.inc').write_text(Path('components/microlink/src/coord_read.inc').read_text())
 Path('build-host/h2_preface.inc').write_text(s[e:f])
 h=Path('components/microlink/src/ml_h2.c').read_text();Path('build-host/h2_core.inc').write_text(h[h.index('static const char *TAG'):])
 PYCODE

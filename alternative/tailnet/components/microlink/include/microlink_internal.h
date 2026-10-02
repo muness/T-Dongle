@@ -490,6 +490,8 @@ struct microlink_s {
     char last_error[64];
     char transport_error[64];
     unsigned noise_error, noise_frame_bytes;
+    uint32_t read_expected, read_received, read_elapsed_ms, read_errno;
+    int32_t read_tls_result, conn_tls_result;
     uint32_t control_stage;
     char h2_debug[49];
     uint32_t map_attempts, map_failures, map_bytes, map_declared_bytes, map_projected_bytes;
