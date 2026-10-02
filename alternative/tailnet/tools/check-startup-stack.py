@@ -20,3 +20,10 @@ assert match, "Cannot measure the compiled diagnostic writer frame"
 frame = int(match[1], 0)
 assert frame <= 256, f"Journal moved back onto task stacks: frame={frame} bytes"
 print(f"Startup stack: {stack} bytes, journal writer frame: {frame} bytes (not a runtime high-water measurement)")
+dns_obj = obj.with_name("dns.c.obj")
+dns_disassembly = subprocess.check_output(["xtensa-esp32s3-elf-objdump", "-d", str(dns_obj)], text=True)
+dns_match = re.search(r"<dns_task>:\s*\n\s*[0-9a-f]+:\s+[0-9a-f]+\s+entry\s+a1,\s*(0x[0-9a-f]+|\d+)", dns_disassembly)
+assert dns_match, "Cannot measure the compiled DNS task frame"
+dns_frame = int(dns_match[1], 0)
+assert dns_frame <= 256, f"DNS workspace moved back onto its stack: frame={dns_frame} bytes"
+print(f"DNS task frame: {dns_frame} bytes; task budget remains 4096 bytes")

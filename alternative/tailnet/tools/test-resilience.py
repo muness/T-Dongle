@@ -10,7 +10,9 @@ boot=(r/'main/boot_health.c').read_text()
 (build/'boot_health.inc').write_text((r/'main/json_writer.inc').read_text()+'\n'+boot[boot.index('#define BOOT_MAGIC'):])
 directory=(r/'components/microlink/src/ml_directory.c').read_text()
 (build/'directory_mount.inc').write_text(directory[directory.index('bool ml_directory_mount(void)'):directory.index('\n#else')])
-for name in ['startup','settings','derp_owner','route_ingress','boot_health','directory_mount']:
+dns=(r/'main/dns.c').read_text()
+(build/'dns.inc').write_text(dns[dns.index('static uint16_t read16'):])
+for name in ['startup','settings','derp_owner','route_ingress','boot_health','directory_mount','dns']:
     cmd=['cc','-std=c11','-g','-fsanitize=address,undefined','-I',str(build),'-I',str(cj),str(r/f'tests/test_{name}.c')]
     if name=='settings':cmd.append(str(cj/'cJSON.c'))
     cmd+=['-o',str(build/f'test_{name}')];subprocess.run(cmd,check=True);subprocess.run([str(build/f'test_{name}')],check=True)

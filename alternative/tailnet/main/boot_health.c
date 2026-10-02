@@ -122,6 +122,8 @@ int gateway_boot_report(void *context,int (*sink)(void *,const char *,size_t)) {
     jw_raw(w,",\"reset_reason\":");jw_number(w,esp_reset_reason());
     jw_raw(w,",\"free_memory\":");jw_number(w,esp_get_free_heap_size());
     jw_raw(w,",\"minimum_free_memory\":");jw_number(w,heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    extern unsigned gateway_dns_stack_free(void);
+    jw_raw(w,",\"dns_stack_free_bytes\":");jw_number(w,gateway_dns_stack_free());
     jw_raw(w,",\"errors\":[");bool comma=false;
     for(unsigned i=1;i<BOOT_STAGE_COUNT;i++)if(errors[i]) {
         if(comma)jw_char(w,',');

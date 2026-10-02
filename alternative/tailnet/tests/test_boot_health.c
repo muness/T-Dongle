@@ -26,6 +26,7 @@ static int reason=1;
 static char build_sha[65];
 static uint8_t guard_disk[512],crash_disk[512];static size_t guard_len,crash_len;
 static unsigned erases;
+unsigned gateway_dns_stack_free(void){return 3000;}
 static void esp_app_get_elf_sha256(char *out,size_t n){strlcpy(out,build_sha,n);}
 static int esp_reset_reason(void){return reason;}
 static int esp_core_dump_image_check(void){return raw_present?0:-1;}

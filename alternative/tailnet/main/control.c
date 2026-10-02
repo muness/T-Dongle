@@ -38,7 +38,7 @@ static void command_task(void *arg) {
             snprintf(reply, sizeof(reply),
                      "mode=tailnet trial=0 active=0 wifi=%s rssi=unknown usb_enumerated=%d "
                      "usb_transport_ready=%d host_interface_ready=unknown "
-                     "internet=not_checked firmware=" GATEWAY_VERSION "\r\nuptime_ms=%llu free_heap=%lu\r\n",
+                     "internet=not_checked\r\nfirmware=" GATEWAY_VERSION "\r\nuptime_ms=%llu free_heap=%lu\r\n",
                      gateway_online() ? "up" : "joining", tud_mounted(), tud_ready(),
                      (unsigned long long)(esp_timer_get_time() / 1000),
                      (unsigned long)esp_get_free_heap_size());

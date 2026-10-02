@@ -8,22 +8,35 @@ static void write16(uint8_t *p, uint16_t n) {
     p[0] = n >> 8;
     p[1] = n;
 }
-static void dns_task(void *arg) {
-    int sock = (int)(intptr_t)arg;
+/* Owned by the DNS task for its lifetime. Keep packet/directory workspace off
+ * its stack: socket, FAT and flash calls need that stack while resolving. */
+typedef struct {
+    int sock;
     uint8_t packet[1500];
+    char name[256], peer[64], qualified[128];
+    ml_peer_update_t record;
+} dns_workspace;
+static TaskHandle_t dns_handle;
+unsigned gateway_dns_stack_free(void) {
+    return dns_handle ? (unsigned)uxTaskGetStackHighWaterMark(dns_handle) : 0;
+}
+static void dns_task(void *arg) {
+    dns_workspace *work=arg;
+    int sock=work->sock;
+    uint8_t *packet=work->packet;
     for (;;) {
         struct sockaddr_in host;
         socklen_t sl = sizeof(host);
-        int n = recvfrom(sock, packet, sizeof(packet), 0, (struct sockaddr *)&host, &sl);
+        int n = recvfrom(sock, packet, sizeof(work->packet), 0, (struct sockaddr *)&host, &sl);
         if (n < 12 || (ntohl(host.sin_addr.s_addr) & 0xffffff00) != 0xc0a84d00 ||
             read16(packet + 4) != 1 || packet[2] & 128)
             continue;
-        char name[256];
+        char *name=work->name;
         size_t pos = 12, len = 0;
         bool invalid = false;
         while (pos < (size_t)n && packet[pos]) {
             unsigned size = packet[pos++];
-            if (size > 63 || pos + size > (size_t)n || len + size + 1 >= sizeof(name)) {
+            if (size > 63 || pos + size > (size_t)n || len + size + 1 >= sizeof(work->name)) {
                 invalid = true;
                 break;
             }
@@ -47,15 +60,14 @@ static void dns_task(void *arg) {
             for (membership_t *m = members; m; m = m->next)
                 if (m->client && m->client->state == ML_STATE_CONNECTED && m->client->directory.session_valid) {
                     for (unsigned i = 0; i < m->client->directory.count; i++) {
-                        ml_peer_update_t record;
-                        if(!ml_directory_at(m->client,i,&record))continue;
-                        ml_peer_update_t *p=&record;
-                        char peer[64], qualified[128];
-                        strlcpy(peer, p->hostname, sizeof(peer));
+                        ml_peer_update_t *p=&work->record;
+                        if(!ml_directory_at(m->client,i,p))continue;
+                        char *peer=work->peer, *qualified=work->qualified;
+                        strlcpy(peer, p->hostname, sizeof(work->peer));
                         char *dot = strchr(peer, '.');
                         if (dot)
                             *dot = 0;
-                        snprintf(qualified, sizeof(qualified), "%s.%s.tailnet", peer, m->label);
+                        snprintf(qualified, sizeof(work->qualified), "%s.%s.tailnet", peer, m->label);
                         if (!strcasecmp(name, qualified) && p->vpn_ip) {
                             matches++;
                             alias = gateway_alias(m->id, p->vpn_ip);
@@ -72,7 +84,7 @@ static void dns_task(void *arg) {
             write16(packet + 6, alias ? 1 : 0);
             write16(packet + 8, 0);
             write16(packet + 10, 0);
-            if (alias && pos + 16 <= sizeof(packet)) {
+            if (alias && pos + 16 <= sizeof(work->packet)) {
                 uint8_t answer[] = {0xc0, 0x0c, 0, 1, 0,           1,           0,          0,
                                     0,    30,   0, 4, alias >> 24, alias >> 16, alias >> 8, alias};
                 memcpy(packet + pos, answer, 16);
@@ -97,7 +109,7 @@ static void dns_task(void *arg) {
         uint16_t id = read16(packet);
         if (connect(out, (struct sockaddr *)&upstream, sizeof(upstream)) == 0 &&
             send(out, packet, n, 0) == n) {
-            int count = recv(out, packet, sizeof(packet), 0);
+            int count = recv(out, packet, sizeof(work->packet), 0);
             if (count >= 12 && read16(packet) == id && (packet[2] & 128))
                 sendto(sock, packet, count, 0, (struct sockaddr *)&host, sl);
         }
@@ -105,10 +117,13 @@ static void dns_task(void *arg) {
     }
 }
 esp_err_t gateway_dns_start(void) {
+    dns_workspace *work=calloc(1,sizeof(*work));
+    if(!work)return ESP_ERR_NO_MEM;
     int sock=socket(AF_INET,SOCK_DGRAM,0);
     struct sockaddr_in local={.sin_family=AF_INET,.sin_port=htons(53),.sin_addr.s_addr=htonl(0xc0a84d01)};
-    if(sock<0)return ESP_ERR_NO_MEM;
-    if(bind(sock,(struct sockaddr *)&local,sizeof(local))<0){close(sock);return ESP_FAIL;}
-    if(xTaskCreate(dns_task,"gateway_dns",4096,(void *)(intptr_t)sock,3,NULL)!=pdPASS){close(sock);return ESP_ERR_NO_MEM;}
+    if(sock<0){free(work);return ESP_ERR_NO_MEM;}
+    if(bind(sock,(struct sockaddr *)&local,sizeof(local))<0){close(sock);free(work);return ESP_FAIL;}
+    work->sock=sock;
+    if(xTaskCreate(dns_task,"gateway_dns",4096,work,3,&dns_handle)!=pdPASS){close(sock);free(work);return ESP_ERR_NO_MEM;}
     return ESP_OK;
 }
