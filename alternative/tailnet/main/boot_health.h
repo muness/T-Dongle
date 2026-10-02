@@ -2,7 +2,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#define GATEWAY_VERSION "0.2.19"
+#define GATEWAY_VERSION "0.2.20"
 /* Numeric stages are persisted, so append rather than reorder. */
 enum gateway_boot_stage {
     BOOT_USB=1, BOOT_SETTINGS, BOOT_NETWORK, BOOT_HTTP, BOOT_DIRECTORY,
