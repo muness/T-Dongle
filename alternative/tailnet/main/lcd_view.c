@@ -5,19 +5,23 @@
 void lcd_compose(const lcd_state *s,const char *version,lcd_view *v) {
     memset(v,0,sizeof(*v));
     const char *title,*detail,*hint;
-    if(s->installing){title="INSTALLING";detail="Follow progress in app";hint="Keep USB connected";}
-    else if(s->starting){title="STARTING";detail="Preparing your dongle";hint="Settings stay saved";}
-    else if(s->recovery){title="RECOVERY";detail="Settings are preserved";hint="App: Restart services";v->attention=true;}
-    else if(!s->wifi){title=s->saved_wifi?"JOINING WI-FI":"SET UP WI-FI";detail="Open Networks in the app";hint="Use a 2.4 GHz network";}
-    else if(s->bridge){title="WI-FI READY";detail="USB internet forwarding";hint="Wi-Fi bridge mode";}
-    else if(s->login){title="SIGN IN";detail="Open Networks in the app";hint="Approve in your browser";}
-    else if(s->ready){title="ROUTING READY";detail="Wi-Fi connected";hint="Devices in Networks";}
-    else if(!s->enabled){title=s->saved?"DISCONNECTED":"ADD A TAILNET";detail="Wi-Fi connected";hint=s->saved?"Reconnect in Networks":"Sign in from Networks";}
-    else {title=s->failed?"RECONNECTING":"CONNECTING";detail="Wi-Fi connected";hint="Progress in Networks";v->attention=s->failed>0;}
+    if(s->installing){title="INSTALLING";detail="Installing firmware";hint="Keep USB plugged in";}
+    else if(s->starting){title="STARTING";detail="Starting dongle services";hint="Please wait";}
+    else if(s->recovery){title="RECOVERY";detail="App: Overview";hint="Tap Restart services";v->attention=true;}
+    else if(!s->wifi){
+        title=s->saved_wifi?"JOINING WI-FI":"SET UP WI-FI";
+        detail=s->saved_wifi?"Trying saved Wi-Fi":"App: Networks";
+        hint=s->saved_wifi?"App: Networks to change":"Add a 2.4 GHz network";
+    }
+    else if(s->bridge){title="WI-FI BRIDGE";detail="Wi-Fi connected";hint=s->usb?"USB host connected":"Waiting for USB host";}
+    else if(s->login){title="APPROVE LOGIN";detail="App: Networks - Sign in";hint="Approve in your browser";}
+    else if(s->ready){title="TAILNET READY";detail="Wi-Fi connected";hint=!s->usb?"Waiting for USB host":s->ready<s->enabled?"App: Networks for details":"USB routing is ready";}
+    else if(!s->enabled){title=s->saved?"TAILNET OFF":"ADD A TAILNET";detail=s->saved?"Wi-Fi connected":"App: Networks";hint=s->saved?"App: Networks - Reconnect":"Sign in with Tailscale";}
+    else {title=s->failed?"RETRYING":"CONNECTING";detail=s->failed?"Tailnet connection failed":"Joining your tailnet";hint=s->failed?"App: Networks for details":"Please wait";v->attention=s->failed>0;}
     snprintf(v->title,sizeof(v->title),"%s",title);snprintf(v->detail,sizeof(v->detail),"%s",detail);snprintf(v->hint,sizeof(v->hint),"%s",hint);
     if(!s->bridge && s->ready && !s->recovery && !s->installing && !s->starting && !s->login && s->wifi)
         snprintf(v->detail,sizeof(v->detail),"%u OF %u TAILNET%s READY",s->ready>999?999:s->ready,s->enabled>999?999:s->enabled,s->enabled==1?"":"S");
-    snprintf(v->footer,sizeof(v->footer),"v%.10s  USB %s",version,s->usb?"READY":"WAIT");
+    snprintf(v->footer,sizeof(v->footer),"v%.10s  USB %s",version,s->usb?"READY":"NOT READY");
 }
 /* Small fixed glyphs kept in flash. Unsupported characters render as '?'. */
 static const struct {char c;uint8_t row[7];} glyphs[]={
