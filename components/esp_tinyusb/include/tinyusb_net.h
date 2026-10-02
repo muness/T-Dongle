@@ -66,6 +66,7 @@ void tinyusb_net_deinit(void);
  *
  * @note It is possible to use sync and async send interchangeably.
  * This function needs some synchronization primitives, so using sync mode (even once) uses more heap
+ * Calls must be serialized by the caller (the gateway uses the lwIP core lock).
  *
  * @param[in] buffer            USB send data
  * @param[in] len               Send data len

@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "appVersion": 121,
+  "source": "Saved Android archive retrieved over Wi-Fi after the reported failure",
+  "sampleCount": 209,
+  "managementStage": "STATUS_READ",
+  "failure": "STATUS_READ:STATUS_FORMAT_REJECTED",
+  "bootReport": {
+    "schema": 1,
+    "recovery": true,
+    "firmware": "0.2.12",
+    "elf": "7414a52b1e2979c9b0833a35c40a26093ba5850fe53372b9aea504ddbd2d8354",
+    "stage": "running",
+    "previous_stage": "running",
+    "previous_route_stage": 0,
+    "previous_route_member": 0,
+    "reset_reason": 1,
+    "free_memory": 219640,
+    "minimum_free_memory": 211596,
+    "errors": [],
+    "crash": {
+      "task": "gateway_dns",
+      "elf": "7414a52b1e2979c9b0833a35c40a26093ba5850fe53372b9aea504ddbd2d8354",
+      "pc": 1077390469,
+      "cause": 0,
+      "corrupted": true,
+      "backtrace": [
+        1077390469,
+        1077390413,
+        1077394310,
+        1077398635,
+        1077394572
+      ]
+    }
+  },
+  "decodedBacktrace": [
+    "panic_abort",
+    "esp_system_abort",
+    "vApplicationStackOverflowHook",
+    "vTaskSwitchContext",
+    "_frxt_dispatch"
+  ],
+  "matchingElf": "7414a52b1e2979c9b0833a35c40a26093ba5850fe53372b9aea504ddbd2d8354",
+  "oldDnsFrameBytes": 2336,
+  "dnsTaskStackBytes": 4096,
+  "newDnsFrameBytes": 144
+}

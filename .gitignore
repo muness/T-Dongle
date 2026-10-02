@@ -6,3 +6,5 @@ sdkconfig.old
 .venv/
 __pycache__/
 dist/
+
+sdkconfig.unified*

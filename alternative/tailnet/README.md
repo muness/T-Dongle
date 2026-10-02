@@ -1,0 +1,67 @@
+# Experimental USB multi-tailnet gateway
+
+This separate ESP32-S3 firmware implements USB NCM Ethernet, Wi-Fi upstream, tailnet enrollment, saved independent identities, and concurrent membership contexts. It replaces adapter mode while installed. The original bridge source and `adapter` NVS namespace stay untouched. This build has not yet been qualified on physical hardware; do not treat compilation or host tests as proof of simultaneous traffic on the dongle.
+
+## Try it
+
+Install the explicitly labeled tailnet preview APK and use its existing board-confirmed firmware installer. Reconnect USB after flashing, allow management access, and choose **Set up and use your tailnets**. The companion binds its setup view to the USB Ethernet interface. A computer can instead open http://192.168.77.1/ after obtaining a USB DHCP lease.
+
+Save Wi-Fi first, then add each membership with a unique label. Leave its auth key empty for browser authorization, or supply a Tailscale auth key. Follow **Sign in to this tailnet** when shown. The firmware preserves that membership's machine, WireGuard and discovery keys in its own NVS namespace. The provisioning auth key is removed from the saved settings after successful connection. Disable and reactivate individual memberships, or remove their stored identities. Removing a local identity does not delete its node from the Tailscale admin console.
+
+Each peer receives a USB-visible address in `198.18.0.0/15`. These mappings persist across reboot and are never reassigned to another identity when removed. For example, use a displayed address with SSH or an HTTP service. DNS provides `<peer>.<membership>.tailnet`; identical peer addresses or short names across memberships remain distinct. Unqualified names use upstream DNS. Ambiguous qualified names return NXDOMAIN.
+
+## Bounds and current limitations
+
+Membership records form a dynamic list: zero, one or N, with no two-slot model. Active admission depends on actual free memory, including a reserve for control-plane work; a rejected activation leaves existing memberships running and its saved record available. Physical capacity, two simultaneous enrollments, DERP-only operation, throughput and long-running stability still need measurement. The preview reports memory admission failures instead of switching or evicting another membership.
+
+The implementation currently supports IPv4 peer TCP/UDP connections originating from USB, 8 peers per membership, 64 persistent peer aliases, and 64 active flows. It rejects fragmented IP packets, unsolicited inbound traffic, and IPv6 tunnel traffic. Subnet routes and exit nodes are not exposed. A retired alias continues to occupy its allocation to prevent old DNS caches from reaching a new identity. Oversized control maps or Noise records fail the connection rather than overflowing a buffer. Raw map messages may be up to 1 MiB but are parsed incrementally; retained records are bounded to 4 KiB, eight peer updates per section, and four DERP regions. Noise plaintext is bounded to 20 KiB. Startup EarlyNoise is limited to 1 KiB and encrypted startup records/pending HTTP/2 bytes to 4 KiB. Capacity failures are explicit; the peer limit is separate from raw map size.
+
+The setup service accepts USB-subnet clients only, verifies Host/Origin, and requires JSON for mutations. Traffic returning from a tunnel must match an outbound flow belonging to that same membership and peer. Remote peers enforce their Tailscale ingress policy; this preview exposes no inbound tailnet service or route between memberships. It does not implement the full reference client's policy/capability surface or Tailnet Lock. The screen is not driven by this alternative firmware yet.
+
+## Build and validate
+
+Source the pinned ESP-IDF v5.5.5 environment and run `tools/build-gateway.sh` from this project. It builds the actual gateway, runs router and fragmented HTTP/2 map tests under ASan/UBSan, and packages `dist/` for the companion. The existing `AUDIT.md` and `audit-result.json` describe the historical unmodified runtime baseline, not current active-session memory. No physical flashing is performed by the build script.
+
+## Memory and map diagnostics (0.2.1)
+
+The tailnet runtime has no on-device diagnostic archive or statistics history; those live on Android. Its console output queue is reduced to 1 KiB, Wi-Fi static RX buffers to six, and dynamic RX/TX buffers to sixteen each. These settings favor control-plane headroom over peak transfer throughput. The default six-packet RX aggregation window remains supported. The map reader decrypts authenticated Noise records in place in its shared workspace, avoiding a second allocation of up to 20 KiB during reception. Invalid authentication still fails and clears the plaintext.
+
+Before allocating a cJSON object tree, an allocation-free pass validates the complete map and retains only fields consumed by this gateway. It preserves full/incremental peer lists, peer removals, endpoint patches, node addresses/expiry, and relay connection fields. It retains the first four relay regions plus the preferred region if that appears later; the existing four-region selection then includes the preferred region. Existing raw map/Noise size bounds remain. Callback users bypass projection to preserve their full-map contract. Saved Wi-Fi, identity namespaces, and peer aliases are unchanged. An 80-region synthetic fixture on the host reduced cJSON peak allocations from 123714 to 4332 bytes; The public 28-region relay snapshot reduced host object-tree allocations from 64529 to 8182 bytes. Actual device headroom still needs measurement.
+
+The empty-fetch fallback requests peers on its initial streaming map instead of setting OmitPeers before a peer list exists. Valid padded DATA frames are read across arbitrary fragment boundaries. Partial END_STREAM responses fail rather than being misclassified as empty. Length-prefix checks reject overflow and oversize before addition. Socket EOF is distinguished from a retryable timeout.
+
+USB `/status` includes firmware version, current/minimum internal heap, largest free block, and per-membership `map_diagnostics`: attempts/failures, error code, received/declared/projected bytes, heap before/after object allocation, largest block before parsing, last HTTP/2 stream/frame, Noise error/frame length, and applied map generation. Android v98 or later saves these automatically in diagnostic captures. No raw map, credentials, or login links are added to this diagnostic object.
+
+Map error codes: 1 workspace busy; 2 Noise transport failure (Noise code distinguishes header/read, invalid framing, capacity, allocation, payload read, authentication); 3 no data; 4 invalid padding; 5 SETTINGS acknowledgement; 6 assembly capacity; 7 invalid/oversized length prefix; 8 malformed/deep JSON; 9 object allocation/parse failure; 10 GOAWAY/RST; 11 flow-control write failure; 12 incomplete message. Human-readable protocol errors retain the exact stage instead of a generic unsupported-map message.
+
+The public relay-map regression fixture was retrieved from https://controlplane.tailscale.com/derpmap/default on 2026-10-01; it contains no private membership map. Host tests run against the saved fixture without internet access.
+
+## Known devices and routing status (0.2.2)
+
+The setup page retains peer addresses during a control connection failure. These can come from saved peers or an earlier successful map; their presence does not establish current connectivity. `/status` now reports `routing_ready` using the same membership conditions as the USB outbound routing gate. The UI shows that status separately and labels retained peers as known devices whose availability has not been verified. Each peer uses one compact row with its name, qualified hostname, visible USB IP address, and copy action. A ready routing gate still does not prove end-to-end peer reachability or tailnet policy permission.
+
+Validation: `tools/test-onboarding.mjs` executes the actual renderer against failed and ready membership fixtures, checking retained peers, compact structure, visible IP addresses, and distinct status copy. The gateway build and host tests pass. Native Android layout and real-device connectivity remain hardware acceptance checks.
+
+## Control transport and recovery resources (0.2.8)
+
+HTTP upgrade headers, Noise records and EarlyNoise use declared lengths and bounded deadlines. Receiving a partial record never discards its prefix or guesses the next nonce. Decryption failure closes that session. EarlyNoise and registration retain coalesced HTTP/2 tails separately for each identity; received SETTINGS are acknowledged once. The host suite encrypts real transport records and fragments them at every offset, then runs the production HTTP/2 builders/response readers against a local Go server. This does not verify Tailscale authorization or physical peer traffic.
+
+The firmware configures twenty socket descriptors. Eight are reserved for the HTTP server's three internal sockets, two HTTP clients, DNS listener/forwarder and SNTP. Each active membership reserves five: IPv4 DISCO, IPv6 STUN, control TCP, DERP TCP, and a transient key-fetch/netcheck allocation. Admission also checks actual open descriptors and the existing heap/largest-block budget. Counts follow resources rather than a fixed membership count; saved identities are unaffected. HTTP sessions are limited to two with idle eviction and short I/O timeouts. Every BSD socket/accept/close is observed by linker wrappers, including HTTP and TLS, with bounded counters and exact allocation errno/operation. The gateway's ELF confirms these wrappers are linked.
+
+`/status` now emits all sixteen map diagnostic counters, including numeric GOAWAY/RST errors and stream IDs, bounded noncredential H2 debug prose, startup stage, reset reason, and socket counts/peak/failure evidence. `/diagnostics` schema 2 retains the latest eight events in NVS: boot/upstream changes, startup attempts/refusals/errors, TCP/Noise/H2/registration/map failures and connections. It migrates the old ring without erasing identities. Repeated equivalent failure events coalesce for thirty seconds across intervening events. The bounded journal replaces a large firmware RAM log; Android remains responsible for the ten-minute archive.
+
+## Startup recovery (0.2.11)
+
+A saved Android v119 capture identified repeated task stack overflows in the exact 0.2.10 image. The journal writer now uses short-lived heap workspace instead of a large automatic ring, reducing its compiled Xtensa frame from 1776 to 160 bytes. Main startup stack is 7168 bytes and is released when initialization finishes. USB CDC management starts before peerstore mounting, diagnostic journal writes and Wi-Fi initialization. The build checks the effective sdkconfig and compiled journal frame. These changes require actual-board boot verification; they do not establish tailnet traffic acceptance. See [upstream comparison and salvage](docs/upstream-salvage-2026-10-01.md).
+
+## Runtime resilience (0.2.12)
+
+V120's saved evidence confirmed a runtime panic and repeated four-second map truncation. Maps now use progress-based inactivity deadlines with a total bound; one DERP task owns all TLS I/O and reconnect, saving a 10 KiB task stack per membership. TCP MSS is bounded for the routed packet size, and oversized peer packets cannot bypass queue ownership. Startup isolates optional failures, preserves USB management and saved settings, and latches recovery after a crash in the same binary. A new coredump partition preserves task/PC/backtrace evidence; Android automatically archives an allowlisted summary and exposes Restart services. See [evidence, fault-injection checks and remaining hardware limits](docs/runtime-resilience-2026-10-02.md).
+
+## Setup and LCD clarity (0.2.15)
+
+Networks now keeps Wi-Fi settings, sign-in and saved memberships together. Each membership shows its reported identity and routing state; Devices expands to compact name/IP/copy rows and stays expanded across status refreshes. Saved devices remain labeled as unverified when routing is unavailable. Wi-Fi discovery and password visibility controls are available without typing a network name.
+
+The original 160 × 80 LCD now shows setup, sign-in, routing readiness, reconnection, recovery and installation handoff, with the firmware version and USB state. Its renderer uses one 320-byte static DMA scanline, fixed flash-resident glyphs, and the existing control task; the SPI driver has its own initialization allocations. Unchanged frames are skipped. A transfer failure stops drawing without stopping USB or networking. There is no framebuffer, new display task or per-refresh heap allocation. The ROM bootloader cannot report live progress to this renderer; installation progress remains in Android. Panel orientation, colors and behavior still require physical-board confirmation.
+
+See [polish validation](docs/ui-lcd-polish-2026-10-02.md). This build also contains the DNS and USB transmit ownership corrections from 0.2.13–0.2.14.

@@ -39,11 +39,19 @@ static const char *TAG = "tusb_net";
 static void do_send_sync(void *ctx)
 {
     (void) ctx;
-    if (xSemaphoreTake(s_net_obj.buffer_sema, 0) != pdTRUE || s_net_obj.packet_to_send == NULL) {
+    if (xSemaphoreTake(s_net_obj.buffer_sema, 0) != pdTRUE) {
         return;
     }
 
+    // A timed-out send can leave a deferred callback in the TinyUSB queue.
+    // Treat callbacks as wakeups: consume the current slot exactly once while
+    // holding the semaphore, before the copy/free callback can release it.
     packet_t *packet = s_net_obj.packet_to_send;
+    s_net_obj.packet_to_send = NULL;
+    if (packet == NULL) {
+        xSemaphoreGive(s_net_obj.buffer_sema);
+        return;
+    }
     if (tud_network_can_xmit(packet->len)) {
         tud_network_xmit(packet, packet->len);
         packet->result = ESP_OK;

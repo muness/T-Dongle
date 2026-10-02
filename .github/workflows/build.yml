@@ -2,7 +2,7 @@ name: firmware-and-host-tests
 on: [push, pull_request, workflow_dispatch]
 jobs:
   host:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, linux-general]
     steps:
       - uses: actions/checkout@v4
       - run: TEST_CFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' tools/test.sh
@@ -11,7 +11,7 @@ jobs:
           name: synthetic-ui-previews
           path: docs/preview-*.svg
   firmware:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, linux-general]
     strategy:
       matrix:
         variant: [full, headless, network-only]
@@ -28,3 +28,24 @@ jobs:
         with:
           name: tdongle-0.1.0-${{ matrix.variant }}
           path: dist/tdongle-0.1.0-${{ matrix.variant }}/
+
+  tailnet-gateway:
+    runs-on: [self-hosted, linux, x64, linux-general]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Go for control protocol interoperability tests
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - run: sudo apt-get update && sudo apt-get install -y git wget flex bison gperf python3-venv cmake ninja-build ccache libffi-dev libssl-dev libusb-1.0-0
+      - run: tools/bootstrap.sh
+      - shell: bash
+        run: |
+          . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
+          alternative/tailnet/tools/build-gateway.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tailnet-gateway-experimental
+          path: |
+            alternative/tailnet/dist/

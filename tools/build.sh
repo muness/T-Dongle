@@ -12,6 +12,6 @@ case "$variant" in
 esac
 mkdir -p "build-$variant"
 # Per-variant SDKCONFIG prevents cached options leaking between builds.
-idf.py -B "build-$variant" -D "SDKCONFIG=$PWD/build-$variant/sdkconfig" -D "SDKCONFIG_DEFAULTS=$defaults" -D IDF_TARGET=esp32s3 build
+idf.py -D TDONGLE_LEGACY_BRIDGE=ON -B "build-$variant" -D "SDKCONFIG=$PWD/build-$variant/sdkconfig" -D "SDKCONFIG_DEFAULTS=$defaults" -D IDF_TARGET=esp32s3 build
 python3 tools/check_build.py "build-$variant" "$variant"
 python3 tools/package.py "build-$variant" "$variant"
