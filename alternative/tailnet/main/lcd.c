@@ -52,8 +52,12 @@ esp_err_t gateway_display_start(void) {
        (e=esp_lcd_panel_init(panel))!=ESP_OK || (e=esp_lcd_panel_invert_color(panel,true))!=ESP_OK ||
        (e=esp_lcd_panel_set_gap(panel,1,26))!=ESP_OK || (e=esp_lcd_panel_swap_xy(panel,true))!=ESP_OK ||
        (e=esp_lcd_panel_mirror(panel,false,true))!=ESP_OK || (e=esp_lcd_panel_disp_on_off(panel,true))!=ESP_OK)goto fail;
+    // The control task already exists. Publish availability only while holding
+    // the same lock used by its refreshes, including this first DMA frame.
+    xSemaphoreTake(lock,portMAX_DELAY);
     available=true;lcd_state state={.starting=true,.usb=tud_ready()};lcd_view view;lcd_compose(&state,GATEWAY_VERSION,&view);draw(&view);
     if(available)gpio_set_level(BOARD_LCD_BL,0);
+    xSemaphoreGive(lock);
     return available?ESP_OK:ESP_FAIL;
 fail:
     if(panel){esp_lcd_panel_del(panel);panel=NULL;}
