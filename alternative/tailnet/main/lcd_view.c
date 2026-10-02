@@ -9,12 +9,13 @@ void lcd_compose(const lcd_state *s,const char *version,lcd_view *v) {
     else if(s->starting){title="STARTING";detail="Preparing your dongle";hint="Settings stay saved";}
     else if(s->recovery){title="RECOVERY";detail="Settings are preserved";hint="App: Restart services";v->attention=true;}
     else if(!s->wifi){title=s->saved_wifi?"JOINING WI-FI":"SET UP WI-FI";detail="Open Networks in the app";hint="Use a 2.4 GHz network";}
+    else if(s->bridge){title="WI-FI READY";detail="USB internet forwarding";hint="Wi-Fi bridge mode";}
     else if(s->login){title="SIGN IN";detail="Open Networks in the app";hint="Approve in your browser";}
     else if(s->ready){title="ROUTING READY";detail="Wi-Fi connected";hint="Devices in Networks";}
     else if(!s->enabled){title=s->saved?"DISCONNECTED":"ADD A TAILNET";detail="Wi-Fi connected";hint=s->saved?"Reconnect in Networks":"Sign in from Networks";}
     else {title=s->failed?"RECONNECTING":"CONNECTING";detail="Wi-Fi connected";hint="Progress in Networks";v->attention=s->failed>0;}
     snprintf(v->title,sizeof(v->title),"%s",title);snprintf(v->detail,sizeof(v->detail),"%s",detail);snprintf(v->hint,sizeof(v->hint),"%s",hint);
-    if(s->ready && !s->recovery && !s->installing && !s->starting && !s->login && s->wifi)
+    if(!s->bridge && s->ready && !s->recovery && !s->installing && !s->starting && !s->login && s->wifi)
         snprintf(v->detail,sizeof(v->detail),"%u OF %u TAILNET%s READY",s->ready>999?999:s->ready,s->enabled>999?999:s->enabled,s->enabled==1?"":"S");
     snprintf(v->footer,sizeof(v->footer),"v%.10s  USB %s",version,s->usb?"READY":"WAIT");
 }

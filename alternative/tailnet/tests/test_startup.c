@@ -4,6 +4,7 @@
 #include "../main/boot_health.h"
 #include "../main/boot_policy.h"
 #define ESP_FAIL -1
+static bool tailnet=true;static bool gateway_tailnet_mode(void){return tailnet;}
 static unsigned fail_at, seen[BOOT_STAGE_COUNT], sequence, failed, complete, usb_alive;
 static bool recovery;
 #define STAGE(name,code) static int start_##name(void){assert(code==BOOT_USB || usb_alive);seen[code]=++sequence;if(code==BOOT_USB && code!=fail_at)usb_alive=1;return code==fail_at?-1:0;}
@@ -28,6 +29,7 @@ int main(void) {
         if(fault==BOOT_NETWORK)assert(!seen[BOOT_HTTP] && !seen[BOOT_WIFI]);
         if(fault==BOOT_HTTP)assert(seen[BOOT_MANAGER]); // HTTP isn't a routing dependency
     }
+    tailnet=false;memset(seen,0,sizeof(seen));fail_at=0;gateway_startup_sequence();assert(!seen[BOOT_HTTP] && !seen[BOOT_DNS] && !seen[BOOT_DIRECTORY] && !seen[BOOT_ROUTES] && seen[BOOT_WIFI] && seen[BOOT_MANAGER]);tailnet=true;
     memset(seen,0,sizeof(seen));sequence=complete=failed=usb_alive=0;recovery=true;fail_at=0;
     gateway_startup_sequence();assert(seen[BOOT_HTTP] && !seen[BOOT_DIRECTORY] && !seen[BOOT_WIFI] && !seen[BOOT_MANAGER]);
     for(unsigned same=0;same<2;same++)for(unsigned pending=0;pending<2;pending++)

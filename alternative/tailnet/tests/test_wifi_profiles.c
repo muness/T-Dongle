@@ -37,14 +37,15 @@ static int xSemaphoreTake(int s,int t){return 1;}
 static void xSemaphoreGive(int s){}
 typedef struct {uint8_t ssid[33];int rssi;} wifi_ap_record_t;
 typedef struct {bool show_hidden;int scan_type;struct {struct {int min,max;}active;}scan_time;} wifi_scan_config_t;
-static wifi_ap_record_t found[8];static unsigned scan_cursor;
-static int esp_wifi_sta_get_ap_info(wifi_ap_record_t*a){if(!connected)return 1;memcpy(a->ssid,wifi_config.sta.ssid,32);a->ssid[32]=0;a->rssi=-80;return 0;}
+static wifi_ap_record_t found[8];static unsigned scan_cursor,scans;static int current_rssi=-80;
+static int esp_wifi_sta_get_ap_info(wifi_ap_record_t*a){if(!connected)return 1;memcpy(a->ssid,wifi_config.sta.ssid,32);a->ssid[32]=0;a->rssi=current_rssi;return 0;}
 static int esp_wifi_disconnect(void){connected=false;online=false;return 0;}
-static int esp_wifi_scan_start(wifi_scan_config_t*c,bool blocking){scan_cursor=0;return 0;}
+static int esp_wifi_scan_start(wifi_scan_config_t*c,bool blocking){scan_cursor=0;scans++;return 0;}
 static int esp_wifi_scan_get_ap_record(wifi_ap_record_t*a){if(scan_cursor==8)return 1;*a=found[scan_cursor++];return 0;}
 static int esp_wifi_clear_ap_list(void){return 0;}
 static int esp_wifi_set_config(int i,wifi_config_t*c){wifi_config=*c;return 0;}
 static int esp_wifi_connect(void){joins++;connected=true;online=true;return 0;}
+static void tdongle_memory_note(unsigned o,size_t n,int f){}
 #include "wifi_worker.inc"
 int main(void){
  have_old=true;old_settings.version=CFG_VERSION;strcpy(old_settings.p[0].ssid,"bridge");strcpy(old_settings.p[0].pass,"secret");assert(wifi_load_profiles() && wifi_saved.count==1 && !strcmp(wifi_saved.profiles[0].ssid,"bridge"));have_old=false;
@@ -58,5 +59,6 @@ int main(void){
  wifi_rescan=true;wifi_maintain();assert(joins==1 && wifi_current==7); // strongest of all eight, not first saved
  wifi_retry_after[7]=(uint32_t)(test_time/1000)+60000;connected=online=false;wifi_rescan=true;wifi_maintain();assert(joins==2 && wifi_current==6); // failed strongest cannot trap retries
  wifi_rescan=true;wifi_maintain();assert(joins==2); // no oscillation while current scan signal is healthy
+ unsigned previous=scans;current_rssi=-55;wifi_rescan=false;test_time+=61000000;wifi_maintain();assert(scans==previous);current_rssi=-85;test_time+=61000000;wifi_maintain();assert(scans==previous+1);
  ((uint32_t*)disk)[0]=999;assert(!wifi_load_profiles());
 }

@@ -1,3 +1,4 @@
+#define coord_alloc ml_psram_malloc
 #include "cJSON.h"
 #include <assert.h>
 #include <ctype.h>

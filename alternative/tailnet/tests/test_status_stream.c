@@ -157,6 +157,11 @@ static size_t checked_strlcpy(char *out,const char *src,size_t size){size_t n=te
 #define strlcpy checked_strlcpy
 #define calloc checked_calloc
 static struct {unsigned count;struct {char ssid[33];} profiles[8];} wifi_saved;
+#include "../../../components/tdongle_runtime/include/tdongle_mode.h"
+#include "../../../components/tdongle_runtime/include/tdongle_temperature.h"
+static void tdongle_memory_note(unsigned o,size_t n,int f){}
+static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
+tdongle_temperature tdongle_temperature_snapshot(void){return (tdongle_temperature){.valid=true,.current_tenths=550,.peak_tenths=600,.sampled_at_ms=1000};}
 #include "status_stream.inc"
 #undef calloc
 #undef strlcpy

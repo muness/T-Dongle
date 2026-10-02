@@ -22,6 +22,7 @@ set(SRCS
 )
 
 set(REQUIRES
+    tdongle_runtime
     fatfs
     wear_levelling
     nvs_flash

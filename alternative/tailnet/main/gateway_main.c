@@ -1,4 +1,9 @@
 #include "esp_log.h"
+#include "tdongle_temperature.h"
+#include "tdongle_mode.h"
+#include "tdongle_mode_store.h"
+#include "tdongle_l2.h"
+#include "tdongle_memory.h"
 #include "cJSON.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
@@ -33,6 +38,8 @@ static void usb_event(tinyusb_event_t *event, void *arg) {
     }
 }
 static bool online;
+static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
+bool gateway_tailnet_mode(void){return runtime_mode==TDONGLE_TAILNET_GATEWAY;}
 static volatile bool wifi_scan_pauses_reconnect;
 static SemaphoreHandle_t wifi_scan_lock;
 static bool route_storage_ok;
@@ -76,6 +83,7 @@ static void gateway_diag_write(const microlink_t *ml, uint32_t member_id,
                                uint32_t event, uint32_t detail) {
     if (!diag_lock || xSemaphoreTake(diag_lock, pdMS_TO_TICKS(20)) != pdTRUE) return;
     gateway_diag_ring_t *ring = malloc(sizeof(*ring));
+    tdongle_memory_note(2,sizeof(*ring),ring==NULL);
     if (!ring) { xSemaphoreGive(diag_lock); return; }
     gateway_diag_load(ring);
     uint32_t uptime = (uint32_t)(esp_timer_get_time() / 1000);
@@ -129,6 +137,8 @@ static wifi_config_t wifi_config;
 #include "core.h"
 #include "wifi_policy.h"
 #include "wifi_profiles.inc"
+#include "serial_setup.inc"
+
 extern const char setup_html_start[] asm("_binary_setup_html_start");
 extern const char setup_html_end[] asm("_binary_setup_html_end");
 static bool save_members(void) {
@@ -222,7 +232,7 @@ static size_t member_start_budget(void) {
            4 * sizeof(StaticTask_t) + 2048 + 16384 + 40000;
 }
 static void start_member(membership_t *m) {
-    if (!m->enabled || m->client || !online)
+    if (!gateway_tailnet_mode() || !m->enabled || m->client || !online)
         return;
     if (!route_storage_ok) {
         strlcpy(m->error,
@@ -282,6 +292,7 @@ static void start_member(membership_t *m) {
     m->error[0] = 0;
 }
 bool gateway_display_state(lcd_state *s) {
+    s->bridge=!gateway_tailnet_mode();
     s->wifi=online;s->recovery=gateway_boot_needs_attention();
     if(xSemaphoreTake(members_lock,pdMS_TO_TICKS(10))!=pdTRUE)return false;
     s->saved_wifi=wifi_saved.count!=0;
@@ -299,6 +310,8 @@ static void manager(void *arg) {
     unsigned last_socket_failures = 0;
     bool last_online = !online;
     for (;;) {
+        tdongle_temperature_sample();
+        tdongle_memory_note(0,0,0);
         wifi_maintain();
         if (last_online != online) {
             gateway_diag_membership(0, GATEWAY_DIAG_UPSTREAM, online);
@@ -338,9 +351,10 @@ static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
         free(copy);
     return err;
 }
-static void usb_free_tx(void *buffer, void *ctx) { free(buffer); }
+static void usb_free_tx(void *buffer, void *ctx) { if(gateway_tailnet_mode())free(buffer);else tdongle_l2_release(buffer); }
 static void usb_free_rx(void *handle, void *buffer) { free(buffer); }
 static esp_err_t usb_rx(void *buffer, uint16_t len, void *ctx) {
+    if(!gateway_tailnet_mode())return tdongle_l2_host(buffer,len);
     if (!usb_interface) return ESP_ERR_INVALID_STATE;
     void *copy = malloc(len);
     if (!copy)
@@ -355,10 +369,12 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
         wifi_rescan=true;
     if (base == WIFI_EVENT && event == WIFI_EVENT_STA_DISCONNECTED) {
         online = false;
+        if(!gateway_tailnet_mode())tdongle_l2_link(false);
         if(!wifi_scan_pauses_reconnect && wifi_current>=0)
             wifi_retry_after[wifi_current]=(uint32_t)(esp_timer_get_time()/1000)+60000;
         /* Worker rescans with backoff; never reconnect recursively here. */
     }
+    if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && !gateway_tailnet_mode()){online=true;tdongle_l2_link(true);}
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
         online = true;
     }
@@ -525,6 +541,7 @@ static esp_err_t diagnostics(httpd_req_t *req) {
     if (!local_request(req))
         return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "USB access required");
     gateway_diag_ring_t *ring=calloc(1,sizeof(*ring));
+    tdongle_memory_note(3,sizeof(*ring),ring==NULL);
     if(!ring)return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Out of memory reading journal");
     ring->magic=DIAG_RING_MAGIC;
     uint32_t last_read[7]={0};
@@ -625,6 +642,7 @@ static esp_err_t status(httpd_req_t *req) {
         return status_busy(req);
     status_member *snapshot =
         capacity ? calloc(capacity, sizeof(*snapshot)) : NULL;
+    tdongle_memory_note(4,capacity*sizeof(*snapshot),capacity && !snapshot);
     if (capacity && !snapshot)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    "Out of memory taking setup snapshot");
@@ -739,6 +757,11 @@ static esp_err_t status(httpd_req_t *req) {
         jw_char(w, ',');                                                       \
     } while (0)
     STR("firmware", GATEWAY_VERSION);
+    STR("mode",tdongle_mode_name(runtime_mode));
+    tdongle_temperature temperature=tdongle_temperature_snapshot();
+    jw_raw(w,"\"chip_temperature\":{");
+    BOOL("valid",temperature.valid);NUM("current_tenths_c",temperature.current_tenths);NUM("peak_tenths_c",temperature.peak_tenths);NUM("sampled_at_uptime_ms",temperature.sampled_at_ms);
+    jw_key(w,"errors");jw_number(w,temperature.errors);jw_raw(w,"},");
     BOOL("recovery", gateway_boot_recovery());
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
@@ -883,6 +906,12 @@ static esp_err_t command(httpd_req_t *req) {
     }
     if (!settings_ok || gateway_boot_recovery()) {
         error = "Recovery mode: settings are preserved. Use Restart services in the app after saving diagnostics.";
+    } else if(action && !strcmp(action,"mode")){
+        tdongle_mode selected;
+        const char *value=cJSON_GetStringValue(cJSON_GetObjectItem(j,"mode"));
+        if(!tdongle_mode_parse(value,&selected))error="Choose Wi-Fi bridge or tailnet gateway";
+        else if(tdongle_mode_save(store,selected)!=ESP_OK)error="Mode could not be saved; current mode remains active";
+        else {extern bool control_submit(const char *line);if(!control_submit("reboot"))error="Mode saved; restart the dongle to apply it";}
     } else if (action && !strcmp(action, "wifi")) {
         if(!wifi_ready){xSemaphoreGive(members_lock);cJSON_Delete(j);return failure(req,"Wi-Fi did not start; restart services after saving diagnostics");}
         const char *ssid = cJSON_GetStringValue(cJSON_GetObjectItem(j, "ssid")),
@@ -1027,7 +1056,7 @@ static esp_err_t start_usb(void) {
     if(result!=ESP_OK)return result;
     tinyusb_net_config_t net = {.on_recv_callback = usb_rx,
                                 .free_tx_buffer = usb_free_tx};
-    identity_mac[0]=(identity_mac[0]|2)&~1;
+    if(gateway_tailnet_mode())identity_mac[0]=(identity_mac[0]|2)&~1;
     memcpy(net.mac_addr, identity_mac, 6);
     result=tinyusb_net_init(&net);
     extern esp_err_t gateway_console_start(void);
@@ -1038,6 +1067,7 @@ static esp_err_t start_usb(void) {
 static esp_err_t start_network(void) {
     START_TRY(esp_netif_init());
     START_TRY(esp_event_loop_create_default());
+    if(!gateway_tailnet_mode())return ESP_OK;
     esp_netif_ip_info_t ip = {0};
     IP4_ADDR(&ip.ip, 192, 168, 77, 1);
     ip.gw = ip.ip;
@@ -1114,6 +1144,7 @@ static esp_err_t start_settings(void) {
     esp_err_t result=nvs_get_blob(store,"wifi",&wifi_config,&n);
     if(result!=ESP_ERR_NVS_NOT_FOUND && (result!=ESP_OK || n!=sizeof(wifi_config)))return ESP_ERR_INVALID_STATE;
     if(!wifi_load_profiles())return ESP_ERR_INVALID_STATE;
+    START_TRY(tdongle_mode_load(store,&runtime_mode));
     settings_ok=true;
     gateway_diag_membership(0,GATEWAY_DIAG_BOOT,esp_reset_reason());
     return ESP_OK;
@@ -1124,7 +1155,8 @@ static esp_err_t start_routes(void) {
     route_storage_ok=gateway_routes_init();return route_storage_ok?ESP_OK:ESP_FAIL;
 }
 static esp_err_t start_wifi(void) {
-    if(!esp_netif_create_default_wifi_sta())return ESP_ERR_NO_MEM;
+    if(gateway_tailnet_mode() && !esp_netif_create_default_wifi_sta())return ESP_ERR_NO_MEM;
+    if(!gateway_tailnet_mode()){uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);START_TRY(tdongle_l2_start(mac));}
     wifi_init_config_t w=WIFI_INIT_CONFIG_DEFAULT();
     START_TRY(esp_wifi_init(&w));
     START_TRY(esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_event,NULL));
@@ -1135,6 +1167,7 @@ static esp_err_t start_wifi(void) {
     START_TRY(esp_wifi_start());
     wifi_ready=true;
     wifi_rescan=true;
+    if(!gateway_tailnet_mode())return ESP_OK;
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
     esp_sntp_setservername(0,"pool.ntp.org");esp_sntp_init();
     return ESP_OK;
@@ -1157,6 +1190,11 @@ static bool start_step(unsigned stage,esp_err_t (*start)(void)) {
 /* Compiled unchanged by the host fault-injection harness. */
 #include "startup_sequence.inc"
 void app_main(void) {
+    /* Read only before USB descriptors are created; normal settings startup
+     * still validates storage and reports failures without erasing anything. */
+    nvs_handle_t early;
+    if(nvs_flash_init()==ESP_OK && nvs_open("tn_settings",NVS_READONLY,&early)==ESP_OK){tdongle_mode_load(early,&runtime_mode);nvs_close(early);}
+
     members_lock=xSemaphoreCreateMutexStatic(&members_mutex);
     wifi_scan_lock=xSemaphoreCreateMutexStatic(&scan_mutex);
     gateway_startup_sequence();

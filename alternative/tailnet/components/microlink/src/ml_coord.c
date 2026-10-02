@@ -21,6 +21,9 @@
  *            tailscale/control/controlclient/direct.go
  */
 
+#ifdef ESP_PLATFORM
+#include "tdongle_memory.h"
+#endif
 #include <ctype.h>
 #include "microlink_internal.h"
 #include "ml_x25519.h"
@@ -40,6 +43,13 @@
 
 static const char *TAG = "ml_coord";
 
+static void *coord_alloc(size_t bytes){
+ void *p=ml_psram_malloc(bytes);
+#ifdef ESP_PLATFORM
+ tdongle_memory_note(1,bytes,p==NULL);
+#endif
+ return p;
+}
 /* A failed control-plane buffer allocation used to be silent: ml_psram_malloc()
  * returns NULL, the caller returns -1 and the state machine only logs
  * "MapRequest failed, will retry" - indistinguishable from a network failure,
@@ -610,7 +620,7 @@ static int coord_send(microlink_t *ml, const uint8_t *data, size_t len) {
 static int noise_send(microlink_t *ml, ml_noise_state_t *noise,
                         const uint8_t *plaintext, size_t pt_len) {
     size_t ct_len = pt_len + 16;  /* ciphertext + 16-byte MAC */
-    uint8_t *frame = ml_psram_malloc(3 + ct_len);
+    uint8_t *frame = coord_alloc(3 + ct_len);
     if (!frame) return -1;
 
     frame[0] = 0x04;  /* Transport data frame type */
@@ -892,7 +902,7 @@ static int do_noise_handshake(microlink_t *ml, ml_noise_state_t *noise) {
     msg1_b64[b64_len] = '\0';
 
     /* Send HTTP/1.1 Upgrade request with Noise msg1 in header */
-    char *http_req = ml_psram_malloc(512 + b64_len);
+    char *http_req = coord_alloc(512 + b64_len);
     if (!http_req) return -1;
 
     int req_len = snprintf(http_req, 512 + b64_len,
@@ -1072,7 +1082,7 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     ESP_LOGI(TAG, "RegisterRequest: %d bytes", (int)json_len);
 
     /* Build HTTP/2 HEADERS + DATA frames */
-    uint8_t *h2_buf = ml_psram_malloc(json_len + 512 + 16);
+    uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
     if (!h2_buf) { free(json_str); return -1; }
 
     int h2_pos = 0;
@@ -1955,7 +1965,7 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
     ESP_LOGI(TAG, "MapRequest: %d bytes (Stream=false)", (int)json_len);
 
     /* Build H2 HEADERS + DATA, stream ID 3 (stream 1 was register) */
-    uint8_t *h2_buf = ml_psram_malloc(json_len + 512 + 16);
+    uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
     if (!h2_buf) { free(json_str); return -1; }
 
     int h2_pos = 0;
@@ -2030,7 +2040,7 @@ static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise, bool omi
     ESP_LOGI(TAG, "MapRequest: %d bytes (Stream=true)", (int)json_len);
 
     /* Build H2 frames on stream ID 5 */
-    uint8_t *h2_buf = ml_psram_malloc(json_len + 512 + 16);
+    uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
     if (!h2_buf) { free(json_str); return -1; }
 
     int h2_pos = 0;
@@ -2133,7 +2143,7 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     uint32_t sid = ml->h2_next_stream_id;
     ml->h2_next_stream_id += 2;
 
-    uint8_t *h2_buf = ml_psram_malloc(json_len + 512 + 16);
+    uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
     if (!h2_buf) { free(json_str); return -1; }
 
     int h2_pos = 0;

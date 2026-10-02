@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+../../components/tdongle_runtime/tests/run.sh
 mkdir -p build-host
 python - <<'PYWIFI'
 from pathlib import Path

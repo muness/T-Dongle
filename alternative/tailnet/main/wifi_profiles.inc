@@ -28,8 +28,9 @@ static bool wifi_load_profiles(void){
     for(unsigned i=0;i<wifi_saved.count;i++)if(!wifi_saved.profiles[i].ssid[0] || wifi_saved.profiles[i].ssid[32] || wifi_saved.profiles[i].password[63])return false;
     return true;
 }
-static bool wifi_save_profile(const char *ssid,const char *password,bool remove){
+static bool wifi_save_at(const char *ssid,const char *password,bool remove,int slot){
     unsigned i=0;for(;i<wifi_saved.count;i++)if(!strcmp(wifi_saved.profiles[i].ssid,ssid))break;
+    if(slot>=0){if(slot>(int)wifi_saved.count || (i<wifi_saved.count && i!=(unsigned)slot))return false;i=(unsigned)slot;}
     if(remove && i==wifi_saved.count)return false;
     if(!remove && i==8)return false;
     typeof(wifi_saved) candidate=wifi_saved;
@@ -40,6 +41,7 @@ static bool wifi_save_profile(const char *ssid,const char *password,bool remove)
     wifi_rescan=true;
     return true;
 }
+static bool wifi_save_profile(const char *ssid,const char *password,bool remove){return wifi_save_at(ssid,password,remove,-1);}
 /* Scanning and reconnecting run on the existing manager, never on event callbacks or HTTP.
  * One AP record at a time bounds our SRAM, regardless of nearby AP count. */
 static void wifi_maintain(void){
@@ -48,17 +50,19 @@ static void wifi_maintain(void){
     uint32_t tick=(uint32_t)(esp_timer_get_time()/1000);
     if(!wifi_rescan && (int32_t)(next_scan-tick)>0)return;
     if(!wifi_ready || xSemaphoreTake(wifi_scan_lock,0)!=pdTRUE)return;
-    wifi_rescan=false;next_scan=tick+(online?60000:10000);
+    bool forced=wifi_rescan;wifi_rescan=false;next_scan=tick+(online?60000:10000);
         wifi_profile profiles[8];unsigned count,revision;
         xSemaphoreTake(members_lock,portMAX_DELAY);count=wifi_saved.count;revision=wifi_revision;memcpy(profiles,wifi_saved.profiles,sizeof(profiles));xSemaphoreGive(members_lock);
         wifi_scan_pauses_reconnect=true;
         wifi_ap_record_t ap;bool connected=esp_wifi_sta_get_ap_info(&ap)==ESP_OK;
         int current=-1;int16_t signal[8];for(unsigned i=0;i<8;i++)signal[i]=-127;
         if(connected)for(unsigned i=0;i<count;i++)if(!strncmp(profiles[i].ssid,(char*)ap.ssid,32)){current=i;signal[i]=ap.rssi;}
+        if(connected && current>=0 && ap.rssi>-75 && !forced){memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);return;}
         if(!count){esp_wifi_disconnect();memset(&wifi_config,0,sizeof(wifi_config));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);return;}
         if(!connected)esp_wifi_disconnect();
         wifi_scan_config_t scan={.show_hidden=true,.scan_type=WIFI_SCAN_TYPE_ACTIVE,.scan_time.active={.min=40,.max=100}};
         esp_err_t result=esp_wifi_scan_start(&scan,true);
+        tdongle_memory_note(5,0,result!=ESP_OK);
         if(result==ESP_OK){while(esp_wifi_scan_get_ap_record(&ap)==ESP_OK)for(unsigned i=0;i<count;i++)if(!strncmp(profiles[i].ssid,(char*)ap.ssid,32)&&ap.rssi>signal[i])signal[i]=ap.rssi;esp_wifi_clear_ap_list();}
         uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
         for(unsigned i=0;i<count;i++)if((int32_t)(wifi_retry_after[i]-now)>0)signal[i]=-127;

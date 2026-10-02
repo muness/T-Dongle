@@ -50,6 +50,7 @@ static int httpd_resp_send_chunk(httpd_req_t *r,const char *data,size_t length){
 static bool fail_journal_allocation;
 static void *journal_malloc(size_t n) {return fail_journal_allocation ? NULL : malloc(n);}
 #define malloc journal_malloc
+static void tdongle_memory_note(unsigned op,size_t requested,int failed){}
 #include "diagnostic_journal.inc"
 #undef malloc
 int main(void) {

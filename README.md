@@ -1,3 +1,11 @@
+## Unified firmware preview
+
+The integration build supports two saved routing modes in one image: **Wi-Fi bridge**, using the original transparent Ethernet forwarding path and LAN DHCP, and **Tailnet router**, using the dongle USB subnet and saved tailnet memberships. Switch from the companion app under **Help → Mode**, then unplug and reinsert without BOOT if Android does not reconnect. Saved Wi-Fi and tailnet identities are retained. Only the selected data plane starts.
+
+Both modes share eight saved Wi-Fi networks, startup/recovery reporting and internal chip temperature. **Activity** shows current and peak chip temperature; this is not the dongle enclosure temperature. Diagnostics save bounded low-water memory records on Android. Full automatic diagnostic capture runs every 30 seconds; serial health remains independent every ten seconds.
+
+The root ESP-IDF project now builds unified firmware by default. The legacy `tools/build.sh` variant builds explicitly select `TDONGLE_LEGACY_BRIDGE=ON`. See [runtime validation and review](docs/investigations/unified-runtime-review.md) for checks and hardware verification still required.
+
 # T-Dongle: Wi-Fi to USB Ethernet
 
 Firmware that turns a **LILYGO T-Dongle-S3** into a plug-in USB network adapter. The dongle joins a Wi-Fi network, and whatever it is plugged into sees an ordinary wired Ethernet port. No drivers are needed on macOS or Linux.

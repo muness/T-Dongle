@@ -15,3 +15,7 @@ extern SemaphoreHandle_t members_lock;
 int gateway_host_input(struct pbuf *, struct netif *);
 uint32_t gateway_alias(uint32_t id, uint32_t peer);
 void gateway_forget(uint32_t id);
+
+bool gateway_tailnet_mode(void);
+
+bool gateway_serial_command(const char *line);
