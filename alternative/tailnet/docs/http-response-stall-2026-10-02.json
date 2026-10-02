@@ -1,0 +1,103 @@
+{
+  "schema": 1,
+  "source": "Mac peer probe; HTTP request arrived from dongle, Android reported loading/timeout",
+  "events": [
+    {
+      "event": "request",
+      "tcp": {
+        "state": 4,
+        "maxSegment": 1228,
+        "unacknowledgedBytes": 0,
+        "txPackets": 0,
+        "txBytes": 0,
+        "retransmitBytes": 0,
+        "rxPackets": 1,
+        "rxBytes": 441,
+        "outOfOrderBytes": 0,
+        "retransmitPackets": 0
+      },
+      "at": "2026-10-02T05:33:16.978116+00:00"
+    },
+    {
+      "event": "response-written",
+      "bodyBytes": 441,
+      "tcp": {
+        "state": 4,
+        "maxSegment": 1228,
+        "unacknowledgedBytes": 618,
+        "txPackets": 1,
+        "txBytes": 177,
+        "retransmitBytes": 0,
+        "rxPackets": 1,
+        "rxBytes": 441,
+        "outOfOrderBytes": 0,
+        "retransmitPackets": 0
+      },
+      "at": "2026-10-02T05:33:16.978487+00:00"
+    },
+    {
+      "event": "response-delivery",
+      "tcp": {
+        "state": 4,
+        "maxSegment": 1228,
+        "unacknowledgedBytes": 618,
+        "txPackets": 1,
+        "txBytes": 177,
+        "retransmitBytes": 0,
+        "rxPackets": 1,
+        "rxBytes": 441,
+        "outOfOrderBytes": 0,
+        "retransmitPackets": 0
+      },
+      "at": "2026-10-02T05:33:17.233113+00:00"
+    },
+    {
+      "event": "response-delivery",
+      "tcp": {
+        "state": 4,
+        "maxSegment": 1228,
+        "unacknowledgedBytes": 618,
+        "txPackets": 4,
+        "txBytes": 1854,
+        "retransmitBytes": 1236,
+        "rxPackets": 3,
+        "rxBytes": 1323,
+        "outOfOrderBytes": 0,
+        "retransmitPackets": 2
+      },
+      "at": "2026-10-02T05:33:18.237758+00:00"
+    },
+    {
+      "event": "response-delivery",
+      "tcp": {
+        "state": 4,
+        "maxSegment": 1228,
+        "unacknowledgedBytes": 618,
+        "txPackets": 7,
+        "txBytes": 3708,
+        "retransmitBytes": 3090,
+        "rxPackets": 3,
+        "rxBytes": 1323,
+        "outOfOrderBytes": 0,
+        "retransmitPackets": 5
+      },
+      "at": "2026-10-02T05:33:21.242913+00:00"
+    },
+    {
+      "event": "response-delivery",
+      "tcp": {
+        "state": 4,
+        "maxSegment": 1228,
+        "unacknowledgedBytes": 618,
+        "txPackets": 8,
+        "txBytes": 4326,
+        "retransmitBytes": 3708,
+        "rxPackets": 3,
+        "rxBytes": 1323,
+        "outOfOrderBytes": 0,
+        "retransmitPackets": 6
+      },
+      "at": "2026-10-02T05:33:26.248616+00:00"
+    }
+  ]
+}
