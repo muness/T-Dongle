@@ -438,24 +438,32 @@ static esp_err_t wifi_scan(httpd_req_t *req) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    "Out of memory returning Wi-Fi scan");
     }
-    cJSON_AddBoolToObject(response, "ok", true);
-    cJSON_AddNumberToObject(response, "count", count);
-    cJSON_AddBoolToObject(response, "truncated", total > count);
-    cJSON_AddItemToObject(response, "networks", networks);
+    bool json_ok = cJSON_AddBoolToObject(response, "ok", true) &&
+                   cJSON_AddNumberToObject(response, "count", count) &&
+                   cJSON_AddBoolToObject(response, "truncated", total > count) &&
+                   cJSON_AddItemToObject(response, "networks", networks);
     for (uint16_t i = 0; i < count; i++) {
+        if (!json_ok)
+            break;
         cJSON *network = cJSON_CreateObject();
-        if (!network)
-            continue;
-        cJSON_AddStringToObject(network, "ssid",
-                                (const char *)records[i].ssid);
-        cJSON_AddNumberToObject(network, "rssi", records[i].rssi);
-        cJSON_AddBoolToObject(network, "secure",
-                              records[i].authmode != WIFI_AUTH_OPEN);
-        cJSON_AddItemToArray(networks, network);
+        json_ok = network &&
+                  cJSON_AddStringToObject(network, "ssid",
+                                          (const char *)records[i].ssid) &&
+                  cJSON_AddNumberToObject(network, "rssi", records[i].rssi) &&
+                  cJSON_AddBoolToObject(network, "secure",
+                                        records[i].authmode != WIFI_AUTH_OPEN) &&
+                  cJSON_AddItemToArray(networks, network);
+        if (!json_ok)
+            cJSON_Delete(network);
     }
     free(records);
     wifi_scan_resume(connected);
     xSemaphoreGive(wifi_scan_lock);
+    if (!json_ok) {
+        cJSON_Delete(response);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "Out of memory returning Wi-Fi scan");
+    }
     return json_reply(req, response);
 }
 static bool usb_peer_address(const struct sockaddr *address, socklen_t length) {
