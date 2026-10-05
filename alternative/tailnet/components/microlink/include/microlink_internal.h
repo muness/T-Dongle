@@ -52,25 +52,48 @@ extern "C" {
  * ========================================================================== */
 
 /* Task configuration.
- * Stack sizes right-sized 2026-05-26 from measured high-water marks to free
- * internal DRAM (FreeRTOS stacks are internal-only). Observed peak usage:
- * net_io ~3.0K, derp_tx ~3.7K, coord ~8.3K (TLS + a 4K on-stack recv_buf),
- * wg_mgr ~4.3K. Trimmed only the clearly-oversized ones, keeping a generous
- * margin over the observed peak (TLS handshakes can spike). coord/wg_mgr
- * left as-is — they run closer to their ceiling. */
-#define ML_TASK_NET_IO_STACK    (6 * 1024)   /* was 8K; ~3K peak observed */
+ *
+ * Stack sizes (FreeRTOS stacks are internal DRAM, charged per membership by
+ * member_start_budget()). Rule: size >= 2 x the highest stack use measured on
+ * hardware, rounded up to 512 B, and never less than peak + 2 KiB.
+ *
+ * Evidence: firmware 0.2.22 on the T-Dongle-S3, 2026-10-05 (docs/diagnostics/
+ * baseline-0.2.22-2026-10-05.md), uxTaskGetStackHighWaterMark after a join that
+ * included the DERP TLS handshake and 4x4-stream bidirectional iperf over the
+ * direct path. Peak use: net_io 3,376, derp_tx 3,716, coord 4,152, wg_mgr 3,644.
+ * The stack overflow canary stays on (CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY).
+ *
+ * Paths that capture did not run, bounded from the linked binary's frame sizes
+ * (tools/stack-frames.py prints the frame of each function in the linked binary;
+ * they were added up along the real call chains from the source):
+ *   derp_tx  DERP certificate verification now runs in the handshake
+ *            (ml_derp_connect 1,344 B frame + ssl_handshake chain + x509 verify
+ *            + esp_crt_verify_callback + RSA/ECDSA verify): about +1.5 KB over the
+ *            VERIFY_NONE handshake that was measured, so about 5.2 KB peak.
+ *            DERP-only relay traffic and a TLS retry use the same or shallower
+ *            chains (derp_write_frame 48, ssl_write 160).
+ *   coord    map re-fetch and reconnect repeat the measured map path
+ *            (gateway_read_map, ml_directory_commit 960, snprintf 192/800);
+ *            the new custom-login-server key fetch (https) is shallower than that
+ *            (ctrl_key_fetch 352 + esp_tls + mbedTLS handshake), about 3.8 KB.
+ *   wg_mgr   inbound activation of an unknown peer adds derp_sender_admit 336 and
+ *            directory_activate_idle 336 on the paths JIT activation already
+ *            walked; DISCO authentication reuses the nacl_box_beforenm frame.
+ *   net_io   only socket receive and queue hand-off.
+ * Every size below leaves at least 2 KiB over the highest estimate. */
+#define ML_TASK_NET_IO_STACK    (7168)       /* 3,376 B measured -> 7,168 (was 6,144) */
 #define ML_TASK_NET_IO_PRIO     7
 #define ML_TASK_NET_IO_CORE     0
 
-#define ML_TASK_DERP_TX_STACK   (10 * 1024)  /* was 14K; ~3.7K peak observed */
+#define ML_TASK_DERP_TX_STACK   (7680)       /* 3,716 B measured, ~5.2 KB est. with verification (was 10,240) */
 #define ML_TASK_DERP_TX_PRIO    5
 #define ML_TASK_DERP_TX_CORE    0
 
-#define ML_TASK_COORD_STACK     (12 * 1024)
+#define ML_TASK_COORD_STACK     (8704)       /* 4,152 B measured (was 12,288) */
 #define ML_TASK_COORD_PRIO      5
 #define ML_TASK_COORD_CORE      1
 
-#define ML_TASK_WG_MGR_STACK    (8 * 1024)
+#define ML_TASK_WG_MGR_STACK    (7680)       /* 3,644 B measured (was 8,192) */
 #define ML_TASK_WG_MGR_PRIO     7
 #define ML_TASK_WG_MGR_CORE     1
 
