@@ -271,6 +271,46 @@ static void scenario_detach_midstream(void) {
 }
 
 
+/* What the old per-membership owner test pinned, against the real state machine. */
+static void scenario_fair_duplex_and_serialised_pongs(void) {
+    begin(0, 3, true);                       /* three-byte writes: every frame is written in many pieces */
+    connect_both();
+    run(100);
+    /* Both directions saturated: a single service call moves at most the burst in each direction. */
+    for (unsigned i = 0; i < 100; i++) { fake_enqueue(&A, vnow, 1000 + i, 300); fake_server_send(&A, vnow, 2000 + i, 300); }
+    unsigned tx0 = A.link.stats.frames_tx, rx0 = A.link.stats.frames_rx;
+    A.write_chunk = 0;
+    ml_derp_link_service(&A.link);
+    assert(A.link.stats.frames_tx - tx0 <= ML_DERP_TX_BURST && A.link.stats.frames_rx - rx0 <= ML_DERP_RX_BURST);
+    assert(A.link.stats.frames_tx - tx0 >= 1 && A.link.stats.frames_rx - rx0 >= 1);       /* ...and neither direction starves the other */
+    /* Server pings arrive while frames are half written (3 bytes per call): the Pong must never land inside one. */
+    A.write_chunk = 3;
+    for (unsigned i = 0; i < 20; i++) {
+        uint8_t ping[13] = {ML_DERP_FRAME_PING, 0, 0, 0, 8, 1, 2, 3, 4, 5, 6, 7, (uint8_t)i};
+        fpipe_push(&A.s2c, ping, sizeof(ping));
+        fake_enqueue(&A, vnow, 3000 + i, 500);
+        run(20);
+    }
+    run(5000);
+    assert(A.server_bad == 0 && A.delivered_bad == 0);      /* every frame the server parsed was whole */
+    assert(A.pongs_seen == A.link.stats.pings_answered && A.pongs_seen >= 1);
+    end_checks();
+}
+static void scenario_no_io_after_failure(void) {
+    /* After a read or write failure the link makes no further call into the transport until it has redialled. */
+    begin(0, 0, true);
+    connect_both();
+    uint8_t huge[5] = {ML_DERP_FRAME_KEEP_ALIVE, 0x00, 0x10, 0x00, 0x00};
+    fpipe_push(&A.s2c, huge, sizeof(huge));
+    ml_derp_link_service(&A.link);
+    assert(A.link.state == ML_DERP_WAITING && A.link.stats.oversize == 1);
+    unsigned calls = A.io_calls;
+    for (unsigned i = 0; i < 10; i++) { vnow += 10; ml_derp_link_service(&A.link); }   /* inside the 200 ms redial delay */
+    assert(A.io_calls == calls);
+    assert(A.transports_closed >= 1);
+    end_checks();
+}
+
 /* Negative control: the old per-record behaviour (wait for the record, up to 5 s) run on the SHARED loop.
  * The harness must see B starve; otherwise the bounds asserted above would prove nothing. */
 static void blocking_service(void *ctx, void *shared) {
@@ -322,6 +362,8 @@ int main(void) {
     scenario_negotiation_serialised();
     scenario_pings_and_oversize();
     scenario_detach_midstream();
+    scenario_fair_duplex_and_serialised_pongs();
+    scenario_no_io_after_failure();
     scenario_negative_control();
     puts("shared DERP: a stalled or hostile server costs its own membership a redial and nobody else any latency");
     return 0;

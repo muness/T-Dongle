@@ -3,7 +3,8 @@
 #include "microlink_internal.h"
 const uint32_t tailnet_audit_metrics[] = {
     sizeof(microlink_t), sizeof(ml_peer_t),
-    ML_TASK_NET_IO_STACK + 2 * ML_TASK_DERP_TX_STACK + ML_TASK_COORD_STACK + ML_TASK_WG_MGR_STACK,
+    /* per membership: its control task. net_io, derp and wg_mgr are shared (ML_RT_SHARED_STACK_BYTES, paid once). */
+    ML_TASK_COORD_STACK,
     ML_H2_BUFFER_SIZE, ML_JSON_BUFFER_SIZE,
     ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
     (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH + ML_STUN_RX_QUEUE_DEPTH) * sizeof(ml_rx_packet_t) +

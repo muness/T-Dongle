@@ -63,6 +63,8 @@ static int add_peer(microlink_t *m,const ml_peer_update_t *u) {
     }
     return -1;
 }
+static bool pool_ok=true; /* the global WireGuard slot pool (peer_pool_reserve) */
+static bool peer_pool_reserve(microlink_t *m,uint64_t idle_ms){(void)m;(void)idle_ms;return pool_ok;}
 static void apply_peer_update(microlink_t *m,const ml_peer_update_t *u) {}
 
 /* WireGuard stand-ins. */

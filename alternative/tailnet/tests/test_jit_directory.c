@@ -55,6 +55,8 @@ static int add_peer(microlink_t *m,const ml_peer_update_t *u) {
     }
     return -1;
 }
+static bool pool_ok=true; /* the global WireGuard slot pool (peer_pool_reserve) */
+static bool peer_pool_reserve(microlink_t *m,uint64_t idle_ms){(void)m;(void)idle_ms;return pool_ok;}
 static void apply_peer_update(microlink_t *m,const ml_peer_update_t *u) {}
 static bool wg_peer_authenticated(microlink_t *m,int idx){return false;}
 static bool wg_initiation_plausible(microlink_t *m,const ml_rx_packet_t *p){return false;}
@@ -74,6 +76,7 @@ int main(void) {
     now=20000;ml_peer_update_t hot=record(1);assert(directory_activate(&m,&hot)==0);
     assert(directory_activate(&m,&u)==1); // evicts cold #2, preserves MRU #1
     assert(find_peer_by_key(&m,hot.public_key)==0);
+    {microlink_t t=m;memset(&t.peers[7],0,sizeof(t.peers[7]));pool_ok=false;now=100000;ml_peer_update_t cold=record(11);unsigned rej=t.jit_rejected;assert(directory_activate(&t,&cold)<0 && t.jit_rejected==rej+1 && !t.peers[7].active);pool_ok=true;} /* pool exhausted across memberships: rejected, not evicted */
     now=40000;u=record(10);m.config.priority_peer_ip=record(3).vpn_ip;
     assert(directory_activate(&m,&u)==3); // old #3 is pinned, evicts #4
     // Cold inbound discovery activates authorized peer, rejects unknown key.

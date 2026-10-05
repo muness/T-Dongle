@@ -42,7 +42,7 @@ typedef struct {
     /* server */
     enum { SV_WAIT_REQ, SV_WAIT_CI, SV_READY } sv;
     size_t parsed;
-    unsigned note_preferred, pongs_seen, ci_seen;
+    unsigned note_preferred, pongs_seen, ci_seen, io_calls;
     /* relay queue of packets the client must send */
     struct { uint8_t *data; size_t len; } q[256];
     unsigned qh, qt;
@@ -64,6 +64,7 @@ static void fake_release_block(void *u, void *p) { fake_t *f = u; if (p) { f->li
 
 static int fake_read(void *u, uint8_t *buf, size_t len) {
     fake_t *f = u;
+    f->io_calls++;
     size_t n = fpipe_avail(&f->s2c);
     if (!n) return 0;
     if (n > len) n = len;
@@ -74,6 +75,7 @@ static int fake_read(void *u, uint8_t *buf, size_t len) {
 }
 static int fake_write(void *u, const uint8_t *buf, size_t len) {
     fake_t *f = u;
+    f->io_calls++;
     if (f->write_blocked) return 0;
     size_t n = len;
     if (f->write_chunk && n > f->write_chunk) n = f->write_chunk;
@@ -240,7 +242,7 @@ static void fake_server_poll(fake_t *f) {
             if (avail < 5 + len) return;
             const uint8_t *body = f->c2s.d + f->parsed + 5;
             if (type == ML_DERP_FRAME_NOTE_PREFERRED) f->note_preferred++;
-            else if (type == ML_DERP_FRAME_PONG) f->pongs_seen++;
+            else if (type == ML_DERP_FRAME_PONG) { f->pongs_seen++; if (len != 8) f->server_bad++; }
             else if (type == ML_DERP_FRAME_SEND_PACKET) {
                 uint64_t ts; uint32_t seq;
                 memcpy(&ts, body + 32, 8); memcpy(&seq, body + 40, 4);
@@ -253,6 +255,7 @@ static void fake_server_poll(fake_t *f) {
                     f->last_tx_ms = *f->clock;
                 } else f->server_bad++;
             }
+            else f->server_bad++;       /* a frame type we never send: the stream is desynchronised */
             f->parsed += 5 + len;
             continue;
         }

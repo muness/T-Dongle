@@ -68,5 +68,14 @@ bool ml_mux_detach(ml_mux_t *mux, void *ctx, uint32_t timeout_ms);
 /* One fair pass: every attached member is serviced once. Returns how many were serviced. */
 unsigned ml_mux_pass(ml_mux_t *mux);
 
+/* Visit every attached member under the lock. For loops whose work is not one slice per member (net_io's single
+ * select over all sockets). `fn` must be quick and must not block, attach or detach. */
+void ml_mux_foreach(ml_mux_t *mux, void (*fn)(void *ctx, void *arg), void *arg);
+
+/* Same walk for code that is ALREADY running inside a service slice of this mux (so the lock is held by this very
+ * thread): the wg_mgr slice reads every membership's peers to choose a pool eviction victim. Calling it from anywhere
+ * else is a data race; there is no recursive locking. */
+void ml_mux_foreach_held(ml_mux_t *mux, void (*fn)(void *ctx, void *arg), void *arg);
+
 unsigned ml_mux_count(ml_mux_t *mux);
 bool ml_mux_contains(ml_mux_t *mux, const void *ctx);

@@ -90,6 +90,18 @@ unsigned ml_mux_pass(ml_mux_t *mux) {
     return serviced;
 }
 
+void ml_mux_foreach(ml_mux_t *mux, void (*fn)(void *ctx, void *arg), void *arg) {
+    ml_mutex_lock(&mux->lock);
+    for (unsigned i = 0; i < ML_MUX_MAX; i++)
+        if (mux->slot[i]) fn(mux->slot[i], arg);
+    ml_mutex_unlock(&mux->lock);
+}
+
+void ml_mux_foreach_held(ml_mux_t *mux, void (*fn)(void *ctx, void *arg), void *arg) {
+    for (unsigned i = 0; i < ML_MUX_MAX; i++)
+        if (mux->slot[i]) fn(mux->slot[i], arg);
+}
+
 unsigned ml_mux_count(ml_mux_t *mux) {
     ml_mutex_lock(&mux->lock);
     unsigned n = count_locked(mux);

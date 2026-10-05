@@ -55,16 +55,24 @@ static bool memory_snapshot(memory_member *out, unsigned *count, unsigned *omitt
         if (!c) continue;
         if (*count == MEMORY_MEMBER_LIMIT) { (*omitted)++; continue; }
         memory_member *v = &out[(*count)++];
-        TaskHandle_t tasks[4] = {c->net_io_task, c->derp_tx_task, c->coord_task, c->wg_mgr_task};
-        const uint32_t stacks[4] = {ML_TASK_NET_IO_STACK, ML_TASK_DERP_TX_STACK, ML_TASK_COORD_STACK, ML_TASK_WG_MGR_STACK};
+        /* A membership owns one task, its control task. net_io, derp and wg_mgr are shared: their headroom is reported
+         * under every membership they serve (stack_free keeps its four slots) but their bytes are counted once, in
+         * `shared_runtime`. */
+        const bool shared = c->rt_attached && !c->stop_incomplete;
+        TaskHandle_t tasks[4] = {shared ? ml_rt_task_handle(ML_RT_TASK_NET_IO) : NULL,
+                                 shared ? ml_rt_task_handle(ML_RT_TASK_DERP) : NULL,
+                                 c->coord_task,
+                                 shared ? ml_rt_task_handle(ML_RT_TASK_WG_MGR) : NULL};
         *v = (memory_member){.id = m->id, .h2_acc = c->h2_acc_len, .lp_acc = c->lp_acc != NULL};
         for (unsigned t = 0; t < 4; t++) {
             v->stack_free[t] = UINT32_MAX;
             if (!tasks[t] || c->stop_incomplete) continue;
-            v->tasks++;
-            v->stacks += stacks[t];
-            v->tcbs += sizeof(StaticTask_t);
             v->stack_free[t] = uxTaskGetStackHighWaterMark(tasks[t]);
+        }
+        if (tasks[2] && !c->stop_incomplete) {
+            v->tasks = 1;
+            v->stacks = ML_TASK_COORD_STACK;
+            v->tcbs = sizeof(StaticTask_t);
         }
     }
     xSemaphoreGive(members_lock);
@@ -127,6 +135,17 @@ static void report_attribution(jw_writer *w) {
     bool lp_acc = false;
     uint32_t h2_acc = 0;
     for (unsigned i = 0; i < TDONGLE_OWNER_COUNT; i++) tagged += tdongle_heap_owner((tdongle_owner)i).live;
+    /* The three shared tasks exist once, while any membership is attached. */
+    ml_rt_status_t shared_rt;
+    ml_rt_status(&shared_rt);
+    uint32_t shared_tasks = 0, shared_stacks = 0, shared_tcbs = 0;
+    if (shared_rt.running)
+        for (unsigned t = 0; t < ML_RT_TASK_COUNT; t++) {
+            shared_tasks++;
+            shared_stacks += shared_rt.stack_bytes[t];
+            shared_tcbs += sizeof(StaticTask_t);
+        }
+    synthetic += shared_stacks + shared_tcbs;
     for (unsigned i = 0; i < count; i++) {
         synthetic += snapshot[i].stacks + snapshot[i].tcbs + member_queue_bytes();
         lp_acc |= snapshot[i].lp_acc;
@@ -143,6 +162,11 @@ static void report_attribution(jw_writer *w) {
     report_field(w, "unattributed", allocated > accounted ? allocated - accounted : 0);
     report_field(w, "overattributed", accounted > allocated ? accounted - allocated : 0);
     report_field(w, "members_omitted", omitted);
+    jw_raw(w, ",\"shared_runtime\":{\"tasks\":");
+    jw_number(w, shared_tasks);
+    report_field(w, "stacks", shared_stacks);
+    report_field(w, "tcbs", shared_tcbs);
+    jw_char(w, '}');
     jw_raw(w, ",\"members\":[");
     for (unsigned i = 0; i < count; i++) {
         memory_member *v = &snapshot[i];

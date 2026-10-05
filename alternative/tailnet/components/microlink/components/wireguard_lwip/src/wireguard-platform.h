@@ -37,9 +37,22 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-// Peers are allocated statically inside the device structure to avoid malloc
-// Increased from 1 to support multiple Tailscale peers (10 peers for larger networks)
+// Per-device peer TABLE size: how many peer slots one wireguard_device can reference
+// (device-local peer_index is 0..WIREGUARD_MAX_PEERS-1). The peer structs themselves
+// are NOT embedded in the device; they come from the process-wide pool below.
 #define WIREGUARD_MAX_PEERS 8
+
+// Capacity of the process-wide WireGuard peer-slot pool (see wireguard_pool.h): the
+// hard cap on live peers summed over ALL wireguard_device instances (tailnet
+// memberships). Each slot is sizeof(struct wireguard_peer) bytes (904 B on the S3 build;
+// tests/test_wg_peer_pool_if.c prints the host figure) and is allocated on demand, so
+// RAM tracks residents, not capacity.
+// K = 12: 8 = one full single-membership working set exactly as today, +4 shared
+// headroom for a second membership's handful of peers. Override with
+// wireguardif_pool_configure() before the first peer is added.
+#ifndef WIREGUARD_POOL_SLOTS
+#define WIREGUARD_POOL_SLOTS 12
+#endif
 #define WIREGUARD_MAX_SRC_IPS 2
 
 // Per device limit on accepting (valid) initiation requests - per peer

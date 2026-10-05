@@ -114,8 +114,30 @@ void wireguardif_peer_init(struct wireguardif_peer *peer);
 // On success the peer_index can be used to reference this peer in future function calls
 err_t wireguardif_add_peer(struct netif *netif, struct wireguardif_peer *peer, u8_t *peer_index);
 
-// Remove the given peer from the network interface
+// Remove the given peer from the network interface; its pool slot is wiped and returned.
 err_t wireguardif_remove_peer(struct netif *netif, u8_t peer_index);
+
+// Peer slots come from ONE process-wide pool shared by every wireguard netif (see
+// wireguard_pool.h); wireguardif_add_peer() returns ERR_MEM when the device's table is
+// full OR the pool is at capacity / out of memory. The caller can tell the pool apart
+// via wireguardif_pool_stats().refused_full / .refused_nomem. The eviction policy (which
+// peer to drop to make room) lives in the caller. Everything here runs under the lwIP
+// core lock, like the rest of this API.
+
+// Re-size the pool (1..WG_POOL_MAX_SLOTS slots, default WIREGUARD_POOL_SLOTS) and install
+// allocator hooks (both NULL = malloc/free). Returns false, changing nothing, if any peer
+// is live. Call at boot, before the first wireguardif_init()/add_peer.
+bool wireguardif_pool_configure(size_t capacity, wg_pool_alloc_fn alloc, wg_pool_free_fn free_fn);
+
+// Snapshot of the pool counters: capacity, used, peak_used, acquired, released,
+// refused_full, refused_nomem, evictions.
+wg_pool_stats_t wireguardif_pool_stats(void);
+
+// Tell the pool that the caller evicted a peer of this netif's device to make room.
+void wireguardif_pool_note_eviction(const struct netif *netif);
+
+// Number of peers (pool slots) currently held by this netif's device.
+uint8_t wireguardif_device_peer_count(const struct netif *netif);
 
 // Update the "connect" IP of the given peer
 err_t wireguardif_update_endpoint(struct netif *netif, u8_t peer_index, const ip_addr_t *ip, u16_t port);

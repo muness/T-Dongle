@@ -139,8 +139,8 @@ static struct wireguard_peer *peer_lookup_by_allowed_ip(struct wireguard_device 
     bool best_has_keypair = false;
     int x, y;
     for (x = 0; x < WIREGUARD_MAX_PEERS; x++) {
-        struct wireguard_peer *tmp = &device->peers[x];
-        if (!tmp->valid) continue;
+        struct wireguard_peer *tmp = wireguard_device_peer(device, (uint8_t)x);
+        if (!tmp || !tmp->valid) continue;
         for (y = 0; y < WIREGUARD_MAX_SRC_IPS; y++) {
             struct wireguard_allowed_ip *aip = &tmp->allowed_source_ips[y];
             if (!aip->valid) continue;
@@ -460,14 +460,14 @@ static err_t wireguardif_output(struct netif *netif, struct pbuf *q, const ip4_a
     struct wireguard_peer *peer = peer_lookup_by_allowed_ip(device, &addr);
     if (peer) {
         WG_DEBUG("[WG_OUTPUT] Found peer, peer_index=%d, valid=%d\n",
-               (int)(peer - device->peers), peer->valid);
+               (int)wireguard_peer_index(device, peer), peer->valid);
 
         return wireguardif_output_to_peer(netif, q, ipaddr, peer);
     } else {
         WG_DEBUG("[WG_OUTPUT] NO PEER FOUND for %s! Dumping all peers:\n", ipaddr_ntoa(&addr));
         for (int i = 0; i < WIREGUARD_MAX_PEERS; i++) {
-            struct wireguard_peer *p = &device->peers[i];
-            if (p->valid) {
+            struct wireguard_peer *p = wireguard_device_peer(device, (uint8_t)i);
+            if (p && p->valid) {
                 WG_DEBUG("  peer[%d]: valid=%d, curr_keypair.valid=%d, last_rx=%lu\n",
                        i, p->valid, p->curr_keypair.valid, (unsigned long)p->curr_keypair.last_rx);
                 for (int j = 0; j < WIREGUARD_MAX_SRC_IPS; j++) {
@@ -1107,9 +1107,8 @@ err_t wireguardif_remove_peer(struct netif *netif, u8_t peer_index) {
     struct wireguard_peer *peer;
     err_t result = wireguardif_lookup_peer(netif, peer_index, &peer);
     if (result == ERR_OK) {
-        crypto_zero(peer, sizeof(struct wireguard_peer));
-        peer->valid = false;
-        result = ERR_OK;
+        // Wipes the slot (session keys, PSK, DH precompute) and returns it to the pool.
+        peer_free((struct wireguard_device *)netif->state, peer);
     }
     return result;
 }
@@ -1139,7 +1138,10 @@ void wireguardif_free(struct netif *netif) {
         udp_remove(device->udp_pcb);
         device->udp_pcb = NULL;
     }
-    // The device holds the private key and every peer's session keys.
+    // Peer slots live in the global pool, not in the device: hand every one back (wiped)
+    // BEFORE the device (their owner tag) goes away. Releasing twice is harmless.
+    wireguard_device_release_peers(device);
+    // The device itself still holds the private key.
     crypto_zero(device, sizeof(struct wireguard_device));
     mem_free(device);
 }
@@ -1214,9 +1216,13 @@ err_t wireguardif_add_peer(struct netif *netif, struct wireguardif_peer *p, u8_t
 
                     result = ERR_OK;
                 } else {
+                    // Atomic add: never leave an allocated-but-uninitialised slot behind.
+                    peer_free(device, peer);
+                    peer = NULL;
                     result = ERR_ARG;
                 }
             } else {
+                // Device table full or the shared pool refused (see wireguardif_pool_stats()).
                 result = ERR_MEM;
             }
         } else {
@@ -1322,8 +1328,8 @@ static void wireguardif_tmr(void *arg) {
     // Check periodic things
     bool link_up = false;
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        peer = &device->peers[x];
-        if (peer->valid) {
+        peer = wireguard_device_peer(device, (uint8_t)x);
+        if (peer && peer->valid) {
             // Do we need to rekey / send a handshake?
             if (should_reset_peer(peer)) {
                 // Nothing back for too long - we should wipe out all crypto state
@@ -1380,15 +1386,16 @@ void wireguardif_periodic(struct netif *netif) {
     // collapses phone upload throughput mid-test. Throttle to 1 init per tick +
     // round-robin so each peer still gets a chance within WIREGUARD_MAX_PEERS
     // ticks.
-    static int s_next_hs_peer_idx = 0;
+    // The cursor is per device (wireguard_device.next_hs_peer): with several tailnet
+    // memberships a shared static would let one device's progress skew another's rotation.
     int handshakes_this_tick = 0;
     const int MAX_HANDSHAKES_PER_TICK = 1;
 
     bool link_up = false;
     for (x = 0; x < WIREGUARD_MAX_PEERS; x++) {
-        int peer_idx = (s_next_hs_peer_idx + x) % WIREGUARD_MAX_PEERS;
-        peer = &device->peers[peer_idx];
-        if (peer->valid) {
+        int peer_idx = (device->next_hs_peer + x) % WIREGUARD_MAX_PEERS;
+        peer = wireguard_device_peer(device, (uint8_t)peer_idx);
+        if (peer && peer->valid) {
             if (should_reset_peer(peer)) {
                 keypair_destroy(&peer->next_keypair);
                 keypair_destroy(&peer->curr_keypair);
@@ -1416,7 +1423,7 @@ void wireguardif_periodic(struct netif *netif) {
                            peer->active, peer->send_handshake);
                     wireguard_start_handshake(device->netif, peer);
                     handshakes_this_tick++;
-                    s_next_hs_peer_idx = (peer_idx + 1) % WIREGUARD_MAX_PEERS;
+                    device->next_hs_peer = (uint8_t)((peer_idx + 1) % WIREGUARD_MAX_PEERS);
                 }
                 // else: throttled this tick, next tick (round-robin) gets the chance
             }
@@ -1488,6 +1495,7 @@ err_t wireguardif_init(struct netif *netif) {
 
                         result = ERR_OK;
                     } else {
+                        crypto_zero(device, sizeof(struct wireguard_device));
                         mem_free(device);
                         device = NULL;
                         result = ERR_ARG;
@@ -1536,6 +1544,7 @@ err_t wireguardif_init(struct netif *netif) {
 
                                 result = ERR_OK;
                             } else {
+                                crypto_zero(device, sizeof(struct wireguard_device));
                                 mem_free(device);
                                 device = NULL;
                                 udp_remove(udp);
@@ -1560,6 +1569,25 @@ err_t wireguardif_init(struct netif *netif) {
         result = ERR_ARG;
     }
     return result;
+}
+
+bool wireguardif_pool_configure(size_t capacity, wg_pool_alloc_fn alloc, wg_pool_free_fn free_fn) {
+    return wireguard_pool_configure(capacity, alloc, free_fn);
+}
+
+wg_pool_stats_t wireguardif_pool_stats(void) {
+    return wireguard_pool_stats();
+}
+
+void wireguardif_pool_note_eviction(const struct netif *netif) {
+    wg_pool_note_eviction(wireguard_peer_pool(), netif ? netif->state : NULL);
+}
+
+uint8_t wireguardif_device_peer_count(const struct netif *netif) {
+    if (!netif || !netif->state) {
+        return 0;
+    }
+    return wireguard_device_peer_count((const struct wireguard_device *)netif->state);
 }
 
 void wireguardif_peer_init(struct wireguardif_peer *peer) {

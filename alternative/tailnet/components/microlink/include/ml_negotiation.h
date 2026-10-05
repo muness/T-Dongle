@@ -51,6 +51,13 @@ typedef enum {
 
 typedef enum { ML_NEG_GRANTED, ML_NEG_QUEUED, ML_NEG_FULL } ml_neg_result_t;
 
+/* The holder key of one membership's phase. Phase A (START and CONTROL) is one key, so the token passes from the
+ * gateway's start path to the control task without a hand-over; phase B (DERP) is another, so a membership's two
+ * phases are separate acquisitions and the token is free between them. Never zero. */
+static inline uintptr_t ml_neg_key(uint32_t member_id, ml_neg_phase_t phase) {
+    return ((uintptr_t)(member_id + 1u) << 1) | (phase == ML_NEG_PHASE_DERP ? 0u : 1u);
+}
+
 typedef struct {
     ml_mutex_t lock;
     uint64_t (*now_ms)(void);

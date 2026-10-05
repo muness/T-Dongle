@@ -26,6 +26,8 @@
 #endif
 #include <ctype.h>
 #include "microlink_internal.h"
+#include "ml_coord_state.h"
+#include "ml_runtime.h"
 #include "ml_x25519.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -133,19 +135,7 @@ static cJSON *build_routable_ips_array(const char *routes)
 
 
 
-/* Coordination state machine */
-typedef enum {
-    COORD_IDLE,
-    COORD_STUN_PROBE,
-    COORD_DNS_RESOLVE,
-    COORD_TCP_CONNECT,
-    COORD_NOISE_HANDSHAKE,
-    COORD_H2_PREFACE,
-    COORD_REGISTER,
-    COORD_FETCH_PEERS,
-    COORD_LONG_POLL,
-    COORD_RECONNECTING,
-} coord_state_t;
+/* Coordination state machine: coord_state_t and the token rule are in ml_coord_state.h */
 
 /* ============================================================================
  * Helper: hex encoding for keys
@@ -2340,6 +2330,15 @@ void ml_coord_task(void *arg) {
     /* Noise protocol state - owned exclusively by this task */
     ml_noise_state_t noise = {0};
 
+    /* Only one membership negotiates at a time (ml_negotiation.h): the Noise handshake, registration and the
+     * initial map are the control channel's memory peak, and two of them overlapping is what took v120 to a
+     * 6 KB largest block. The token follows the state machine (ml_coord_state.h), so every path out of a
+     * negotiation state releases it at the next loop iteration. */
+    static const char waiting_text[] = "Waiting for another membership to finish joining";
+    ml_neg_t *neg = ml_rt_negotiation();
+    const uintptr_t neg_key = ml_neg_key(ml->config.diagnostic_id, ML_NEG_PHASE_CONTROL);
+    bool neg_holding = false;
+
     /* Wait for WiFi/cellular OR shutdown */
     ESP_LOGI(TAG, "Waiting for WiFi...");
     {
@@ -2378,8 +2377,17 @@ void ml_coord_task(void *arg) {
             }
         }
 
-        /* DERP reconnect is now handled by the DERP I/O task itself.
-         * The I/O task checks ML_EVT_DERP_RECONNECT directly. */
+        /* DERP reconnect is handled by the shared DERP task, which watches ML_EVT_DERP_RECONNECT itself. */
+
+        if (!coord_token_sync(neg, neg_key, state, ml->connected_at_ms ? ML_NEG_PRIO_REJOIN : ML_NEG_PRIO_START,
+                              &neg_holding)) {
+            /* Another membership is negotiating. Waiting costs nothing; the shutdown bit and the command queue are
+             * checked again every 50 ms. */
+            if (!ml->transport_error[0]) strlcpy(ml->transport_error, waiting_text, sizeof(ml->transport_error));
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        if (!strcmp(ml->transport_error, waiting_text)) ml->transport_error[0] = 0;
 
         switch (state) {
         case COORD_IDLE:
@@ -2523,6 +2531,10 @@ void ml_coord_task(void *arg) {
                 tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_MAP);
                 map_applied_ms = ml_get_time_ms();
                 xEventGroupSetBits(ml->events, ML_EVT_COORD_REGISTERED);
+                /* The negotiation is over: the control channel's peak is behind us. Let go now, before the
+                 * wait for DERP below, which is another membership-phase (the DERP link takes the token itself
+                 * for its handshake) and must not wait on a token this task still holds. */
+                coord_token_sync(neg, neg_key, COORD_LONG_POLL, ML_NEG_PRIO_REJOIN, &neg_holding);
 
                 if (!ml->derp.connected) {
                     /* Signal DERP I/O task to connect (connection now owned by I/O task) */
@@ -2876,6 +2888,7 @@ void ml_coord_task(void *arg) {
     /* Cleanup */
     ml_conn_close(ml);
     memset(&noise, 0, sizeof(noise));
+    coord_token_sync(neg, neg_key, COORD_IDLE, ML_NEG_PRIO_REJOIN, &neg_holding);   /* never exit holding the token */
 
     ESP_LOGI(TAG, "Coord task exiting");
     ml_task_exiting(ml);

@@ -71,18 +71,86 @@ void wireguard_init() {
     wireguard_blake2s_final(&ctx, identifier_hash);
 }
 
+// ---------------------------------------------------------------------------
+// Global peer-slot pool. All wireguard_device instances (tailnet memberships) draw their
+// peers from this one capped pool; see wireguard_pool.h. Serialised by the lwIP core lock.
+// ---------------------------------------------------------------------------
+static wg_pool_t s_peer_pool;
+static bool s_peer_pool_ready;
+
+wg_pool_t *wireguard_peer_pool(void) {
+    if (!s_peer_pool_ready) {
+        s_peer_pool_ready = wg_pool_init(&s_peer_pool, WIREGUARD_POOL_SLOTS, sizeof(struct wireguard_peer), NULL, NULL);
+    }
+    return s_peer_pool_ready ? &s_peer_pool : NULL;
+}
+
+bool wireguard_pool_configure(size_t capacity, wg_pool_alloc_fn alloc, wg_pool_free_fn free_fn) {
+    wg_pool_t *pool = wireguard_peer_pool();
+    return pool && wg_pool_configure(pool, capacity, sizeof(struct wireguard_peer), alloc, free_fn);
+}
+
+wg_pool_stats_t wireguard_pool_stats(void) {
+    return wg_pool_get_stats(wireguard_peer_pool());
+}
+
+struct wireguard_peer *wireguard_device_peer(struct wireguard_device *dev, uint8_t index) {
+    if (!dev || index >= WIREGUARD_MAX_PEERS) {
+        return NULL;
+    }
+    return dev->peers[index];
+}
+
+uint8_t wireguard_device_peer_count(const struct wireguard_device *dev) {
+    uint8_t n = 0;
+    for (int x = 0; dev && x < WIREGUARD_MAX_PEERS; x++) {
+        n += dev->peers[x] != NULL;
+    }
+    return n;
+}
+
 struct wireguard_peer *peer_alloc(struct wireguard_device *device) {
-    struct wireguard_peer *result = NULL;
-    struct wireguard_peer *tmp;
+    wg_pool_t *pool = wireguard_peer_pool();
     int x;
-    for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        tmp = &device->peers[x];
-        if (!tmp->valid) {
-            result = tmp;
-            break;
+    if (!device || !pool) {
+        return NULL;
+    }
+    for (x = 0; x < WIREGUARD_MAX_PEERS; x++) {
+        if (!device->peers[x]) {
+            // Pool refusal (full / no memory) is counted by the pool itself.
+            struct wireguard_peer *peer = (struct wireguard_peer *)wg_pool_acquire(pool, device);
+            device->peers[x] = peer;
+            return peer;
         }
     }
-    return result;
+    return NULL; // this device's table is full
+}
+
+bool peer_free(struct wireguard_device *device, struct wireguard_peer *peer) {
+    int x;
+    if (!device || !peer) {
+        return false;
+    }
+    for (x = 0; x < WIREGUARD_MAX_PEERS; x++) {
+        if (device->peers[x] == peer) {
+            device->peers[x] = NULL;
+            wg_pool_release(wireguard_peer_pool(), peer); // wipes, then frees
+            return true;
+        }
+    }
+    return false;
+}
+
+void wireguard_device_release_peers(struct wireguard_device *device) {
+    if (!device) {
+        return;
+    }
+    // Release by owner tag (not just the table) so no slot can outlive its device even if
+    // the table was already cleared; then drop the now dangling pointers.
+    wg_pool_release_owner(wireguard_peer_pool(), device);
+    for (int x = 0; x < WIREGUARD_MAX_PEERS; x++) {
+        device->peers[x] = NULL;
+    }
 }
 
 struct wireguard_peer *peer_lookup_by_pubkey(struct wireguard_device *device, uint8_t *public_key) {
@@ -90,8 +158,8 @@ struct wireguard_peer *peer_lookup_by_pubkey(struct wireguard_device *device, ui
     struct wireguard_peer *tmp;
     int x;
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        tmp = &device->peers[x];
-        if (tmp->valid) {
+        tmp = wireguard_device_peer(device, (uint8_t)x);
+        if (tmp && tmp->valid) {
             if (memcmp(tmp->public_key, public_key, WIREGUARD_PUBLIC_KEY_LEN) == 0) {
                 result = tmp;
                 break;
@@ -104,8 +172,11 @@ struct wireguard_peer *peer_lookup_by_pubkey(struct wireguard_device *device, ui
 uint8_t wireguard_peer_index(struct wireguard_device *device, struct wireguard_peer *peer) {
     uint8_t result = 0xFF;
     uint8_t x;
+    if (!peer) {
+        return result;
+    }
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        if (peer == &device->peers[x]) {
+        if (peer == wireguard_device_peer(device, x)) {
             result = x;
             break;
         }
@@ -114,22 +185,19 @@ uint8_t wireguard_peer_index(struct wireguard_device *device, struct wireguard_p
 }
 
 struct wireguard_peer *peer_lookup_by_peer_index(struct wireguard_device *device, uint8_t peer_index) {
-    struct wireguard_peer *result = NULL;
-    if (peer_index < WIREGUARD_MAX_PEERS) {
-        if (device->peers[peer_index].valid) {
-            result = &device->peers[peer_index];
-        }
-    }
-    return result;
+    struct wireguard_peer *result = wireguard_device_peer(device, peer_index);
+    return (result && result->valid) ? result : NULL;
 }
 
+// Lookups below are deliberately scoped to THIS device's table: a receiver index that
+// happens to be live in another device's slot must never resolve here.
 struct wireguard_peer *peer_lookup_by_receiver(struct wireguard_device *device, uint32_t receiver) {
     struct wireguard_peer *result = NULL;
     struct wireguard_peer *tmp;
     int x;
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        tmp = &device->peers[x];
-        if (tmp->valid) {
+        tmp = wireguard_device_peer(device, (uint8_t)x);
+        if (tmp && tmp->valid) {
             if ((tmp->curr_keypair.valid && (tmp->curr_keypair.local_index == receiver)) ||
                 (tmp->next_keypair.valid && (tmp->next_keypair.local_index == receiver)) ||
                 (tmp->prev_keypair.valid && (tmp->prev_keypair.local_index == receiver))
@@ -147,8 +215,8 @@ struct wireguard_peer *peer_lookup_by_handshake(struct wireguard_device *device,
     struct wireguard_peer *tmp;
     int x;
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        tmp = &device->peers[x];
-        if (tmp->valid) {
+        tmp = wireguard_device_peer(device, (uint8_t)x);
+        if (tmp && tmp->valid) {
             if (tmp->handshake.valid && tmp->handshake.initiator && (tmp->handshake.local_index == receiver)) {
                 result = tmp;
                 break;
@@ -375,29 +443,49 @@ struct wireguard_keypair *get_peer_keypair_for_idx(struct wireguard_peer *peer, 
     return NULL;
 }
 
-static uint32_t wireguard_generate_unique_index(struct wireguard_device *device) {
-    // We need a random 32-bit number but make sure it's not already been used in the context of this device
+struct index_probe {
+    uint32_t index;
+    bool found;
+};
+
+static bool index_probe_cb(void *slot, const void *owner, void *ctx) {
+    const struct wireguard_peer *peer = (const struct wireguard_peer *)slot;
+    struct index_probe *probe = (struct index_probe *)ctx;
+    (void)owner;
+    // Deliberately ignores the .valid flags: a stale index in a destroyed/idle state
+    // is harmless to skip, and the check stays conservative.
+    if (probe->index == peer->curr_keypair.local_index ||
+        probe->index == peer->prev_keypair.local_index ||
+        probe->index == peer->next_keypair.local_index ||
+        probe->index == peer->handshake.local_index) {
+        probe->found = true;
+        return false;
+    }
+    return true;
+}
+
+bool wireguard_receiver_index_in_use(const wg_pool_t *pool, uint32_t index) {
+    struct index_probe probe = { index, false };
+    wg_pool_each(pool, index_probe_cb, &probe);
+    return probe.found;
+}
+
+uint32_t wireguard_generate_unique_index(struct wireguard_device *device) {
+    // We need a random 32-bit number that is not in use by ANY peer of ANY device: the
+    // pool is shared, and a collision between memberships would let one membership's
+    // transport packets be attributed to (and fail against) the other's session.
+    // (Previously this only looked at the device's own peers and, due to an assignment
+    // inside the loop instead of an accumulation, only at the LAST peer slot.)
+    const wg_pool_t *pool = wireguard_peer_pool();
     uint32_t result;
     uint8_t buf[4];
-    int x;
-    struct wireguard_peer *peer;
-    bool existing;
+    (void)device;
     do {
         do {
             wireguard_random_bytes(buf, 4);
             result = U8TO32_LITTLE(buf);
         } while ((result == 0) || (result == 0xFFFFFFFF)); // Don't allow 0 or 0xFFFFFFFF as valid values
-
-        existing = false;
-        for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-            peer = &device->peers[x];
-            existing = (result == peer->curr_keypair.local_index) ||
-                    (result == peer->prev_keypair.local_index) ||
-                    (result == peer->next_keypair.local_index) ||
-                    (result == peer->handshake.local_index);
-
-        }
-    } while (existing);
+    } while (wireguard_receiver_index_in_use(pool, result));
 
     return result;
 }
