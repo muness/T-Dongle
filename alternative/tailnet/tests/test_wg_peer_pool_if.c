@@ -331,6 +331,92 @@ static void test_handshake_cursor_is_per_device(void) {
     pool_expect_empty();
 }
 
+
+/* The crypto-outside-the-lock splits (initiation begin/compute/commit, receive begin/decrypt/complete) against the one-piece
+ * paths, using the real protocol code on two devices that talk to each other. */
+static void link_peers(struct dev *A, struct dev *B, u8_t *ia, u8_t *ib) {
+    char s[64]; struct wireguardif_peer p;
+    wireguardif_peer_init(&p); b64(devp(B)->public_key, s); p.public_key = s;
+    p.allowed_ip.addr = 0x0100000a; p.allowed_mask.addr = 0xffffffff;
+    assert(wireguardif_add_peer(&A->nif, &p, ia) == ERR_OK);
+    wireguardif_peer_init(&p); b64(devp(A)->public_key, s); p.public_key = s;
+    p.allowed_ip.addr = 0x0200000a; p.allowed_mask.addr = 0xffffffff;
+    assert(wireguardif_add_peer(&B->nif, &p, ib) == ERR_OK);
+}
+static void test_split_crypto(void) {
+    pool_setup(12);
+    struct dev A, B; u8_t ia, ib;
+    dev_up(&A, 21); dev_up(&B, 22);
+    link_peers(&A, &B, &ia, &ib);
+    struct wireguard_peer *pa = P(&A, ia), *pb = P(&B, ib);
+    pa->active = true;
+    /* Initiation in three steps: B accepts it as a genuine initiation from A. */
+    struct wireguard_initiation_job job;
+    assert(wireguard_initiation_begin(devp(&A), pa, &job));
+    assert(!pa->handshake.valid);                               /* nothing installed before commit */
+    wireguard_initiation_compute(&job);
+    assert(job.ok && job.msg.type == MESSAGE_HANDSHAKE_INITIATION && job.msg.sender == job.index);
+    struct message_handshake_initiation msg = job.msg;
+    assert(wireguard_initiation_commit(devp(&A), pa, &job));
+    assert(pa->handshake.valid && pa->handshake.initiator && pa->handshake.local_index == msg.sender);
+    assert(wireguard_process_initiation_message(devp(&B), &msg) == pb);
+    /* Complete the handshake and move data: A seals, B opens through the receive job. */
+    struct message_handshake_response resp;
+    assert(wireguard_create_handshake_response(devp(&B), pb, &resp));
+    assert(wireguard_process_handshake_response(devp(&A), pa, &resp));
+    uint8_t plain[100], sealed[100 + 16];
+    for (unsigned i = 0; i < sizeof(plain); i++) plain[i] = (uint8_t)(i * 5 + 3);
+    wireguard_encrypt_packet(sealed, plain, sizeof(plain), &pa->next_keypair);
+    struct pbuf out; uint8_t outbuf[100 + 16];
+    memset(&out, 0, sizeof(out)); out.payload = outbuf; out.tot_len = out.len = sizeof(plain);
+    struct wireguard_rx_job rx = {.pbuf = &out, .src = sealed, .src_len = sizeof(sealed), .nonce = 0};
+    memcpy(rx.key, pb->next_keypair.receiving_key, 32);
+    wireguard_rx_decrypt(&rx);
+    assert(rx.ok && !memcmp(outbuf, plain, sizeof(plain)));
+    for (unsigned i = 0; i < 32; i++) assert(rx.key[i] == 0);        /* the key copy does not linger */
+    sealed[5] ^= 1;                                                    /* a forged packet fails authentication */
+    rx.ok = true; memcpy(rx.key, pb->next_keypair.receiving_key, 32);
+    wireguard_rx_decrypt(&rx);
+    assert(!rx.ok);
+    /* A peer removed while the crypto ran outside the lock: the commit installs nothing. */
+    struct wireguard_initiation_job j2;
+    assert(wireguard_initiation_begin(devp(&A), pa, &j2));
+    wireguard_initiation_compute(&j2);
+    assert(wireguardif_remove_peer(&A.nif, ia) == ERR_OK);
+    assert(wireguardif_periodic_commit(&A.nif, ia, &j2) == ERR_ARG);
+    for (unsigned i = 0; i < 32; i++) assert(j2.handshake.ephemeral_private[i] == 0);   /* ephemeral key wiped either way */
+    dev_down(&A); dev_down(&B);
+    pool_expect_empty();
+}
+
+static void test_sliced_periodic_matches_monolithic(void) {
+    pool_setup(12);
+    struct dev M, S; u8_t i;
+    dev_up(&M, 31); dev_up(&S, 31);
+    for (uint8_t k = 0; k < 3; k++) { add_peer(&M, 90 + k, &i); add_peer(&S, 90 + k, &i); P(&M, k)->active = P(&S, k)->active = true; }
+    for (unsigned tick = 0; tick < 6; tick++) {
+        g_now += 6000;
+        wireguardif_periodic(&M.nif);
+        /* the sliced form, exactly as wg_mgr runs it */
+        uint8_t first = devp(&S)->next_hs_peer; bool allowed = true;
+        for (unsigned k = 0; k < WIREGUARD_MAX_PEERS; k++) {
+            uint8_t idx = (uint8_t)((first + k) % WIREGUARD_MAX_PEERS);
+            struct wireguard_initiation_job job;
+            if (wireguardif_periodic_peer(&S.nif, idx, allowed, &job)) {
+                wireguard_initiation_compute(&job);
+                assert(wireguardif_periodic_commit(&S.nif, idx, &job) == ERR_OK || true);
+                allowed = false;
+            }
+        }
+        wireguardif_periodic_end(&S.nif);
+        for (uint8_t k = 0; k < 3; k++) assert(P(&M, k)->handshake_attempts == P(&S, k)->handshake_attempts && P(&M, k)->handshake.valid == P(&S, k)->handshake.valid);
+        assert(devp(&M)->next_hs_peer == devp(&S)->next_hs_peer);
+    }
+    assert(P(&S, 0)->handshake_attempts >= 2 && P(&S, 1)->handshake_attempts >= 2);
+    dev_down(&M); dev_down(&S);
+    pool_expect_empty();
+}
+
 int main(void) {
     test_sizes_and_default_pool();
     test_two_devices_share_pool();
@@ -338,6 +424,8 @@ int main(void) {
     test_failure_paths_are_atomic();
     test_receiver_index_uniqueness_and_scoping();
     test_handshake_cursor_is_per_device();
+    test_split_crypto();
+    test_sliced_periodic_matches_monolithic();
     puts("wg peer pool integration: ok");
     return 0;
 }

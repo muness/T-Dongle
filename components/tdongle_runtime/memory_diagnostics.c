@@ -16,6 +16,7 @@ static member_slot slots[TDONGLE_MEMORY_MEMBERS];
 static tdongle_admission_record admissions[TDONGLE_MEMORY_ADMISSIONS];
 static unsigned admission_used,admission_next;
 static uint32_t drop_count[TDONGLE_DROP_COUNT];
+static tdongle_lock_stats lock_stats[TDONGLE_LOCK_SITE_COUNT];
 static uint32_t underflow_count,eviction_count,guard_floor=CONFIG_TDONGLE_MEMORY_GUARD_FLOOR_BYTES;
 static portMUX_TYPE diag_lock=portMUX_INITIALIZER_UNLOCKED;
 /* Caller holds diag_lock. Every join in flight sees the heap low points and owner peaks. */
@@ -102,9 +103,29 @@ bool tdongle_memory_member_get(unsigned slot,tdongle_member_phases *out){
  portEXIT_CRITICAL(&diag_lock);
  return used;
 }
-size_t tdongle_memory_ledger_bytes(void){return sizeof(owners)+sizeof(slots)+sizeof(admissions)+sizeof(drop_count);}
+size_t tdongle_memory_ledger_bytes(void){return sizeof(owners)+sizeof(slots)+sizeof(admissions)+sizeof(drop_count)+sizeof(lock_stats);}
 void tdongle_memory_drop(tdongle_drop where){if(where<TDONGLE_DROP_COUNT)__atomic_fetch_add(&drop_count[where],1,__ATOMIC_RELAXED);}
 uint32_t tdongle_memory_drops(tdongle_drop where){return where<TDONGLE_DROP_COUNT?__atomic_load_n(&drop_count[where],__ATOMIC_RELAXED):0;}
+int64_t tdongle_lock_clock(void){return esp_timer_get_time();}
+void tdongle_lock_hold(tdongle_lock_site site,uint32_t us){
+ if(site>=TDONGLE_LOCK_SITE_COUNT)site=TDONGLE_LOCK_WG_OTHER;
+ tdongle_lock_stats *s=&lock_stats[site];
+ unsigned b=0;while(b<TDONGLE_LOCK_BUCKETS-1 && us>=tdongle_lock_bucket_limit_us[b])b++;
+ __atomic_fetch_add(&s->count,1,__ATOMIC_RELAXED);__atomic_fetch_add(&s->bucket[b],1,__ATOMIC_RELAXED);
+ __atomic_fetch_add(&s->total_us,us,__ATOMIC_RELAXED);
+ if(us>=1000)__atomic_fetch_add(&s->over_1ms,1,__ATOMIC_RELAXED);
+ uint32_t cur=__atomic_load_n(&s->max_us,__ATOMIC_RELAXED);
+ while(us>cur && !__atomic_compare_exchange_n(&s->max_us,&cur,us,true,__ATOMIC_RELAXED,__ATOMIC_RELAXED)){}
+}
+tdongle_lock_stats tdongle_lock_stats_get(tdongle_lock_site site){
+ tdongle_lock_stats r={0};
+ if(site>=TDONGLE_LOCK_SITE_COUNT)return r;
+ const tdongle_lock_stats *s=&lock_stats[site];
+ r.count=__atomic_load_n(&s->count,__ATOMIC_RELAXED);r.max_us=__atomic_load_n(&s->max_us,__ATOMIC_RELAXED);
+ r.over_1ms=__atomic_load_n(&s->over_1ms,__ATOMIC_RELAXED);r.total_us=__atomic_load_n(&s->total_us,__ATOMIC_RELAXED);
+ for(unsigned i=0;i<TDONGLE_LOCK_BUCKETS;i++)r.bucket[i]=__atomic_load_n(&s->bucket[i],__ATOMIC_RELAXED);
+ return r;
+}
 uint32_t tdongle_memory_slot_evictions(void){portENTER_CRITICAL(&diag_lock);uint32_t n=eviction_count;portEXIT_CRITICAL(&diag_lock);return n;}
 /* A membership refused again and again (every supervisor tick) must not push the attempts that
  * matter out of the six-entry ring: a repeated refusal replaces the previous identical one. */

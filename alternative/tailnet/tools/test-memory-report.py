@@ -57,6 +57,10 @@ admission = reports("members", "admission")[0]
 assert admission["override"] is True and len(admission["attempts"]) == 6
 assert [a["verdict"] for a in admission["attempts"]] == ["refused_budget", "refused_largest", "refused_sockets", "override", "refused_floor", "start_failed"], admission
 
+locks = reports("memory locks", "locks")[0]
+assert locks["bucket_limits_us"] == [100, 250, 500, 1000, 2000, 5000, 10000, 30000]
+assert locks["sites"]["wg_periodic"]["count"] == 2 and locks["sites"]["wg_periodic"]["max_us"] == 42000 and locks["sites"]["wg_periodic"]["over_1ms"] == 1
+assert locks["sites"]["wg_periodic"]["buckets"] == [0, 0, 0, 1, 0, 0, 0, 0, 1] and locks["sites"]["wg_other"]["count"] == 0
 bench = reports("memory bench", "bench")[0]
 assert bench["rounds"] == 256 and bench["chacha20poly1305_ns_per_packet"] == 2000000 and bench["cipher_ceiling_kbit_s"] == 1400 * 8 * 1000000 // 2000000
 assert reports("memory guard 4096", "guard")[0]["guard_floor"] == 4096

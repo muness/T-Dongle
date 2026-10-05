@@ -74,7 +74,8 @@ int main(void) {
         tdongle_memory_admission_note(&r);
     }
     tdongle_memory_drop(TDONGLE_DROP_DERP_TX_FULL);
-    const char *commands[] = {"memory", "members", "memory bench", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
+    tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 700);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 42000);
+    const char *commands[] = {"memory", "members", "memory bench", "memory locks", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));

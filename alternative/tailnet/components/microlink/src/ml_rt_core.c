@@ -27,6 +27,7 @@ void ml_rt_core_task_exit(ml_rt_core_t *core) {
 static bool wait_tasks_gone(ml_rt_core_t *core) {
     for (uint32_t waited = 0; __atomic_load_n(&core->tasks_alive, __ATOMIC_SEQ_CST) > 0; waited += 10) {
         if (waited >= core->stop_wait_ms) return false;
+        if (core->platform->wake_all) core->platform->wake_all(core->platform_ctx);
         core->platform->sleep_ms(10);
     }
     return true;

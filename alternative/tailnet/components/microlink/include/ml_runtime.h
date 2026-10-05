@@ -54,5 +54,9 @@ bool ml_rt_detach(microlink_t *ml);
 /* Visit every membership attached to the wg_mgr task. ONLY from inside a wg_mgr service slice (the mux lock is held). */
 void ml_rt_wg_foreach_held(void (*fn)(microlink_t *ml, void *arg), void *arg);
 
+/* Wake a shared task that is waiting for its next deadline (ulTaskNotifyTake). Event driven: queue producers call it
+ * after a successful enqueue; safe from any task, cheap, a no-op while the runtime is not running. */
+void ml_rt_wake(ml_rt_task_t which);
+
 void ml_rt_status(ml_rt_status_t *out);
 TaskHandle_t ml_rt_task_handle(ml_rt_task_t which);

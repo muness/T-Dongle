@@ -592,7 +592,7 @@ void microlink_destroy(microlink_t *ml) {
      * ML_JSON_BUFFER_SIZE) were never released here before: every
      * stop/start cycle lost ~650 KB on the reference router. */
     ml_directory_abort(ml);
-    for(unsigned i=0;i<4;i++)tdongle_heap_free(TDONGLE_OWNER_WG, ml->jit_pending[i].packet);
+    for(unsigned i=0;i<ML_JIT_PENDING;i++)tdongle_heap_free(TDONGLE_OWNER_WG, ml->jit_pending[i].packet);
     /* The DERP link was closed and its TLS state released by ml_rt_detach() (under the DERP task's lock); the
      * packets still queued for it are freed with the queues below. */
     if (ml->h2_acc) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0; }
@@ -693,6 +693,7 @@ esp_err_t microlink_rebind(microlink_t *ml) {
      * fresh handshake (it watches ML_EVT_DERP_RECONNECT directly). */
     xEventGroupClearBits(ml->events, ML_EVT_DERP_CONNECTED);
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    ml_rt_wake(ML_RT_TASK_DERP);
 
     return ESP_OK;
 }

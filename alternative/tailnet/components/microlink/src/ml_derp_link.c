@@ -557,3 +557,23 @@ void ml_derp_link_service(ml_derp_link_t *l) {
         }
     }
 }
+
+uint32_t ml_derp_link_wait_ms(ml_derp_link_t *l) {
+    uint64_t t = now_of(l);
+    switch (l->state) {
+    case ML_DERP_IDLE:
+        return UINT32_MAX;
+    case ML_DERP_WAITING: {
+        if (!l->ops->clock_valid(l->user)) return 1000;     /* the wall clock arrives by SNTP: look now and then */
+        uint64_t due = l->burst_left ? l->next_attempt_ms : l->pace.next_ms;
+        if (!due) return 0;                                 /* the ladder is not armed yet: arm it now */
+        return due > t ? (uint32_t)(due - t) : 0;
+    }
+    case ML_DERP_TOKEN:
+        return 50;                                          /* the token has no wake-up: poll it */
+    case ML_DERP_READY:
+        return ML_DERP_POLL_MS;
+    default:                                                /* connecting: bounded steps */
+        return ML_DERP_POLL_MS;
+    }
+}

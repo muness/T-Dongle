@@ -372,7 +372,14 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
 static void *wg_pool_alloc(size_t bytes) { return tdongle_heap_tag(TDONGLE_OWNER_WG, calloc(1, bytes)); }
 static void wg_pool_free(void *block) { tdongle_heap_free(TDONGLE_OWNER_WG, block); }
 
-#define GATEWAY_WG_CALL(expr) ({ LOCK_TCPIP_CORE(); err_t result_ = (expr); UNLOCK_TCPIP_CORE(); result_; })
+/* Every hold of the lwIP core lock by this task is timed into the diagnostics ledger by call site (tdongle_lock_hold,
+ * diagnostics builds only; `memory locks`). The budget the shared task works to is ~1 ms per hold: the cryptography runs
+ * outside the lock (initiation: wireguard_initiation_*, receive: wireguard_rx_*) and periodic work is taken one peer at
+ * a time. */
+#define WG_LOCKED(site, body) do { LOCK_TCPIP_CORE(); int64_t hold_start_ = tdongle_lock_clock(); body; \
+    tdongle_lock_hold((site), (uint32_t)(tdongle_lock_clock() - hold_start_)); UNLOCK_TCPIP_CORE(); } while (0)
+#define GATEWAY_WG_SITE(site, expr) ({ err_t result_; WG_LOCKED(site, result_ = (expr)); result_; })
+#define GATEWAY_WG_CALL(expr) GATEWAY_WG_SITE(TDONGLE_LOCK_WG_OTHER, expr)
 static esp_err_t wg_init_interface_impl(microlink_t *ml) {
     /* Peer slots come from the one global pool, through ledger-tagged allocation. Reconfiguring is refused (and
      * harmless) once any slot is live, so every device after the first leaves it as it is. */
@@ -672,7 +679,7 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
                 ESP_LOGW(TAG, "Evicting LRU peer %s (%s) for priority peer %s",
                          ml->peers[evict_idx].hostname, evict_ip, update->hostname);
                 if (ml->peers[evict_idx].wg_peer_index >= 0 && ml->wg_netif) {
-                    GATEWAY_WG_CALL(wireguardif_remove_peer((struct netif *)ml->wg_netif,
+                    GATEWAY_WG_SITE(TDONGLE_LOCK_WG_PEER, wireguardif_remove_peer((struct netif *)ml->wg_netif,
                                             ml->peers[evict_idx].wg_peer_index));
                 }
                 ml->peers[evict_idx].active = false;
@@ -790,7 +797,7 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
         wg_peer.keep_alive = 25;
 
         u8_t wg_peer_idx = WIREGUARDIF_INVALID_INDEX;
-        err_t wg_err = GATEWAY_WG_CALL(wireguardif_add_peer(netif, &wg_peer, &wg_peer_idx));
+        err_t wg_err = GATEWAY_WG_SITE(TDONGLE_LOCK_WG_PEER, wireguardif_add_peer(netif, &wg_peer, &wg_peer_idx));
 
         if (wg_err == ERR_OK && wg_peer_idx != WIREGUARDIF_INVALID_INDEX) {
             p->wg_peer_index = wg_peer_idx;
@@ -936,7 +943,7 @@ static void remove_peer(microlink_t *ml, const ml_peer_update_t *update) {
     /* Remove from wireguard-lwip */
     if (ml->wg_netif && ml->peers[idx].wg_peer_index >= 0) {
         struct netif *netif = (struct netif *)ml->wg_netif;
-        GATEWAY_WG_CALL(wireguardif_remove_peer(netif, (u8_t)ml->peers[idx].wg_peer_index));
+        GATEWAY_WG_SITE(TDONGLE_LOCK_WG_PEER, wireguardif_remove_peer(netif, (u8_t)ml->peers[idx].wg_peer_index));
     }
 
     char ip_str[16];
@@ -1271,17 +1278,18 @@ static void directory_reconcile(microlink_t *ml) {
 esp_err_t ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *data,size_t len) {
     if(!ml || !data || !len || len>1400 || ml->state!=ML_STATE_CONNECTED)return ESP_ERR_INVALID_STATE;
     unsigned old=__atomic_fetch_add(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
-    if(old>=4) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+    if(old>=ML_JIT_PENDING) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
     ml_peer_update_t *packet=tdongle_heap_tag(TDONGLE_OWNER_WG, calloc(1,sizeof(*packet)+sizeof(size_t)+len));
     if(!packet) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
     packet->action=ML_PEER_PACKET;packet->vpn_ip=ip;
     memcpy(packet+1,&len,sizeof(len));memcpy((uint8_t *)(packet+1)+sizeof(len),data,len);
     if(xQueueSend(ml->peer_update_queue,&packet,0)!=pdTRUE) {
         tdongle_heap_free(TDONGLE_OWNER_WG, packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+    ml_rt_wake(ML_RT_TASK_WG_MGR);   /* event driven: the queue is serviced now, not at the next poll */
     return ESP_OK;
 }
 static void directory_flush_packets(microlink_t *ml) {
-    for(unsigned i=0;i<4;i++) {
+    for(unsigned i=0;i<ML_JIT_PENDING;i++) {
         ml_peer_update_t *packet=ml->jit_pending[i].packet;if(!packet)continue;
         int idx=find_peer_by_ip(ml,packet->vpn_ip);
         bool discard=idx<0 || ml_get_time_ms()>=ml->jit_pending[i].expires;
@@ -1294,7 +1302,7 @@ static void directory_flush_packets(microlink_t *ml) {
                 ip4_addr_t ip={.addr=htonl(packet->vpn_ip)};
                 struct netif *wg=ml->wg_netif;
                 ROUTE_MARK(4);
-                GATEWAY_WG_CALL(wg->output(wg,b,&ip));pbuf_free(b);
+                GATEWAY_WG_SITE(TDONGLE_LOCK_WG_OUTPUT, wg->output(wg,b,&ip));pbuf_free(b);
                 ROUTE_MARK(0);
                 ml->peers[idx].jit_used_ms=ml_get_time_ms();
             }
@@ -1318,7 +1326,7 @@ static void process_peer_updates(microlink_t *ml) {
             if(idx>=0){ml->jit_hits++;ml->peers[idx].jit_used_ms=ml_get_time_ms();}
             else if(ml_directory_find(ml,update->vpn_ip,NULL,NULL,0,&record))idx=directory_activate(ml,&record);
             bool kept=false;
-            if(idx>=0)for(unsigned i=0;i<4;i++)if(!ml->jit_pending[i].packet) {
+            if(idx>=0)for(unsigned i=0;i<ML_JIT_PENDING;i++)if(!ml->jit_pending[i].packet) {
                 ml->jit_pending[i].packet=update;ml->jit_pending[i].expires=ml_get_time_ms()+5000;
                 ROUTE_MARK(3);
                 ml_wg_mgr_trigger_handshake(ml,update->vpn_ip);ROUTE_MARK(0);kept=true;break;
@@ -2061,8 +2069,7 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
     }
 
     struct netif *netif = (struct netif *)ml->wg_netif;
-    void *device = netif->state;
-    if (!device) {
+    if (!netif->state) {
         tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
         return;
     }
@@ -2089,12 +2096,16 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
         ip4_addr_set_u32(ip_2_ip4(&addr), htonl(pkt->src_ip));
     }
 
-    /* Call WG RX handler — pbuf is PBUF_RAM so data survives async delivery */
-    LOCK_TCPIP_CORE();
-    ROUTE_MARK(5);
-    wireguardif_network_rx(device, NULL, p, &addr, pkt->src_port);
-    ROUTE_MARK(0);
-    UNLOCK_TCPIP_CORE();
+    /* Call the WG RX handler — pbuf is PBUF_RAM so data survives async delivery. Transport data is decrypted with the
+     * lwIP core lock RELEASED: the lock is held to find the keypair (begin) and to deliver the plaintext (complete),
+     * the ChaCha20-Poly1305 in between (~0.4 ms per 1,400 B) blocks nobody. */
+    struct wireguard_rx_job rx_job;
+    int rx_pending = 0;
+    WG_LOCKED(TDONGLE_LOCK_WG_OTHER, { ROUTE_MARK(5); rx_pending = wireguardif_rx_begin(netif, p, &addr, pkt->src_port, &rx_job); ROUTE_MARK(0); });
+    if (rx_pending) {
+        wireguard_rx_decrypt(&rx_job);
+        WG_LOCKED(TDONGLE_LOCK_WG_COMMIT, { ROUTE_MARK(5); wireguardif_rx_complete(netif, &addr, pkt->src_port, &rx_job); ROUTE_MARK(0); });
+    }
 #ifdef ESP_PLATFORM
     if(sender>=0 && wg_peer_activity(ml,sender)!=sender_activity)
         ml->peers[sender].jit_used_ms=ml_get_time_ms();
@@ -2646,9 +2657,42 @@ static void dump_wg_state_snapshot(microlink_t *ml) {
 #define WG_MGR_WG_BURST         64
 #define WG_MGR_PASS_BUDGET_MS   (WG_MGR_DISCO_BUDGET_MS + 2 * WG_MGR_WG_BUDGET_MS)
 
+/* Housekeeping that has no producer to wake the task (STUN finishing, the directory generation moving, a trial or
+ * pending packet running out) is looked at at least this often. Everything else wakes the task or has its own timer. */
+#define WG_MGR_HOUSEKEEPING_MS 250
+
 void ml_wg_pass_begin(ml_wg_pass_t *pass) {
     pass->pass_start_ms = ml_get_time_ms();
     pass->drain_ms = 0;
+    pass->next_due_ms = pass->pass_start_ms + WG_MGR_HOUSEKEEPING_MS;
+}
+
+static inline void wg_due(ml_wg_pass_t *pass, uint64_t when) {
+    if (when < pass->next_due_ms) pass->next_due_ms = when;
+}
+
+/* One periodic cycle, in slices: the lwIP core lock is taken once per peer (timers and keepalives are microseconds) and an
+ * initiation's X25519 runs with it released (wireguardif.c, "Periodic work in slices"). At most one initiation per cycle,
+ * as before, so a cycle never costs N x 40 ms of CPU either. Called only from this task, which also owns the
+ * membership's peers, so nothing else changes them between the slices except the lwIP thread's receive path, whose
+ * effects the commit step re-validates. */
+static void wg_periodic_sliced(microlink_t *ml) {
+    struct netif *netif = (struct netif *)ml->wg_netif;
+    if (!netif || !netif->state) return;
+    uint8_t first = ((struct wireguard_device *)netif->state)->next_hs_peer;
+    bool handshake_allowed = true;
+    for (unsigned k = 0; k < WIREGUARD_MAX_PEERS; k++) {
+        uint8_t idx = (uint8_t)((first + k) % WIREGUARD_MAX_PEERS);
+        struct wireguard_initiation_job job;
+        bool started = false;
+        WG_LOCKED(TDONGLE_LOCK_WG_PERIODIC, { ROUTE_MARK(6); started = wireguardif_periodic_peer(netif, idx, handshake_allowed, &job); ROUTE_MARK(0); });
+        if (started) {
+            wireguard_initiation_compute(&job);                           /* no lock: ~40 ms of X25519 and AEAD */
+            WG_LOCKED(TDONGLE_LOCK_WG_COMMIT, { ROUTE_MARK(6); wireguardif_periodic_commit(netif, idx, &job); ROUTE_MARK(0); });
+            handshake_allowed = false;
+        }
+    }
+    WG_LOCKED(TDONGLE_LOCK_WG_PERIODIC, wireguardif_periodic_end(netif));
 }
 
 static void member_service(void *ctx, void *shared) {
@@ -2781,11 +2825,7 @@ static void member_service(void *ctx, void *shared) {
     uint64_t now = ml_get_time_ms();
     if (ml->wg_netif && now - loop->last_wg_periodic_ms >= 400) {
         uint64_t t0 = now;
-        LOCK_TCPIP_CORE();
-        ROUTE_MARK(6);
-        wireguardif_periodic((struct netif *)ml->wg_netif);
-        ROUTE_MARK(0);
-        UNLOCK_TCPIP_CORE();
+        wg_periodic_sliced(ml);
         uint64_t dt = ml_get_time_ms() - t0;
         loop->last_wg_periodic_ms = now;
         /* Throughput-collapse diag: only log when actually slow (>30ms),
@@ -2841,6 +2881,18 @@ static void member_service(void *ctx, void *shared) {
         loop->budget_hits_10s = 0;
         loop->last_snapshot_ms = now;
     }
+
+    /* When does this membership next need the task? Its own timers, a backlog the drain budgets left behind (one
+     * tick, so lower priorities get the core between slices), packets waiting for a handshake or a trial deadline
+     * (polled at 10 ms while they exist). */
+    now = ml_get_time_ms();
+    wg_due(pass, loop->last_wg_periodic_ms + 400);
+    wg_due(pass, loop->last_disco_probe_ms + 1000);
+    wg_due(pass, loop->last_snapshot_ms + 10000);
+    if (uxQueueMessagesWaiting(ml->wg_rx_queue) || uxQueueMessagesWaiting(ml->disco_rx_queue) ||
+        uxQueueMessagesWaiting(ml->peer_update_queue))
+        wg_due(pass, now + 1);
+    if (ml->jit_packet_count || ml->inbound_trial.pending) wg_due(pass, now + 10);
 }
 
 /* Runs under the wg_mgr mux lock after the membership left the table: shut the WireGuard interface down while

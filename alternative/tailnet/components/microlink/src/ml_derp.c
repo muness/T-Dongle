@@ -589,6 +589,8 @@ static void op_deliver(void *user, const uint8_t *src_pubkey, uint8_t *data, siz
             ESP_LOGW(TAG, "DERP-RX queue full: dropped %lu (type=%d)", (unsigned long)derp_rx_drops, (int)type);
         tdongle_memory_drop(TDONGLE_DROP_DERP_RX_FULL);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
+    } else {
+        ml_rt_wake(ML_RT_TASK_WG_MGR);
     }
 }
 
@@ -726,6 +728,7 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
     /* Try to send to queue */
     if ((is_wg_handshake ? xQueueSendToFront(ml->derp_tx_queue, &item, 0)
                          : xQueueSend(ml->derp_tx_queue, &item, 0)) == pdTRUE) {
+        ml_rt_wake(ML_RT_TASK_DERP);   /* event driven: the relay writes it now, not at the next poll */
         return ESP_OK;
     }
 
@@ -737,6 +740,7 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
             tdongle_heap_free(TDONGLE_OWNER_PACKET, dropped.data);  /* Drop oldest */
         }
         if (xQueueSend(ml->derp_tx_queue, &item, 0) == pdTRUE) {
+            ml_rt_wake(ML_RT_TASK_DERP);
             return ESP_OK;
         }
     }
@@ -756,7 +760,6 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
  * ========================================================================== */
 
 static void member_service(void *ctx, void *shared) {
-    (void)shared;
     microlink_t *ml = ctx;
     uint64_t now = ml_get_time_ms();
 
@@ -782,6 +785,11 @@ static void member_service(void *ctx, void *shared) {
 
     ml_derp_link_service(&ml->derp.link);
     ml->derp.last_recv_ms = ml->derp.link.last_recv_ms;
+    {   /* when this link next needs the task: the shared loop sleeps until the earliest of them */
+        ml_derp_pass_t *pass = shared;
+        uint32_t wait = ml_derp_link_wait_ms(&ml->derp.link);
+        if (pass && wait < pass->wait_ms) pass->wait_ms = wait;
+    }
 
     static uint64_t last_status_ms;   /* one line per 10 s across all memberships is plenty */
     if (now - last_status_ms > 10000) {

@@ -311,6 +311,23 @@ static void scenario_no_io_after_failure(void) {
     end_checks();
 }
 
+/* The shared task sleeps until the earliest wait any link reports (event driven: no fixed tick while idle). */
+static void scenario_wait_computation(void) {
+    begin(0, 0, true);
+    assert(ml_derp_link_wait_ms(&A.link) == UINT32_MAX);                    /* nothing wanted: sleep until woken */
+    ml_derp_link_connect(&A.link);
+    assert(ml_derp_link_wait_ms(&A.link) == 0);                             /* first attempt is due now */
+    connect_both();
+    assert(ml_derp_link_wait_ms(&A.link) == ML_DERP_POLL_MS);               /* established: read every 10 ms */
+    uint8_t huge[5] = {ML_DERP_FRAME_KEEP_ALIVE, 0x00, 0x10, 0x00, 0x00};
+    fpipe_push(&A.s2c, huge, sizeof(huge));
+    ml_derp_link_service(&A.link);                                          /* fails: redial in 200 ms, not at a tick */
+    uint32_t w = ml_derp_link_wait_ms(&A.link);
+    assert(w > 100 && w <= 200);
+    vnow += 150; w = ml_derp_link_wait_ms(&A.link); assert(w <= 50);        /* and it counts down */
+    end_checks();
+}
+
 /* Negative control: the old per-record behaviour (wait for the record, up to 5 s) run on the SHARED loop.
  * The harness must see B starve; otherwise the bounds asserted above would prove nothing. */
 static void blocking_service(void *ctx, void *shared) {
@@ -364,6 +381,7 @@ int main(void) {
     scenario_detach_midstream();
     scenario_fair_duplex_and_serialised_pongs();
     scenario_no_io_after_failure();
+    scenario_wait_computation();
     scenario_negative_control();
     puts("shared DERP: a stalled or hostile server costs its own membership a redial and nobody else any latency");
     return 0;

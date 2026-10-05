@@ -14,6 +14,7 @@
  */
 
 #include "microlink_internal.h"
+#include "ml_runtime.h"
 #include "esp_log.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -71,6 +72,7 @@ static void route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
         .via_derp = false,
     };
 
+    bool wake_wg = false;
     switch (type) {
     case PKT_STUN:
         if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
@@ -82,7 +84,7 @@ static void route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
         if (xQueueSend(ml->disco_rx_queue, &pkt, 0) != pdTRUE) {
             tdongle_memory_drop(TDONGLE_DROP_NET_DISCO_FULL);
             tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
-        }
+        } else wake_wg = true;
         break;
     case PKT_WIREGUARD:
         if (xQueueSend(ml->wg_rx_queue, &pkt, 0) != pdTRUE) {
@@ -92,12 +94,13 @@ static void route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
                          (unsigned long)wg_rx_drops);
             tdongle_memory_drop(TDONGLE_DROP_NET_WG_FULL);
             tdongle_heap_free(TDONGLE_OWNER_PACKET, data);  /* Queue full, drop */
-        }
+        } else wake_wg = true;
         break;
     default:
         tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
         break;
     }
+    if (wake_wg) ml_rt_wake(ML_RT_TASK_WG_MGR);   /* event driven: a packet arrived, the manager runs now */
 }
 
 /* ---------------------------------------------------------------------------

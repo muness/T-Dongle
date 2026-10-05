@@ -142,6 +142,13 @@ extern "C" {
 #define ML_COORD_CMD_QUEUE_DEPTH 4
 #define ML_PEER_UPDATE_QUEUE_DEPTH 16
 
+/* Outbound packets one membership may hold while the peer they are for is activated and its handshake runs
+ * (ml_gateway_queue_packet). A per-membership budget, no longer a constant 4: at ~1,400 B each, 8 is 11,200 B at the
+ * worst, only while a handshake is in flight, tagged to the `wg` owner (the packet pool of PR-B will own this memory).
+ * Enqueueing wakes the wg_mgr task (ml_rt_wake), so the budget is what absorbs a burst, not a polling period. */
+#define ML_JIT_PENDING 8
+#define ML_JIT_PACKET_MAX 1400
+
 /* Protocol limits */
 #define ML_MAX_PEERS            CONFIG_ML_MAX_PEERS
 #define ML_MAX_ENDPOINTS        8
@@ -669,7 +676,7 @@ struct microlink_s {
     QueueHandle_t stun_rx_queue;        /* net_io -> coord */
     QueueHandle_t coord_cmd_queue;      /* any -> coord */
     volatile uint32_t peer_generation; /* even = peer metadata stable, odd = owner applying updates */
-    struct { ml_peer_update_t *packet; uint64_t expires; } jit_pending[4];
+    struct { ml_peer_update_t *packet; uint64_t expires; } jit_pending[ML_JIT_PENDING];
     volatile unsigned jit_packet_count;
     uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
     uint32_t directory_applied;
@@ -931,7 +938,8 @@ size_t ml_wg_device_bytes(void);     /* sizeof(struct wireguard_device): a membe
 
 /* The shared wg_mgr task's scratch: one pass visits every membership, and the work windows below the
  * per-membership drains (#46) are bounded by the pass as a whole, so N memberships share what one used to have. */
-typedef struct { uint64_t pass_start_ms; uint32_t drain_ms; } ml_wg_pass_t;
+typedef struct { uint64_t pass_start_ms; uint32_t drain_ms; uint64_t next_due_ms; } ml_wg_pass_t;
+typedef struct { uint32_t wait_ms; } ml_derp_pass_t;   /* shortest wait any link asks for, UINT32_MAX = none */
 void ml_wg_pass_begin(ml_wg_pass_t *pass);
 void ml_wg_mgr_send_cmm(microlink_t *ml, uint32_t peer_vpn_ip);
 esp_err_t ml_wg_mgr_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip);

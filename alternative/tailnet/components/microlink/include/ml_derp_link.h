@@ -204,5 +204,11 @@ void ml_derp_link_close(ml_derp_link_t *l);
 /* Bounded work: advance the state machine, move frames. Never blocks. */
 void ml_derp_link_service(ml_derp_link_t *l);
 
+/* How long until this link needs service although nothing external happens (a wake-up from a queue or an event bit
+ * arrives separately): UINT32_MAX = never. Backs the shared task's computed deadline; no fixed polling period while idle.
+ * An established relay is read every ML_DERP_POLL_MS (the transport has no readiness callback; PR-B can add one). */
+#define ML_DERP_POLL_MS 10
+uint32_t ml_derp_link_wait_ms(ml_derp_link_t *l);
+
 static inline bool ml_derp_link_ready(const ml_derp_link_t *l) { return l->state == ML_DERP_READY; }
 const char *ml_derp_link_state_name(ml_derp_link_state_t s);

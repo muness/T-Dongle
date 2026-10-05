@@ -848,14 +848,43 @@ bool wireguard_process_cookie_message(struct wireguard_device *device, struct wi
     return result;
 }
 
-bool wireguard_create_handshake_initiation(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_initiation *dst) {
+/* ---------------------------------------------------------------------------
+ * Handshake initiation in three steps, so the crypto can run OUTSIDE the lwIP core lock.
+ *
+ * Creating an initiation is two X25519 operations, a handful of BLAKE2s/ChaCha20-Poly1305 calls and a TAI64N read:
+ * about 40 ms on the S3. Done under the core lock it stalls every socket in the system for that long. The steps:
+ *   begin   (lock held)    copy what the crypto reads out of the device and peer, reserve a receiver index
+ *   compute (NO lock)      all the cryptography, on the job's own storage; touches no device, peer or lwIP state
+ *   commit  (lock held)    if the peer is still the one the job was made for, install the handshake state
+ * wireguard_create_handshake_initiation() below is the three in a row, for callers that hold the lock throughout.
+ * ------------------------------------------------------------------------- */
+bool wireguard_initiation_begin(struct wireguard_device *device, struct wireguard_peer *peer, struct wireguard_initiation_job *job) {
+    if (!device || !peer || !peer->valid) {
+        return false;
+    }
+    memset(job, 0, sizeof(*job));
+    memcpy(job->device_public, device->public_key, WIREGUARD_PUBLIC_KEY_LEN);
+    memcpy(job->peer_public, peer->public_key, WIREGUARD_PUBLIC_KEY_LEN);
+    memcpy(job->peer_dh, peer->public_key_dh, WIREGUARD_PUBLIC_KEY_LEN);
+    memcpy(job->label_mac1_key, peer->label_mac1_key, WIREGUARD_SESSION_KEY_LEN);
+    job->use_cookie = !((peer->cookie_millis == 0) || wireguard_expired(peer->cookie_millis, COOKIE_SECRET_MAX_AGE));
+    if (job->use_cookie) {
+        memcpy(job->cookie, peer->cookie, WIREGUARD_COOKIE_LEN);
+    }
+    job->index = wireguard_generate_unique_index(device);
+    return true;
+}
+
+void wireguard_initiation_compute(struct wireguard_initiation_job *job) {
     uint8_t timestamp[WIREGUARD_TAI64N_LEN];
     uint8_t key[WIREGUARD_SESSION_KEY_LEN];
     uint8_t dh_calculation[WIREGUARD_PUBLIC_KEY_LEN];
     bool result = false;
 
-    struct wireguard_handshake *handshake = &peer->handshake;
+    struct wireguard_handshake *handshake = &job->handshake;
+    struct message_handshake_initiation *dst = &job->msg;
 
+    memset(handshake, 0, sizeof(*handshake));
     memset(dst, 0, sizeof(struct message_handshake_initiation));
 
     // Ci := Hash(Construction) (precalculated hash)
@@ -865,7 +894,7 @@ bool wireguard_create_handshake_initiation(struct wireguard_device *device, stru
     memcpy(handshake->hash, identifier_hash, WIREGUARD_HASH_LEN);
 
     // Hi := Hash(Hi || Spubr)
-    wireguard_mix_hash(handshake->hash, peer->public_key, WIREGUARD_PUBLIC_KEY_LEN);
+    wireguard_mix_hash(handshake->hash, job->peer_public, WIREGUARD_PUBLIC_KEY_LEN);
 
     // (Eprivi, Epubi) := DH-Generate()
     wireguard_generate_private_key(handshake->ephemeral_private);
@@ -874,28 +903,24 @@ bool wireguard_create_handshake_initiation(struct wireguard_device *device, stru
         // Ci := Kdf1(Ci, Epubi)
         wireguard_kdf1(handshake->chaining_key, handshake->chaining_key, dst->ephemeral, WIREGUARD_PUBLIC_KEY_LEN);
 
-        // msg.ephemeral := Epubi
-        // Done above - public keys is calculated into dst->ephemeral
-
         // Hi := Hash(Hi || msg.ephemeral)
         wireguard_mix_hash(handshake->hash, dst->ephemeral, WIREGUARD_PUBLIC_KEY_LEN);
 
         // Calculate DH(Eprivi,Spubr)
-        wireguard_x25519(dh_calculation, handshake->ephemeral_private, peer->public_key);
+        wireguard_x25519(dh_calculation, handshake->ephemeral_private, job->peer_public);
         if (!crypto_equal(dh_calculation, zero_key, WIREGUARD_PUBLIC_KEY_LEN)) {
 
             // (Ci,k) := Kdf2(Ci,DH(Eprivi,Spubr))
             wireguard_kdf2(handshake->chaining_key, key, handshake->chaining_key, dh_calculation, WIREGUARD_PUBLIC_KEY_LEN);
 
             // msg.static := AEAD(k,0,Spubi, Hi)
-            wireguard_aead_encrypt(dst->enc_static, device->public_key, WIREGUARD_PUBLIC_KEY_LEN, handshake->hash, WIREGUARD_HASH_LEN, 0, key);
+            wireguard_aead_encrypt(dst->enc_static, job->device_public, WIREGUARD_PUBLIC_KEY_LEN, handshake->hash, WIREGUARD_HASH_LEN, 0, key);
 
             // Hi := Hash(Hi || msg.static)
             wireguard_mix_hash(handshake->hash, dst->enc_static, sizeof(dst->enc_static));
 
-            // (Ci,k) := Kdf2(Ci,DH(Sprivi,Spubr))
-            // note DH(Sprivi,Spubr) is precomputed per peer
-            wireguard_kdf2(handshake->chaining_key, key, handshake->chaining_key, peer->public_key_dh, WIREGUARD_PUBLIC_KEY_LEN);
+            // (Ci,k) := Kdf2(Ci,DH(Sprivi,Spubr)); DH(Sprivi,Spubr) is precomputed per peer
+            wireguard_kdf2(handshake->chaining_key, key, handshake->chaining_key, job->peer_dh, WIREGUARD_PUBLIC_KEY_LEN);
 
             // msg.timestamp := AEAD(k, 0, Timestamp(), Hi)
             wireguard_tai64n_now(timestamp);
@@ -905,7 +930,7 @@ bool wireguard_create_handshake_initiation(struct wireguard_device *device, stru
             wireguard_mix_hash(handshake->hash, dst->enc_timestamp, sizeof(dst->enc_timestamp));
 
             dst->type = MESSAGE_HANDSHAKE_INITIATION;
-            dst->sender = wireguard_generate_unique_index(device);
+            dst->sender = job->index;
 
             handshake->valid = true;
             handshake->initiator = true;
@@ -917,23 +942,44 @@ bool wireguard_create_handshake_initiation(struct wireguard_device *device, stru
 
     if (result) {
         // 5.4.4 Cookie MACs
-        // msg.mac1 := Mac(Hash(Label-Mac1 || Spubm' ), msgA)
-        // The value Hash(Label-Mac1 || Spubm' ) above can be pre-computed
-        wireguard_mac(dst->mac1, dst, (sizeof(struct message_handshake_initiation)-(2*WIREGUARD_COOKIE_LEN)), peer->label_mac1_key, WIREGUARD_SESSION_KEY_LEN);
+        // msg.mac1 := Mac(Hash(Label-Mac1 || Spubm' ), msgA); the key is pre-computed per peer
+        wireguard_mac(dst->mac1, dst, (sizeof(struct message_handshake_initiation)-(2*WIREGUARD_COOKIE_LEN)), job->label_mac1_key, WIREGUARD_SESSION_KEY_LEN);
 
-        // if Lm = E or Lm ≥ 120:
-        if ((peer->cookie_millis == 0) || wireguard_expired(peer->cookie_millis, COOKIE_SECRET_MAX_AGE)) {
+        if (!job->use_cookie) {
             // msg.mac2 := 0
             crypto_zero(dst->mac2, WIREGUARD_COOKIE_LEN);
         } else {
             // msg.mac2 := Mac(Lm, msgB)
-            wireguard_mac(dst->mac2, dst, (sizeof(struct message_handshake_initiation)-(WIREGUARD_COOKIE_LEN)), peer->cookie, WIREGUARD_COOKIE_LEN);
-
+            wireguard_mac(dst->mac2, dst, (sizeof(struct message_handshake_initiation)-(WIREGUARD_COOKIE_LEN)), job->cookie, WIREGUARD_COOKIE_LEN);
         }
     }
+    job->ok = result;
 
     crypto_zero(key, sizeof(key));
     crypto_zero(dh_calculation, sizeof(dh_calculation));
+}
+
+bool wireguard_initiation_commit(struct wireguard_device *device, struct wireguard_peer *peer, struct wireguard_initiation_job *job) {
+    (void)device;
+    // The peer may have been removed, replaced or re-keyed while the crypto ran outside the lock.
+    bool same = job->ok && peer && peer->valid && memcmp(peer->public_key, job->peer_public, WIREGUARD_PUBLIC_KEY_LEN) == 0;
+    if (same) {
+        memcpy(&peer->handshake, &job->handshake, sizeof(peer->handshake));
+    }
+    // Ephemeral private key and chaining state must not linger in the job either way.
+    crypto_zero(&job->handshake, sizeof(job->handshake));
+    return same;
+}
+
+bool wireguard_create_handshake_initiation(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_initiation *dst) {
+    struct wireguard_initiation_job job;
+    bool result = false;
+    if (wireguard_initiation_begin(device, peer, &job)) {
+        wireguard_initiation_compute(&job);
+        memcpy(dst, &job.msg, sizeof(*dst));
+        result = wireguard_initiation_commit(device, peer, &job);
+    }
+    crypto_zero(&job, sizeof(job));
     return result;
 }
 

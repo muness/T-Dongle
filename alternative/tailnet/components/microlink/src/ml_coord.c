@@ -2304,6 +2304,7 @@ static void apply_long_poll_map(microlink_t *ml, cJSON *update_json) {
     if (parse_derp_map_from_response(ml, update_json) && !ml->derp.connected) {
         ESP_LOGI(TAG, "DERPMap arrived via long-poll - signaling DERP connect");
         xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
+        ml_rt_wake(ML_RT_TASK_DERP);
     }
 }
 
@@ -2531,6 +2532,7 @@ void ml_coord_task(void *arg) {
                 tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_MAP);
                 map_applied_ms = ml_get_time_ms();
                 xEventGroupSetBits(ml->events, ML_EVT_COORD_REGISTERED);
+                ml_rt_wake(ML_RT_TASK_WG_MGR);
                 /* The negotiation is over: the control channel's peak is behind us. Let go now, before the
                  * wait for DERP below, which is another membership-phase (the DERP link takes the token itself
                  * for its handshake) and must not wait on a token this task still holds. */
@@ -2539,6 +2541,7 @@ void ml_coord_task(void *arg) {
                 if (!ml->derp.connected) {
                     /* Signal DERP I/O task to connect (connection now owned by I/O task) */
                     xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
+                    ml_rt_wake(ML_RT_TASK_DERP);
                     /* Wait for DERP to connect (up to 15s) before continuing -- unless
                      * the wall clock is not set: DERP will not even try until SNTP has
                      * run (certificates cannot be judged), and the control plane must not

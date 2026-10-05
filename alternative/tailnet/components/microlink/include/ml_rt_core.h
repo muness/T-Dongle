@@ -28,6 +28,7 @@ typedef struct {
      * ml_rt_core_task_exit(core) as its last act. */
     bool (*spawn)(void *platform, unsigned index, struct ml_rt_core *core);
     void (*sleep_ms)(uint32_t ms);
+    void (*wake_all)(void *platform);   /* optional: unblock tasks waiting for an event so they see `stop` */
 } ml_rt_platform_t;
 
 typedef struct ml_rt_core {

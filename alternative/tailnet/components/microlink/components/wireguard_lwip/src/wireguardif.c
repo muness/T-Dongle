@@ -89,6 +89,7 @@ static const char *TAG = "wg";
 
 // Forward declaration for timer cancellation in wireguardif_shutdown
 static void wireguardif_tmr(void *arg);
+void wireguardif_network_rx(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
 
 // Flag to disable internal UDP socket binding (for magicsock mode)
 static bool g_disable_socket_bind = false;
@@ -548,42 +549,65 @@ static bool peer_add_ip(struct wireguard_peer *peer, ip_addr_t ip, ip_addr_t mas
     return result;
 }
 
-static void wireguardif_process_data_message(struct wireguard_device *device, struct wireguard_peer *peer, struct message_transport_data *data_hdr, size_t data_len, const ip_addr_t *addr, u16_t port) {
-    struct wireguard_keypair *keypair;
-    uint64_t nonce;
-    uint8_t *src;
-    size_t src_len;
-    struct pbuf *pbuf;
+// Data message processing, in two halves so the decryption can run outside the lwIP core lock (see wireguard.h
+// struct wireguard_rx_job). prepare and complete need the lock; wireguard_rx_decrypt() needs none.
+//
+// prepare:  find the peer's keypair for the receiver index, check it may be used, allocate the plaintext pbuf and copy the
+//           receiving key and nonce into the job. 1 = decrypt this; 0 = nothing to do.
+// complete: with the lock again: re-find the peer and keypair (either may have gone while the lock was released), and if
+//           the packet authenticated do everything the one-piece version did (endpoint update, keypair roll, replay
+//           check, cryptokey routing, input).
+static int wireguardif_rx_data_prepare(struct wireguard_device *device, struct wireguard_peer *peer, struct message_transport_data *data_hdr, size_t data_len, struct wireguard_rx_job *job) {
+    (void)device;
+    struct wireguard_keypair *keypair = get_peer_keypair_for_idx(peer, data_hdr->receiver);
+    if (!keypair) {
+        return 0;   // Could not locate valid keypair for remote index
+    }
+    if (!((keypair->receiving_valid) &&
+          !wireguard_expired(keypair->keypair_millis, REJECT_AFTER_TIME) &&
+          (keypair->sending_counter < REJECT_AFTER_MESSAGES))) {
+        // After Reject-After-Messages transport data messages or after the current secure session is Reject-After-Time
+        // seconds old, whichever comes first, WireGuard refuses to send or receive more transport data messages using
+        // this session until a new secure session is created through the 1-RTT handshake.
+        keypair_destroy(keypair);
+        return 0;
+    }
+    job->receiver = data_hdr->receiver;
+    job->nonce = U8TO64_LITTLE(data_hdr->counter);
+    job->src = &data_hdr->enc_packet[0];
+    job->src_len = data_len;
+    memcpy(job->key, keypair->receiving_key, WIREGUARD_SESSION_KEY_LEN);
+    // We don't know the unpadded size until we have decrypted the packet and validated/inspected the IP header
+    job->pbuf = pbuf_alloc(PBUF_TRANSPORT, data_len - WIREGUARD_AUTHTAG_LEN, PBUF_RAM);
+    if (!job->pbuf) {
+        crypto_zero(job->key, sizeof(job->key));
+        return 0;
+    }
+    memset(job->pbuf->payload, 0, job->pbuf->tot_len);
+    job->ok = false;
+    return 1;
+}
+
+void wireguard_rx_decrypt(struct wireguard_rx_job *job) {
+    job->ok = wireguard_aead_decrypt(job->pbuf->payload, job->src, job->src_len, NULL, 0, job->nonce, job->key);
+    crypto_zero(job->key, sizeof(job->key));
+}
+
+static void wireguardif_rx_data_complete(struct wireguard_device *device, struct wireguard_peer *peer, struct wireguard_rx_job *job, const ip_addr_t *addr, u16_t port) {
+    struct pbuf *pbuf = job->pbuf;
     struct ip_hdr *iphdr;
     ip_addr_t dest;
     bool dest_ok = false;
     int x;
     uint32_t now;
     uint16_t header_len = 0xFFFF;
-    uint32_t idx = data_hdr->receiver;
-
-    keypair = get_peer_keypair_for_idx(peer, idx);
-
-    if (keypair) {
-        if (
-                (keypair->receiving_valid) &&
-                !wireguard_expired(keypair->keypair_millis, REJECT_AFTER_TIME) &&
-                (keypair->sending_counter < REJECT_AFTER_MESSAGES)
-
-        ) {
-
-            nonce = U8TO64_LITTLE(data_hdr->counter);
-            src = &data_hdr->enc_packet[0];
-            src_len = data_len;
-
-            // We don't know the unpadded size until we have decrypted the packet and validated/inspected the IP header
-            pbuf = pbuf_alloc(PBUF_TRANSPORT, src_len - WIREGUARD_AUTHTAG_LEN, PBUF_RAM);
-            if (pbuf) {
-                // Decrypt the packet
-                memset(pbuf->payload, 0, pbuf->tot_len);
-                bool decrypt_ok = wireguard_decrypt_packet(pbuf->payload, src, src_len, nonce, keypair);
-                WG_DEBUG("[WG_DECRYPT] result=%d, src_len=%u, nonce=%llu\n",
-                       decrypt_ok, (unsigned)src_len, (unsigned long long)nonce);
+    uint64_t nonce = job->nonce;
+    bool decrypt_ok = job->ok;
+    struct wireguard_keypair *keypair = peer ? get_peer_keypair_for_idx(peer, job->receiver) : NULL;
+    if (!keypair || !keypair->receiving_valid) {
+        decrypt_ok = false;   // the session was replaced while the packet was being decrypted
+    }
+    WG_DEBUG("[WG_DECRYPT] result=%d, src_len=%u, nonce=%llu\n", decrypt_ok, (unsigned)job->src_len, (unsigned long long)nonce);
                 if (decrypt_ok) {
 
                     // 3. Since the packet has authenticated correctly, the source IP of the outer UDP/IP packet is used to update the endpoint for peer TrMv...WXX0.
@@ -691,21 +715,58 @@ static void wireguardif_process_data_message(struct wireguard_device *device, st
                     }
                 }
 
-                if (pbuf) {
-                    pbuf_free(pbuf);
-                }
-            }
+    if (pbuf) {
+        pbuf_free(pbuf);
+    }
+    job->pbuf = NULL;
+}
 
+static void wireguardif_process_data_message(struct wireguard_device *device, struct wireguard_peer *peer, struct message_transport_data *data_hdr, size_t data_len, const ip_addr_t *addr, u16_t port) {
+    struct wireguard_rx_job job;
+    if (wireguardif_rx_data_prepare(device, peer, data_hdr, data_len, &job)) {
+        wireguard_rx_decrypt(&job);
+        wireguardif_rx_data_complete(device, peer, &job, addr, port);
+    }
+}
 
-        } else {
-            //After Reject-After-Messages transport data messages or after the current secure session is Reject- After-Time seconds old,
-            // whichever comes first, WireGuard will refuse to send or receive any more transport data messages using the current secure session,
-            // until a new secure session is created through the 1-RTT handshake
-            keypair_destroy(keypair);
+// Split form of wireguardif_network_rx for the shared wg_mgr task. begin (lock held) handles every message type except
+// transport data exactly as wireguardif_network_rx does, and for transport data stops after validation: returns 1 with
+// `job` ready, the caller releases the lock, runs wireguard_rx_decrypt(job), takes the lock and calls complete. The input
+// pbuf is NOT consumed on 1: complete frees it. On 0 it has been handled and freed.
+int wireguardif_rx_begin(struct netif *netif, struct pbuf *p, const ip_addr_t *addr, u16_t port, struct wireguard_rx_job *job) {
+    if (!netif || !netif->state || !p) {
+        if (p) pbuf_free(p);
+        return 0;
+    }
+    struct wireguard_device *device = (struct wireguard_device *)netif->state;
+    uint8_t *data = p->payload;
+    size_t len = p->len;
+    if (wireguard_get_message_type(data, len) == MESSAGE_TRANSPORT_DATA) {
+        struct message_transport_data *msg_data = (struct message_transport_data *)data;
+        struct wireguard_peer *peer = peer_lookup_by_receiver(device, msg_data->receiver);
+        if (peer && len > 16 + WIREGUARD_AUTHTAG_LEN && wireguardif_rx_data_prepare(device, peer, msg_data, len - 16, job)) {
+            job->input = p;
+            return 1;
         }
+        pbuf_free(p);
+        return 0;
+    }
+    wireguardif_network_rx(device, NULL, p, addr, port);    // handshakes and cookies: rare, handled in one piece
+    return 0;
+}
 
-    } else {
-        // Could not locate valid keypair for remote index
+void wireguardif_rx_complete(struct netif *netif, const ip_addr_t *addr, u16_t port, struct wireguard_rx_job *job) {
+    if (netif && netif->state) {
+        struct wireguard_device *device = (struct wireguard_device *)netif->state;
+        struct wireguard_peer *peer = peer_lookup_by_receiver(device, job->receiver);
+        wireguardif_rx_data_complete(device, peer, job, addr, port);
+    } else if (job->pbuf) {
+        pbuf_free(job->pbuf);
+        job->pbuf = NULL;
+    }
+    if (job->input) {
+        pbuf_free(job->input);
+        job->input = NULL;
     }
 }
 
@@ -1430,6 +1491,94 @@ void wireguardif_periodic(struct netif *netif) {
             if ((peer->curr_keypair.valid) || (peer->prev_keypair.valid)) {
                 link_up = true;
             }
+        }
+    }
+    if (!link_up) {
+        netif_set_link_down(device->netif);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Periodic work in slices, with the handshake crypto outside the lwIP core lock.
+//
+// wireguardif_periodic() above walks every peer in one call: its caller holds the core lock for the whole walk, and an
+// initiation costs ~40 ms of X25519. The sliced form lets the caller take the lock once PER PEER (timers and keepalives
+// are microseconds) and run the initiation's cryptography with the lock released:
+//     lock:   wireguardif_periodic_peer(netif, i, allow, &job)   -> true when an initiation was started
+//     unlock: wireguard_initiation_compute(&job)                 -> the X25519 and AEAD work
+//     lock:   wireguardif_periodic_commit(netif, i, &job)        -> install it and send it
+//     lock:   wireguardif_periodic_end(netif)                    -> link state, once per cycle
+// A peer removed or re-keyed in between makes the commit a no-op.
+// ---------------------------------------------------------------------------
+bool wireguardif_periodic_peer(struct netif *netif, uint8_t peer_idx, bool allow_handshake, struct wireguard_initiation_job *job) {
+    if (!netif || !netif->state) {
+        return false;
+    }
+    struct wireguard_device *device = (struct wireguard_device *)netif->state;
+    struct wireguard_peer *peer = wireguard_device_peer(device, peer_idx);
+    if (!peer || !peer->valid) {
+        return false;
+    }
+    if (should_reset_peer(peer)) {
+        keypair_destroy(&peer->next_keypair);
+        keypair_destroy(&peer->curr_keypair);
+        keypair_destroy(&peer->prev_keypair);
+        peer->ip = peer->connect_ip;
+        peer->port = peer->connect_port;
+    }
+    if (should_destroy_current_keypair(peer)) {
+        keypair_destroy(&peer->curr_keypair);
+    }
+    if (should_send_keepalive(peer)) {
+        wireguardif_send_keepalive(device, peer);
+    }
+    if (allow_handshake && should_send_initiation(peer)) {
+        if (wireguard_initiation_begin(device, peer, job)) {
+            device->next_hs_peer = (uint8_t)((peer_idx + 1) % WIREGUARD_MAX_PEERS);
+            return true;
+        }
+    }
+    return false;
+}
+
+err_t wireguardif_periodic_commit(struct netif *netif, uint8_t peer_idx, struct wireguard_initiation_job *job) {
+    if (!netif || !netif->state) {
+        return ERR_ARG;
+    }
+    struct wireguard_device *device = (struct wireguard_device *)netif->state;
+    struct wireguard_peer *peer = wireguard_device_peer(device, peer_idx);
+    if (!peer || !wireguard_initiation_commit(device, peer, job)) {
+        return ERR_ARG;     // the peer went away or changed while the crypto ran: nothing to send
+    }
+    struct pbuf *pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct message_handshake_initiation), PBUF_RAM);
+    if (!pbuf) {
+        return ERR_MEM;
+    }
+    err_t result = pbuf_take(pbuf, &job->msg, sizeof(struct message_handshake_initiation));
+    if (result == ERR_OK) {
+        result = wireguardif_peer_output(netif, pbuf, peer);
+        peer->send_handshake = false;
+        peer->last_initiation_tx = wireguard_sys_now();
+        if (peer->handshake_attempts < 0xFF) {
+            peer->handshake_attempts++;
+        }
+        memcpy(peer->handshake_mac1, job->msg.mac1, WIREGUARD_COOKIE_LEN);
+        peer->handshake_mac1_valid = true;
+    }
+    pbuf_free(pbuf);
+    return result;
+}
+
+void wireguardif_periodic_end(struct netif *netif) {
+    if (!netif || !netif->state) {
+        return;
+    }
+    struct wireguard_device *device = (struct wireguard_device *)netif->state;
+    bool link_up = false;
+    for (int x = 0; x < WIREGUARD_MAX_PEERS; x++) {
+        struct wireguard_peer *peer = wireguard_device_peer(device, (uint8_t)x);
+        if (peer && peer->valid && (peer->curr_keypair.valid || peer->prev_keypair.valid)) {
+            link_up = true;
         }
     }
     if (!link_up) {

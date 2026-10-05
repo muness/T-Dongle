@@ -339,6 +339,35 @@ struct wireguard_peer *wireguard_process_initiation_message(struct wireguard_dev
 bool wireguard_process_handshake_response(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_response *src);
 bool wireguard_process_cookie_message(struct wireguard_device *device, struct wireguard_peer *peer, struct message_cookie_reply *src);
 
+/* An initiation whose cryptography runs outside the lwIP core lock; see wireguard.c. */
+struct wireguard_initiation_job {
+    uint8_t device_public[WIREGUARD_PUBLIC_KEY_LEN];
+    uint8_t peer_public[WIREGUARD_PUBLIC_KEY_LEN];
+    uint8_t peer_dh[WIREGUARD_PUBLIC_KEY_LEN];
+    uint8_t label_mac1_key[WIREGUARD_SESSION_KEY_LEN];
+    uint8_t cookie[WIREGUARD_COOKIE_LEN];
+    bool use_cookie;
+    uint32_t index;
+    bool ok;
+    struct wireguard_handshake handshake;
+    struct message_handshake_initiation msg;
+};
+bool wireguard_initiation_begin(struct wireguard_device *device, struct wireguard_peer *peer, struct wireguard_initiation_job *job);
+void wireguard_initiation_compute(struct wireguard_initiation_job *job);
+bool wireguard_initiation_commit(struct wireguard_device *device, struct wireguard_peer *peer, struct wireguard_initiation_job *job);
+/* A transport data message whose decryption runs outside the lwIP core lock (wireguardif_rx_begin / _complete). */
+struct wireguard_rx_job {
+    struct pbuf *input;        /* the received packet; `src` points into it */
+    struct pbuf *pbuf;         /* the plaintext, filled by wireguard_rx_decrypt */
+    const uint8_t *src;
+    size_t src_len;
+    uint32_t receiver;
+    uint64_t nonce;
+    uint8_t key[WIREGUARD_SESSION_KEY_LEN];
+    bool ok;
+};
+void wireguard_rx_decrypt(struct wireguard_rx_job *job);   /* needs no lock and touches no shared state */
+
 bool wireguard_create_handshake_initiation(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_initiation *dst);
 bool wireguard_create_handshake_response(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_response *dst);
 void wireguard_create_cookie_reply(struct wireguard_device *device, struct message_cookie_reply *dst, const uint8_t *mac1, uint32_t index, uint8_t *source_addr_port, size_t source_length);

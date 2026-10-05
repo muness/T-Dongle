@@ -214,6 +214,36 @@ static void report_lwip(jw_writer *w) {
     report_field(w, "wifi_dynamic_tx", CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM);
     report_end(w);
 }
+/* How long the lwIP core lock was held by the shared wg_mgr task, by call site: a histogram, so a board run can show whether
+ * any single hold exceeds the ~1 ms budget (over_1ms) and how long the worst one was. */
+static void report_locks(jw_writer *w) {
+    static const char *const sites[TDONGLE_LOCK_SITE_COUNT] = {"wg_other", "wg_periodic", "wg_commit", "wg_output", "wg_peer"};
+    report_begin(w, "locks");
+    jw_raw(w, ",\"bucket_limits_us\":[");
+    for (unsigned b = 0; b < TDONGLE_LOCK_BUCKETS - 1; b++) {
+        if (b) jw_char(w, ',');
+        jw_number(w, tdongle_lock_bucket_limit_us[b]);
+    }
+    jw_raw(w, "],\"sites\":{");
+    for (unsigned i = 0; i < TDONGLE_LOCK_SITE_COUNT; i++) {
+        tdongle_lock_stats s = tdongle_lock_stats_get((tdongle_lock_site)i);
+        if (i) jw_char(w, ',');
+        jw_key(w, sites[i]);
+        jw_raw(w, "{\"count\":");
+        jw_number(w, s.count);
+        report_field(w, "max_us", s.max_us);
+        report_field(w, "over_1ms", s.over_1ms);
+        report_field(w, "total_us", (uint32_t)s.total_us);
+        jw_raw(w, ",\"buckets\":[");
+        for (unsigned b = 0; b < TDONGLE_LOCK_BUCKETS; b++) {
+            if (b) jw_char(w, ',');
+            jw_number(w, s.bucket[b]);
+        }
+        jw_raw(w, "]}");
+    }
+    jw_char(w, '}');
+    report_end(w);
+}
 static void report_phases(jw_writer *w) {
     tdongle_member_phases m;
     for (unsigned slot = 0; slot < TDONGLE_MEMORY_MEMBERS; slot++) {
@@ -312,6 +342,8 @@ bool gateway_memory_command(const char *line) {
     } else if (!strcmp(line, "members")) {
         report_phases(&w);
         report_admission(&w);
+    } else if (!strcmp(line, "memory locks")) {
+        report_locks(&w);
     } else if (!strcmp(line, "memory bench"))
         report_bench(&w);
     else if (!strncmp(line, "memory guard", 12) && (!line[12] || line[12] == ' ')) {

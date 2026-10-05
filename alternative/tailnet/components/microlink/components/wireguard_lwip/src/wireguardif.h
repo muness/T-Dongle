@@ -207,6 +207,17 @@ void wireguardif_free(struct netif *netif);
 // crypto (X25519, ChaCha20-Poly1305) on the lwIP TCPIP thread. Call this every ~400ms.
 void wireguardif_periodic(struct netif *netif);
 
+// Sliced periodic processing with the handshake crypto outside the lwIP core lock (see wireguardif.c). The caller takes
+// the core lock for each call EXCEPT wireguard_initiation_compute(), which needs none.
+bool wireguardif_periodic_peer(struct netif *netif, u8_t peer_index, bool allow_handshake, struct wireguard_initiation_job *job);
+err_t wireguardif_periodic_commit(struct netif *netif, u8_t peer_index, struct wireguard_initiation_job *job);
+void wireguardif_periodic_end(struct netif *netif);
+
+// Receive path with the decryption outside the lwIP core lock. begin (lock held) returns 1 with `job` ready for transport
+// data, 0 when the packet was handled; then wireguard_rx_decrypt(job) with NO lock; then complete (lock held).
+int wireguardif_rx_begin(struct netif *netif, struct pbuf *p, const ip_addr_t *addr, u16_t port, struct wireguard_rx_job *job);
+void wireguardif_rx_complete(struct netif *netif, const ip_addr_t *addr, u16_t port, struct wireguard_rx_job *job);
+
 // Disable WireGuard's internal UDP socket binding
 // Call before wireguardif_init to prevent WireGuard from binding its own socket.
 // The caller is then responsible for receiving packets and calling wireguardif_inject_packet.

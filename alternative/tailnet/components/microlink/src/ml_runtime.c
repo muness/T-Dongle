@@ -14,6 +14,7 @@ static struct {
     ml_neg_t neg;
     ml_rt_core_t core;
     ml_wg_pass_t wg_pass;
+    ml_derp_pass_t derp_pass;
     TaskHandle_t task[ML_RT_TASK_COUNT];
 } rt;
 
@@ -35,27 +36,42 @@ static void net_io_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+/* Wait for a wake-up or the computed deadline, whichever is first. A deadline of UINT32_MAX means "nothing is due":
+ * the task sleeps until it is woken, but never longer than a second so a stop request is always noticed. */
+static void wait_for_work(uint32_t wait_ms) {
+    if (wait_ms > 1000) wait_ms = 1000;
+    TickType_t ticks = pdMS_TO_TICKS(wait_ms);
+    if (ticks == 0) ticks = 1;     /* a deadline already due still yields one tick: lower priorities get the core */
+    ulTaskNotifyTake(pdTRUE, ticks);
+}
+
+/* The derp task sleeps until the shortest wait any link asks for (ml_derp_link_wait_ms: a retry deadline, a connect
+ * step, the 10 ms read of an established relay), or until a producer wakes it: a packet queued for relay, a connect
+ * request. With every relay down and nothing wanted it wakes once a second. */
 static void derp_task(void *arg) {
     ml_rt_core_t *core = arg;
     ESP_LOGI(TAG, "derp started (Core %d)", xPortGetCoreID());
     while (!ml_rt_core_should_stop(core)) {
+        rt.derp_pass.wait_ms = UINT32_MAX;
         ml_mux_pass(&core->mux[ML_RT_TASK_DERP]);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        wait_for_work(rt.derp_pass.wait_ms);
     }
     ml_rt_core_task_exit(core);
     vTaskDelete(NULL);
 }
 
-/* Yield - 10 ms loop rate for minimum packet processing latency. Each wake is cheap: queue checks and event
- * bits, no crypto. This sleep is what hands the core to lower-priority tasks; the budgets in ml_wg_mgr.c
- * guarantee it is reached every iteration (#46), however many memberships are attached. */
+/* The wg_mgr task runs when a packet, a peer update or an event arrives (producers call ml_rt_wake), or when the
+ * earliest membership timer is due (periodic WireGuard work, DISCO probes, a trial or pending packet deadline), not on
+ * a fixed 10 ms tick. A backlog left by the drain budgets (#46) asks for one tick, so the budgets still hand the core
+ * to lower priorities between slices. */
 static void wg_mgr_task(void *arg) {
     ml_rt_core_t *core = arg;
     ESP_LOGI(TAG, "wg_mgr started (Core %d)", xPortGetCoreID());
     while (!ml_rt_core_should_stop(core)) {
         ml_wg_pass_begin(&rt.wg_pass);
         ml_mux_pass(&core->mux[ML_RT_TASK_WG_MGR]);
-        vTaskDelay(pdMS_TO_TICKS(10));
+        uint64_t now = ml_get_time_ms();
+        wait_for_work(rt.wg_pass.next_due_ms > now ? (uint32_t)(rt.wg_pass.next_due_ms - now) : 0);
     }
     ml_rt_core_task_exit(core);
     vTaskDelete(NULL);
@@ -82,7 +98,11 @@ static bool platform_spawn(void *platform, unsigned index, ml_rt_core_t *core) {
     return true;
 }
 static void platform_sleep(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
-static const ml_rt_platform_t platform = { .spawn = platform_spawn, .sleep_ms = platform_sleep };
+static void platform_wake_all(void *platform) {
+    (void)platform;
+    for (int i = 0; i < ML_RT_TASK_COUNT; i++) if (rt.task[i]) xTaskNotifyGive(rt.task[i]);
+}
+static const ml_rt_platform_t platform = { .spawn = platform_spawn, .sleep_ms = platform_sleep, .wake_all = platform_wake_all };
 
 /* First use builds the static state exactly once, without a lock to take yet. */
 static void rt_init(void) {
@@ -90,7 +110,7 @@ static void rt_init(void) {
     if (__atomic_compare_exchange_n(&rt.ready, &expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         ml_neg_init(&rt.neg, ml_get_time_ms, 0, 0, 0);
         const ml_mux_ops_t *ops[ML_RT_CORE_TASKS] = { &net_io_ops, &ml_derp_mux_ops, &ml_wg_mux_ops };
-        void *shared[ML_RT_CORE_TASKS] = { NULL, NULL, &rt.wg_pass };
+        void *shared[ML_RT_CORE_TASKS] = { NULL, &rt.derp_pass, &rt.wg_pass };
         /* Attach in the order a packet travels; detach in the order that stops intake first, then the WireGuard
          * interface, then the relay. */
         static const unsigned attach_order[ML_RT_CORE_TASKS] = { ML_RT_TASK_DERP, ML_RT_TASK_WG_MGR, ML_RT_TASK_NET_IO };
@@ -101,6 +121,11 @@ static void rt_init(void) {
     } else {
         while (__atomic_load_n(&rt.ready, __ATOMIC_ACQUIRE) != 2) vTaskDelay(1);
     }
+}
+
+void ml_rt_wake(ml_rt_task_t which) {
+    TaskHandle_t h = which < ML_RT_TASK_COUNT ? rt.task[which] : NULL;
+    if (h) xTaskNotifyGive(h);
 }
 
 ml_neg_t *ml_rt_negotiation(void) {
