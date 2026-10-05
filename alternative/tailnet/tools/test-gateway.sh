@@ -186,6 +186,13 @@ cc -std=gnu11 -DCONFIG_MBEDTLS_CERTIFICATE_BUNDLE_MAX_CERTS=200 -fsanitize=addre
   "$derp_tls_lib/libmbedtls_derp.a" -o build-host/test_derp_tls
 build-host/test_derp_tls build-host/derp-pki
 
+# Shared entropy: ONE seeded CTR-DRBG for every membership (real mbedTLS), thread-safe, resident only while used.
+for san in address,undefined thread; do
+ cc -std=gnu11 -fsanitize=$san -g -Wall -Wextra -pthread -DMBEDTLS_CONFIG_FILE='"derp_tls_host_config.h"' -I tests -I components/microlink/include -I "$mbed/include" -I "$mbed/library" \
+  tests/test_rng.c components/microlink/src/ml_rng.c "$derp_tls_lib/libmbedtls_derp.a" -o build-host/test_rng_${san%%,*}
+ build-host/test_rng_${san%%,*}
+done
+
 # Control-plane Noise key: who vouches for it (real parse/fetch core of ml_coord.c, mock transport).
 python - <<'PYKEY'
 from pathlib import Path
