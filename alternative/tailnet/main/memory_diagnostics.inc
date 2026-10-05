@@ -7,6 +7,7 @@
 #include "ml_rx_stats.h"
 #include "ml_net_io_drain.h"
 #include "ml_wg_rx_budget.h"
+#include "ml_heap_budget.h"
 #include "wifi_stats.h"
 #if LWIP_STATS
 #include "lwip/stats.h"
@@ -360,6 +361,93 @@ static void report_wifi_dump(jw_writer *w) {
     jw_char(w, ',');
     jw_key(w, "output");
     jw_string(w, "rom_console_not_this_port");
+    report_end(w);
+}
+/* Where the heap minimum came from (`memory low`, ADR 0022). The board's minimum free (3,040-3,140 B under a 6 Mbit/s flood) lasts
+ * milliseconds, and the owner ledger only sees blocks the firmware tags, not the Wi-Fi driver's buffers pinned by sockets. A 10 ms
+ * sampler (esp_timer task, diagnostics builds only) notices every NEW heap-wide minimum below the elastic floor and records, at that
+ * moment, what the firmware's own buffers held: the USB ring (capacity and elastic part), the WireGuard queue, USB receive frames in
+ * flight and the tagged packet owner. Whatever the drop from the highest free level seen does not explain with those is the pinned
+ * Wi-Fi buffers and lwIP: `unexplained` = (free_hi - free_now) - ring_elastic - wgq - rx_inflight x 1,534 - packet_live. The last
+ * eight records are kept; the first and the lowest are never overwritten. tools/heap_low.py prints the decomposition. */
+enum { HEAP_LOW_RECORDS = 8, HEAP_LOW_PERIOD_US = 10000 };
+typedef struct {
+    uint32_t uptime_ms, min_free, free_now, free_hi, largest, tx_ring_bytes, tx_elastic_bytes, wgq_bytes, rx_inflight, packet_live;
+} heap_low_rec_t;
+static heap_low_rec_t heap_low_rec[HEAP_LOW_RECORDS];
+static unsigned heap_low_count;                 /* records ever written */
+static uint32_t heap_low_last_min = UINT32_MAX, heap_low_free_hi;
+static portMUX_TYPE heap_low_mux = portMUX_INITIALIZER_UNLOCKED;
+/* The decision, separate from the sampling so the host test drives it. `in` carries the snapshot; true when it was recorded. */
+static bool heap_low_note(const heap_low_rec_t *in) {
+    bool recorded = false;
+    portENTER_CRITICAL(&heap_low_mux);
+    if (in->free_now > heap_low_free_hi) heap_low_free_hi = in->free_now;
+    if (in->min_free < heap_low_last_min) {
+        heap_low_last_min = in->min_free;
+        if (in->min_free < ML_HB_FLOOR) {
+            heap_low_rec_t r = *in;
+            r.free_hi = heap_low_free_hi;
+            unsigned slot = heap_low_count < HEAP_LOW_RECORDS ? heap_low_count : 1 + (heap_low_count - 1) % (HEAP_LOW_RECORDS - 1);   /* slot 0 keeps the first */
+            heap_low_rec[slot] = r;
+            heap_low_count++;
+            recorded = true;
+        }
+    }
+    portEXIT_CRITICAL(&heap_low_mux);
+    return recorded;
+}
+static void heap_low_tick(void *arg) {
+    (void)arg;
+    tinyusb_net_tx_stats_t tx;
+    tinyusb_net_tx_ring_stats(&tx);
+    heap_low_rec_t r = {.uptime_ms = (uint32_t)(esp_timer_get_time() / 1000),
+                        .min_free = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+                        .free_now = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                        .largest = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                        .tx_ring_bytes = tx.ring_bytes, .tx_elastic_bytes = tx.elastic_held_bytes,
+                        .wgq_bytes = (uint32_t)ml_wgrx_queued(&ml_wgrx_budget), .rx_inflight = atomic_load(&usb_rx_budget.inflight),
+                        .packet_live = tdongle_heap_owner(TDONGLE_OWNER_PACKET).live};
+    (void)heap_low_note(&r);
+}
+static void heap_low_start(void) {
+    static esp_timer_handle_t timer;
+    const esp_timer_create_args_t args = {.callback = heap_low_tick, .name = "heap_low"};
+    if (esp_timer_create(&args, &timer) == ESP_OK) (void)esp_timer_start_periodic(timer, HEAP_LOW_PERIOD_US);
+}
+static void report_heap_low(jw_writer *w) {
+    heap_low_rec_t copy[HEAP_LOW_RECORDS];
+    unsigned count, n;
+    uint32_t hi;
+    portENTER_CRITICAL(&heap_low_mux);
+    count = heap_low_count;
+    n = count < HEAP_LOW_RECORDS ? count : HEAP_LOW_RECORDS;
+    memcpy(copy, heap_low_rec, sizeof(copy));
+    hi = heap_low_free_hi;
+    portEXIT_CRITICAL(&heap_low_mux);
+    report_begin(w, "heap_low");
+    report_field(w, "floor", ML_HB_FLOOR);
+    report_field(w, "reserve", ML_HB_RESERVE);
+    report_field(w, "period_ms", HEAP_LOW_PERIOD_US / 1000);
+    report_field(w, "free_hi", hi);
+    report_field(w, "events", count);
+    jw_raw(w, ",\"records\":[");
+    for (unsigned i = 0; i < n; i++) {
+        const heap_low_rec_t *r = &copy[i];
+        if (i) jw_char(w, ',');
+        jw_raw(w, "{\"uptime_ms\":");
+        jw_number(w, r->uptime_ms);
+        report_field(w, "min", r->min_free);
+        report_field(w, "free", r->free_now);
+        report_field(w, "largest", r->largest);
+        report_field(w, "tx_ring", r->tx_ring_bytes);
+        report_field(w, "tx_elastic", r->tx_elastic_bytes);
+        report_field(w, "wgq", r->wgq_bytes);
+        report_field(w, "rx_inflight", r->rx_inflight);
+        report_field(w, "packet_live", r->packet_live);
+        jw_char(w, '}');
+    }
+    jw_char(w, ']');
     report_end(w);
 }
 /* USB data path: elastic transmit ring (tunnel to host) and receive budget (host to lwIP). Drops here are
@@ -724,6 +812,8 @@ bool gateway_memory_command(const char *line) {
         report_attribution(&w);
         report_lwip(&w);
         report_usb(&w);
+    } else if (!strcmp(line, "memory low")) {
+        report_heap_low(&w);
     } else if (!strcmp(line, "wifistats")) {
         report_wifi_link(&w);
         report_wifi_lwip(&w);

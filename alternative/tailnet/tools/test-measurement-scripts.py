@@ -243,6 +243,21 @@ def test_inbound_accounting():
     assert inbound_accounting.snapshot(Link())["usb"]["tx_sent"] == 3125
     assert "lwip_stats" not in inbound_accounting.snapshot(Link()) and "wgperf" not in inbound_accounting.snapshot(Link())   # firmware without the commands
 
+    # ADR 0022: the USB IN pipe and the heap minimum, from the usb counters and `memory low`.
+    drain_before = snap(base=0); drain_after = snap({"udp_rx": 100, "udp_wg": 100, "wg_in": 100, "wg_to_wireguardif": 100}, usb_extra={"tx_sent": 200})
+    drain_before["usb"].update({"ntb_xfers": 0, "ntb_zlp": 0, "ntb_bytes": 0, "gap_count": 0, "gap_us_sum": 0, "gap_us_max": 0, "cold_starts": 0, "cold_us_sum": 0, "cold_us_max": 0,
+                                "drains_sent": [0] * 5, "gap_hist_ms": [0] * 5, "tx_worker_demotions": 0, "rx_dropped_heap": 0})
+    drain_after["usb"].update({"ntb_xfers": 100, "ntb_zlp": 2, "ntb_bytes": 254000, "gap_count": 99, "gap_us_sum": 7400 * 99, "gap_us_max": 21000, "cold_starts": 10, "cold_us_sum": 12000,
+                               "cold_us_max": 5000, "drains_sent": [3, 90, 4, 2, 1], "gap_hist_ms": [0, 10, 20, 60, 9], "tx_worker_demotions": 3, "rx_dropped_heap": 5})
+    drain_after["heap"] = {"uptime_ms": 9, "free": 30000, "min": 17000, "largest": 20000}
+    drain_after["heap_low"] = {"floor": 29884, "reserve": 16384, "free_hi": 37000, "events": 1, "records": [
+        {"uptime_ms": 9000, "min": 17000, "free": 18000, "largest": 9000, "tx_ring": 7620, "tx_elastic": 3048, "wgq": 5000, "rx_inflight": 2, "packet_live": 1000}]}
+    rows, summary = inbound_accounting.reconcile(drain_before, drain_after, 100, 100)
+    d = summary["usb_drain"]
+    assert d["ntb_xfers"] == 100 and d["mean_ntb_bytes"] == 2540 and d["frames_per_ntb"] == 2.0 and d["gap_mean_ms"] == 7.4 and d["wake_latency_ms"] > 4.5
+    assert d["cold_start_mean_ms"] == 1.2 and d["drains_sent"] == [3, 90, 4, 2, 1] and summary["usb_rx_refused_for_heap"] == 5 and summary["heap_min_free"] == 17000
+    text = inbound_accounting.render(rows, summary)
+    assert "USB IN pipe: 100 NTBs" in text and "wake latency about" in text and "unexplained" in text and "dropped 19000 B from the peak" in text
     # lwIP's udp.recv is 16 bits wide and wraps: a run that crosses the wrap must not show a negative (or huge) mailbox loss.
     wrap_before, wrap_after = snap(base=0), snap({"udp_rx": 1000, "udp_wg": 990, "wg_in": 990, "wg_to_wireguardif": 990}, {"rx_data": 990, "rx_delivered": 990}, {"forwarded_in": 990, "usb_tx": 990}, {"tx_sent": 990})
     wrap_before["inbound"]["lwip"]["udp_recv"] = 65000

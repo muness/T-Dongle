@@ -59,6 +59,9 @@ assert usb["tx_xfer_events"] == 55 and usb["tx_worker_stack_free"] == 900
 assert (usb["ntb_xfers"], usb["ntb_zlp"], usb["ntb_bytes"], usb["ntb_max_bytes"]) == (40, 2, 100000, 3190)
 assert usb["drains_sent"] == [1, 2, 3, 4, 5] and usb["gap_hist_ms"] == [6, 7, 8, 9, 10]
 assert (usb["gap_count"], usb["gap_us_sum"], usb["gap_us_max"], usb["cold_starts"], usb["cold_us_sum"], usb["cold_us_max"], usb["tx_worker_demotions"]) == (30, 150000, 21000, 21, 42000, 9000, 22)
+low = reports("memory low", "heap_low")[0]
+assert low["floor"] == 29884 and low["reserve"] == 16384 and low["events"] == 11 and low["free_hi"] == 40000 and len(low["records"]) == 8
+assert low["records"][0]["min"] == 29000 and min(x["min"] for x in low["records"]) == 23500 and low["records"][0]["wgq"] == 5000
 assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 22 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
 members = sections["members"]

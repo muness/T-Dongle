@@ -1456,6 +1456,9 @@ static bool start_step(unsigned stage,esp_err_t (*start)(void)) {
 #include "startup_sequence.inc"
 void app_main(void) {
     tdongle_memory_diagnostics_init();
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+    heap_low_start();   /* ADR 0022: owner breakdown at every new heap minimum below the elastic floor (`memory low`) */
+#endif
     /* Read only before USB descriptors are created; normal settings startup
      * still validates storage and reports failures without erasing anything. */
     nvs_handle_t early;
