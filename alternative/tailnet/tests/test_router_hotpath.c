@@ -586,9 +586,23 @@ static void *tunnel_thread(void *arg) {
     unsigned i = 0;
     while (!atomic_load(&done)) {
         size_t n = build_packet(pkt, 0x64500001, 0x64400009, 6, 80, 40064 + i++ % 64, 20, false, false);
-        struct pbuf *p = pbuf_alloc(0, n, 0);
-        pbuf_take(p, pkt, n);
-        gateway_tunnel_input(p, &live_wg);
+        if (i & 1) {
+            struct pbuf *p = pbuf_alloc(0, n, 0);
+            pbuf_take(p, pkt, n);
+            gateway_tunnel_input(p, &live_wg);
+        } else {
+            /* the batch form (what wg_mgr calls): the membership is pinned across the whole batch and unpinned before the core lock */
+            struct pbuf *in[4];
+            err_t res[4];
+            for (unsigned k = 0; k < 4; k++) {
+                in[k] = pbuf_alloc(0, n, 0);
+                pbuf_take(in[k], pkt, n);
+            }
+            gateway_tunnel_input_batch(in, 4, &live_wg, res);
+            for (unsigned k = 0; k < 4; k++)
+                if (res[k] != ERR_OK)
+                    pbuf_free(in[k]);
+        }
     }
     return NULL;
 }

@@ -22,6 +22,8 @@
  */
 
 #include "microlink_internal.h"
+#include "ml_wg_rx_budget.h"
+#include "esp_heap_caps.h"
 #include "ml_rx_stats.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -587,9 +589,19 @@ static void op_deliver(void *user, const uint8_t *src_pubkey, uint8_t *data, siz
     memcpy(pkt.src_pubkey, src_pubkey, 32);
 
     QueueHandle_t target = (type == PKT_DISCO) ? ml->disco_rx_queue : ml->wg_rx_queue;
-    if (type != PKT_DISCO) ML_RX_STAT(derp_rx_wg);
+    if (type != PKT_DISCO) {
+        ML_RX_STAT(derp_rx_wg);
+        /* The same byte and heap bound as the direct path (ml_wg_rx_budget.h): relayed datagrams wait in the same heap. */
+        ml_wgrx_verdict_t admit = ml_wgrx_admit_gated(&ml_wgrx_budget, len, heap_caps_get_free_size(MALLOC_CAP_INTERNAL), ml_wgrx_join_busy);
+        if (admit != ML_WGRX_OK) {
+            if (admit == ML_WGRX_BYTES) ML_RX_STAT(q_wg_bytes); else ML_RX_STAT(q_wg_heap);
+            tdongle_memory_drop(TDONGLE_DROP_DERP_RX_FULL);
+            tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
+            return;
+        }
+    }
     if (xQueueSend(target, &pkt, 0) != pdTRUE) {
-        if (type == PKT_DISCO) ML_RX_STAT(q_disco_full); else ML_RX_STAT(derp_q_wg_full);
+        if (type == PKT_DISCO) ML_RX_STAT(q_disco_full); else { ml_wgrx_release(len); ML_RX_STAT(derp_q_wg_full); }
         /* Download-direction RX drop: frames arrive faster than the consumer (wg_rx_queue depth) can
          * decrypt/forward. Rate-limited so a flood doesn't itself spam the SD recorder. */
         static uint32_t derp_rx_drops = 0;

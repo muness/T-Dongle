@@ -69,6 +69,7 @@ static void status_shared_runtime(jw_writer *w) {
     RNUM("evictions_other", pool.evictions_other);
     RNUM("rejected", pool.rejected);
     RNUM("refused_largest", pool.refused_largest);
+    RNUM("refused_heap", pool.refused_heap);
     jw_key(w, "largest_low"); if (pool.largest_low == UINT32_MAX) jw_raw(w, "null"); else jw_number(w, pool.largest_low); jw_char(w, ',');
     RNUM("slot_bytes", pool.slot_bytes);
     jw_key(w, "device_bytes"); jw_number(w, pool.device_bytes);

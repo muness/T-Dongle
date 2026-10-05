@@ -241,6 +241,66 @@ def test_inbound_accounting():
         def json_command(self, line):
             return {"inbound": [after["inbound"]]} if line == "inbound" else {"usb": [after["usb"]], "heap": [{"uptime_ms": 1, "free": 2, "min": 3, "largest": 4}]}
     assert inbound_accounting.snapshot(Link())["usb"]["tx_sent"] == 3125
+    assert "lwip_stats" not in inbound_accounting.snapshot(Link()) and "wgperf" not in inbound_accounting.snapshot(Link())   # firmware without the commands
+
+    # lwIP's udp.recv is 16 bits wide and wraps: a run that crosses the wrap must not show a negative (or huge) mailbox loss.
+    wrap_before, wrap_after = snap(base=0), snap({"udp_rx": 1000, "udp_wg": 990, "wg_in": 990, "wg_to_wireguardif": 990}, {"rx_data": 990, "rx_delivered": 990}, {"forwarded_in": 990, "usb_tx": 990}, {"tx_sent": 990})
+    wrap_before["inbound"]["lwip"]["udp_recv"] = 65000
+    wrap_before["inbound"]["counter_bits"] = wrap_after["inbound"]["counter_bits"] = 16
+    wrap_after["inbound"]["lwip"]["udp_recv"] = (65000 + 1000 + 7) % 65536
+    rows, summary = inbound_accounting.reconcile(wrap_before, wrap_after, 1000, 990)
+    assert summary["mailbox_loss"] == 7, summary
+    wrap_before["inbound"]["counter_bits"] = wrap_after["inbound"]["counter_bits"] = 32       # a 32-bit build: the same numbers, no wrap involved
+    wrap_before["inbound"]["lwip"]["udp_recv"] = 70000; wrap_after["inbound"]["lwip"]["udp_recv"] = 71007
+    assert inbound_accounting.reconcile(wrap_before, wrap_after, 1000, 990)[1]["mailbox_loss"] == 7
+    # firmware that does not report the width (the base image): 16 bits is right for any run of fewer than 65,536 datagrams
+    del wrap_before["inbound"]["counter_bits"]; del wrap_after["inbound"]["counter_bits"]
+    wrap_before["inbound"]["lwip"]["udp_recv"] = 65000; wrap_after["inbound"]["lwip"]["udp_recv"] = 471
+    assert inbound_accounting.reconcile(wrap_before, wrap_after, 1000, 990)[1]["mailbox_loss"] == 7
+
+    # Where the missing datagrams went BEFORE net_io: the sender made 3,137, 3,045 reached net_io. The mailbox and lwIP's own
+    # counters are named; what is left is the air, the access point and the driver.
+    b = snap(); b["lwip_stats"] = {"counter_bits": 16, "proto": {"link": {"drop": 65530, "recv": 0}, "ip": {"drop": 3, "chkerr": 0}}, "pool": {"PBUF": {"err": 4}}}
+    a = snap({"udp_rx": 3045, "_mailbox": 11, "udp_wg": 3045, "wg_in": 3045, "wg_to_wireguardif": 3045}, {"rx_data": 3045, "rx_delivered": 3045}, {"forwarded_in": 3045, "usb_tx": 3045}, {"tx_sent": 3045})
+    a["lwip_stats"] = {"counter_bits": 16, "proto": {"link": {"drop": 4, "recv": 0}, "ip": {"drop": 3, "chkerr": 0}}, "pool": {"PBUF": {"err": 4}}}
+    rows, summary = inbound_accounting.reconcile(b, a, 3137, 3045)
+    assert summary["before_net_io"] == 92 and summary["mailbox_loss"] == 11 and summary["before_lwip_udp"] == 81, summary
+    assert summary["lwip_drops"] == {"link.drop": 10}, summary["lwip_drops"]      # 65530 -> 4 across the wrap
+    text = inbound_accounting.render(rows, summary)
+    assert "lost before net_io" in text and "link.drop" in text
+
+    # wgperf: cycles per datagram, run sizes, queue depth, lock holds
+    def perf(scale=1):
+        names = ["q_latency", "lock_wait", "lock_hold", "rx_pkt", "rx_prep", "rx_begin", "rx_decrypt", "rx_complete", "rx_route", "rx_deliver", "rx_run", "rx_qdepth", "rt_check", "rt_lock_wait", "rt_emit", "batch"]
+        units = ["us", "cy", "cy", "cy", "cy", "cy", "cy", "cy", "cy", "cy", "pkt", "pkt", "cy", "cy", "cy", "pkt"]
+        st = {n: [0, 0, 0] for n in names}
+        st["rx_pkt"] = [100 * scale, 100 * scale * 8 * 100000, 900000]
+        st["rx_decrypt"] = [100 * scale, 100 * scale * 8 * 78000, 700000]
+        st["rx_run"] = [100 * scale, 100 * scale * 8, 8]
+        st["rx_qdepth"] = [60 * scale, 60 * scale * 5, 12]
+        st["lock_hold"] = [200 * scale, 200 * scale * 20000, 90000]
+        return {"elapsed_ms": 10000 * scale, "cpu_mhz": 240, "stages": st, "units": units, "counters": {"in_pkts": 800 * scale, "rx_runs": 100 * scale, "rx_runs_full": 90 * scale, "rx_runs_cut": 2 * scale, "passes": 50 * scale}}
+    a2 = snap(); a2["wgperf"] = perf()
+    rows, summary = inbound_accounting.reconcile(snap(), a2, None, None)
+    w = summary["wgperf"]
+    assert w["datagrams"] == 800 and w["cycles_per_datagram"] == {"rx_pkt": 100000, "rx_decrypt": 78000}, w
+    assert w["run_mean"] == 8.0 and w["run_max"] == 8 and w["queue_depth_mean"] == 5.0 and w["queue_depth_max"] == 12 and w["lock_hold"]["mean_cy"] == 20000
+    assert "inbound cost per datagram, 800 datagrams" in inbound_accounting.render(rows, summary) and "rx_decrypt" in inbound_accounting.render(rows, summary)
+    b2 = snap(); b2["wgperf"] = perf(1)
+    a3 = snap(); a3["wgperf"] = perf(3)                                          # no reset in between: the run is the difference
+    w = inbound_accounting.reconcile(b2, a3, None, None)[1]["wgperf"]
+    assert w["datagrams"] == 1600 and w["cycles_per_datagram"]["rx_pkt"] == 100000, w
+    class PerfLink:
+        def __init__(self): self.sent = []
+        def command(self, line): self.sent.append(line); return []
+        def json_command(self, line):
+            if line == "wgperf": return {"wgperf": [perf()]}
+            if line == "wifistats": return {"lwip_stats": [{"enabled": 1, "counter_bits": 16}], "lwip_proto": [{"name": "link", "recv": 5, "xmit": 6, "drop": 7}], "lwip_pool": [{"name": "PBUF", "err": 2}, {"name": "TCP_PCB", "err": 9}]}
+            return Link().json_command(line)
+    link = PerfLink()
+    got = inbound_accounting.snapshot(link, wgperf=True, reset_wgperf=True)
+    assert link.sent == ["wgperf reset"] and got["wgperf"]["counters"]["in_pkts"] == 800
+    assert got["lwip_stats"] == {"counter_bits": 16, "proto": {"link": {"recv": 5, "xmit": 6, "drop": 7, "chkerr": 0, "lenerr": 0, "memerr": 0, "err": 0}}, "pool": {"PBUF": {"err": 2}}}, got["lwip_stats"]
 
 
 for test in (test_console, test_capture, test_compare, test_throughput, test_cpu_profile, test_inbound_accounting):

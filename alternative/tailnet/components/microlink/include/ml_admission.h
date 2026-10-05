@@ -9,7 +9,7 @@
  *
  *   required free heap =  shared runtime (the first membership only: 3 stacks + 3 TCBs)
  *                       + member start allocations (context, coord stack + TCB, queues)
- *                       + member steady growth     (WireGuard device + typical resident peer slots, DERP TLS state,
+ *                       + member steady growth     (WireGuard device + the guaranteed resident peer slots, DERP TLS state,
  *                                                  lwIP sockets and PCBs, other tagged state)
  *                       + one negotiation peak     (a single join's transient above steady: the token guarantees
  *                                                  at most one at a time, whatever N is)
@@ -46,9 +46,14 @@
                                            peaks at 17.3 KB against 1.3 KB live, 15,964 B above steady (rounded) */
 #define ML_ADM_RECOVERY_BYTES   16384   /* kept free for HTTP/control recovery (the v120 panic was at 7,464 B free) */
 #define ML_ADM_LARGEST_BLOCK    24000   /* steady largest block measured 24,576 B; the TLS record buffer is ~16.7 KB */
-#define ML_ADM_PEER_SLOTS       4       /* resident WireGuard peers charged per membership (the pool holds 12 in all) */
-#define ML_ADM_JIT_TYPICAL      2       /* outbound packets pending on a membership while its peer's handshake runs (typical) */
-#define ML_ADM_JIT_PACKET_BYTES 1464    /* one pending packet: ML_JIT_PACKET_MAX + the update header, rounded */
+#define ML_ADM_PEER_SLOTS       2       /* resident WireGuard peers GUARANTEED per membership (the pool holds 12 in all); slots beyond
+                                           these are elastic: ml_adm_slot_heap_ok. ADR 0013 expected three resident typically (2,712 B at
+                                           904 B a slot); the guarantee is the two a gateway cannot be useful without (the peer it
+                                           reaches and the exit node or the second destination), the rest come from free heap */
+#define ML_ADM_JIT_PACKET_BYTES 1464    /* one pending packet: ML_JIT_PACKET_MAX + the update header, rounded. NOT charged: the packets
+                                           pending while a peer's handshake runs are elastic (ml_gateway_queue_packet refuses one that
+                                           would take the free heap below the recovery reserve), 2 x 1,464 = 2,928 B that used to be in
+                                           `required` as a "typical" allowance on top of that guard */
 #define ML_ADM_TLS_BLOCK_FLOOR  17408   /* the DERP TLS record buffer (~16.7 KB) must always find one free block this big;
                                            17 KiB. A peer slot may not be the allocation that takes the heap below it. */
 
@@ -82,7 +87,7 @@ static inline void ml_adm_budget(const ml_adm_sizes_t *s, bool runtime_running, 
     b->shared_runtime = runtime_running ? 0 : s->shared_stacks + s->shared_tasks * s->task_tcb;
     b->member_start = s->context + s->coord_stack + s->task_tcb + s->queues;
     b->member_growth = s->wg_device + ML_ADM_PEER_SLOTS * s->wg_slot + ML_ADM_TLS_LIVE_BYTES + ML_ADM_LWIP_BYTES +
-                       ML_ADM_OTHER_BYTES + ML_ADM_JIT_TYPICAL * ML_ADM_JIT_PACKET_BYTES;
+                       ML_ADM_OTHER_BYTES;
     b->member_steady = b->member_start + b->member_growth;
     b->negotiation = ML_ADM_NEG_PEAK_BYTES;
     b->recovery = ML_ADM_RECOVERY_BYTES;
@@ -97,10 +102,27 @@ static inline ml_adm_verdict_t ml_adm_decide(const ml_adm_budget_t *b, size_t fr
     return ML_ADM_OK;
 }
 
+/* ELASTIC heap (ADR 0020): memory that exists only while something waits or is in use, that is bounded in bytes, and that is
+ * therefore not part of `required`: the WireGuard receive queue (ml_wg_rx_budget.h), the pending outbound packets
+ * (ml_gateway_queue_packet), the router queue above its floor (rt_queue_budget), the USB transmit ring's growth chunks, and the
+ * peer slots beyond the guaranteed ML_ADM_PEER_SLOTS. Each is refused at allocation time, counted, when it would take the free heap
+ * below the recovery reserve; those that persist for long (USB chunks, slots) also leave one negotiation peak, because a join
+ * (or a rejoin after a Wi-Fi flap) can start at any time and needs it; the receive queue, which drains in milliseconds, leaves it
+ * only while a join is actually running. The floors, in one place so the tests state them: */
+static inline size_t ml_adm_elastic_floor(bool leaves_negotiation_peak) {
+    return ML_ADM_RECOVERY_BYTES + (leaves_negotiation_peak ? ML_ADM_NEG_PEAK_BYTES : 0);
+}
+/* A peer slot of `bytes` when `live` slots are resident (all memberships) and `free_before` is the free internal heap: the first
+ * ML_ADM_PEER_SLOTS are in `required` (admission already left the heap for them) and only keep the recovery reserve; the others
+ * keep recovery reserve AND one negotiation peak. */
+static inline bool ml_adm_slot_heap_ok(unsigned live, size_t free_before, size_t bytes) {
+    return free_before >= ml_adm_elastic_floor(live >= ML_ADM_PEER_SLOTS) + bytes;
+}
+
 /* The WireGuard peer-slot pool allocates its 904 B slots on demand, and a slot lives as long as its peer (hours). Long-lived
  * small blocks scattered through a heap that is already fragmented are how the largest free block shrinks: steady state
  * measured 24,576 B against the 24,000 B admission floor (a 576 B margin, smaller than ONE slot), and the pool may hold 12.
- * A static pool would pin the full 12 x 904 = 10,848 B for ever (7,232 B more than the four slots admission charges at
+ * A static pool would pin the full 12 x 904 = 10,848 B for ever ((at 1,096 B a slot now) more than the slots admission charges at
  * N = 1, against ~107 KB free after boot), so slots stay on demand and each allocation is checked instead: an allocation
  * that is the one taking the largest free block from at least `floor` to below it is refused (and counted), which the pool
  * reports as "no memory" and the policy as a rejected activation. A heap already below the floor is not made an excuse

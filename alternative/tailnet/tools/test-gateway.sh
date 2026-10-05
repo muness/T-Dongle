@@ -229,6 +229,51 @@ build-host/test_rx_stats_threads_asan
 # Tunnel -> USB reject reasons, and the allocation-failure ownership rule.
 cc $RT_CC -fsanitize=address,undefined -fno-sanitize-recover=undefined tests/test_router_rx_reasons.c -o build-host/test_router_rx_reasons
 build-host/test_router_rx_reasons
+# Inbound pipeline (docs/adr/0020-inbound-pipeline.md).
+# Cryptokey routing for IPv4 AND IPv6 (WireGuard whitepaper 5.4.6) on the real wireguardif.c against the dual-stack lwIP fake: the
+# source must be in the peer's AllowedIPs of its own family, the IPv6 length is the Payload Length, unsupported IPv6 is counted.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -DWG_HOST_IPV6 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_ipv6_rx.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_ipv6_rx
+build-host/test_wg_ipv6_rx
+# The run: begin / in-place decrypt / complete / deliver for up to ML_WG_RX_BATCH datagrams per core-lock cycle, identical in every
+# observable to the one-datagram path (random traffic, both side by side), with the lock discipline asserted.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_batch.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_batch
+build-host/test_wg_rx_batch
+# ... and the decrypt with the lock released against a thread that rolls and destroys the keypairs meanwhile, under TSan.
+cc -std=gnu11 -O1 -g -fsanitize=thread -w -DWIREGUARD_CRYPTO_REFC=1 -pthread -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_batch.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_batch_tsan
+build-host/test_wg_rx_batch_tsan race
+# Router batch hand-off: identical to its packets one by one, the USB netif only under the core lock and the lock taken once per chunk,
+# ownership on every path.
+cc $RT_CC -fsanitize=address,undefined -fno-sanitize-recover=undefined tests/test_router_batch.c -o build-host/test_router_batch
+build-host/test_router_batch
+# wg_mgr's inbound drain: the real staging / flush / drain code of ml_wg_mgr.c (two ranges, extracted) on the real wireguardif.c.
+python - <<'PYCODE'
+from pathlib import Path
+w=Path('components/microlink/src/ml_wg_mgr.c').read_text()
+a=w.index('/* ----------------------------------------------------------------------------\n * Inbound runs (ADR 0020)')
+b=w.index('/* ============================================================================\n * SendCallMeMaybe',a)
+c=w.index("/* Drain one membership's wg_rx_queue in runs")
+d=w.index('static void member_service(',c)
+Path('build-host/wg_mgr_rx.inc').write_text(w[a:b]+w[c:d])
+PYCODE
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I build-host -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_mgr_rx.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_mgr_rx
+build-host/test_wg_mgr_rx
+# The byte and heap bound on datagrams waiting for wg_mgr: exact model, then four producers and a consumer under TSan.
+cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -pthread -I components/microlink/include tests/test_wg_rx_budget.c -o build-host/test_wg_rx_budget
+build-host/test_wg_rx_budget
+cc -std=c11 -O1 -g -fsanitize=thread -Wall -Wextra -pthread -I components/microlink/include tests/test_wg_rx_budget.c -o build-host/test_wg_rx_budget_tsan
+build-host/test_wg_rx_budget_tsan
 cc $TD_INC -std=c11 -Wall -Wextra -fsanitize=address,undefined -g tests/test_wg_idle.c -o build-host/test_wg_idle
 build-host/test_wg_idle
 build-host/test_jit_queue

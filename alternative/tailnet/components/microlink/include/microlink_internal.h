@@ -129,14 +129,16 @@ extern "C" {
 #define ML_DERP_TX_QUEUE_DEPTH  8
 #define ML_DISCO_RX_QUEUE_DEPTH 8
 #endif
-/* WG RX 8->32 (2026-05-27): download-direction frames arrive in bursts via DERP;
- * depth 8 overflowed and silently dropped → TCP loss → exit-node throughput
- * collapse. ml_rx_packet_t is small (ptr+len+meta); 32 is ~1KB internal. */
+/* WG RX queue slots. The slots are only the COUNT bound (an ml_rx_packet_t is 48 B); what a queued datagram costs is the heap block
+ * it points to, and that is bounded in bytes across all memberships by ml_wg_rx_budget.h (ML_WG_RX_QUEUE_BYTES), which holds 9
+ * full-size datagrams or, with these slots, 12 small ones (ACKs). 8 -> 12 (ADR 0020): a burst that net_io moves out of the socket
+ * mailbox in one pass (up to 10, at most 16) must fit at once, and the old 8 slots lost 5 % of a 3 Mbit/s UDP stream. +192 B of
+ * queue storage per membership, charged by admission through member_queue_bytes. */
 #if ML_QUEUE_SWEEP
 #define ML_WG_RX_QUEUE_DEPTH    ML_QUEUE_SWEEP
 #define ML_STUN_RX_QUEUE_DEPTH  (ML_QUEUE_SWEEP < 4 ? ML_QUEUE_SWEEP : 4)
 #else
-#define ML_WG_RX_QUEUE_DEPTH    8
+#define ML_WG_RX_QUEUE_DEPTH    12
 #define ML_STUN_RX_QUEUE_DEPTH  4
 #endif
 #define ML_COORD_CMD_QUEUE_DEPTH 4
@@ -937,6 +939,7 @@ typedef struct {
     uint32_t capacity, used, peak, refused_full, refused_nomem;
     uint32_t evictions_own, evictions_other, rejected;
     uint32_t refused_largest;   /* slots refused because they would have taken the largest free block under the TLS floor */
+    uint32_t refused_heap;      /* slots beyond the guaranteed ones refused for the recovery reserve / negotiation peak (ml_adm_slot_heap_ok) */
     uint32_t largest_low;       /* smallest largest-free-block seen right after a slot allocation (UINT32_MAX: none yet) */
     uint32_t slot_bytes, device_bytes;
 } ml_wg_pool_status_t;

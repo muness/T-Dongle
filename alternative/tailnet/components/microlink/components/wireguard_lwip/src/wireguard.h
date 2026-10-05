@@ -92,6 +92,10 @@ typedef err_t (*wireguard_derp_output_fn)(const uint8_t *peer_public_key, const 
 /* The same send, handing over the pbuf the datagram is in (contiguous, PBUF_TRANSPORT headroom) instead of a copy. */
 struct pbuf;
 typedef err_t (*wireguard_udp_output_pbuf_fn)(uint32_t dest_ip, uint16_t dest_port, struct pbuf *p, void *ctx);
+/* Batch hand-off of decrypted packets to the router (wireguardif_set_rx_batch). Called WITHOUT the lwIP core lock held by the
+ * wg_mgr task. For each p[i]: on result[i] == ERR_OK the callee consumed it, otherwise the caller still owns and frees it (lwIP's
+ * input contract). Packets are in arrival order and must be handled in that order. */
+typedef void (*wireguard_rx_batch_fn)(struct pbuf **p, unsigned n, struct netif *netif, err_t *result);
 typedef err_t (*wireguard_udp_output_fn)(uint32_t dest_ip, uint16_t dest_port, const uint8_t *data, size_t len, void *ctx);
 
 _Static_assert(REJECT_AFTER_MESSAGES == WIREGUARD_REPLAY_LIMIT, "the replay filter and the session limit must agree");
@@ -234,6 +238,11 @@ struct wireguard_device {
     // Force all peer output through DERP relay (cellular mode)
     bool force_derp_output;
 
+    // Inbound delivery (wireguardif_rx_deliver): optional batch hand-off to the router, and whether an authenticated inner IPv6
+    // packet may be delivered at all (default no: the gateway rejects IPv6, README; AllowedIPs are enforced either way).
+    wireguard_rx_batch_fn rx_batch_fn;
+    bool rx_ipv6;
+
     bool valid;
 };
 
@@ -368,13 +377,17 @@ bool wireguard_initiation_commit(struct wireguard_device *device, struct wiregua
 /* A transport data message whose decryption runs outside the lwIP core lock (wireguardif_rx_begin / _complete). */
 struct wireguard_rx_job {
     struct pbuf *input;        /* the received packet; `src` points into it */
-    struct pbuf *pbuf;         /* the plaintext, filled by wireguard_rx_decrypt */
-    const uint8_t *src;
-    size_t src_len;
+    struct pbuf *pbuf;         /* the plaintext, filled by wireguard_rx_decrypt (NULL for an in-place job) */
+    const uint8_t *src;        /* the ciphertext and tag (past the 16 B header) */
+    size_t src_len;            /* ciphertext + 16 B tag */
+    uint8_t *dst;              /* where the plaintext goes: pbuf->payload, or `src` itself for an in-place job */
     uint32_t receiver;
     uint64_t nonce;
     uint8_t key[WIREGUARD_SESSION_KEY_LEN];
     bool ok;
+    bool inplace;              /* decrypted over `input` (wireguardif_rx_begin_ex with WIREGUARDIF_RX_INPLACE) */
+    struct pbuf *deliver;      /* wireguardif_rx_complete_deferred: the accepted plaintext, trimmed to its IP length, waiting for
+                                * wireguardif_rx_deliver. NULL when the datagram was dropped, was a keepalive, or was delivered. */
 };
 void wireguard_rx_decrypt(struct wireguard_rx_job *job);   /* needs no lock and touches no shared state */
 /* An outbound transport data message sealed outside the lwIP core lock (wireguardif_tx_begin / _commit). begin, under the

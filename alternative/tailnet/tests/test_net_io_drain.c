@@ -94,6 +94,15 @@ int main(void) {
         only("udp_rx", ml_rx_stat_get(ML_RXS_udp_rx), 3); only("udp_rx_empty", ml_rx_stat_get(ML_RXS_udp_rx_empty), 1);
         only("sink_calls", sink_calls, 2); assert(sink_len[0] == 100 && sink_len[1] == 1400 && sink_ip[0] < sink_ip[1]);
         only("burst_max", atomic_load(&ml_rx_stats.drain_burst_max), 3); only("capped", ml_rx_stat_get(ML_RXS_drain_capped), 0);
+        only("deep", ml_rx_stat_get(ML_RXS_drain_deep), 0);
+    }
+    {   /* "deep" = the mailbox was nearly full: 7 is not, 8 is */
+        for (unsigned depth = 0; depth <= 16; depth++) {
+            script_t s = {.n = depth}; for (unsigned i = 0; i < depth; i++) s.result[i] = 20;
+            ml_rx_stats_reset(); sink_calls = 0;
+            assert(ml_net_io_drain(script_recv, script_sink, &s, buf, sizeof(buf), 16) == depth);
+            only("deep", ml_rx_stat_get(ML_RXS_drain_deep), depth >= ML_NET_IO_DEEP ? 1 : 0);
+        }
     }
     {   /* a receive error stops the drain without counting a datagram, and is counted */
         script_t s = {.result = {50, ML_DRAIN_ERROR, 60}, .n = 3}; ml_rx_stats_reset(); sink_calls = 0;
@@ -109,7 +118,7 @@ int main(void) {
         for (unsigned i = 0; i < 16; i++) assert(sink_len[i] == 10 + (int)i);       /* order preserved */
         assert(ml_net_io_drain(script_recv, script_sink, &s, buf, sizeof(buf), 16) == 16 && s.at == 32);
         assert(ml_net_io_drain(script_recv, script_sink, &s, buf, sizeof(buf), 16) == 8 && s.at == 40);
-        only("capped", ml_rx_stat_get(ML_RXS_drain_capped), 2); only("udp_rx", ml_rx_stat_get(ML_RXS_udp_rx), 40); only("drain_calls", ml_rx_stat_get(ML_RXS_drain_calls), 3);
+        only("capped", ml_rx_stat_get(ML_RXS_drain_capped), 2); only("deep", ml_rx_stat_get(ML_RXS_drain_deep), 3); only("udp_rx", ml_rx_stat_get(ML_RXS_udp_rx), 40); only("drain_calls", ml_rx_stat_get(ML_RXS_drain_calls), 3);
         only("sink_calls", sink_calls, 40);
     }
     printf("net_io drain: counters, cap, errors, empty datagrams ok\n");

@@ -6,6 +6,7 @@
 #include "tdongle_wgperf.h"
 #include "ml_rx_stats.h"
 #include "ml_net_io_drain.h"
+#include "ml_wg_rx_budget.h"
 #include "wifi_stats.h"
 #if LWIP_STATS
 #include "lwip/stats.h"
@@ -594,8 +595,14 @@ static void report_inbound(jw_writer *w) {
     report_field(w, "udp_recvmbox", CONFIG_LWIP_UDP_RECVMBOX_SIZE);
     report_field(w, "drain_cap", ML_NET_IO_DRAIN_CAP);
     report_field(w, "wg_rx_queue_depth", ML_WG_RX_QUEUE_DEPTH);
+    report_field(w, "wg_rx_queue_bytes", ML_WG_RX_QUEUE_BYTES);             /* the cap (ml_wg_rx_budget.h), shared by every membership */
+    report_field(w, "wg_rx_bytes_queued", atomic_load_explicit(&ml_wgrx_budget.bytes, memory_order_relaxed));   /* gauge: waiting now */
+    report_field(w, "wg_rx_bytes_peak", atomic_load_explicit(&ml_wgrx_budget.peak, memory_order_relaxed));      /* high-water since boot */
+    report_field(w, "wg_rx_batch", ml_wg_rx_batch_size());
     report_field(w, "replay_window", ml_wg_replay_window());
 #if LWIP_STATS && UDP_STATS
+    /* lwIP's counters are STAT_COUNTER wide (16 bits unless LWIP_STATS_LARGE) and wrap: the accounting script diffs modulo 2^counter_bits. */
+    report_field(w, "counter_bits", sizeof(STAT_COUNTER) * 8);
     jw_raw(w, ",\"lwip\":{\"udp_recv\":");
     jw_number(w, lwip_stats.udp.recv);
     report_field(w, "udp_drop", lwip_stats.udp.drop);

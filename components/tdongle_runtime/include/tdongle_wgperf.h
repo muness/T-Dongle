@@ -33,10 +33,18 @@
     X(out_lookup, "cy")  /* wireguardif: longest-prefix allowed-ip match */ \
     X(out_seal, "cy")    /* wireguardif: keypair choice, header, ChaCha20-Poly1305 in place */ \
     X(out_udp, "cy")     /* wireguardif_peer_output: udp_sendto (IP, ARP/ethernet, Wi-Fi hand-off) or DERP queue */ \
-    X(rx_pkt, "cy")      /* process_wg_packet, everything */ \
-    X(rx_prep, "cy")     /* inbound: pbuf allocation and copy */ \
-    X(rx_decrypt, "cy")  /* inbound: decrypt, core lock released */ \
-    X(rx_deliver, "cy")  /* inbound: wireguardif_rx_complete under the lock (NAT, router, USB ring) */ \
+    X(rx_pkt, "cy")      /* inbound, one RUN of up to ML_WG_RX_BATCH datagrams (ADR 0020): everything from the first prep to the last delivery. Per packet: total / in_pkts */ \
+    X(rx_prep, "cy")     /* inbound, per run: admission, wrapping each datagram in a pbuf (no copy, no allocation) */ \
+    X(rx_begin, "cy")    /* inbound, per run: core lock wait + wireguardif_rx_begin_ex for every datagram under ONE hold (keypair lookup, key copy) */ \
+    X(rx_decrypt, "cy")  /* inbound, per run: every datagram decrypted in place, core lock released */ \
+    X(rx_complete, "cy") /* inbound, per run: core lock wait + wireguardif_rx_complete_deferred for every datagram under ONE hold (replay, endpoint, AllowedIPs, trim) */ \
+    X(rx_route, "cy")    /* inbound, per run: wireguardif_rx_deliver: the router (rt_check + rt_lock_wait + rt_emit), no lock held on entry */ \
+    X(rx_deliver, "cy")  /* inbound, per run: rx_complete + rx_route, the stage of this name before ADR 0020, per packet: everything after the decrypt */ \
+    X(rx_run, "pkt")     /* datagrams per run: n = runs, sum = datagrams, max = the largest run */ \
+    X(rx_qdepth, "pkt")  /* wg_rx_queue depth when a drain starts: n = drains, sum / n = mean backlog, max = the worst burst seen (sizes the queue) */ \
+    X(rt_check, "cy")    /* router, per batch: validation, flow lookup, NAT rewrite of every packet, core lock NOT held */ \
+    X(rt_lock_wait, "cy") /* router, per batch that emits: waiting for the core lock */ \
+    X(rt_emit, "cy")     /* router, per batch that emits: USB netif output of every frame (ARP lookup, ring copy) under the lock */ \
     X(drain_wg, "cy")    /* both WG receive drains of a pass */ \
     X(disco_rx, "cy")    /* DISCO drain of a pass */ \
     X(periodic, "cy")    /* wg_periodic_sliced (every 400 ms) */ \
@@ -54,6 +62,9 @@
     X(out_flushed)      /* parked packets sent after the handshake */ \
     X(out_discard)      /* egress packets discarded (no peer, expired, send error) */ \
     X(in_pkts)          /* inbound WireGuard datagrams processed */ \
+    X(rx_runs)          /* inbound runs (one begin / decrypt / complete / deliver cycle) */ \
+    X(rx_runs_full)     /* ... that reached ML_WG_RX_BATCH datagrams (the drain had more waiting) */ \
+    X(rx_runs_cut)      /* ... that ended early because the next datagram was not transport data (a handshake is processed in order, alone) */ \
     X(lookup_scans)     /* peer-table entries visited by find_peer_by_ip */
 
 typedef enum {

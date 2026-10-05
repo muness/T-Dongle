@@ -94,7 +94,7 @@ Producers wake wg_mgr after every enqueue and the notification count is cleared 
 | `lock_wait`, `lock_hold` | cy | taking the lwIP core lock, and the body under it, every wg_mgr site |
 | `send` | cy | one egress packet from ready to handed to UDP/DERP, lock wait included |
 | `out_lookup`, `out_seal`, `out_udp` | cy | wireguardif: allowed-IP match; keypair, header and encrypt; `peer_output` (UDP, IP, ARP, Wi-Fi hand-off) |
-| `rx_pkt`, `rx_prep`, `rx_decrypt`, `rx_deliver` | cy | inbound datagram: all, pbuf copy, decrypt (lock released), `rx_complete` under the lock (NAT, router, USB ring) |
+| `rx_pkt`, `rx_prep`, `rx_decrypt`, `rx_deliver` | cy | inbound datagram: all, pbuf copy, decrypt (lock released), `rx_complete` under the lock (NAT, router, USB ring). **Since ADR 0020 these are per RUN of up to 8 datagrams** (divide by `in_pkts`), `rx_deliver` means everything after the decrypt, and the stages `rx_begin`, `rx_complete`, `rx_route`, `rx_run`, `rx_qdepth`, `rt_check`, `rt_lock_wait`, `rt_emit` split it |
 | `drain_wg`, `disco_rx`, `periodic`, `disco_tick` | cy | the receive drains, DISCO drain, 400 ms WireGuard periodic, 1 s probes |
 | `batch` | pkt | packets sent in a pass that sent any (n = such passes) |
 

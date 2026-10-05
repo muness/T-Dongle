@@ -33,3 +33,7 @@ Everything else on the path was cheap by comparison (host-measured in `tools/ben
 ## Validation
 
 Host: `tests/test_route_table.c` (checksums, hash tables against the old linear model, eviction, ownership, ASan/UBSan and TSan), `tests/test_router_hotpath.c` (zero flash calls during 30,000 round trips, miss/fill/preload, invalidation, membership lifecycle against concurrent forwarding under TSan, ICMP), `tests/test_router_differential.c` (the frozen old router and the new one receive the same random packets and control events; emitted packets and flow tables must be identical), `tests/test_route_ingress.c` (queue overflow accounting). Run by `alternative/tailnet/tools/test-gateway.sh`.
+
+## Amendment (ADR 0020)
+
+`gateway_tunnel_input_batch` takes the packets one wake of `ml_wg_mgr` decrypted and runs validation, the flow lookup and the NAT rewrite with the lwIP core lock RELEASED; the membership is pinned for that part only and unpinned before the lock is taken (once per chunk of 16 packets) for the USB netif output. The checks, counters and ownership rules above are unchanged (batch equals one-by-one in the tests). The reader's worst case in the RCU section is therefore the validation of a chunk, not the USB output under the lock; the "about 60 ms" bound above is now far smaller, and a suspend can no longer wait on a reader that waits for the core lock.

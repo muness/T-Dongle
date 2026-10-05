@@ -6,7 +6,7 @@
  *
  *   rx_data == rx_no_peer + rx_keypair_unusable + rx_expired +
  *              rx_alloc_fail + rx_session_gone + rx_decrypt_fail + rx_keepalive + rx_replay_dup + rx_replay_old +
- *              rx_replay_limit + rx_bad_ip + rx_allowed_ip + rx_bad_length + rx_input_fail + rx_delivered
+ *              rx_replay_limit + rx_bad_ip + rx_allowed_ip + rx_allowed_ip6 + rx_bad_length + rx_ipv6_unsupported + rx_input_fail + rx_delivered
  *
  * (read together while the path is idle; a datagram in flight is in rx_data and in no terminal yet). Counting is one relaxed
  * atomic add on a cold path, or per delivered packet one add against ~2.4 ms of wg_mgr CPU per forwarded packet (ADR 0018),
@@ -29,8 +29,10 @@
     X(rx_replay_old)        /* authenticated, counter below the replay window (reordered by more than the window) */ \
     X(rx_replay_limit)      /* authenticated, counter at or above REJECT_AFTER_MESSAGES */ \
     X(rx_bad_ip)            /* plaintext is not a whole IPv4/IPv6 header */ \
-    X(rx_allowed_ip)        /* inner source address outside the peer's AllowedIPs (cryptokey routing) */ \
-    X(rx_bad_length)        /* inner IP total length exceeds the decrypted bytes */ \
+    X(rx_allowed_ip)        /* inner IPv4 source address outside the peer's AllowedIPs (cryptokey routing) */ \
+    X(rx_allowed_ip6)       /* inner IPv6 source address outside the peer's AllowedIPs (a gateway whose peers have no IPv6 entry counts every IPv6 packet here) */ \
+    X(rx_bad_length)        /* inner IP length field inconsistent with the decrypted bytes (longer than them, or shorter than its own header) */ \
+    X(rx_ipv6_unsupported)  /* authenticated inner IPv6 packet from an allowed source, well formed, that this gateway does not deliver (README) */ \
     X(rx_input_fail)        /* netif->input (the router) refused the packet */ \
     X(rx_delivered)         /* handed to netif->input and accepted */
 

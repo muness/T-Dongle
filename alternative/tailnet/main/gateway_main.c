@@ -18,6 +18,7 @@
 #include "gateway.h"
 #include "ml_runtime.h"
 #include "ml_admission.h"
+#include "ml_wg_rx_budget.h"
 #include "route_table.h"
 #include "boot_health.h"
 #include "lcd.h"
@@ -64,6 +65,8 @@ _Static_assert(GATEWAY_USB_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_BYTES <= 32 * 10
 _Static_assert(GATEWAY_USB_TX_FLOOR_FREE >= ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES,
                "growth must leave one negotiation peak and the recovery reserve");
 _Static_assert(GATEWAY_USB_TX_FLOOR_LARGEST >= ML_ADM_LARGEST_BLOCK, "growth must keep the admission largest-block floor");
+_Static_assert(GATEWAY_USB_TX_FLOOR_FREE == ML_WG_RX_JOIN_FLOOR_FREE && GATEWAY_USB_TX_FLOOR_FREE == 16384 + 16000,
+               "the elastic buffers (USB ring growth, WireGuard receive queue during a join) leave the same recovery reserve and negotiation peak");
 _Static_assert(3 * (GATEWAY_USB_TX_MAX_FRAMES * TINYUSB_NET_TX_SLAB_BYTES / 875) <= GATEWAY_USB_TX_RECLAIM_WAIT_MS,
                "reclaim must wait long enough to drain a full ring three times over at USB speed");
 #include <ctype.h>
@@ -365,7 +368,10 @@ static bool start_member_holding_token(membership_t *m) {
     tinyusb_net_tx_elastic_reclaim(GATEWAY_USB_TX_RECLAIM_WAIT_MS);
     /* Reserve for parsed JSON, networking and recovery HTTP. Shared receive
      * buffers are static. Runtime peak sufficiency needs board qualification. */
-    size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    /* The WireGuard receive queue is elastic memory like the transmit ring: datagrams that wait in it at this instant (at most
+     * ML_WG_RX_QUEUE_BYTES) are heap the next wg_mgr pass returns, and the token held here has already closed the queue's growth
+     * (ml_wgrx_admit_gated), so they are counted as free. Without this a burst in flight during a second join could refuse it. */
+    size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) + ml_wgrx_queued(&ml_wgrx_budget);
     size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     unsigned active = 0;
     for (membership_t *other = members; other; other = other->next)
