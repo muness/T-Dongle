@@ -105,6 +105,9 @@ extern "C" {
 #define ML_MAX_PEERS            CONFIG_ML_MAX_PEERS
 #define ML_MAX_ENDPOINTS        8
 #define ML_MAX_PACKET_SIZE      1500
+/* Largest payload accepted in one DERP frame after the 32-byte source key of a
+ * RecvPacket (and the cap for every other post-handshake frame). A WireGuard
+ * packet over a 1280-byte tailnet MTU is about 1.3 KB; this leaves headroom. */
 #define ML_DERP_MAX_FRAME       (ML_MAX_PACKET_SIZE + 64)
 
 /* DERP */
@@ -348,6 +351,11 @@ typedef struct {
     uint8_t disco_key[32];
     char hostname[64];
     bool active;
+    /* Activated because of an inbound claim nobody has authenticated yet (a
+     * DERP source key). Set only while it holds the membership's single trial
+     * slot; cleared when WireGuard authenticates this peer, or the peer is
+     * removed when the trial expires. See directory_trial_* in ml_wg_mgr.c. */
+    bool unconfirmed;
 
     /* Endpoints */
     struct {
@@ -600,6 +608,16 @@ struct microlink_s {
     volatile unsigned jit_packet_count;
     uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
     uint32_t directory_applied;
+    /* Budget for work an unauthenticated inbound packet can cause (flash
+     * lookup, X25519, a peer slot). Owned by wg_mgr. */
+    struct {
+        uint8_t pending;              /* peer index + 1 holding the trial slot, 0 = free */
+        uint8_t tokens;               /* lookups the next packets may still cause */
+        uint64_t refill_ms;           /* last token refill */
+        uint64_t deadline_ms;         /* the trial peer must authenticate by then */
+        uint64_t cooldown_until_ms;   /* no new trial before this after a failed one */
+        uint32_t started, confirmed, expired, refused;
+    } inbound_trial;
     ml_directory_t directory;
     volatile bool map_batch_pending; /* at most one owned semantic batch per membership */
     QueueHandle_t peer_update_queue;    /* coord -> wg_mgr */

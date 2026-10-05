@@ -408,11 +408,23 @@ static int poll_derp_read(microlink_t *ml) {
     uint8_t frame_type = header[0];
     uint32_t len = ((uint32_t)header[1] << 24) | ((uint32_t)header[2] << 16) |
                    ((uint32_t)header[3] << 8) | header[4];
-    if (len > 65536)
+    /* The length field is read before anything authenticates it, and it sizes
+     * an allocation. Bound it by what this firmware can carry: a relayed packet
+     * is at most ML_DERP_MAX_FRAME bytes after the 32-byte source key (the DERP
+     * protocol's 64 KiB ceiling is far above any tunnel MTU), and every other
+     * frame this client acts on is a few dozen bytes. An oversize frame is a
+     * protocol violation or a corrupted stream: drop the connection, which the
+     * caller reconnects, rather than allocating up to 64 KiB on a heap that
+     * cannot supply it. */
+    bool relayed = frame_type == DERP_FRAME_RECV_PACKET;
+    if (relayed ? (len <= sizeof(src_key) ||
+                   len - sizeof(src_key) > ML_DERP_MAX_FRAME)
+                : len > ML_DERP_MAX_FRAME) {
+        ESP_LOGW(TAG, "DERP frame type 0x%02x length %lu out of bounds; reconnecting",
+                 frame_type, (unsigned long)len);
         return -1;
-    if (frame_type == DERP_FRAME_RECV_PACKET) {
-        if (len <= sizeof(src_key))
-            return -1;
+    }
+    if (relayed) {
         if (derp_read_exact(ml, src_key, sizeof(src_key), started, false) < 0)
             return -1;
         len -= sizeof(src_key);

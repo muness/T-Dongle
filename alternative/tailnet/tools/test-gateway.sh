@@ -113,10 +113,15 @@ build-host/test_semantic_directory
 
 python - <<'PYJIT'
 from pathlib import Path
-s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate(');b=s.index('/* The queue owns copies',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate_idle(');b=s.index('/* The queue owns copies',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+a=s.index('static bool wg_initiation_plausible(');b=s.index('#endif',a);Path('build-host/wg_initiation.inc').write_text(s[a:b])
 PYJIT
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_jit_directory.c -o build-host/test_jit_directory
 build-host/test_jit_directory
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_inbound_trial.c -o build-host/test_inbound_trial
+cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_wg_initiation.c -o build-host/test_wg_initiation
+build-host/test_wg_initiation
+build-host/test_inbound_trial
 
 python - <<'PYQUEUE'
 from pathlib import Path

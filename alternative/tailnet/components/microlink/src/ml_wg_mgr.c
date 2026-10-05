@@ -537,6 +537,77 @@ static const uint8_t *disco_shared_key(microlink_t *ml, ml_peer_t *p) {
     return p->disco_shared;
 }
 
+/* Does the box in a DISCO packet open with the key a directory record says the
+ * sender holds? Proves the sender owns that disco key without touching the peer
+ * table. */
+static bool disco_authenticates(microlink_t *ml, const uint8_t *sender_key,
+                                const uint8_t *nonce, const uint8_t *ciphertext,
+                                size_t length) {
+    uint8_t shared[32];
+    if (length < NACL_BOX_MACBYTES ||
+        nacl_box_beforenm(shared, sender_key, ml->disco_private_key) != 0)
+        return false;
+    uint8_t *plain = tdongle_heap_tag(TDONGLE_OWNER_OTHER, malloc(length - NACL_BOX_MACBYTES + 1));
+    if (!plain)
+        return false;
+    bool ok = nacl_box_open_afternm(plain, ciphertext, length, nonce, shared) == 0;
+    tdongle_heap_free(TDONGLE_OWNER_OTHER, plain);
+    memset(shared, 0, sizeof(shared));
+    return ok;
+}
+
+/* WireGuard has produced a session key for this peer: it proved it holds the
+ * private key (initiation timestamp or handshake response). */
+static bool wg_peer_authenticated(microlink_t *ml, int idx) {
+#ifdef ESP_PLATFORM
+    const ml_peer_t *p = &ml->peers[idx];
+    struct netif *netif = (struct netif *)ml->wg_netif;
+    if (!netif || !netif->state || p->wg_peer_index < 0 ||
+        p->wg_peer_index >= WIREGUARD_MAX_PEERS)
+        return false;
+    const struct wireguard_peer *wp =
+        &((struct wireguard_device *)netif->state)->peers[p->wg_peer_index];
+    return wp->valid && (wp->curr_keypair.valid || wp->next_keypair.valid ||
+                         wp->prev_keypair.valid);
+#else
+    (void)ml; (void)idx;
+    return false;
+#endif
+}
+
+#ifdef ESP_PLATFORM
+/* A WireGuard initiation addressed to us: right size, type and mac1 for our
+ * public key. mac1 is not authentication (anyone who knows our public key can
+ * compute it); it screens out random and truncated input before any lookup. */
+static bool wg_initiation_plausible(microlink_t *ml, const ml_rx_packet_t *pkt) {
+    struct netif *netif = (struct netif *)ml->wg_netif;
+    if (!netif || !netif->state ||
+        pkt->len != sizeof(struct message_handshake_initiation) ||
+        pkt->data[0] != MESSAGE_HANDSHAKE_INITIATION || pkt->data[1] || pkt->data[2] || pkt->data[3])
+        return false;
+    const size_t macs = 2 * WIREGUARD_COOKIE_LEN;
+    return wireguard_check_mac1((struct wireguard_device *)netif->state, pkt->data,
+                                pkt->len - macs, pkt->data + pkt->len - macs);
+}
+#endif
+/* Changes whenever WireGuard accepts an authenticated packet from the peer
+ * (data decrypted, or an initiation that passed its timestamp check). */
+static uint32_t wg_peer_activity(microlink_t *ml, int idx) {
+#ifdef ESP_PLATFORM
+    const ml_peer_t *p = &ml->peers[idx];
+    struct netif *netif = (struct netif *)ml->wg_netif;
+    if (!netif || !netif->state || p->wg_peer_index < 0 ||
+        p->wg_peer_index >= WIREGUARD_MAX_PEERS)
+        return 0;
+    const struct wireguard_peer *wp =
+        &((struct wireguard_device *)netif->state)->peers[p->wg_peer_index];
+    return wp->last_rx + wp->last_initiation_rx;
+#else
+    (void)ml; (void)idx;
+    return 0;
+#endif
+}
+
 static int find_peer_by_node_id(microlink_t *ml, uint64_t node_id) {
     if (node_id == 0) return -1;
     for (int i = 0; i < ml->peer_count; i++) {
@@ -616,6 +687,7 @@ static int add_peer(microlink_t *ml, const ml_peer_update_t *update) {
     p->hostname[sizeof(p->hostname) - 1] = '\0';
     p->derp_region = update->derp_region;
     p->active = true;
+    p->unconfirmed = false;
 
     /* Copy endpoints */
     p->endpoint_count = update->endpoint_count;
@@ -934,8 +1006,9 @@ static void apply_peer_update(microlink_t *ml, const ml_peer_update_t *update) {
     }
 }
 #ifdef ESP_PLATFORM
-/* Called only by the peer owner. Keep hot peers; never evict recent traffic. */
-static int directory_activate(microlink_t *ml, const ml_peer_update_t *record) {
+/* Called only by the peer owner. Keep hot peers; never evict recent traffic.
+ * A peer idle for less than idle_ms is never evicted. */
+static int directory_activate_idle(microlink_t *ml, const ml_peer_update_t *record, uint64_t idle_ms) {
     ROUTE_MARK(2);
     if(!ml->directory.session_valid)return -1;
     int idx=find_peer_by_key(ml,record->public_key);
@@ -947,7 +1020,7 @@ static int directory_activate(microlink_t *ml, const ml_peer_update_t *record) {
         int victim=-1;uint64_t oldest=UINT64_MAX,now=ml_get_time_ms();
         for(int i=0;i<ML_MAX_PEERS;i++) {
             uint64_t used=ml->peers[i].jit_used_ms;
-            if(now-used>=10000 && used<oldest && ml->peers[i].vpn_ip!=ml->config.priority_peer_ip) {oldest=used;victim=i;}
+            if(now-used>=idle_ms && used<oldest && ml->peers[i].vpn_ip!=ml->config.priority_peer_ip) {oldest=used;victim=i;}
         }
         if(victim<0){ml->jit_rejected++;return -1;}
         ml->jit_evictions++;
@@ -955,6 +1028,119 @@ static int directory_activate(microlink_t *ml, const ml_peer_update_t *record) {
         memcpy(rm.public_key,ml->peers[victim].public_key,32);remove_peer(ml,&rm);
     }
     idx=add_peer(ml,record);
+    if(idx>=0)ml->peers[idx].jit_used_ms=ml_get_time_ms();
+    return idx;
+}
+/* Activation for traffic the local host or an authenticated packet asked for. */
+static int directory_activate(microlink_t *ml, const ml_peer_update_t *record) {
+    return directory_activate_idle(ml,record,10000);
+}
+/* ----------------------------------------------------------------------------
+ * Activation on an unauthenticated claim.
+ *
+ * A DERP RecvPacket names its sender in a 32-byte field that nothing
+ * authenticates: the relay (or anyone able to terminate or alter the TLS
+ * stream) writes it. WireGuard cannot authenticate an initiation from a peer
+ * it has no entry for, so the claim has to select a directory record and give
+ * it a slot before the packet can be tested. What the claim must not do is buy
+ * lasting state: a forged key must not evict warm peers, thrash flash, or keep
+ * a slot. So an inbound activation is a trial:
+ *
+ *   - only a WireGuard initiation (the one message a non-resident peer can
+ *     start a session with) with a valid mac1 for our key is eligible; the
+ *     caller checks that, and everything else from an unknown key is dropped
+ *     before any flash read;
+ *   - one trial slot per membership. While it is held, other unknown keys are
+ *     refused; a trial that does not authenticate within TRIAL_MS is removed and
+ *     opens a cool-down before the next one;
+ *   - a small token budget limits how often an unauthenticated packet can cost a
+ *     directory lookup at all;
+ *   - a trial uses a free slot, or evicts only a peer idle for TRIAL_EVICT_IDLE_MS
+ *     (six times the idle window authenticated traffic needs);
+ *   - the peer becomes ordinary (confirmed) only once WireGuard reports an
+ *     authenticated session key for it.
+ * -------------------------------------------------------------------------- */
+#define TRIAL_MS 5000
+#define TRIAL_COOLDOWN_MS 30000
+#define TRIAL_EVICT_IDLE_MS 60000
+#define TRIAL_TOKEN_BURST 3
+#define TRIAL_TOKEN_REFILL_MS 1000
+static bool directory_trial_token(microlink_t *ml, uint64_t now) {
+    if(!ml->inbound_trial.refill_ms)ml->inbound_trial.tokens=TRIAL_TOKEN_BURST,ml->inbound_trial.refill_ms=now;
+    uint64_t gained=(now-ml->inbound_trial.refill_ms)/TRIAL_TOKEN_REFILL_MS;
+    if(gained) {
+        unsigned tokens=ml->inbound_trial.tokens+(gained>TRIAL_TOKEN_BURST?TRIAL_TOKEN_BURST:gained);
+        ml->inbound_trial.tokens=tokens>TRIAL_TOKEN_BURST?TRIAL_TOKEN_BURST:tokens;
+        ml->inbound_trial.refill_ms+=gained*TRIAL_TOKEN_REFILL_MS;
+    }
+    if(!ml->inbound_trial.tokens){ml->inbound_trial.refused++;return false;}
+    ml->inbound_trial.tokens--;
+    return true;
+}
+/* Confirm or expire the trial peer. Cheap; call after any WireGuard input and
+ * from the periodic loop. */
+static void directory_trial_poll(microlink_t *ml) {
+    unsigned slot=ml->inbound_trial.pending;
+    if(!slot)return;
+    int idx=(int)slot-1;
+    ml_peer_t *peer=&ml->peers[idx];
+    if(!peer->active || !peer->unconfirmed) {ml->inbound_trial.pending=0;return;} /* removed or replaced meanwhile */
+    if(wg_peer_authenticated(ml,idx)) {
+        peer->unconfirmed=false;ml->inbound_trial.pending=0;ml->inbound_trial.confirmed++;
+        return;
+    }
+    uint64_t now=ml_get_time_ms();
+    if(now>=ml->inbound_trial.deadline_ms) {
+        ml_peer_update_t rm={.action=ML_PEER_REMOVE};
+        memcpy(rm.public_key,peer->public_key,32);remove_peer(ml,&rm);
+        ml->inbound_trial.pending=0;ml->inbound_trial.expired++;
+        ml->inbound_trial.cooldown_until_ms=now+TRIAL_COOLDOWN_MS;
+    }
+}
+/* May an unauthenticated packet cost a directory lookup and a trial now? */
+static bool directory_trial_open(microlink_t *ml) {
+    uint64_t now=ml_get_time_ms();
+    directory_trial_poll(ml);
+    if(ml->inbound_trial.pending || now<ml->inbound_trial.cooldown_until_ms) {ml->inbound_trial.refused++;return false;}
+    return directory_trial_token(ml,now);
+}
+/* Give the record a trial slot. Returns the peer index or -1. */
+static int directory_trial_start(microlink_t *ml, const ml_peer_update_t *record) {
+    int idx=find_peer_by_key(ml,record->public_key);
+    if(idx>=0)return idx; /* already resident: nothing to trial */
+    idx=directory_activate_idle(ml,record,TRIAL_EVICT_IDLE_MS);
+    if(idx<0)return -1;
+    ml->peers[idx].unconfirmed=true;
+    ml->inbound_trial.pending=(uint8_t)(idx+1);
+    ml->inbound_trial.deadline_ms=ml_get_time_ms()+TRIAL_MS;
+    ml->inbound_trial.started++;
+    return idx;
+}
+/* Resolve the sender of a DERP-relayed WireGuard packet: the resident peer, or
+ * a trial activation for a directory peer that opens with a plausible
+ * initiation. -1 means drop the packet; nothing was activated. */
+static int derp_sender_admit(microlink_t *ml, const ml_rx_packet_t *pkt) {
+    int idx=find_peer_by_key(ml,pkt->src_pubkey);
+    if(idx>=0)return idx;
+    ml_peer_update_t record;
+    if(!wg_initiation_plausible(ml,pkt) || !directory_trial_open(ml) ||
+       !ml_directory_find(ml,0,pkt->src_pubkey,NULL,0,&record))return -1;
+    return directory_trial_start(ml,&record);
+}
+/* DISCO: the sender is identified by a key inside the packet, which only the
+ * holder of the matching private key can box correctly. Authenticate first
+ * (one X25519 and one box open, bounded by the token budget), activate second:
+ * a forged sender key never reaches the peer table. A resident sender is
+ * handled by the caller exactly as before. */
+static int directory_disco_admit(microlink_t *ml, const uint8_t *sender_key, const uint8_t *nonce,
+                                 const uint8_t *ciphertext, size_t length) {
+    int idx=find_peer_by_disco_key(ml,sender_key);
+    if(idx>=0) {ml->peers[idx].jit_used_ms=ml_get_time_ms();return idx;}
+    if(length<NACL_BOX_MACBYTES || !directory_trial_token(ml,ml_get_time_ms()))return -1;
+    ml_peer_update_t record;
+    if(!ml_directory_find(ml,0,NULL,sender_key,0,&record))return -1;
+    if(!disco_authenticates(ml,sender_key,nonce,ciphertext,length)){ml->inbound_trial.refused++;return -1;}
+    idx=directory_activate(ml,&record);
     if(idx>=0)ml->peers[idx].jit_used_ms=ml_get_time_ms();
     return idx;
 }
@@ -1581,12 +1767,13 @@ static void process_disco_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
 
     if (ciphertext_len < NACL_BOX_MACBYTES) return;
 
-    /* Identify the sender by its disco key BEFORE touching the crypto
-     * (reference client: discoInfoForKnownPeerLocked only for keys that
-     * belong to a peer). A key that matches no peer -- a rotation the netmap
-     * has not delivered yet, or a stranger -- is dropped without an X25519;
-     * the handlers below could do nothing with it anyway. */
-    int sender_idx = directory_by_disco(ml, sender_disco_key);
+    /* Identify the sender by its disco key (reference client:
+     * discoInfoForKnownPeerLocked only for keys that belong to a peer). A key
+     * that matches no peer -- a rotation the netmap has not delivered yet, or
+     * a stranger -- is dropped. A directory peer that is not resident is only
+     * activated after its box opens (directory_disco_admit): the key in the
+     * packet is a claim, and activation costs a slot. */
+    int sender_idx = directory_disco_admit(ml, sender_disco_key, nonce, ciphertext, ciphertext_len);
     if (sender_idx < 0) {
         static uint64_t last_unknown_log_ms = 0;
         static uint32_t unknown_suppressed = 0;
@@ -1760,11 +1947,18 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
              pkt->len >= 4 ? pkt->data[0] : -1,
              pkt->src_pubkey[0], pkt->src_pubkey[1], pkt->src_pubkey[2], pkt->src_pubkey[3]);
 #ifdef ESP_PLATFORM
+    int sender = -1;
+    uint32_t sender_activity = 0;
     if(pkt->via_derp) {
-        ml_peer_update_t record;
-        int idx=find_peer_by_key(ml,pkt->src_pubkey);
-        if(idx>=0)ml->peers[idx].jit_used_ms=ml_get_time_ms();
-        else if(!ml_directory_find(ml,0,pkt->src_pubkey,NULL,0,&record) || directory_activate(ml,&record)<0) {tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);return;}
+        /* The DERP source key is the relay's claim, not proof. A resident peer
+         * is simply that peer. Otherwise only a WireGuard initiation can start
+         * a session, so anything else from an unknown key is dropped before it
+         * costs a flash read; an initiation gets a trial slot (see
+         * directory_trial_*), kept only if WireGuard authenticates it. */
+        sender=derp_sender_admit(ml,pkt);
+        if(sender<0){tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);return;}
+        /* The packet only counts as the peer's activity if WireGuard accepts it. */
+        sender_activity=wg_peer_activity(ml,sender);
     }
 #endif
     if (!ml->wg_netif) {
@@ -1807,6 +2001,11 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
     wireguardif_network_rx(device, NULL, p, &addr, pkt->src_port);
     ROUTE_MARK(0);
     UNLOCK_TCPIP_CORE();
+#ifdef ESP_PLATFORM
+    if(sender>=0 && wg_peer_activity(ml,sender)!=sender_activity)
+        ml->peers[sender].jit_used_ms=ml_get_time_ms();
+    directory_trial_poll(ml);
+#endif
 }
 
 /* ============================================================================
@@ -2402,6 +2601,7 @@ void ml_wg_mgr_task(void *arg) {
 #endif
         process_peer_updates(ml);
 #ifdef ESP_PLATFORM
+        directory_trial_poll(ml);
         directory_flush_packets(ml);
 #endif
 

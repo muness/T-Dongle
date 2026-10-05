@@ -8,6 +8,10 @@
 #define MBEDTLS_ERR_SSL_TIMEOUT -3
 #define DERP_FRAME_RECV_PACKET 5
 #define pdMS_TO_TICKS(x) (x)
+#define ML_DERP_MAX_FRAME 1564
+static const char *TAG = "t";
+static unsigned warnings;
+#define ESP_LOGW(tag, ...) (warnings++)
 typedef struct {
     struct {
         bool connected;
@@ -99,6 +103,30 @@ int main(void) {
     assert(poll_derp_read(&m) < 0 && !live);
     reset(70000 - 5);
     assert(poll_derp_read(&m) < 0 && !allocations);
+    /* The declared length is capped before anything is allocated or read:
+     * 32-byte key plus ML_DERP_MAX_FRAME is the largest relayed frame. */
+    chunk = 7;
+    reset(32 + ML_DERP_MAX_FRAME);
+    warnings = 0;
+    assert(poll_derp_read(&m) == 1 && allocations == 1 && delivered_len == ML_DERP_MAX_FRAME && !warnings);
+    free(delivered);
+    reset(32 + ML_DERP_MAX_FRAME + 1);
+    assert(poll_derp_read(&m) < 0 && !allocations && !live && warnings == 1);
+    assert(pos == 5);                          /* refused on the header alone */
+    for (size_t declared = 65536; declared > 32 + ML_DERP_MAX_FRAME; declared -= 4093) {
+        reset(declared);
+        assert(poll_derp_read(&m) < 0 && !allocations && !live && pos == 5);
+    }
+    reset(0xFFFFFFFFu >= 70000 ? 69990 : 0);
+    input[1] = 0xFF; input[2] = 0xFF; input[3] = 0xFF; input[4] = 0xFF;   /* 4 GiB declared */
+    assert(poll_derp_read(&m) < 0 && !allocations && !live);
+    reset(ML_DERP_MAX_FRAME);                  /* other frame types share the cap */
+    input[0] = 0x14;
+    assert(poll_derp_read(&m) == 1 && allocations == 1 && !live);
+    reset(ML_DERP_MAX_FRAME + 1);
+    input[0] = 0x14;
+    assert(poll_derp_read(&m) < 0 && !allocations && !live && pos == 5);
+    chunk = 13;
     reset(32);
     assert(poll_derp_read(&m) < 0 && !allocations);
     reset(200);
