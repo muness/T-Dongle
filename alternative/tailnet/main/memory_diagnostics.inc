@@ -1,5 +1,5 @@
 /* Serial memory diagnostics (CONFIG_TDONGLE_MEMORY_DIAGNOSTICS). Each report is one JSON line:
- * bounded, allocation-free and free of keys, auth keys, URLs and names. Included by
+ * bounded and free of keys, auth keys, URLs and names. Included by
  * gateway_main.c after json_writer.inc. */
 #include "lwip/opt.h"
 #include "route_table.h"
@@ -373,6 +373,47 @@ static void report_bench(jw_writer *w) {
     }
     report_end(w);
 }
+/* `cpu`: one JSON line with the raw, cumulative FreeRTOS run-time counters of every task, so two snapshots around a
+ * transfer give each task's share (tools/cpu_profile.py). Needs CONFIG_FREERTOS_USE_TRACE_FACILITY and
+ * CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS, which only sdkconfig.diagnostics sets. `total` is the counter's total
+ * across both cores (percent of ONE core = task delta / (total delta / 2)); it wraps at 2^32 counts. */
+#define CPU_REPORT_TASKS 32
+static void report_cpu(jw_writer *w) {
+    TaskStatus_t *tasks = malloc(CPU_REPORT_TASKS * sizeof(*tasks));
+    if (!tasks) {
+        mgmt_write("ERR no memory for the task table\r\n");
+        return;
+    }
+    uint32_t total = 0;
+    UBaseType_t n = uxTaskGetSystemState(tasks, CPU_REPORT_TASKS, &total);
+    tdongle_pm_status_t pm;
+    tdongle_pm_status(&pm);
+    report_begin(w, "cpu");
+    report_field(w, "uptime_ms", esp_timer_get_time() / 1000);
+    report_field(w, "cpu_mhz", pm.cpu_mhz);
+    report_field(w, "total", total);
+    report_field(w, "cores", portNUM_PROCESSORS);
+    report_field(w, "tasks_listed", n);
+    jw_raw(w, ",\"tasks\":[");
+    for (UBaseType_t i = 0; i < n; i++) {
+        if (i) jw_char(w, ',');
+        jw_raw(w, "{\"name\":");
+        jw_string(w, tasks[i].pcTaskName);
+        report_field(w, "runtime", tasks[i].ulRunTimeCounter);
+        report_field(w, "priority", tasks[i].uxCurrentPriority);
+        /* core: 0 or 1, or -1 (unpinned) */
+        jw_char(w, ',');
+        jw_key(w, "core");
+        BaseType_t core = xTaskGetCoreID(tasks[i].xHandle);
+        if (core >= 0 && core < portNUM_PROCESSORS) jw_number(w, (uint32_t)core);
+        else jw_raw(w, "-1");
+        report_field(w, "stack_free", tasks[i].usStackHighWaterMark);
+        jw_char(w, '}');
+    }
+    jw_char(w, ']');
+    report_end(w);
+    free(tasks);
+}
 bool gateway_memory_command(const char *line) {
     jw_writer w = {.sink = memory_sink};
     if (!strcmp(line, "memory")) {
@@ -380,6 +421,8 @@ bool gateway_memory_command(const char *line) {
         report_attribution(&w);
         report_lwip(&w);
         report_usb(&w);
+    } else if (!strcmp(line, "cpu")) {
+        report_cpu(&w);
     } else if (!strcmp(line, "route")) {
         report_router(&w);
     } else if (!strcmp(line, "members")) {

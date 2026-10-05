@@ -13,9 +13,16 @@ void tdongle_temperature_sample(void){
     if(e==ESP_OK){e=temperature_sensor_get_celsius(sensor,&c);temperature_sensor_disable(sensor);}
     portENTER_CRITICAL(&lock);
     if(e==ESP_OK && isfinite(c)){
-        int32_t value=(int32_t)lroundf(c*10);if(!state.sampled_at_ms || value>state.peak_tenths)state.peak_tenths=value;
-        state.valid=true;state.current_tenths=value;state.sampled_at_ms=(uint32_t)(esp_timer_get_time()/1000);
+        int32_t value=(int32_t)lroundf(c*10);uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
+        if(!state.samples || value>state.peak_tenths)state.peak_tenths=value;
+        if(!state.samples || value!=state.current_tenths)state.changed_at_ms=now;
+        state.valid=true;state.current_tenths=value;state.sampled_at_ms=now;state.samples++;
     }else {state.valid=false;state.errors++;}
     portEXIT_CRITICAL(&lock);
 }
-tdongle_temperature tdongle_temperature_snapshot(void){portENTER_CRITICAL(&lock);tdongle_temperature copy=state;portEXIT_CRITICAL(&lock);return copy;}
+tdongle_temperature tdongle_temperature_snapshot(void){
+    uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
+    portENTER_CRITICAL(&lock);tdongle_temperature copy=state;portEXIT_CRITICAL(&lock);
+    copy.age_ms=copy.samples?now-copy.sampled_at_ms:UINT32_MAX;
+    return copy;
+}
