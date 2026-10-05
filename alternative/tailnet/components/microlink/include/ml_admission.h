@@ -21,6 +21,11 @@
  *                       + the recovery reserve     (free heap kept for HTTP/control recovery)
  *   and a largest free block of at least ML_ADM_LARGEST_BLOCK.
  *
+ * Not in the sum, on purpose: the USB transmit ring (4,576 B), its usb_txq worker (1,536 B stack + TCB) and the USB receive
+ * budget. The ring and worker are allocated once at USB start, before any membership, so the free heap that is compared
+ * with `required` has already paid for them (6,476 B, offset by the 6,400 B the smaller IN NTBs gave back: ADR 0015). The
+ * receive frames are transient and bounded by usb_rx_budget.h, not reserved.
+ *
  * Sizes that the compiler knows (sizeof the context, the WireGuard peer slot, stack and TCB sizes, queue bytes) are
  * passed in; the rest are measurements, with their provenance below. Everything is exposed in /status so a
  * refusal can be checked against the numbers that caused it. Pure arithmetic, tested on the host.

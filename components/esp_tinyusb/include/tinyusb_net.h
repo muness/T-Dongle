@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 #include "sdkconfig.h"
@@ -95,6 +96,58 @@ esp_err_t tinyusb_net_send_sync(void *buffer, uint16_t len, void *buff_free_arg,
  *          ESP_ERR_INVALID_STATE if tusb not initialized
  */
 esp_err_t tinyusb_net_send_async(void *buffer, uint16_t len, void *buff_free_arg);
+
+/**
+ * @brief Transmit-ring counters (all monotonic except the sizes)
+ */
+typedef struct {
+    uint32_t ring_bytes;         /*!< ring capacity */
+    uint32_t high_water_bytes;   /*!< most bytes ever queued at once */
+    uint32_t enqueued_frames;    /*!< frames accepted into the ring */
+    uint32_t enqueued_bytes;
+    uint32_t sent_frames;        /*!< frames handed to an NTB (each exactly once) */
+    uint32_t sent_bytes;
+    uint32_t dropped_full;       /*!< ring full: backpressure, frame dropped */
+    uint32_t dropped_link_down;  /*!< refused because USB was not ready */
+    uint32_t dropped_invalid;    /*!< length outside 14..1518 */
+    uint32_t flushed_link_down;  /*!< queued frames discarded when USB went away */
+    uint32_t ntb_blocked;        /*!< times a drain stopped with every NTB in flight */
+    uint32_t xfer_events;        /*!< IN transfer completions that drained the ring (no polling) */
+    uint32_t worker_stack_free;  /*!< worker stack high-water mark, bytes never used */
+} tinyusb_net_tx_stats_t;
+
+/**
+ * @brief Allocate the transmit ring and start its worker task (once, after tinyusb_net_init)
+ *
+ * The ring is an alternative to tinyusb_net_send_sync() for callers that hold a lock and must
+ * never wait. It costs ring_bytes of heap plus the worker (1,536 B stack and a 340 B TCB);
+ * send_sync users pay nothing. The transmit-complete event that keeps it draining is a
+ * linker wrap of netd_xfer_cb (CMakeLists.txt).
+ *
+ * @param[in] ring_bytes  capacity, at least 2 * 1524 + 4 (two maximum frames); n * 1524 + 4
+ *                        holds n maximum frames at any position
+ * @param[in] priority    worker task priority
+ * @param[in] core        core to pin the worker to (tskNO_AFFINITY for none)
+ * @return ESP_OK, ESP_ERR_NO_MEM, ESP_ERR_INVALID_ARG
+ */
+esp_err_t tinyusb_net_tx_ring_start(size_t ring_bytes, unsigned priority, int core);
+
+/**
+ * @brief Queue a frame for transmission without blocking
+ *
+ * The frame is copied: the caller keeps ownership of `buffer` in every case and the
+ * free_tx_buffer callback is NOT used. Calls must be serialized by the caller (single
+ * producer). Never waits, never allocates.
+ *
+ * @return ESP_OK            queued; it will be handed to USB exactly once or flushed on link loss
+ *         ESP_ERR_NO_MEM    ring full (dropped, counted)
+ *         ESP_ERR_INVALID_STATE  ring not started or USB not ready (dropped, counted)
+ *         ESP_ERR_INVALID_ARG    frame length outside 14..1518
+ */
+esp_err_t tinyusb_net_tx_ring_send(const void *buffer, uint16_t len);
+
+/** @brief Snapshot the transmit-ring counters */
+void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out);
 
 #endif // (CONFIG_TINYUSB_NET_MODE_NONE != 1)
 

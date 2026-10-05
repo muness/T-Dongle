@@ -30,6 +30,22 @@
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_net.h"
+#include "usb_rx_budget.h"
+#include "tcp_window_budget.h"
+/* Tunnel-to-USB transmit ring (heap, allocated once at USB start): three full frames, 3 x 1524 + 4.
+ * It is paid for by shrinking the two IN NTBs from 6,400 to 3,200 B (sdkconfig.defaults), so the
+ * boot heap does not go down. Raise it only if the "usb" memory report shows tx_dropped_full with
+ * tx_high_water at tx_ring_bytes. Sizing: docs/adr/0015-data-plane-io.md. */
+#ifndef GATEWAY_USB_TX_RING_BYTES
+#define GATEWAY_USB_TX_RING_BYTES (3 * 1524 + 4)
+#endif
+/* Boot-heap neutrality (ADR 0015): before the ring the IN NTBs held 2 x 6,400 B. The ring, its
+ * worker stack (1,536) and TCB (340) must fit in what the smaller NTBs gave back, plus 512 B. */
+_Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT * CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE +
+               GATEWAY_USB_TX_RING_BYTES + 1536 + 340 <= 2 * 6400 + 512,
+               "USB transmit buffering grew past the admission-margin budget");
+_Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE >= 2 * (1518 + 4) + 64, "an IN NTB must hold two frames");
+_Static_assert(GATEWAY_USB_TX_RING_BYTES >= 3 * 1524 + 4, "transmit ring must hold three full frames");
 #include <ctype.h>
 #include <strings.h>
 #include <time.h>
@@ -229,12 +245,17 @@ static bool stop_member(membership_t *m) {
  * negotiation peak is reserved however many memberships there are, because negotiations are serialised by the
  * token (ml_negotiation.h). Shared registration/map byte buffers are static, not charged per member. The decision
  * inputs are all in /status. */
+_Static_assert(GATEWAY_USB_RX_INFLIGHT_MAX >= ROUTE_QUEUE_DEPTH + ROUTE_HOLD_SLOTS + 4, "USB receive slots must leave room beyond what the router can hold");
 _Static_assert(ROUTE_HEAP_RESERVE == ML_ADM_RECOVERY_BYTES, "the router queue must stop at the same recovery reserve admission keeps");
 _Static_assert(GATEWAY_TASK_USB_ROUTES_CORE == ML_TASK_WG_MGR_CORE && GATEWAY_TASK_USB_ROUTES_PRIO > ML_TASK_WG_MGR_PRIO &&
                ML_TASK_WG_MGR_PRIO > ML_TASK_COORD_PRIO && ML_TASK_COORD_CORE == ML_TASK_WG_MGR_CORE,
                "core 1: usb_routes > wg_mgr > coord");
 _Static_assert(ML_TASK_NET_IO_CORE == ML_TASK_DERP_TX_CORE && ML_TASK_NET_IO_PRIO > ML_TASK_DERP_TX_PRIO,
                "core 0: net_io > derp");
+_Static_assert(GATEWAY_TASK_USB_TX_CORE == TINYUSB_DEFAULT_TASK_AFFINITY && GATEWAY_TASK_USB_TX_CORE == ML_TASK_WG_MGR_CORE &&
+               GATEWAY_TASK_USB_TX_PRIO > TINYUSB_DEFAULT_TASK_PRIO && GATEWAY_TASK_USB_TX_PRIO > ML_TASK_COORD_PRIO &&
+               GATEWAY_TASK_USB_TX_PRIO < ML_TASK_WG_MGR_PRIO,
+               "core 1: usb_routes > wg_mgr > usb_txq > TinyUSB and coord");
 static size_t member_queue_bytes(void) {
     return ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
            (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH +
@@ -445,25 +466,34 @@ static void manager(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
+/* Runs in the lwIP core-lock holder (tcpip task, WireGuard manager): it must never wait.
+ * The frame is copied into the USB transmit ring and a worker hands it to TinyUSB; a full ring
+ * drops the frame (counted), which TCP treats as loss. See docs/adr/0015-data-plane-io.md. */
 static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
-    void *copy = malloc(len);
-    if (!copy)
-        return ESP_ERR_NO_MEM;
-    memcpy(copy, buffer, len);
-    esp_err_t err = tinyusb_net_send_sync(copy, len, copy, pdMS_TO_TICKS(50));
-    if (err != ESP_OK)
-        free(copy);
-    return err;
+    if (len > UINT16_MAX)
+        return ESP_ERR_INVALID_SIZE;
+    return tinyusb_net_tx_ring_send(buffer, (uint16_t)len);
 }
-static void usb_free_tx(void *buffer, void *ctx) { if(gateway_tailnet_mode())free(buffer);else tdongle_l2_release(buffer); }
-static void usb_free_rx(void *handle, void *buffer) { free(buffer); }
+/* Called only for tdongle_l2 (bridge mode) frames sent with tinyusb_net_send_sync. */
+static void usb_free_tx(void *buffer, void *ctx) { if(!gateway_tailnet_mode())tdongle_l2_release(buffer); }
+static gateway_usb_rx_budget usb_rx_budget;
+static void usb_free_rx(void *handle, void *buffer) {
+    free(buffer);
+    gateway_usb_rx_release(&usb_rx_budget);
+}
 static esp_err_t usb_rx(void *buffer, uint16_t len, void *ctx) {
     if(!gateway_tailnet_mode())return tdongle_l2_host(buffer,len);
     if (!usb_interface) return ESP_ERR_INVALID_STATE;
-    void *copy = malloc(len);
-    if (!copy)
+    if (!gateway_usb_rx_admit(&usb_rx_budget, len))
         return ESP_ERR_NO_MEM;
+    void *copy = malloc(len);
+    if (!copy) {
+        gateway_usb_rx_release(&usb_rx_budget);
+        atomic_fetch_add_explicit(&usb_rx_budget.dropped_nomem, 1, memory_order_relaxed);
+        return ESP_ERR_NO_MEM;
+    }
     memcpy(copy, buffer, len);
+    /* esp_netif frees the copy through usb_free_rx exactly once, on every path including errors. */
     return esp_netif_receive(usb_interface, copy, len, NULL);
 }
 static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
@@ -1197,6 +1227,7 @@ static esp_err_t start_usb(void) {
     if(gateway_tailnet_mode()){uint8_t device[6];gateway_usb_macs(identity_mac,device,net.mac_addr);}
     else memcpy(net.mac_addr, identity_mac, 6);
     result=tinyusb_net_init(&net);
+    if(result==ESP_OK && gateway_tailnet_mode())result=tinyusb_net_tx_ring_start(GATEWAY_USB_TX_RING_BYTES,GATEWAY_TASK_USB_TX_PRIO,GATEWAY_TASK_USB_TX_CORE);
     extern esp_err_t gateway_console_start(void);
     esp_err_t console=gateway_console_start();
     return console!=ESP_OK?console:result;

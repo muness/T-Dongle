@@ -9,6 +9,11 @@
 #include "esp_timer.h"
 #include "tdongle_memory.h"
 #include "ml_gateway_limits.h"
+#include "usb_rx_budget.h"
+#define CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT 2
+typedef struct {uint32_t ring_bytes,high_water_bytes,enqueued_frames,enqueued_bytes,sent_frames,sent_bytes,dropped_full,dropped_link_down,dropped_invalid,flushed_link_down,ntb_blocked,xfer_events,worker_stack_free;} tinyusb_net_tx_stats_t;
+static void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *s) { *s = (tinyusb_net_tx_stats_t){4576, 4212, 90, 120000, 80, 100000, 7, 1, 2, 3, 4, 55, 900}; }
+static gateway_usb_rx_budget usb_rx_budget;
 #define GATEWAY_VERSION "0.0.0-test"
 #include "route_table.h"
 uint32_t gateway_route_stat(unsigned which) { return which * 3; }
