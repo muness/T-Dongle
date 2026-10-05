@@ -82,8 +82,17 @@ extern "C" {
  *            scratch 64 B) on top of the same TLS chain: about +0.4 KB, so about 5.6 KB.
  *            The cross-member path is the DNS callback registration under the core lock and the negotiation
  *            token poll, both shallower than the handshake chain.
- *   coord    map re-fetch and reconnect repeat the measured map path; the custom-login-server key fetch
- *            (https) is shallower than that, about 3.8 KB. Unchanged by this stage.
+ *   coord    map re-fetch and reconnect repeat the measured map path (the deepest one: DERP-map activation runs the
+ *            netcheck on this task). The paths added since that capture, from GCC's frame sizes along the real call
+ *            chains (docs/research/evidence/coord_stack_paths.py, docs/adr/0016): the JSON of the /key response
+ *            (plain HTTP for an http:// login server: unauthenticated) and of the RegisterResponse is parsed by cJSON,
+ *            which recurses on this stack; ml_coord.c bounds their nesting to 4 and 16 levels (the build's limit
+ *            is 32) before parsing, so the worst of them is 5.7 KB with everything the frame sums cannot see added;
+ *            the https key fetch and control connection run esp_tls's handshake on this task as well (5.4 KB,
+ *            direct calls only). The measured 4,152 B bounds the rule from below (2 x = 8,304 B), the analysed
+ *            5,736 B from above (+ 2 KiB = 7,784 B): 8,704 B is the smallest 512 B multiple that holds both, for
+ *            plain and TLS control alike. The research's 6,144 B (docs/research/membership-bytes.md R3) is below
+ *            twice the measured use and is NOT taken; lowering it needs a new board measurement (see ADR 0016).
  *   wg_mgr   inbound activation of an unknown peer adds derp_sender_admit 336 and directory_activate_idle 336
  *            on the paths JIT activation already walked. Stage 1 adds the CROSS-MEMBER path: when the peer pool
  *            is full a membership evicts the least recently used idle peer of ANOTHER membership
@@ -102,7 +111,13 @@ extern "C" {
 #define ML_TASK_DERP_TX_PRIO    5
 #define ML_TASK_DERP_TX_CORE    0
 
-#define ML_TASK_COORD_STACK     (8704)       /* 4,152 B measured (per membership; stage 2 may share it) */
+#define ML_COORD_STACK_MEASURED  4152        /* uxTaskGetStackHighWaterMark, board, firmware 0.2.22, all phases */
+#define ML_COORD_STACK_ANALYSED  5736        /* worst path added since, evidence/coord_stack_paths.py */
+#define ML_TASK_COORD_STACK     (8704)       /* per membership; stage 2 may share it. Smallest 512 B multiple that holds both bounds: */
+_Static_assert(ML_TASK_COORD_STACK >= 2 * ML_COORD_STACK_MEASURED, "coord stack: at least twice the measured use");
+_Static_assert(ML_TASK_COORD_STACK >= ML_COORD_STACK_ANALYSED + 2048, "coord stack: at least 2 KiB over the analysed worst path");
+_Static_assert(ML_TASK_COORD_STACK % 512 == 0 && ML_TASK_COORD_STACK - 512 < 2 * ML_COORD_STACK_MEASURED,
+               "coord stack: not larger than the rule needs (re-measure before changing the bounds)");
 #define ML_TASK_COORD_PRIO      5
 #define ML_TASK_COORD_CORE      1
 

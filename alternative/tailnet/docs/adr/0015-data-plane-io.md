@@ -76,6 +76,8 @@ Admission (`start_member`, ADR 0013 N1.2, `ml_admission.h`) requires `free >= re
 | router queue floor | 2,800 |
 | **required (first membership)** | **103,448** |
 
+(ADR 0016 lowers the negotiation peak from 16,000 to 11,500 B: required 98,948 B, margin about 8,624 B against the same 107.8 KB.)
+
 On the release image the board boots with about 107.8 KB free (measured before PR #30/#31; assumed unchanged here: if the merged base boots with a different figure, the margin moves by exactly that much, and the change below does not depend on it). That is a margin of about 4,352 B. What this PR changes before admission, against the merged base (origin/overhaul/multi-tailnet 03002d8), both built with `idf.py size` on IDF v5.5.5:
 
 | Item | Bytes |

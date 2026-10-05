@@ -268,4 +268,53 @@ int main(void) {
         for (int i = 0; i < 50; i++) ctrl_key_note_handshake(&sa, false, 100000000ull * i);
         assert(!sa.ctrl_key_refetches && !ensure(&sa, &key) && key == NULL && !tls_mock.opens);
     }
+
+    /* JSON nesting bound (coord stack budget, microlink_internal.h): a hostile /key body cannot make cJSON recurse
+     * past ML_JSON_DEPTH_KEY, and the scan never accepts what cJSON would recurse deeper on. */
+    {
+        assert(json_nesting_within("", 0, 0) && json_nesting_within("123", 3, 0));
+        assert(json_nesting_within("{}", 2, 1) && !json_nesting_within("{}", 2, 0));
+        assert(json_nesting_within("{\"a\":[{\"b\":[1]}]}", 17, 4) && !json_nesting_within("{\"a\":[{\"b\":[1]}]}", 17, 3));
+        /* Brackets inside strings are text; an escaped quote does not end the string; an escaped backslash does not escape. */
+        const char *quoted = "{\"k\":\"[[[[[[[[{{{{{{{{\\\"[[[[\"}";
+        assert(json_nesting_within(quoted, strlen(quoted), 1));
+        const char *escaped_backslash = "{\"k\":\"\\\\\"}[[[[";                   /* the string ends at the second quote */
+        assert(!json_nesting_within(escaped_backslash, strlen(escaped_backslash), 1));
+        /* Unbalanced closers never go negative (a later opener still counts from zero). */
+        assert(json_nesting_within("}}]]{", 5, 1) && !json_nesting_within("}}]]{{", 6, 1));
+        /* Only the first `length` bytes are read. */
+        assert(json_nesting_within("{{{{{{", 1, 1));
+        /* Whatever the scan accepts, cJSON parses within the bound; whatever is deeper is refused before any allocation. */
+        for (unsigned levels = 1; levels <= 40; levels++) {
+            for (int objects = 0; objects < 2; objects++) {
+                char doc[256]; size_t n = 0;
+                for (unsigned i = 0; i < levels; i++) n += (size_t)snprintf(doc + n, sizeof(doc) - n, objects ? "{\"a\":" : "[");
+                n += (size_t)snprintf(doc + n, sizeof(doc) - n, "1");
+                for (unsigned i = 0; i < levels; i++) n += (size_t)snprintf(doc + n, sizeof(doc) - n, objects ? "}" : "]");
+                assert(json_nesting_within(doc, n, ML_JSON_DEPTH_KEY) == (levels <= ML_JSON_DEPTH_KEY));
+                assert(json_nesting_within(doc, n, ML_JSON_DEPTH_REGISTER) == (levels <= ML_JSON_DEPTH_REGISTER));
+            }
+        }
+        /* The /key response parser: the real shape parses, a deep one is rejected without allocating or parsing. */
+        uint8_t out[32];
+        char deep[1024];
+        reset_mocks();
+        assert(!parse_pubkey_response(GOOD, out) && !memcmp(out, KEY, 32) && !logs_error);
+        size_t n = (size_t)snprintf(deep, sizeof(deep), "HTTP/1.1 200 OK\r\n\r\n");
+        for (int i = 0; i < ML_JSON_DEPTH_KEY + 1; i++) n += (size_t)snprintf(deep + n, sizeof(deep) - n, "[");
+        n += (size_t)snprintf(deep + n, sizeof(deep) - n, "{\"publicKey\":\"mkey:" KEYHEX "\"}");
+        for (int i = 0; i < ML_JSON_DEPTH_KEY + 1; i++) n += (size_t)snprintf(deep + n, sizeof(deep) - n, "]");
+        reset_mocks();
+        assert(parse_pubkey_response(deep, out) != 0 && logs_error == 1);
+        /* Through the whole fetch: nothing is cached, and the 5,000-deep bomb costs only the response buffer. */
+        reset_mocks();
+        microlink_t victim = make("http://hs.lan");
+        static char bomb[1536 + 64];
+        n = (size_t)snprintf(bomb, sizeof(bomb), "HTTP/1.1 200 OK\r\n\r\n");
+        while (n < 1400) bomb[n++] = '[';
+        bomb[n] = 0;
+        plain_mock.response = bomb;
+        allocations = 0;
+        assert(ensure(&victim, &key) != 0 && !victim.ctrl_noise_pubkey_valid && allocations == 1 && !live);
+    }
 }
