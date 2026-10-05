@@ -148,7 +148,99 @@ static void test_threads(void) {
     assert(s.acquires == s.releases && s.acquires == (uint32_t)atomic_load(&acquire_calls));
 }
 
+/* ---- activity hold ---- */
+static atomic_uint arms, last_arm_delay;
+static void fake_arm(void *ctx, uint32_t delay_us) { (void)ctx; atomic_fetch_add(&arms, 1); atomic_store(&last_arm_delay, delay_us); }
+static void activity_setup(tdongle_pm_burst_t *b, tdongle_pm_activity_t *a) {
+    reset(); atomic_store(&arms, 0);
+    tdongle_pm_burst_init(b, "fwd", &ops, NULL);
+    tdongle_pm_activity_init(a, b, 200000, fake_arm, NULL);
+}
+static void test_activity(void) {
+    tdongle_pm_burst_t b; tdongle_pm_activity_t a;
+    activity_setup(&b, &a);
+    tdongle_pm_activity_tick(&a, 5000);                                  /* idle tick: nothing */
+    assert(atomic_load(&held) == 0 && atomic_load(&arms) == 0);
+    tdongle_pm_activity_note(&a, 1000);                                  /* first packet: one acquire, one timer */
+    assert(atomic_load(&held) == 1 && atomic_load(&arms) == 1 && atomic_load(&last_arm_delay) == 200000);
+    for (uint32_t t = 1100; t < 150000; t += 100) tdongle_pm_activity_note(&a, t);   /* a stream: no more acquires */
+    assert(atomic_load(&acquire_calls) == 1 && atomic_load(&arms) == 1 && a.starts == 1);
+    tdongle_pm_activity_tick(&a, 200000);                                /* last note 149,900: 50 ms in, 150 ms left */
+    assert(atomic_load(&held) == 1 && atomic_load(&arms) == 2 && atomic_load(&last_arm_delay) == 200000 - (200000 - 149900));
+    tdongle_pm_activity_tick(&a, 349899);                                /* one us short */
+    assert(atomic_load(&held) == 1 && atomic_load(&release_calls) == 0);
+    tdongle_pm_activity_tick(&a, 349900);                                /* hold_us since the last note: released */
+    assert(atomic_load(&held) == 0 && atomic_load(&release_calls) == 1 && stats(&b).depth == 0);
+    tdongle_pm_activity_tick(&a, 500000);                                /* idle again: nothing to do */
+    assert(atomic_load(&release_calls) == 1);
+    tdongle_pm_activity_note(&a, 600000);                                /* and it restarts */
+    assert(atomic_load(&held) == 1 && a.starts == 2 && atomic_load(&arms) == 4);
+    assert(stats(&b).acquires == 2 && stats(&b).underflows == 0);
+}
+/* A tick that read the clock before a concurrent note (now < last) must treat the note as "just now". */
+static void test_activity_stale_clock(void) {
+    tdongle_pm_burst_t b; tdongle_pm_activity_t a;
+    activity_setup(&b, &a);
+    tdongle_pm_activity_note(&a, 1000);
+    tdongle_pm_activity_note(&a, 900000);
+    tdongle_pm_activity_tick(&a, 800000);                                /* now is 100 ms older than the newest note */
+    assert(atomic_load(&held) == 1 && atomic_load(&release_calls) == 0);
+    /* wrap: notes and ticks around the 2^32 us rollover */
+    activity_setup(&b, &a);
+    tdongle_pm_activity_note(&a, 0xffffff00u);
+    tdongle_pm_activity_tick(&a, 0x00000100u + 100000);                  /* 100 ms later across the wrap: still held */
+    assert(atomic_load(&held) == 1);
+    tdongle_pm_activity_tick(&a, 0x00000100u + 250000);
+    assert(atomic_load(&held) == 0);
+}
+static void test_activity_isr(void) {
+    tdongle_pm_burst_t b; tdongle_pm_activity_t a;
+    activity_setup(&b, &a);
+    in_isr = true;
+    tdongle_pm_activity_note(&a, 1000);
+    in_isr = false;
+    assert(atomic_load(&held) == 0 && stats(&b).isr_rejects == 1 && a.starts == 0);
+    tdongle_pm_activity_note(&a, 2000);                                  /* the next task-context note works */
+    assert(atomic_load(&held) == 1);
+}
+
+/* Producers note continuously while a timer thread ticks: the lock is never released under a live stream's feet for
+ * long, never leaked, and always balanced. */
+static tdongle_pm_burst_t th_burst; static tdongle_pm_activity_t th_act;
+static atomic_bool th_stop;
+static atomic_uint th_clock;
+static void *producer(void *arg) {
+    (void)arg;
+    for (int i = 0; i < 100000; i++) {
+        tdongle_pm_activity_note(&th_act, atomic_fetch_add(&th_clock, 7));
+        if (i % 1000 == 0) atomic_fetch_add(&th_clock, 300000);        /* quiet spells: the ticker releases */
+    }
+    return NULL;
+}
+static void *ticker(void *arg) {
+    (void)arg;
+    while (!atomic_load(&th_stop)) tdongle_pm_activity_tick(&th_act, atomic_load(&th_clock));
+    return NULL;
+}
+static void test_activity_threads(void) {
+    reset(); atomic_store(&th_stop, false); atomic_store(&th_clock, 1000);
+    tdongle_pm_burst_init(&th_burst, "fwd", &ops, NULL);
+    tdongle_pm_activity_init(&th_act, &th_burst, 200000, fake_arm, NULL);
+    pthread_t p[3], t;
+    for (int i = 0; i < 3; i++) pthread_create(&p[i], NULL, producer, NULL);
+    pthread_create(&t, NULL, ticker, NULL);
+    for (int i = 0; i < 3; i++) pthread_join(p[i], NULL);
+    atomic_store(&th_stop, true);
+    pthread_join(t, NULL);
+    /* drain: far in the future nothing is held any more, and the lock count matches the flag */
+    tdongle_pm_activity_tick(&th_act, atomic_load(&th_clock) + 1000000);
+    tdongle_pm_burst_stats_t s = stats(&th_burst);
+    assert(atomic_load(&held) == 0 && s.depth == 0 && s.underflows == 0 && atomic_load(&below_zero) == 0);
+    assert(s.acquires == s.releases && s.acquires <= th_act.starts);   /* a start that crosses a pending end only nests */
+}
+
 int main(void) {
+    test_activity(); test_activity_stale_clock(); test_activity_isr(); test_activity_threads();
     test_nesting(); test_error_paths(); test_isr(); test_release_all(); test_model(); test_threads();
     puts("pm burst: nesting, error paths, interrupt refusal, task exit, model and threads passed");
     return 0;

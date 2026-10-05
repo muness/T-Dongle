@@ -76,3 +76,44 @@ void tdongle_pm_burst_stats(const tdongle_pm_burst_t *b, tdongle_pm_burst_stats_
     out->isr_rejects = LOAD(isr_rejects);
 #undef LOAD
 }
+
+/* ---- activity hold ------------------------------------------------------------------------------------------- */
+void tdongle_pm_activity_init(tdongle_pm_activity_t *a, tdongle_pm_burst_t *burst, uint32_t hold_us,
+                              void (*arm)(void *ctx, uint32_t delay_us), void *ctx) {
+    memset(a, 0, sizeof(*a));
+    a->burst = burst;
+    a->hold_us = hold_us;
+    a->arm = arm;
+    a->ctx = ctx;
+}
+
+static void activity_start(tdongle_pm_activity_t *a) {
+    if (atomic_exchange_explicit(&a->held, true, memory_order_acq_rel)) return;
+    atomic_fetch_add_explicit(&a->starts, 1, memory_order_relaxed);
+    tdongle_pm_burst_begin(a->burst);
+    if (a->arm) a->arm(a->ctx, a->hold_us);
+}
+
+void tdongle_pm_activity_note(tdongle_pm_activity_t *a, uint32_t now_us) {
+    if (refuse_in_isr(a->burst)) return;
+    atomic_store_explicit(&a->last_us, now_us, memory_order_relaxed);
+    if (atomic_load_explicit(&a->held, memory_order_acquire)) return;      /* the common case: one load */
+    activity_start(a);
+}
+
+void tdongle_pm_activity_tick(tdongle_pm_activity_t *a, uint32_t now_us) {
+    if (!atomic_load_explicit(&a->held, memory_order_acquire)) return;
+    /* Signed: a note newer than `now_us` (this tick read the clock first) means "just now", not "71 minutes ago". */
+    uint32_t last = atomic_load_explicit(&a->last_us, memory_order_relaxed);
+    int32_t idle = (int32_t)(now_us - last);
+    if (idle < 0) idle = 0;
+    if ((uint32_t)idle < a->hold_us) {
+        uint32_t left = a->hold_us - (uint32_t)idle;
+        if (a->arm) a->arm(a->ctx, left < 1000 ? 1000 : left);
+        return;
+    }
+    if (!atomic_exchange_explicit(&a->held, false, memory_order_acq_rel)) return;
+    tdongle_pm_burst_end(a->burst);
+    /* A note between the idle test and the exchange saw `held` and returned: take the lock again for it. */
+    if (atomic_load_explicit(&a->last_us, memory_order_relaxed) != last) activity_start(a);
+}

@@ -21,8 +21,9 @@ void tdongle_temperature_sample(void){
     portEXIT_CRITICAL(&lock);
 }
 tdongle_temperature tdongle_temperature_snapshot(void){
-    uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
-    portENTER_CRITICAL(&lock);tdongle_temperature copy=state;portEXIT_CRITICAL(&lock);
+    portENTER_CRITICAL(&lock);tdongle_temperature copy=state;uint32_t now=(uint32_t)(esp_timer_get_time()/1000);portEXIT_CRITICAL(&lock);
+    /* `now` is read inside the section: a sample taken between a clock read and the copy would otherwise be newer than
+     * `now` and its age would wrap to about 49 days. */
     copy.age_ms=copy.samples?now-copy.sampled_at_ms:UINT32_MAX;
     return copy;
 }

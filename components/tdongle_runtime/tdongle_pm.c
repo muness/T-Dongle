@@ -21,6 +21,21 @@ static struct {
 } pm;
 static portMUX_TYPE pm_mux = portMUX_INITIALIZER_UNLOCKED;
 
+/* Forwarding activity (tdongle_pm.h): the lwIP input hook notes every unicast packet, a one-shot timer drops the
+ * lock TDONGLE_PM_ACTIVITY_HOLD_US after the last one. */
+static tdongle_pm_burst_t activity_burst;
+static tdongle_pm_activity_t activity;
+static esp_timer_handle_t activity_timer;
+static volatile bool activity_ready;
+static void activity_arm(void *ctx, uint32_t delay_us) {
+    (void)ctx;
+    esp_timer_start_once(activity_timer, delay_us);     /* already armed: ESP_ERR_INVALID_STATE, nothing to do */
+}
+static void activity_fire(void *arg) {
+    (void)arg;
+    tdongle_pm_activity_tick(&activity, (uint32_t)esp_timer_get_time());
+}
+
 esp_err_t tdongle_pm_start(void) {
     const esp_pm_config_t config = {
         .max_freq_mhz = TDONGLE_PM_MAX_MHZ,
@@ -33,8 +48,15 @@ esp_err_t tdongle_pm_start(void) {
     if (err != ESP_OK)
         ESP_LOGE(TAG, "esp_pm_configure failed (%s): running fixed at the boot frequency, %d MHz", esp_err_to_name(err),
                  (int)(esp_clk_cpu_freq() / 1000000));
-    else
+    else {
         ESP_LOGI(TAG, "DFS %d..%d MHz, light sleep off", TDONGLE_PM_MIN_MHZ, TDONGLE_PM_MAX_MHZ);
+        const esp_timer_create_args_t args = { .callback = activity_fire, .name = "pm_activity" };
+        if (tdongle_pm_burst_register(&activity_burst, "fwd_activity") && esp_timer_create(&args, &activity_timer) == ESP_OK) {
+            tdongle_pm_activity_init(&activity, &activity_burst, TDONGLE_PM_ACTIVITY_HOLD_US, activity_arm, NULL);
+            activity_ready = true;
+        } else
+            ESP_LOGE(TAG, "forwarding activity hold unavailable: hops outside the shared tasks run at the idle clock");
+    }
     return err;
 }
 
@@ -77,6 +99,10 @@ bool tdongle_pm_burst_register(tdongle_pm_burst_t *burst, const char *name) {
     tdongle_pm_burst_init(burst, name, &backend, &pm.slot[index].lock);
     pm.slot[index].burst = burst;        /* published last: status never sees a half-built slot */
     return lock != NULL || err == ESP_ERR_NOT_SUPPORTED;
+}
+
+void tdongle_pm_note_activity(void) {
+    if (activity_ready) tdongle_pm_activity_note(&activity, (uint32_t)esp_timer_get_time());
 }
 
 void tdongle_pm_status(tdongle_pm_status_t *out) {

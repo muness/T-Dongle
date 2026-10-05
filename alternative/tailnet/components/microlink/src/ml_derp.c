@@ -788,7 +788,9 @@ static void member_service(void *ctx, void *shared) {
         ml_derp_link_connect(&ml->derp.link);
     }
 
+    uint32_t frames_before = ml->derp.link.stats.frames_rx + ml->derp.link.stats.frames_tx;
     ml_derp_link_service(&ml->derp.link);
+    if (shared && ml_derp_link_busy(&ml->derp.link, frames_before)) ((ml_derp_pass_t *)shared)->active = true;
     ml->derp.last_recv_ms = ml->derp.link.last_recv_ms;
     {   /* when this link next needs the task: the shared loop sleeps until the earliest of them */
         ml_derp_pass_t *pass = shared;

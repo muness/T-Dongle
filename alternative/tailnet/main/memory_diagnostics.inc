@@ -385,7 +385,10 @@ static void report_cpu(jw_writer *w) {
         return;
     }
     uint32_t total = 0;
-    UBaseType_t n = uxTaskGetSystemState(tasks, CPU_REPORT_TASKS, &total);
+    UBaseType_t existing = uxTaskGetNumberOfTasks();
+    /* uxTaskGetSystemState returns 0 and fills nothing when the array is too small: say so rather than print an
+     * empty list. */
+    UBaseType_t n = existing <= CPU_REPORT_TASKS ? uxTaskGetSystemState(tasks, CPU_REPORT_TASKS, &total) : 0;
     tdongle_pm_status_t pm;
     tdongle_pm_status(&pm);
     report_begin(w, "cpu");
@@ -394,6 +397,7 @@ static void report_cpu(jw_writer *w) {
     report_field(w, "total", total);
     report_field(w, "cores", portNUM_PROCESSORS);
     report_field(w, "tasks_listed", n);
+    report_field(w, "tasks_existing", existing);
     jw_raw(w, ",\"tasks\":[");
     for (UBaseType_t i = 0; i < n; i++) {
         if (i) jw_char(w, ',');

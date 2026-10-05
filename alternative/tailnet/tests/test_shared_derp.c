@@ -150,6 +150,39 @@ static void scenario_exactly_5s(void) {
     b_bounded("A stalled exactly 5 s mid-record");
     end_checks();
 }
+/* The shared derp task takes the CPU-max lock after a pass that was busy and never for an idle poll (ADR 0016):
+ * an established relay with nothing to say is polled every 10 ms and must read as not busy. */
+static void scenario_activity_gate(void) {
+    begin(0, 0, true);
+    connect_both();
+    run(2000);                                                           /* the handshake frames have settled */
+    unsigned idle_busy = 0;
+    for (unsigned i = 0; i < 100; i++) {
+        uint32_t before = A.link.stats.frames_rx + A.link.stats.frames_tx;
+        vnow += ML_DERP_POLL_MS;
+        ml_derp_link_service(&A.link);
+        idle_busy += ml_derp_link_busy(&A.link, before);
+    }
+    assert(idle_busy == 0);                                              /* 100 idle polls: no lock cycles */
+    fake_enqueue(&A, vnow, 77, 300);
+    uint32_t before = A.link.stats.frames_rx + A.link.stats.frames_tx;
+    vnow += ML_DERP_POLL_MS;
+    ml_derp_link_service(&A.link);
+    assert(ml_derp_link_busy(&A.link, before));                          /* a frame went out: busy */
+    fake_server_send(&A, vnow, 78, 300);
+    before = A.link.stats.frames_rx + A.link.stats.frames_tx;
+    vnow += ML_DERP_POLL_MS;
+    ml_derp_link_service(&A.link);
+    assert(ml_derp_link_busy(&A.link, before));                          /* a frame came in: busy */
+    /* a connect step is work even when no frame moved; a link waiting for its retry is not */
+    ml_derp_link_t probe;
+    memset(&probe, 0, sizeof(probe));
+    for (int st = ML_DERP_IDLE; st <= ML_DERP_READY; st++) {
+        probe.state = (ml_derp_link_state_t)st;
+        assert(ml_derp_link_busy(&probe, 0) == (st >= ML_DERP_TRANSPORT && st < ML_DERP_READY));
+    }
+    end_checks();
+}
 static void scenario_write_blocked(void) {
     begin(0, 0, true);
     connect_both();
@@ -373,6 +406,7 @@ int main(void) {
         scenario_stall_5s(chunks[i][0], chunks[i][1]);
     }
     scenario_exactly_5s();
+    scenario_activity_gate();
     scenario_write_blocked();
     scenario_handshake_hang();
     scenario_http_silent();

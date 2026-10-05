@@ -18,7 +18,7 @@ extern void mgmt_write(const char *s);
 extern bool gateway_online(void);
 /* wireguard_lwip: ChaCha20-Poly1305 self-test + cycle benchmark (writes lines through the callback). */
 extern int wg_crypto_bench_run(void (*write)(const char *line));
-/* The `pm` command: the clock now, the scaling state and every CPU-max lock, then IDF's own lock table. An idle
+/* The `pm` command: the clock now, the scaling state and every CPU-max lock, then IDF's own lock table (heap buffer, truncated). An idle
  * gateway reports cpu_mhz=80 here; after a transfer the held_us counters have moved. See ADR 0016. */
 static void pm_report(void) {
     tdongle_pm_status_t pm;
@@ -34,8 +34,10 @@ static void pm_report(void) {
                  (unsigned long)b->underflows, (unsigned long)b->forced_releases, (unsigned long)b->backend_failures, (unsigned long)b->isr_rejects);
         mgmt_write(line);
     }
-    char dump[768];
-    if (tdongle_pm_dump_locks(dump, sizeof(dump))) {
+    /* On the heap, briefly: the 4 KB command stack has no room for 1 KB of table next to the formatting. */
+    enum { DUMP_BYTES = 1024 };
+    char *dump = malloc(DUMP_BYTES);
+    if (dump && tdongle_pm_dump_locks(dump, DUMP_BYTES)) {
         mgmt_write("esp_pm_dump_locks:\r\n");
         /* The dump is LF terminated text: send it in console-sized pieces. */
         for (char *p = dump; *p;) {
@@ -50,6 +52,7 @@ static void pm_report(void) {
             if (!eol) break;
         }
     }
+    free(dump);
 }
 static QueueHandle_t commands;
 static StaticQueue_t command_queue;
@@ -79,7 +82,9 @@ static void command_task(void *arg) {
                        "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/\r\n");
         else if (!strcmp(line, "capabilities"))
             mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n");
-        else if (!strcmp(line, "status")) {
+        else if (!strcmp(line, "pm")) {
+            pm_report();
+        } else if (!strcmp(line, "status")) {
             gateway_serial_command(line);
         } else if (!strcmp(line, "boot-status")) {
             gateway_boot_report(NULL,boot_sink);mgmt_write("\r\n");

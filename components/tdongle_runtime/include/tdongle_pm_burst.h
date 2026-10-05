@@ -53,3 +53,28 @@ void tdongle_pm_burst_end(tdongle_pm_burst_t *burst);
 /* Close every open section at once (task exit, membership stop). A no-op when idle. */
 void tdongle_pm_burst_release_all(tdongle_pm_burst_t *burst);
 void tdongle_pm_burst_stats(const tdongle_pm_burst_t *burst, tdongle_pm_burst_stats_t *out);
+
+/* ---- activity hold ---------------------------------------------------------------------------------------------
+ * Some stages of the forwarded data path (the Wi-Fi driver, the lwIP tcpip task, the USB class task) never wait on
+ * a queue of ours, so there is no loop of ours to bracket. They call note() when a packet passes. The first note
+ * after a quiet spell takes the lock (idle -> active) and arms a one-shot timer; the timer calls tick(), which keeps
+ * the lock until `hold_us` have passed without a note and then drops it. A stream therefore pays for one lock
+ * acquire, not one per packet, and the CPU returns to its low frequency about hold_us after the last packet.
+ *
+ * note() runs in the caller's task (any task, many at once); tick() runs in the timer task. Both are safe against
+ * each other: `held` is flipped with an exchange and the burst counter absorbs a begin/end that cross. Never from an
+ * interrupt (note() then counts an isr_reject and does nothing). */
+typedef struct {
+    tdongle_pm_burst_t *burst;
+    uint32_t hold_us;                    /* must be below 2^31 */
+    void (*arm)(void *ctx, uint32_t delay_us);   /* start the one-shot timer; tick() runs from it */
+    void *ctx;
+    atomic_uint last_us;                 /* time of the latest note */
+    atomic_bool held;                    /* this object owns one begin() on `burst` */
+    atomic_uint starts;                  /* idle -> active transitions (lock acquires caused by this object) */
+} tdongle_pm_activity_t;
+
+void tdongle_pm_activity_init(tdongle_pm_activity_t *a, tdongle_pm_burst_t *burst, uint32_t hold_us,
+                              void (*arm)(void *ctx, uint32_t delay_us), void *ctx);
+void tdongle_pm_activity_note(tdongle_pm_activity_t *a, uint32_t now_us);
+void tdongle_pm_activity_tick(tdongle_pm_activity_t *a, uint32_t now_us);

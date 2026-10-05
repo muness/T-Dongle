@@ -774,6 +774,10 @@ static void route_task(void *context) {
 #endif
 int gateway_host_input(struct pbuf *p,struct netif *input) {
 #ifndef GATEWAY_HOST_TEST
+    /* Every IP packet that reaches this core passes here, in the tcpip task: Wi-Fi to USB, USB to Wi-Fi, NAT-only
+     * and tunnel. Wi-Fi, USB and tcpip hold no lock of their own, so this is where the clock is raised for them
+     * (ADR 0016). Link-layer broadcast and multicast is neighbours' chatter, not forwarding: it must not pin 240. */
+    if(!(p->flags&(PBUF_FLAG_LLBCAST|PBUF_FLAG_LLMCAST)))tdongle_pm_note_activity();
     uint8_t first[20];
     if(usb_interface && input==esp_netif_get_netif_impl(usb_interface) &&
        pbuf_copy_partial(p,first,20,0)==20 && (rd32(first+16)&0xfffe0000)==0xc6120000) {

@@ -13,7 +13,11 @@
 /* Never below 80: the APB clock (UART, SPI LCD, the Wi-Fi driver's ESP_PM_APB_FREQ_MAX lock) is 80 MHz and drops
  * with the CPU below that. */
 #define TDONGLE_PM_MIN_MHZ 80
-#define TDONGLE_PM_MAX_BURSTS 6
+#define TDONGLE_PM_MAX_BURSTS 8
+/* How long the clock stays at maximum after the last forwarded packet (tdongle_pm_note_activity). Long enough to
+ * bridge the gaps inside a stream and the fairness sleeps, short enough that the chip cools within a fraction of a
+ * second of the last packet. */
+#define TDONGLE_PM_ACTIVITY_HOLD_US 200000
 
 typedef struct {
     bool scaling;                        /* esp_pm_configure succeeded: the CPU moves between min and max */
@@ -33,6 +37,11 @@ esp_err_t tdongle_pm_start(void);
 /* Bind `burst` to a new CPU-frequency-max lock called `name` and list it in the status. Idempotent per object.
  * False: the registry is full or the lock could not be created (the burst then counts but holds nothing). */
 bool tdongle_pm_burst_register(tdongle_pm_burst_t *burst, const char *name);
+
+/* A packet is passing through a stage that has no queue of ours to wait on (the lwIP input hook: every forwarded
+ * packet, from USB or from Wi-Fi, goes through it). Task context, cheap (one atomic load while active), a no-op while
+ * scaling is off. The first call after a quiet spell raises the clock for every core; ADR 0016. */
+void tdongle_pm_note_activity(void);
 
 void tdongle_pm_status(tdongle_pm_status_t *out);
 

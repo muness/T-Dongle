@@ -32,6 +32,11 @@ def snapshot(console):
 def diff(a, b):
     """Task shares between two `cpu` reports. A task absent from `a` (started in between) counts from zero; one absent
     from `b` (exited) is omitted. Tasks are matched by name and core."""
+    for report in (a, b):
+        listed = report.get("tasks_listed", len(report["tasks"]))
+        if report.get("tasks_existing", listed) > listed:
+            raise ValueError(f"the device has {report['tasks_existing']} tasks and the report lists {listed}: "
+                             "the firmware's table is too small (CPU_REPORT_TASKS)")
     wall_us = (b["uptime_ms"] - a["uptime_ms"]) * 1000
     if wall_us <= 0:
         raise ValueError("snapshots are not in order (uptime did not advance; the device may have rebooted)")

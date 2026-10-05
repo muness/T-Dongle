@@ -80,11 +80,20 @@ static void wait_for_work(uint32_t wait_ms) {
 static void derp_task(void *arg) {
     ml_rt_core_t *core = arg;
     ESP_LOGI(TAG, "derp started (Core %d)", xPortGetCoreID());
+    bool hot = false;
     while (!ml_rt_core_should_stop(core)) {
         rt.derp_pass.wait_ms = UINT32_MAX;
-        ml_rt_burst_begin(ML_RT_TASK_DERP);
+        rt.derp_pass.active = false;
         ml_mux_pass(&core->mux[ML_RT_TASK_DERP]);
-        ml_rt_burst_end(ML_RT_TASK_DERP);              /* before the wait: an idle relay does not pin 240 MHz */
+        /* The relay is polled every ML_DERP_POLL_MS whether or not it has anything to say, so bracketing every pass
+         * would take and drop the clock lock about a hundred times a second on an idle gateway. The lock follows
+         * activity instead: taken after a pass that moved a frame or ran a connect step, kept over the short poll
+         * wait that follows (at most ML_DERP_POLL_MS), dropped after the first pass that found nothing to do. A
+         * long wait never holds it. rt_task_exit closes it on every exit path. */
+        bool want = rt.derp_pass.active && rt.derp_pass.wait_ms <= ML_DERP_POLL_MS;
+        if (want && !hot) ml_rt_burst_begin(ML_RT_TASK_DERP);
+        else if (!want && hot) ml_rt_burst_end(ML_RT_TASK_DERP);
+        hot = want;
         wait_for_work(rt.derp_pass.wait_ms);
     }
     rt_task_exit(core, ML_RT_TASK_DERP);

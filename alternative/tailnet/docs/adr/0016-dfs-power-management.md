@@ -1,6 +1,6 @@
 # ADR 0016: CPU frequency scaling (240/80 MHz) with forwarding PM locks; Wi-Fi power save off
 
-Status: accepted for on-board validation, 2026-10-05 (owner-approved, epic #22). Follows ADR 0013 (shared runtime) and ADR 0015 (data-plane I/O). Nothing here has been measured on the board with scaling on; the plan is at the end.
+Status: accepted for on-board validation, 2026-10-05 (owner-approved, epic #22). Follows ADR 0013 (shared runtime) and ADR 0015 (data-plane I/O). Nothing here has been measured on the board with scaling on; the plan is at the end. Reviewed and amended 2026-10-05 (activity hold, derp gating, `pm` command wiring).
 
 ## Context
 
@@ -46,9 +46,10 @@ Rules, each enforced in the helper or by where the calls sit:
 | Task | Lock | Held |
 |---|---|---|
 | `ml_wg_mgr` (shared) | `ml_wg_mgr` | for each `ml_mux_pass`, not while it waits for a wake-up or the next timer |
-| `ml_derp` (shared) | `ml_derp` | for each pass (connect steps, relay read, relay write), not while it waits |
+| `ml_derp` (shared) | `ml_derp` | after a pass that moved a frame or ran a connect step, over the next poll wait (at most 10 ms); never for an idle poll |
 | `ml_net_io` (shared) | `ml_net_io` | while ready UDP sockets are drained, not during the 50 ms `select` |
 | `usb_routes` (router.c) | `usb_routes` | from the first dequeued packet until the queue is empty (also across `hold_service` and an alias fill); released before the fairness `vTaskDelay(1)` |
+| the lwIP input hook (router.c) | `fwd_activity` | from the first unicast packet after a quiet spell until 200 ms after the last one (timer task releases) |
 | `usb_txq` (tinyusb_net.c) | by the USB TX ring change | same contract; use `tdongle_pm_burst_register` and `begin`/`end` around the drain |
 
 **Not locked, on purpose.**
@@ -57,9 +58,31 @@ Rules, each enforced in the helper or by where the calls sit:
 - *`coord` tasks (control plane)*: the Noise handshake and map fetch are seconds-long exchanges bounded by network round trips. At 80 MHz the X25519 and TLS work costs time to join, not forwarding latency. If the time to a connected membership turns out to matter, wrap the connect phase in a burst (one line, same helper).
 - *The `manager` task, the display tick, SNTP, DNS*: periodic housekeeping.
 
-**Known gap, to be measured.** The lwIP `tcpip` task (NAT of Wi-Fi to USB, the lwIP hook that feeds `usb_routes`) and the Wi-Fi driver tasks hold no lock of ours. Forwarded traffic that never reaches a shared task (plain NAT) is processed at whatever the clock is, which may be 80 MHz if no forwarding task is busy. The first on-board run must compare NAT throughput and latency with the fixed-240 build; if it regresses, the fix is a burst held from the hook's enqueue to `tcpip` drain, not a higher floor.
+**The forwarded path, hop by hop, and who holds the clock** (review of 2026-10-05).
 
-**Cost of a section.** `esp_pm_lock_acquire` switches the clock inline (about tens of microseconds, plus a cross-core interrupt so the other core re-bases its tick compare). The `ml_derp` loop wakes every `ML_DERP_POLL_MS` (10 ms) while a relay is up and brackets each pass, so an idle gateway with a relay up takes about 100 acquire/release pairs a second. `power.locks.ml_derp.held_us` shows what that costs in time at 240 MHz. If it is more than a few percent, gate the derp section on the pass having read or written a frame (a follow-up, measured first).
+| Direction | Hop | Task | Clock |
+|---|---|---|---|
+| Wi-Fi to USB | Wi-Fi driver receive | `wifi`, core 0 | idle clock until the hook below has run once |
+| | lwIP input, `gateway_host_input`, UDP demux | `tcpip`, core 0 | raised by the hook (activity hold) |
+| | select wake, socket read, classify | `ml_net_io` | its own lock from the drain; the wake itself is covered by the activity hold |
+| | ChaCha20-Poly1305 decrypt, NAT rewrite, `gateway_tunnel_input` to the USB ring | `ml_wg_mgr` (under the tcpip core lock) | `ml_wg_mgr` lock |
+| | USB IN transfer | TinyUSB task (other PR) | activity hold |
+| USB to Wi-Fi | USB OUT receive | TinyUSB task | idle clock for the first packet after a quiet spell only |
+| | hook: queue to `usb_routes` | `tcpip` | raised by the hook |
+| | flow lookup, rewrite, hand to the tunnel | `usb_routes` | `usb_routes` lock |
+| | encrypt | `ml_wg_mgr` | `ml_wg_mgr` lock |
+| | `udp_sendto`, Wi-Fi transmit | `tcpip`, `wifi` | activity hold |
+| NAT only (no tailnet) | everything: Wi-Fi, `tcpip` NAPT, USB | no task of ours | activity hold (without it: 80 MHz throughout) |
+
+Before the review the last three rows had no lock: the PR's own note admitted that NAT-only traffic and the `tcpip` and Wi-Fi hops ran at whatever the clock was, which with nothing else busy is 80 MHz, a third of the speed the fixed-240 numbers above were measured at. Between two packets of a stream, `usb_routes` also dropped its lock for the fairness `vTaskDelay(1)` and a wake-up from an empty queue ran at 80 MHz until the dequeue.
+
+**Activity hold (the fix).** `gateway_host_input`, the lwIP IP input hook, sees every IP packet that reaches the core, in the `tcpip` task: Wi-Fi and USB, tunnel and NAT-only. It calls `tdongle_pm_note_activity()` for every packet that is not link-layer broadcast or multicast (neighbours' chatter must not pin 240 MHz). The first note after a quiet spell takes a `fwd_activity` CPU-max lock and arms a one-shot `esp_timer`; the timer drops the lock when `TDONGLE_PM_ACTIVITY_HOLD_US` (200 ms) have passed without a note. A stream costs one acquire in total, not one per packet, and an idle gateway is back at 80 MHz about 200 ms after the last packet. The hook is not an interrupt (it runs in `tcpip`), the per-packet cost while held is one atomic store and one atomic load plus an `esp_timer_get_time()`, and the lock is begun by `tcpip` and ended by the timer task: that is why the helper's depth is atomic (`tdongle_pm_activity_*` in `tdongle_pm_burst.c`, tested under TSan with producers and a ticker; the tick compares ages with a signed difference so a note newer than the tick's clock read means "just now").
+
+What is still at the idle clock: only the stages before the hook for the first packet after a quiet spell (the Wi-Fi receive that wakes the system, the TinyUSB receive of the first USB frame). That is the clock-switch cost of the first packet, tens of microseconds for the switch plus a few tens of microseconds of driver work at one third speed; it is paid once per burst, not per packet, and is invisible next to the 48 ms median. Under load the clock is 240 MHz for the whole path, as in the fixed-240 build.
+
+**Cost of a section.** `esp_pm_lock_acquire` switches the clock inline (about tens of microseconds, plus a cross-core interrupt so the other core re-bases its tick compare).
+
+**The `ml_derp` poll.** An established relay is read every `ML_DERP_POLL_MS` (10 ms) whether or not it has anything to say. Bracketing every pass took and dropped the lock about a hundred times a second on an idle gateway with a relay up. The lock now follows activity (`ml_derp_link_busy`): it is taken after a pass that moved a frame or ran a connect step, kept across the following poll wait (at most 10 ms, never a long wait), and dropped after the first pass that found nothing to do. An idle relay therefore causes no lock cycles at all; a relay carrying traffic holds the lock continuously. Note that the DERP traffic itself also passes the activity hold above.
 
 ### C. Wi-Fi power save off
 
@@ -68,7 +91,7 @@ Rules, each enforced in the helper or by where the calls sit:
 ### D. Diagnostics
 
 - `/status` gains a `power` object: `scaling`, `cpu_mhz` (the clock when the request was served), `max_mhz`, `min_mhz`, `configure_error`, `lock_create_failures`, `wifi_ps`, and per lock `depth`, `acquires`, `releases`, `held_us` (wraps at 71.6 min; difference two readings), `max_depth`, `underflows`, `forced_releases`, `backend_failures`, `isr_rejects`. `underflows`, `forced_releases` and `backend_failures` must stay 0 in normal operation.
-- Serial `pm` prints the same, plus IDF's own `esp_pm_dump_locks()` table into a 768 B stack buffer (truncated). The `capabilities` line lists `power_report`.
+- Serial `pm` prints the same, plus IDF's own `esp_pm_dump_locks()` table into a 1 KB heap buffer (truncated; the 4 KB command stack is too small for it). The `capabilities` line lists `power_report`.
 
 ### E. Temperature sensor semantics
 
@@ -88,9 +111,9 @@ Host: `components/tdongle_runtime/tests/test_pm_burst.c` (nesting, error paths, 
 
 On the board (coordinator), each run against the fixed-240 build (`CONFIG_PM_ENABLE` off, or `power.scaling` false) from the same commit:
 
-1. Idle, 10 minutes after the tailnet is up: serial `pm` or `/status` `power.cpu_mhz` reads 80; `ml_derp.held_us` duty (difference over uptime) under a few percent; `forced_releases`, `underflows`, `backend_failures` all 0.
+1. Idle, 10 minutes after the tailnet is up: serial `pm` or `/status` `power.cpu_mhz` reads 80; `ml_derp.acquires` not moving (no lock cycles for an idle relay) and `fwd_activity.held_us` duty under a few percent; `forced_releases`, `underflows`, `backend_failures` all 0.
 2. Under load (iperf3 through the tunnel, both directions, TCP and UDP): `cpu_mhz` reads 240 during the transfer and returns to 80 within seconds after it; ping p50/p90/max under idle and under load no worse than the fixed-240 build; iperf throughput within noise of fixed 240 (UDP +14% over 160 MHz is the bar).
-3. NAT-only traffic (no tailnet peer): the `tcpip` gap above. Compare against fixed 240.
+3. NAT-only traffic (no tailnet peer): covered by the activity hold; compare throughput and ping against fixed 240. `power.locks.fwd_activity.acquires` counts bursts, `held_us` the time at 240.
 4. Idle chip temperature, sampled every 10 s for 10 minutes after 10 minutes of settle, scaling on against fixed 240, same ambient and orientation; expect a lower plateau of a few degrees, in 1 C steps.
 5. Wi-Fi: `power.wifi_ps` is 0; ping p50 near 48 ms idle.
 6. USB: unplug and replug, and a 30 minute soak with the display on: the device stays enumerated and `/status` answers (no light sleep).
