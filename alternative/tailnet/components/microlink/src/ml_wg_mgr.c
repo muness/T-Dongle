@@ -23,6 +23,8 @@
 #include "tdongle_wgperf.h"
 #include "ml_rx_stats.h"
 #include "ml_wg_idle.h"
+#include "ml_wg_rx_batch.h"
+#include "ml_wg_rx_budget.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_netif.h"
@@ -501,7 +503,9 @@ static esp_err_t wg_init_interface_impl(microlink_t *ml) {
      * thread accesses TCP PCB state without synchronization.  The WG output
      * callback uses raw udp_sendto (not BSD sendto) to avoid deadlock. */
     extern err_t gateway_tunnel_input(struct pbuf *, struct netif *);
+    extern void gateway_tunnel_input_batch(struct pbuf **, unsigned, struct netif *, err_t *);
     netif->input = gateway_tunnel_input;
+    wireguardif_set_rx_batch(netif, gateway_tunnel_input_batch);   /* the run hands its packets over together, with the core lock released (ADR 0020) */
 
     /* Add to lwIP netif list (bypass netif_add which wants init callback) */
     netif->next = netif_list;
@@ -2223,10 +2227,86 @@ unsigned ml_wg_rx_stat_count(void) { return WG_RXS_COUNT; }
 uint32_t ml_wg_rx_stat(unsigned which) { return wireguard_rx_stat_get(which); }
 const char *ml_wg_rx_stat_name(unsigned which) { return wireguard_rx_stat_name(which); }
 unsigned ml_wg_replay_window(void) { return WIREGUARD_REPLAY_WINDOW_SIZE; }
+unsigned ml_wg_rx_batch_size(void) { return ML_WG_RX_BATCH; }
 
-static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
+/* ----------------------------------------------------------------------------
+ * Inbound runs (ADR 0020)
+ *
+ * The drain below takes datagrams off wg_rx_queue, stages up to ML_WG_RX_BATCH of them (everything that used to precede the call
+ * into wireguardif: the DERP sender check, the interface check, and wrapping the heap block the datagram already lives in as a
+ * pbuf, with no allocation and no copy), then hands the run to ml_wg_rx_run (ml_wg_rx_batch.h): begin under ONE core-lock hold,
+ * decrypt in place with the lock released, complete under ONE hold, then the router with the lock released. A message that is
+ * not transport data (a handshake, a cookie) is never staged behind data: the data before it is finished first, then it is
+ * processed alone, so state it changes is seen by later datagrams exactly as in the one-datagram path.
+ *
+ * Single consumer: everything here is touched by the wg_mgr task only (statics, not stack: the jobs array is ~800 B). */
+typedef struct { struct pbuf_custom pc; uint8_t *data; } wg_rx_wrap_t;   /* pc first: the free callback receives the pbuf */
+typedef struct { int sender; uint32_t sender_activity; bool keepalive_only; } wg_rx_meta_t;
+static wg_rx_wrap_t g_rx_wrap[ML_WG_RX_BATCH];
+static ml_wg_rx_item_t g_rx_items[ML_WG_RX_BATCH];
+static struct wireguard_rx_job g_rx_jobs[ML_WG_RX_BATCH];
+static wg_rx_meta_t g_rx_meta[ML_WG_RX_BATCH];
+static unsigned g_rx_n;
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+static uint32_t g_rx_t0, g_rx_prep_cycles;
+#endif
+
+/* The pbuf wrapping a datagram frees the datagram's heap block with it, wherever the last reference goes (complete on a drop, the
+ * router when it consumes the packet, wireguardif when the router refuses it). */
+static void wg_rx_wrap_free(struct pbuf *p) {
+    wg_rx_wrap_t *w = (wg_rx_wrap_t *)p;
+    tdongle_heap_free(TDONGLE_OWNER_PACKET, w->data);
+    w->data = NULL;
+}
+
+/* The core lock around a run's begin and complete, timed into the diagnostics ledger by the same sites as before. */
+typedef struct {
+    int64_t hold_start;
+    uint32_t member;      /* diagnostic_id of the membership whose run this is (boot-health route marks) */
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+    uint32_t stamp;
+#endif
+} wg_rx_lk_t;
+static wg_rx_lk_t g_rx_lk;
+static void wg_rx_lock(void *ctx, unsigned site) {
+    wg_rx_lk_t *l = ctx;
+    (void)site;
     WGPERF_T(t);
-    WGPERF_T(t_all);
+    LOCK_TCPIP_CORE();
+    WGPERF_LAP(t, lock_wait);
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+    l->stamp = t;
+#endif
+    l->hold_start = tdongle_lock_clock();
+#ifdef ESP_PLATFORM
+    gateway_route_mark(5, l->member);
+#endif
+}
+static void wg_rx_unlock(void *ctx, unsigned site) {
+    wg_rx_lk_t *l = ctx;
+#ifdef ESP_PLATFORM
+    gateway_route_mark(0, 0);
+#endif
+    tdongle_lock_hold(site == ML_WG_RX_SITE_COMMIT ? TDONGLE_LOCK_WG_COMMIT : TDONGLE_LOCK_WG_OTHER, (uint32_t)(tdongle_lock_clock() - l->hold_start));
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+    WGPERF_ADD(lock_hold, TDONGLE_WGPERF_CYCLES() - l->stamp);
+#endif
+    UNLOCK_TCPIP_CORE();
+}
+static const ml_wg_rx_lock_t g_rx_lock_ops = { wg_rx_lock, wg_rx_unlock, &g_rx_lk };
+
+/* Is this popped datagram transport data (the only thing that is batched)? Same test wireguardif applies. */
+static bool wg_rx_pkt_is_data(const ml_rx_packet_t *pkt) {
+    return pkt->len >= sizeof(struct message_transport_data) + WIREGUARD_AUTHTAG_LEN && pkt->data[0] == MESSAGE_TRANSPORT_DATA &&
+           pkt->data[1] == 0 && pkt->data[2] == 0 && pkt->data[3] == 0;
+}
+
+/* Stage one datagram into the run being built. Takes ownership of pkt->data: false = it was dropped (counted) and freed. */
+static bool wg_rx_stage(microlink_t *ml, const ml_rx_packet_t *pkt) {
+    WGPERF_T(t);
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+    if (!g_rx_n) { g_rx_t0 = t; g_rx_prep_cycles = 0; }
+#endif
     WGPERF_COUNT(in_pkts, 1);
     ML_RX_STAT(wg_in);
     /* Handshake and cookie messages are logged; transport data (type 4, one per ACK or download segment) is not. */
@@ -2235,82 +2315,94 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
                  (int)pkt->len, pkt->via_derp,
                  pkt->len >= 4 ? pkt->data[0] : -1,
                  pkt->src_pubkey[0], pkt->src_pubkey[1], pkt->src_pubkey[2], pkt->src_pubkey[3]);
+    wg_rx_meta_t meta = { .sender = -1, .sender_activity = 0, .keepalive_only = false };
 #ifdef ESP_PLATFORM
-    int sender = -1;
-    uint32_t sender_activity = 0;
     if(pkt->via_derp) {
         /* The DERP source key is the relay's claim, not proof. A resident peer
          * is simply that peer. Otherwise only a WireGuard initiation can start
          * a session, so anything else from an unknown key is dropped before it
          * costs a flash read; an initiation gets a trial slot (see
          * directory_trial_*), kept only if WireGuard authenticates it. */
-        sender=derp_sender_admit(ml,pkt);
-        if(sender<0){ML_RX_STAT(wg_sender_unknown);tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);return;}
+        meta.sender=derp_sender_admit(ml,pkt);
+        if(meta.sender<0){ML_RX_STAT(wg_sender_unknown);tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);return false;}
         /* The packet only counts as the peer's activity if WireGuard accepts it. */
-        sender_activity=wg_peer_activity(ml,sender);
+        meta.sender_activity=wg_peer_activity(ml,meta.sender);
     }
 #endif
     if (!ml->wg_netif) {
         ML_RX_STAT(wg_no_netif);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
-        return;
+        return false;
     }
-
     struct netif *netif = (struct netif *)ml->wg_netif;
     if (!netif->state) {
         ML_RX_STAT(wg_no_netif);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
-        return;
+        return false;
     }
-
-    /* Allocate PBUF_RAM and copy data so the pbuf OWNS its data.
-     * This is required because wireguardif decrypts in-place and then
-     * calls ip_input → tcpip_input which posts to the TCPIP thread.
-     * With PBUF_REF the backing data would be freed before the TCPIP
-     * thread processes the packet. */
-    struct pbuf *p = pbuf_alloc(PBUF_RAW, pkt->len, PBUF_RAM);
+    if (pkt->len > UINT16_MAX) {
+        ML_RX_STAT(wg_pbuf_fail);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
+        return false;
+    }
+    /* The datagram stays where net_io (or the DERP loop) put it: a custom pbuf over that heap block, whose free callback releases
+     * the block. wireguardif decrypts it in place and the router reads the same bytes, so there is no second buffer and no copy
+     * (the pbuf used to be allocated and filled here, 21k cycles per datagram in wgperf `rx_prep`). */
+    wg_rx_wrap_t *w = &g_rx_wrap[g_rx_n];
+    struct pbuf *p = pbuf_alloced_custom(PBUF_RAW, (u16_t)pkt->len, PBUF_REF, &w->pc, pkt->data, (u16_t)pkt->len);
     if (!p) {
         ML_RX_STAT(wg_pbuf_fail);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
-        return;
+        return false;
     }
+    w->pc.custom_free_function = wg_rx_wrap_free;
+    w->data = pkt->data;
     /* A keepalive (transport data, empty plaintext: 16-byte header + 16-byte tag) is processed like any authenticated message
      * (endpoint, timers, keypair confirmation) but, as before it was decrypted at all, is not "use" of the peer for residency:
      * a peer's idle PersistentKeepalive must not keep its slot from eviction (directory_activate_idle). */
-    const bool keepalive_only = pkt->len == 32 && pkt->data[0] == 0x04;
-    pbuf_take(p, pkt->data, pkt->len);
-    tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);  /* Original data no longer needed — pbuf has its own copy */
-    WGPERF_LAP(t, rx_prep);
-
-    /* Build source address */
-    ip_addr_t addr;
+    meta.keepalive_only = pkt->len == 32 && pkt->data[0] == 0x04;
+    ml_wg_rx_item_t *it = &g_rx_items[g_rx_n];
+    it->p = p;
+    it->port = pkt->src_port;
     if (pkt->via_derp) {
-        ip_addr_set_any(false, &addr);
+        ip_addr_set_any(false, &it->addr);
     } else {
-        IP_SET_TYPE_VAL(addr, IPADDR_TYPE_V4);
-        ip4_addr_set_u32(ip_2_ip4(&addr), htonl(pkt->src_ip));
+        IP_SET_TYPE_VAL(it->addr, IPADDR_TYPE_V4);
+        ip4_addr_set_u32(ip_2_ip4(&it->addr), htonl(pkt->src_ip));
     }
-
-    /* Call the WG RX handler — pbuf is PBUF_RAM so data survives async delivery. Transport data is decrypted with the
-     * lwIP core lock RELEASED: the lock is held to find the keypair (begin) and to deliver the plaintext (complete),
-     * the ChaCha20-Poly1305 in between (~0.4 ms per 1,400 B) blocks nobody. */
-    struct wireguard_rx_job rx_job;
-    int rx_pending = 0;
+    g_rx_meta[g_rx_n] = meta;
+    g_rx_n++;
     ML_RX_STAT(wg_to_wireguardif);
-    WG_LOCKED(TDONGLE_LOCK_WG_OTHER, { ROUTE_MARK(5); rx_pending = wireguardif_rx_begin(netif, p, &addr, pkt->src_port, &rx_job); ROUTE_MARK(0); });
-    if (rx_pending) {
-        WGPERF_RESTART(t);
-        wireguard_rx_decrypt(&rx_job);
-        WGPERF_LAP(t, rx_decrypt);
-        WG_LOCKED(TDONGLE_LOCK_WG_COMMIT, { ROUTE_MARK(5); wireguardif_rx_complete(netif, &addr, pkt->src_port, &rx_job); ROUTE_MARK(0); });
-        WGPERF_LAP(t, rx_deliver);
-    }
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+    g_rx_prep_cycles += TDONGLE_WGPERF_CYCLES() - t;
+#endif
+    return true;
+}
+
+/* Process the staged run and do, per datagram, what process_wg_packet did after it. */
+static void wg_rx_flush(microlink_t *ml) {
+    if (!g_rx_n) return;
+    const unsigned n = g_rx_n;
+    g_rx_n = 0;
+    WGPERF_ADD(rx_prep, g_rx_prep_cycles);
+    /* wireguardif_rx_begin_ex frees the datagram of anything it does not decrypt, so after the run nothing is owned here. */
+    g_rx_lk.member = ml->config.diagnostic_id;
+    ml_wg_rx_run((struct netif *)ml->wg_netif, g_rx_items, n, g_rx_jobs, &g_rx_lock_ops);
 #ifdef ESP_PLATFORM
-    if(sender>=0 && !keepalive_only && wg_peer_activity(ml,sender)!=sender_activity)
-        ml->peers[sender].jit_used_ms=ml_get_time_ms();
+    for (unsigned i = 0; i < n; i++) {
+        if (g_rx_meta[i].sender >= 0 && !g_rx_meta[i].keepalive_only && wg_peer_activity(ml, g_rx_meta[i].sender) != g_rx_meta[i].sender_activity)
+            ml->peers[g_rx_meta[i].sender].jit_used_ms = ml_get_time_ms();
+    }
     directory_trial_poll(ml);
 #endif
-    WGPERF_CHARGE(t_all, rx_pkt);
+    WGPERF_CHARGE(g_rx_t0, rx_pkt);
+}
+
+/* One datagram popped off wg_rx_queue: account the bytes the queue no longer holds. */
+static bool wg_rx_pop(microlink_t *ml, ml_rx_packet_t *pkt) {
+    if (xQueueReceive(ml->wg_rx_queue, pkt, 0) != pdTRUE) return false;
+    ml_wgrx_release((unsigned)pkt->len);
+    return true;
 }
 
 /* ============================================================================
@@ -2909,6 +3001,29 @@ static void wg_register_due(microlink_t *ml, ml_wg_pass_t *pass, uint64_t now) {
     if (ml->jit_packet_count || ml->inbound_trial.pending) wg_due(pass, now + 10);
 }
 
+/* Drain one membership's wg_rx_queue in runs: at most `burst` datagrams and while the window (its own, never charged for DISCO) and
+ * the pass budget hold. The window is checked before each datagram is popped, so a run is at most ML_WG_RX_BATCH datagrams past it.
+ * Returns the number of datagrams taken. */
+static unsigned wg_rx_drain(microlink_t *ml, ml_wg_pass_t *pass, uint64_t window_start_ms, unsigned window_ms, unsigned burst) {
+    ml_rx_packet_t pkt;
+    unsigned taken = 0;
+    if (uxQueueMessagesWaiting(ml->wg_rx_queue)) WGPERF_ADD(rx_qdepth, (uint32_t)uxQueueMessagesWaiting(ml->wg_rx_queue));   /* backlog at the start of a drain that has work */
+    while (taken < burst && (ml_get_time_ms() - window_start_ms) < window_ms && pass->drain_ms < WG_MGR_PASS_BUDGET_MS && wg_rx_pop(ml, &pkt)) {
+        taken++;
+        if (!wg_rx_pkt_is_data(&pkt)) {
+            /* a handshake or cookie: everything before it first, then it alone, then a new run */
+            wg_rx_flush(ml);
+            (void)wg_rx_stage(ml, &pkt);
+            wg_rx_flush(ml);
+            continue;
+        }
+        if (!wg_rx_stage(ml, &pkt)) continue;
+        if (g_rx_n == ML_WG_RX_BATCH) wg_rx_flush(ml);
+    }
+    wg_rx_flush(ml);    /* the tail of the backlog: staged datagrams are owned by this task and must not wait for the next wake */
+    return taken;
+}
+
 static void member_service(void *ctx, void *shared) {
     microlink_t *ml = ctx;
     ml_wg_pass_t *pass = shared;
@@ -3059,16 +3174,10 @@ static void member_service(void *ctx, void *shared) {
     if (loop->disco_rx_10s != disco_before) { WGPERF_CHARGE(tdisco, disco_rx); g_pass_work++; }
 
     /* Process WireGuard packets */
-    ml_rx_packet_t wg_pkt;
     budget_start_ms = ml_get_time_ms();   /* WG data plane: fresh window, not charged for DISCO */
     WGPERF_T(tdrain);
-    int drained = 0;
-    for (int n = 0; n < WG_MGR_WG_BURST && WG_MGR_BUDGET_LEFT(WG_MGR_WG_BUDGET_MS) &&
-                    xQueueReceive(ml->wg_rx_queue, &wg_pkt, 0) == pdTRUE; n++) {
-        process_wg_packet(ml, &wg_pkt);
-        drained++;
-    }
-    if (drained) { WGPERF_CHARGE(tdrain, drain_wg); g_pass_work += (unsigned)drained; }
+    unsigned drained = wg_rx_drain(ml, pass, budget_start_ms, WG_MGR_WG_BUDGET_MS, WG_MGR_WG_BURST);
+    if (drained) { WGPERF_CHARGE(tdrain, drain_wg); g_pass_work += drained; }
     WG_MGR_CHARGE();
 
     /* Run WireGuard periodic processing (handshakes, keepalives, rekeys).
@@ -3117,13 +3226,8 @@ static void member_service(void *ctx, void *shared) {
      * window so the slow periodic work above cannot starve it (#46). */
     budget_start_ms = ml_get_time_ms();
     WGPERF_RESTART(tdrain);
-    drained = 0;
-    for (int n = 0; n < WG_MGR_WG_BURST && WG_MGR_BUDGET_LEFT(WG_MGR_WG_BUDGET_MS) &&
-                    xQueueReceive(ml->wg_rx_queue, &wg_pkt, 0) == pdTRUE; n++) {
-        process_wg_packet(ml, &wg_pkt);
-        drained++;
-    }
-    if (drained) { WGPERF_CHARGE(tdrain, drain_wg); g_pass_work += (unsigned)drained; }
+    drained = wg_rx_drain(ml, pass, budget_start_ms, WG_MGR_WG_BUDGET_MS, WG_MGR_WG_BURST);
+    if (drained) { WGPERF_CHARGE(tdrain, drain_wg); g_pass_work += drained; }
     WG_MGR_CHARGE();
     #undef WG_MGR_CHARGE
     #undef WG_MGR_BUDGET_LEFT

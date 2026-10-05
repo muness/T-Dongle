@@ -28,8 +28,11 @@
     X(q_stun_full)       /* stun_rx_queue full: dropped */ \
     X(derp_rx_wg)        /* WireGuard datagrams offered to wg_rx_queue by the DERP loop */ \
     X(derp_q_wg_full)    /* ... of which wg_rx_queue was full: dropped */ \
+    X(q_wg_bytes)        /* WireGuard datagram refused: it would take the queued bytes past ML_WG_RX_QUEUE_BYTES (ml_wg_rx_budget.h), either producer */ \
+    X(q_wg_heap)         /* WireGuard datagram refused: it would leave less free internal heap than the recovery reserve, either producer */ \
     X(drain_calls)       /* times net_io drained a ready socket */ \
     X(drain_capped)      /* ... that stopped at the per-call cap with the socket possibly not empty */ \
+    X(drain_deep)        /* ... that read at least ML_NET_IO_DEEP datagrams: the socket mailbox (10) was nearly full when net_io got to it, one burst from the silent loss */ \
     X(wg_in)             /* datagrams taken off wg_rx_queue by wg_mgr */ \
     X(wg_sender_unknown) /* DERP source key admitted to no peer slot: dropped before any decryption */ \
     X(wg_no_netif)       /* membership has no WireGuard interface (yet or any more): dropped */ \
@@ -80,5 +83,6 @@ unsigned ml_wg_rx_stat_count(void);
 uint32_t ml_wg_rx_stat(unsigned which);
 const char *ml_wg_rx_stat_name(unsigned which);
 unsigned ml_wg_replay_window(void);
+unsigned ml_wg_rx_batch_size(void);   /* ML_WG_RX_BATCH: datagrams per inbound run (ADR 0020) */
 
 #endif

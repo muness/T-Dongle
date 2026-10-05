@@ -14,6 +14,7 @@
 #endif
 #define gateway_host_input H(gateway_host_input)
 #define gateway_tunnel_input H(gateway_tunnel_input)
+#define gateway_tunnel_input_batch H(gateway_tunnel_input_batch)
 #define gateway_alias H(gateway_alias)
 #define gateway_forget H(gateway_forget)
 #define gateway_suspend H(gateway_suspend)

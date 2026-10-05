@@ -107,6 +107,9 @@ unsigned ml_wg_rx_stat_count(void) { return WG_RXS_COUNT; }          /* ml_wg_mg
 uint32_t ml_wg_rx_stat(unsigned which) { return wireguard_rx_stat_get(which); }
 const char *ml_wg_rx_stat_name(unsigned which) { return wireguard_rx_stat_name(which); }
 unsigned ml_wg_replay_window(void) { return WIREGUARD_REPLAY_WINDOW_SIZE; }
+unsigned ml_wg_rx_batch_size(void) { return 8; }
+#include "ml_wg_rx_budget.h"
+ml_wgrx_budget_t ml_wgrx_budget = {.bytes = 4096, .peak = 11000};
 static int wifi_current = 1;   /* slot 2 selected and pinned: the report shows the user's choice */
 #include "wifi_policy.h"
 static wifi_pin wifi_pinned = {1, 0, 0};

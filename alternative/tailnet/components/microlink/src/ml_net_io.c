@@ -16,6 +16,8 @@
 #include "microlink_internal.h"
 #include "ml_runtime.h"
 #include "ml_net_io_drain.h"
+#include "ml_wg_rx_budget.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -25,6 +27,7 @@
 static const char *TAG = "ml_net_io";
 
 ml_rx_stats_t ml_rx_stats;   /* zero-initialised; see ml_rx_stats.h */
+ml_wgrx_budget_t ml_wgrx_budget;   /* bytes of WireGuard datagrams waiting in any membership's wg_rx_queue; see ml_wg_rx_budget.h */
 
 /* DISCO magic bytes: "TS" + sparkles emoji UTF-8 */
 static const uint8_t DISCO_MAGIC[6] = { 'T', 'S', 0xf0, 0x9f, 0x92, 0xac };
@@ -94,9 +97,20 @@ static bool route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
             tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
         } else wake_wg = true;
         break;
-    case PKT_WIREGUARD:
+    case PKT_WIREGUARD: {
         ML_RX_STAT(udp_wg);
+        ml_wgrx_verdict_t admit = ml_wgrx_admit(&ml_wgrx_budget, len, heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        if (admit != ML_WGRX_OK) {
+            if (admit == ML_WGRX_BYTES) ML_RX_STAT(q_wg_bytes); else ML_RX_STAT(q_wg_heap);
+            static uint32_t wg_rx_refused = 0;
+            if ((++wg_rx_refused & 0x1F) == 1)
+                ESP_LOGW(TAG, "WG-RX(direct) queue budget: refused %lu (%s)", (unsigned long)wg_rx_refused, admit == ML_WGRX_BYTES ? "bytes" : "heap");
+            tdongle_memory_drop(TDONGLE_DROP_NET_WG_FULL);
+            tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
+            break;
+        }
         if (xQueueSend(ml->wg_rx_queue, &pkt, 0) != pdTRUE) {
+            ml_wgrx_release(len);
             ML_RX_STAT(q_wg_full);
             static uint32_t wg_rx_drops = 0;
             if ((++wg_rx_drops & 0x1F) == 1)
@@ -106,6 +120,7 @@ static bool route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
             tdongle_heap_free(TDONGLE_OWNER_PACKET, data);  /* Queue full, drop */
         } else wake_wg = true;
         break;
+    }
     default:
         ML_RX_STAT(udp_unclassified);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, data);

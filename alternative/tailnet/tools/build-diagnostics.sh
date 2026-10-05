@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the memory-diagnostics image (never a release): owner-tagged heap, per-phase join capture,
 # admission override and the serial "memory" / "members" commands. See docs/memory-diagnostics.md.
-#   tools/build-diagnostics.sh [--queue-depth 1|2|4|8]   # depth overrides DERP TX / DISCO RX / WG RX (STUN RX <= 4)
+#   tools/build-diagnostics.sh [--queue-depth 1|2|4|8|12|16]   # depth overrides DERP TX / DISCO RX / WG RX (STUN RX <= 4)
 # Output: <repo>/build-diagnostics[-q<N>]/ ; the flash command is printed by idf.py.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
@@ -9,10 +9,10 @@ cd "$(dirname "$0")/../../.."
 [[ "$(git -C "$IDF_PATH" rev-parse HEAD)" == b774170ff46c393eeb5e495ea37936038d3f4f4f ]] || { echo 'Wrong ESP-IDF commit' >&2; exit 1; }
 depth=0
 if [[ "${1:-}" == --queue-depth ]]; then
- depth="${2:?--queue-depth needs 1, 2, 4 or 8}"
- [[ "$depth" =~ ^(1|2|4|8)$ ]] || { echo 'queue depth must be 1, 2, 4 or 8' >&2; exit 2; }
+ depth="${2:?--queue-depth needs 1, 2, 4, 8, 12 or 16}"
+ [[ "$depth" =~ ^(1|2|4|8|12|16)$ ]] || { echo 'queue depth must be 1, 2, 4, 8, 12 or 16' >&2; exit 2; }
 elif [[ $# -gt 0 ]]; then
- echo 'Usage: tools/build-diagnostics.sh [--queue-depth 1|2|4|8]' >&2; exit 2
+ echo 'Usage: tools/build-diagnostics.sh [--queue-depth 1|2|4|8|12|16]' >&2; exit 2
 fi
 build=build-diagnostics; [[ $depth != 0 ]] && build="build-diagnostics-q$depth"
 mkdir -p "$build"

@@ -92,11 +92,13 @@ assert route["reply_owner"] == 3 * 26 and route["usb_tx_err"] == 3 * 29, route  
 # The inbound report: every layer's counters, cumulative, with the configuration they are read against.
 inbound = reports("inbound", "inbound")[0]
 assert inbound["udp_recvmbox"] == 10 and inbound["drain_cap"] == 16 and inbound["wg_rx_queue_depth"] == 8 and inbound["replay_window"] == 480, inbound
+assert inbound["wg_rx_queue_bytes"] == 12288 and inbound["wg_rx_bytes_queued"] == 4096 and inbound["wg_rx_bytes_peak"] == 11000 and inbound["wg_rx_batch"] == 8, inbound   # the byte bound and the run size (ADR 0020)
+assert inbound["counter_bits"] in (16, 32), inbound
 assert inbound["lwip"] == {"udp_recv": 5000, "udp_drop": 1, "udp_memerr": 2, "udp_err": 3}, inbound["lwip"]
 ml_names = ["udp_rx", "udp_rx_empty", "udp_unclassified", "udp_alloc_fail", "udp_recv_err", "udp_wg", "udp_disco", "udp_stun", "q_wg_full", "q_disco_full",
-            "q_stun_full", "derp_rx_wg", "derp_q_wg_full", "drain_calls", "drain_capped", "wg_in", "wg_sender_unknown", "wg_no_netif", "wg_pbuf_fail",
+            "q_stun_full", "derp_rx_wg", "derp_q_wg_full", "q_wg_bytes", "q_wg_heap", "drain_calls", "drain_capped", "drain_deep", "wg_in", "wg_sender_unknown", "wg_no_netif", "wg_pbuf_fail",
             "wg_to_wireguardif", "drain_burst_max"]
-assert list(inbound["ml"]) == ml_names and inbound["ml"]["udp_rx"] == 100 and inbound["ml"]["wg_to_wireguardif"] == 119 and inbound["ml"]["drain_burst_max"] == 13, inbound["ml"]
+assert list(inbound["ml"]) == ml_names and inbound["ml"]["udp_rx"] == 100 and inbound["ml"]["wg_to_wireguardif"] == 122 and inbound["ml"]["drain_burst_max"] == 13, inbound["ml"]
 wg_names = ["rx_data", "rx_bad_type", "rx_no_peer", "rx_keypair_unusable", "rx_expired", "rx_alloc_fail", "rx_session_gone", "rx_decrypt_fail",
             "rx_keepalive", "rx_replay_dup", "rx_replay_old", "rx_replay_limit", "rx_bad_ip", "rx_allowed_ip", "rx_allowed_ip6", "rx_bad_length", "rx_ipv6_unsupported", "rx_input_fail", "rx_delivered"]
 assert list(inbound["wg"]) == wg_names and inbound["wg"]["rx_data"] == 200 and inbound["wg"]["rx_delivered"] == 218, inbound["wg"]
