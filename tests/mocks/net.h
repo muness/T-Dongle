@@ -121,12 +121,8 @@ static void heap_caps_free(void *p){
     free(h);
 }
 
-/* ---- power management: every acquire must pair with a release, never twice ---- */
-typedef int esp_pm_lock_type_t;
-#define ESP_PM_CPU_FREQ_MAX 0
-typedef struct { int held; } *esp_pm_lock_handle_t;
-static int pm_create_fail, pm_acquires, pm_releases, pm_deleted;
-static esp_err_t esp_pm_lock_create(esp_pm_lock_type_t t,int arg,const char *name,esp_pm_lock_handle_t *h){(void)t;(void)arg;(void)name;if(pm_create_fail)return ESP_FAIL;*h=calloc(1,sizeof(**h));return ESP_OK;}
-static esp_err_t esp_pm_lock_acquire(esp_pm_lock_handle_t h){assert(!in_crit&&!in_producer);assert(!h->held);h->held=1;pm_acquires++;return ESP_OK;}
-static esp_err_t esp_pm_lock_release(esp_pm_lock_handle_t h){assert(!in_crit&&!in_producer);assert(h->held);h->held=0;pm_releases++;return ESP_OK;}
-static esp_err_t esp_pm_lock_delete(esp_pm_lock_handle_t h){assert(!h->held);free(h);pm_deleted++;return ESP_OK;}
+/* ---- power management: the caller's hold; every begin must pair with an end, never twice ---- */
+static struct { int held; } mock_pm;
+static int pm_acquires, pm_releases;
+static void mock_pm_begin(void *ctx){(void)ctx;assert(!in_crit&&!in_producer);assert(!mock_pm.held);mock_pm.held=1;pm_acquires++;}
+static void mock_pm_end(void *ctx){(void)ctx;assert(!in_crit&&!in_producer);assert(mock_pm.held);mock_pm.held=0;pm_releases++;}

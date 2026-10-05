@@ -495,6 +495,9 @@ static void manager(void *arg) {
  * drops the frame (counted), which TCP treats as loss. See docs/adr/0015-data-plane-io.md. */
 /* The elastic transmit buffer's gate: growth is forbidden, and idle chunks are given back, while any membership holds the
  * negotiation token (a join's allocation peak, and the admission measurement that precedes it). */
+static tdongle_pm_burst_t usb_tx_pm;
+static void usb_tx_pm_begin(void *ctx) { (void)ctx; tdongle_pm_burst_begin(&usb_tx_pm); }
+static void usb_tx_pm_end(void *ctx) { (void)ctx; tdongle_pm_burst_end(&usb_tx_pm); }
 static bool usb_tx_gate(void *ctx) { (void)ctx; return ml_neg_busy(ml_rt_negotiation()); }
 /* Token changed hands: wake the buffer's worker so it retires idle chunks now rather than at its next housekeeping. */
 static void usb_tx_negotiation_changed(void *ctx) { (void)ctx; tinyusb_net_tx_elastic_kick(); }
@@ -1269,7 +1272,9 @@ static esp_err_t start_usb(void) {
         const tinyusb_net_tx_config_t tx = {.base_frames = GATEWAY_USB_TX_BASE_FRAMES, .max_chunks = GATEWAY_USB_TX_MAX_CHUNKS,
                                             .priority = GATEWAY_TASK_USB_TX_PRIO, .core = GATEWAY_TASK_USB_TX_CORE,
                                             .floor_free = GATEWAY_USB_TX_FLOOR_FREE, .floor_largest = GATEWAY_USB_TX_FLOOR_LARGEST,
-                                            .idle_ms = GATEWAY_USB_TX_IDLE_MS, .gate = usb_tx_gate};
+                                            .idle_ms = GATEWAY_USB_TX_IDLE_MS, .gate = usb_tx_gate,
+                                            .pm_begin = usb_tx_pm_begin, .pm_end = usb_tx_pm_end};
+        tdongle_pm_burst_register(&usb_tx_pm, "usb_txq");   /* ADR 0016: one CPU-max hold mechanism, worker-only begin/end */
         /* The shared runtime's state is built on first use; do that here, before the worker (1,536 B of stack) can ask the gate. */
         ml_neg_t *neg=ml_rt_negotiation();
         result=tinyusb_net_tx_ring_start(&tx);

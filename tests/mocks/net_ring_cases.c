@@ -101,30 +101,30 @@ static void check_invariants(void) {
 /* After a worker wakeup, the CPU-frequency lock is held exactly while frames are queued. */
 static void check_pm(void) {
 #if CONFIG_PM_ENABLE
-    if (s_tx.pm) {
-        assert(s_tx.pm->held == (s_tx.frames_queued > 0));
-        assert(pm_acquires - pm_releases == s_tx.pm->held);
-        assert((unsigned)pm_acquires == atomic_load(&s_tx.pm_acquired) && (unsigned)pm_releases == atomic_load(&s_tx.pm_released));
-    }
+    assert(mock_pm.held == (s_tx.frames_queued > 0));
+    assert(pm_acquires - pm_releases == mock_pm.held);
+    assert((unsigned)pm_acquires == atomic_load(&s_tx.pm_acquired) && (unsigned)pm_releases == atomic_load(&s_tx.pm_released));
 #endif
 }
 
 static tinyusb_net_tx_config_t cfg_with(unsigned base, unsigned chunks) {
     return (tinyusb_net_tx_config_t){ .base_frames = base, .max_chunks = chunks, .priority = 5, .core = 0,
                                       .floor_free = FLOOR_FREE, .floor_largest = FLOOR_LARGEST, .idle_ms = IDLE_MS,
-                                      .gate = gate_cb };
+                                      .gate = gate_cb
+#if CONFIG_PM_ENABLE
+                                      , .pm_begin = mock_pm_begin, .pm_end = mock_pm_end
+#endif
+    };
 }
 /* A fresh ring with a fresh world around it. */
 static void ring_reset(tinyusb_net_tx_config_t c) {
     for (unsigned i = 0; i < TINYUSB_NET_TX_MAX_CHUNKS; i++) heap_caps_free(s_tx.chunk[i].mem);
     heap_caps_free(s_tx.base);
-#if CONFIG_PM_ENABLE
-    if (s_tx.pm) { if (s_tx.pm->held) esp_pm_lock_release(s_tx.pm); esp_pm_lock_delete(s_tx.pm); }
-#endif
+    mock_pm.held = 0;
     memset(&s_tx, 0, sizeof(s_tx));
     pending = 0; atomic_store(&notify_count, 0); usb_ready = 1; ntb_credit = -1; allow_tx = 1; schedule = 0;
     gate_busy = false; frag_next = 0; malloc_fail = 0; malloc_hook = NULL; delay_hook = NULL; pre_copy_hook = NULL;
-    pm_create_fail = 0; pm_acquires = pm_releases = 0; atomic_store(&malloc_calls, 0);
+    pm_acquires = pm_releases = 0; atomic_store(&malloc_calls, 0);
     heap_total = 200000; mock_largest = 100000;
     reset_counters();
     xmit_hook = observe;
@@ -147,9 +147,6 @@ static void test_lifecycle(void) {
     task_create_fail = 1;
     assert(tinyusb_net_tx_ring_start(&c) == ESP_ERR_NO_MEM && s_tx.base == NULL);
     assert(heap_live_blocks == 0);                           /* the ring and the PM lock were given back */
-#if CONFIG_PM_ENABLE
-    assert(pm_deleted >= 1);
-#endif
     task_create_fail = 0;
     assert(tinyusb_net_tx_ring_start(&c) == ESP_OK && task_created >= 1 && task_prio == 5 && task_core == 0);
     int created = task_created;
@@ -175,11 +172,11 @@ static void test_lifecycle(void) {
     assert(tinyusb_net_init(&ncfg) == ESP_OK);            /* deinit cleared the callbacks */
     assert(tinyusb_net_tx_ring_start(&c) == ESP_OK);      /* same ring is re-enabled, nothing reallocated */
     assert(heap_live_blocks == 1);
-    /* No CPU-frequency lock available: the ring still works and never touches one. */
-    pm_create_fail = 1;
-    ring_reset(cfg_with(3, 4));
-    ring_reset(cfg_with(3, 4));
-    pm_create_fail = 0;
+    /* No PM hooks: the ring works and holds nothing. */
+    c = cfg_with(3, 4); c.pm_begin = NULL; c.pm_end = NULL;
+    ring_reset(c);
+    assert(send_len(300) == ESP_OK); pump();
+    assert(pm_acquires == 0 && stats().pm_acquired == 0 && delivered_frames == 1);
     ring_reset(cfg_with(3, 4));
 }
 
@@ -489,8 +486,7 @@ static void test_reclaim_for_admission(void) {
     assert(s_tx.chunks_present == 0 && heap_live_blocks == 1);
     {   tinyusb_net_config_t ncfg = {.free_tx_buffer = released_ring};
         assert(tinyusb_net_init(&ncfg) == ESP_OK); }
-    assert(tinyusb_net_tx_ring_start(&(tinyusb_net_tx_config_t){ .base_frames = 3, .max_chunks = 10, .priority = 5, .core = 0,
-        .floor_free = FLOOR_FREE, .floor_largest = FLOOR_LARGEST, .idle_ms = IDLE_MS, .gate = gate_cb }) == ESP_OK);
+    assert(tinyusb_net_tx_ring_start(&(const tinyusb_net_tx_config_t[]){ cfg_with(3, 10) }[0]) == ESP_OK);
 
     /* A growth that allocated before admission started and publishes after it is discarded (epoch). */
     gate_busy = false;
@@ -762,19 +758,18 @@ static void test_link_loss(void) {
     ntb_credit = 0; grow_to(15); pump();
     check_pm();
 #if CONFIG_PM_ENABLE
-    assert(s_tx.pm->held == 1);
+    assert(mock_pm.held == 1);
 #endif
     tinyusb_net_deinit();
     assert(s_tx.frames_queued == 0 && heap_live_blocks == 1 && s_tx.flushed == 15);
     tx_worker_step();
     check_pm();
 #if CONFIG_PM_ENABLE
-    assert(s_tx.pm->held == 0 && pm_acquires == pm_releases);
+    assert(mock_pm.held == 0 && pm_acquires == pm_releases);
 #endif
     check_invariants();
     assert(tinyusb_net_init(&ncfg) == ESP_OK);
-    assert(tinyusb_net_tx_ring_start(&(tinyusb_net_tx_config_t){ .base_frames = 3, .max_chunks = 10, .priority = 5, .core = 0,
-        .floor_free = FLOOR_FREE, .floor_largest = FLOOR_LARGEST, .idle_ms = IDLE_MS, .gate = gate_cb }) == ESP_OK);
+    assert(tinyusb_net_tx_ring_start(&(const tinyusb_net_tx_config_t[]){ cfg_with(3, 10) }[0]) == ESP_OK);
     delivered_seq = next_seq;
     ntb_credit = -1;
     assert(send_len(300) == ESP_OK); pump();
@@ -799,7 +794,7 @@ static void test_pm_lock(void) {
     assert(s_tx.frames_queued == 0 && pm_releases == 0); /* the consumer does not release: it wakes the worker */
     assert(notify_count > 0);
     tx_worker_step();
-    assert(pm_acquires == 1 && pm_releases == 1 && s_tx.pm->held == 0);
+    assert(pm_acquires == 1 && pm_releases == 1 && mock_pm.held == 0);
     /* The next burst takes it again. */
     assert(send_len(400) == ESP_OK); pump();
     assert(pm_acquires == 2 && pm_releases == 2);
@@ -967,17 +962,14 @@ static void test_hardening(void) {
     fill_pressure(3); tx_worker_step();
     st = stats();
     assert(st.grow_events == 0 && st.grow_raced == 1 && st.chunks == 0 && heap_live_blocks == 1);
-    assert(tinyusb_net_tx_ring_start(&(tinyusb_net_tx_config_t){ .base_frames = 3, .max_chunks = 10, .priority = 5, .core = 0,
-        .floor_free = FLOOR_FREE, .floor_largest = FLOOR_LARGEST, .idle_ms = IDLE_MS, .gate = gate_cb }) == ESP_OK);
+    assert(tinyusb_net_tx_ring_start(&(const tinyusb_net_tx_config_t[]){ cfg_with(3, 10) }[0]) == ESP_OK);
     drain_all();
 
     /* One PM mechanism: with hooks the ring takes no lock of its own and the hooks alternate begin/end. */
     c = cfg_with(3, 10); c.pm_begin = pm_begin_hook; c.pm_end = pm_end_hook; c.pm_ctx = &hook_open;
     hook_begin = hook_end = hook_open = 0;
     ring_reset(c);
-#if CONFIG_PM_ENABLE
-    assert(s_tx.pm == NULL && pm_acquires == 0);          /* no lock of its own when the caller supplies the mechanism */
-#endif
+    assert(pm_acquires == 0);                            /* the caller's hooks, not the default ones, are in use */
     ntb_credit = 0;
     assert(send_len(400) == ESP_OK); pump();
     assert(hook_begin == 1 && hook_end == 0 && hook_open);

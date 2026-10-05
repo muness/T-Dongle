@@ -11,11 +11,8 @@ if(${IDF_VERSION_MAJOR} LESS 6)
     list(APPEND priv_req "usb")
 endif()
 
-# tinyusb_net.c allocates the transmit ring with heap_caps and, when power management is on, holds a CPU-frequency lock
+# tinyusb_net.c allocates the transmit ring with heap_caps
 list(APPEND priv_req "heap")
-if(CONFIG_PM_ENABLE)
-    list(APPEND priv_req "esp_pm")
-endif()
 
 if(CONFIG_TINYUSB_CDC_ENABLED)
     list(APPEND srcs

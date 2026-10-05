@@ -82,7 +82,8 @@ int main(void) {
     tinyusb_net_config_t cfg = {0};
     assert(tinyusb_net_init(&cfg) == ESP_OK);
     tinyusb_net_tx_config_t c = { .base_frames = 3, .max_chunks = 10, .priority = 5, .core = 0,
-                                  .floor_free = FLOOR_FREE, .floor_largest = FLOOR_LARGEST, .idle_ms = 5, .gate = gate_cb };
+                                  .floor_free = FLOOR_FREE, .floor_largest = FLOOR_LARGEST, .idle_ms = 5, .gate = gate_cb,
+                                  .pm_begin = mock_pm_begin, .pm_end = mock_pm_end };
     assert(tinyusb_net_tx_ring_start(&c) == ESP_OK);
     xmit_hook = observe;
     pthread_t p, c1, w, a;
@@ -111,7 +112,7 @@ int main(void) {
     assert(delivered_frames == accepted && st.sent_frames == accepted && st.flushed_link_down == 0);
     assert(accepted > 10000 && st.grow_events > 0 && st.reclaim_events > 0 && admissions > 5);
 #if CONFIG_PM_ENABLE
-    assert(pm_acquires == pm_releases && s_tx.pm->held == 0 && pm_acquires > 0);
+    assert(pm_acquires == pm_releases && mock_pm.held == 0 && pm_acquires > 0);
 #endif
     assert(heap_live_blocks == 1 + (long)s_tx.chunks_present && st.chunks <= 10);
     printf("PASS: elastic transmit ring across four threads: %lu frames in order, none lost or repeated; %u dropped (full), %u grown, %u idle-freed, %u reclaim events (%lu admissions), high water %u slabs\n",

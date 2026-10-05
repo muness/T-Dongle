@@ -15,9 +15,6 @@
 #include "device/usbd_pvt.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
-#if CONFIG_PM_ENABLE
-#include "esp_pm.h"
-#endif
 
 #define MAC_ADDR_LEN 6
 
@@ -207,10 +204,10 @@ esp_err_t tinyusb_net_send_sync(void *buffer, uint16_t len, void *buff_free_arg,
  * - tinyusb_net_tx_elastic_reclaim() bumps an epoch under the lock; a growth
  *   that allocated before the reclaim and publishes after it is discarded.
  *
- * CPU frequency (CONFIG_PM_ENABLE): an ESP_PM_CPU_FREQ_MAX lock is held while
+ * CPU frequency: the caller's pm_begin/pm_end hold the CPU at its maximum while
  * frames are queued. The producer only commits and notifies; `pm_want` is
  * true exactly while frames_queued > 0 (kept under the lock), and ONLY the
- * worker acquires or releases, so the pair cannot interleave. Both the
+ * worker begins or ends the hold, so the pair cannot interleave. Both the
  * empty-to-non-empty and the non-empty-to-empty edge notify the worker.
  */
 #define TX_REC_HDR        4u
@@ -275,9 +272,6 @@ static struct {
     _Atomic bool reap_pending;
     _Atomic uint32_t present_mirror;    // chunks_present, for the worker's wait without the lock
     TaskHandle_t worker;
-#if CONFIG_PM_ENABLE
-    esp_pm_lock_handle_t pm;
-#endif
     _Atomic uint32_t enq_frames, enq_bytes, sent_frames, sent_bytes;
     _Atomic uint32_t drop_full, drop_down, drop_invalid, flushed, blocked_events, xfer_events;
     _Atomic uint32_t grow_events, shrink_events, reclaim_events, reclaimed_chunks;
@@ -847,38 +841,17 @@ bool __wrap_netd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, 
  * caller that supplies none gets this component's own ESP_PM_CPU_FREQ_MAX lock. */
 static void tx_pm_reconcile(void)
 {
-    bool hooks = s_tx.cfg.pm_begin != NULL && s_tx.cfg.pm_end != NULL;
-#if CONFIG_PM_ENABLE
-    if (!hooks && s_tx.pm == NULL) {
-        return;
+    if (s_tx.cfg.pm_begin == NULL || s_tx.cfg.pm_end == NULL) {
+        return;                     // no power management in this build or caller: nothing to hold
     }
-#else
-    if (!hooks) {
-        return;
-    }
-#endif
     bool want = atomic_load_explicit(&s_tx.pm_want, memory_order_acquire);
     bool held = atomic_load_explicit(&s_tx.pm_held, memory_order_relaxed);
     if (want && !held) {
-        if (hooks) {
-            s_tx.cfg.pm_begin(s_tx.cfg.pm_ctx);
-        }
-#if CONFIG_PM_ENABLE
-        else if (esp_pm_lock_acquire(s_tx.pm) != ESP_OK) {
-            return;
-        }
-#endif
+        s_tx.cfg.pm_begin(s_tx.cfg.pm_ctx);
         atomic_store_explicit(&s_tx.pm_held, true, memory_order_relaxed);
         atomic_fetch_add_explicit(&s_tx.pm_acquired, 1, memory_order_relaxed);
     } else if (!want && held) {
-        if (hooks) {
-            s_tx.cfg.pm_end(s_tx.cfg.pm_ctx);
-        }
-#if CONFIG_PM_ENABLE
-        else {
-            esp_pm_lock_release(s_tx.pm);
-        }
-#endif
+        s_tx.cfg.pm_end(s_tx.cfg.pm_ctx);
         atomic_store_explicit(&s_tx.pm_held, false, memory_order_relaxed);
         atomic_fetch_add_explicit(&s_tx.pm_released, 1, memory_order_relaxed);
     }
@@ -935,12 +908,6 @@ esp_err_t tinyusb_net_tx_ring_start(const tinyusb_net_tx_config_t *cfg)
     }
     uint8_t *base = heap_caps_malloc(cfg->base_frames * TX_SLAB_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     ESP_RETURN_ON_FALSE(base, ESP_ERR_NO_MEM, TAG, "Failed to allocate TX ring");
-#if CONFIG_PM_ENABLE
-    if (cfg->pm_begin == NULL && esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "usb_tx", &s_tx.pm) != ESP_OK) {
-        s_tx.pm = NULL;
-        ESP_LOGW(TAG, "no CPU-frequency lock: transmit runs at the current frequency");
-    }
-#endif
     s_tx.cfg = *cfg;
     s_tx.base = base;
     s_tx.base_slabs = (uint8_t)cfg->base_frames;
@@ -948,12 +915,6 @@ esp_err_t tinyusb_net_tx_ring_start(const tinyusb_net_tx_config_t *cfg)
     s_tx.reading = -1;
     TaskHandle_t worker = NULL;
     if (xTaskCreatePinnedToCore(tx_worker, "usb_txq", TX_WORKER_STACK, NULL, cfg->priority, &worker, cfg->core) != pdPASS) {
-#if CONFIG_PM_ENABLE
-        if (s_tx.pm) {
-            esp_pm_lock_delete(s_tx.pm);
-            s_tx.pm = NULL;
-        }
-#endif
         heap_caps_free(base);
         s_tx.base = NULL;
         return ESP_ERR_NO_MEM;
