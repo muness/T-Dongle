@@ -78,6 +78,17 @@ Path('build-host/derp_receive.inc').write_text(s[a:b])
 PYCODE
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_derp_receive.c -o build-host/test_derp_receive
 build-host/test_derp_receive
+# Shared runtime (ADR 0013 stage 1). The adversarial slicing check: two memberships share one DERP loop (the real
+# ml_derp_link state machine under the real ml_mux) while one member's server stalls, hangs or goes deaf. Virtual time
+# (exact) first, then real threads, sockets and a real clock under ASan/UBSan and under TSan.
+SHARED="components/microlink/src/ml_derp_link.c components/microlink/src/ml_mux.c"
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -Itests $SHARED tests/test_shared_derp.c -o build-host/test_shared_derp
+build-host/test_shared_derp
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -pthread -Itests $SHARED tests/test_shared_derp_realtime.c -o build-host/test_shared_derp_rt
+build-host/test_shared_derp_rt
+cc $TD_INC -std=gnu11 -fsanitize=thread -g -Wall -Wextra -pthread -Itests $SHARED tests/test_shared_derp_realtime.c -o build-host/test_shared_derp_rt_tsan
+build-host/test_shared_derp_rt_tsan
+
 python - <<'PYCODE'
 from pathlib import Path
 s=Path('main/gateway_main.c').read_text();a=s.index('#include "json_writer.inc"');b=s.index('static esp_err_t command(',a)

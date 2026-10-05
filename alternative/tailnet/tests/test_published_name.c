@@ -33,7 +33,7 @@ static bool well_formed(const char *s) {
 
 static ml_published_name_t shared;
 static atomic_bool stop;
-static unsigned writes;
+static atomic_uint writes, total_reads;   /* progress, readable while the threads run */
 
 static void *writer(void *arg) {
     (void)arg;
@@ -41,7 +41,7 @@ static void *writer(void *arg) {
     for (unsigned k = 0; !atomic_load(&stop); k++) {
         make_name(k, name);
         assert(ml_published_name_set(&shared, name));
-        writes++;
+        atomic_fetch_add(&writes, 1);
     }
     return NULL;
 }
@@ -59,6 +59,7 @@ static void *reader(void *arg) {
         assert(length == strlen(out));
         assert(well_formed(out)); /* a torn copy fails here */
         r->reads++;
+        atomic_fetch_add(&total_reads, 1);
     }
     return NULL;
 }
@@ -71,8 +72,11 @@ static void stress(void) {
     pthread_create(&w, NULL, writer, NULL);
     for (int i = 0; i < 3; i++)
         pthread_create(&readers[i], NULL, reader, &results[i]);
-    struct timespec pause = {.tv_sec = 1};
-    nanosleep(&pause, NULL);
+    /* At least one second, and until both sides have done real work: on a loaded machine four spinning
+     * threads can need much longer than a second to reach the thresholds below (it is not a speed test). */
+    struct timespec pause = {.tv_nsec = 50 * 1000 * 1000};
+    for (unsigned waited = 0; waited < 20 * 20 && (waited < 20 || atomic_load(&writes) <= 1000 || atomic_load(&total_reads) <= 1000); waited++)
+        nanosleep(&pause, NULL);
     atomic_store(&stop, true);
     pthread_join(w, NULL);
     unsigned reads = 0, misses = 0;
@@ -81,9 +85,9 @@ static void stress(void) {
         reads += results[i].reads;
         misses += results[i].misses;
     }
-    assert(writes > 1000 && reads > 1000);
+    assert(atomic_load(&writes) > 1000 && reads > 1000);
     printf("  stress: %u writes, %u consistent reads, %u bounded-retry misses, 0 torn\n",
-           writes, reads, misses);
+           atomic_load(&writes), reads, misses);
 }
 
 int main(void) {
