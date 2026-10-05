@@ -853,7 +853,7 @@ bool wireguard_process_cookie_message(struct wireguard_device *device, struct wi
  *
  * Creating an initiation is two X25519 operations, a handful of BLAKE2s/ChaCha20-Poly1305 calls and a TAI64N read:
  * about 40 ms on the S3. Done under the core lock it stalls every socket in the system for that long. The steps:
- *   begin   (lock held)    copy what the crypto reads out of the device and peer, reserve a receiver index
+ *   begin   (lock held)    copy what the crypto reads out of the device and peer, draw a receiver index
  *   compute (NO lock)      all the cryptography, on the job's own storage; touches no device, peer or lwIP state
  *   commit  (lock held)    if the peer is still the one the job was made for, install the handshake state
  * wireguard_create_handshake_initiation() below is the three in a row, for callers that hold the lock throughout.
@@ -871,6 +871,8 @@ bool wireguard_initiation_begin(struct wireguard_device *device, struct wireguar
     if (job->use_cookie) {
         memcpy(job->cookie, peer->cookie, WIREGUARD_COOKIE_LEN);
     }
+    job->prior_valid = peer->handshake.valid;
+    job->prior_index = peer->handshake.local_index;
     job->index = wireguard_generate_unique_index(device);
     return true;
 }
@@ -955,14 +957,23 @@ void wireguard_initiation_compute(struct wireguard_initiation_job *job) {
     }
     job->ok = result;
 
+    // peer_dh is DH(our static private, peer static public): long-lived secret material, not needed after the KDF above.
+    crypto_zero(job->peer_dh, sizeof(job->peer_dh));
     crypto_zero(key, sizeof(key));
     crypto_zero(dh_calculation, sizeof(dh_calculation));
 }
 
 bool wireguard_initiation_commit(struct wireguard_device *device, struct wireguard_peer *peer, struct wireguard_initiation_job *job) {
     (void)device;
-    // The peer may have been removed, replaced or re-keyed while the crypto ran outside the lock.
-    bool same = job->ok && peer && peer->valid && memcmp(peer->public_key, job->peer_public, WIREGUARD_PUBLIC_KEY_LEN) == 0;
+    // The peer may have been removed, replaced or re-keyed while the crypto ran outside the lock, and the lock was free
+    // for ~40 ms: another initiation for this peer (the output path starts one when a packet finds no session) or an
+    // inbound handshake may have installed its own state meanwhile. Installing ours over it would send a second,
+    // competing initiation and orphan the first one's response, so a changed handshake state refuses the commit.
+    // The receiver index chosen in begin was only drawn, not reserved (nothing records it until now): it must still
+    // be unused pool-wide, which makes "unique across every device" exact rather than 1 - 2^-32.
+    bool same = job->ok && peer && peer->valid && memcmp(peer->public_key, job->peer_public, WIREGUARD_PUBLIC_KEY_LEN) == 0 &&
+                peer->handshake.valid == job->prior_valid && peer->handshake.local_index == job->prior_index &&
+                !wireguard_receiver_index_in_use(wireguard_peer_pool(), job->index);
     if (same) {
         memcpy(&peer->handshake, &job->handshake, sizeof(peer->handshake));
     }

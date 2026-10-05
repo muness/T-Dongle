@@ -43,7 +43,7 @@ static bool spawn(void *p, unsigned index, ml_rt_core_t *c) {
     pthread_detach(t);
     return true;
 }
-static const ml_rt_platform_t platform = {spawn, ml_sleep_ms};
+static const ml_rt_platform_t platform = {spawn, ml_sleep_ms, NULL};
 
 static member_t *new_member(void) { member_t *m = calloc(1, sizeof(*m)); m->canary = 0xC0FFEE; return m; }
 static void free_member(member_t *m) { memset(m, 0xEE, sizeof(*m)); free(m); }

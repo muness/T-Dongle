@@ -389,6 +389,67 @@ static void test_split_crypto(void) {
     pool_expect_empty();
 }
 
+/* The lock is free for ~40 ms while an initiation is computed. What can happen in that window must not produce a second,
+ * competing initiation or a receiver index that is no longer unique. */
+static void test_initiation_commit_guards(void) {
+    pool_setup(12);
+    struct dev A, B; u8_t ia, ib;
+    dev_up(&A, 41); dev_up(&B, 42);
+    link_peers(&A, &B, &ia, &ib);
+    struct wireguard_peer *pa = P(&A, ia);
+    pa->active = true;
+    wg_pool_t *pool = wireguard_peer_pool();
+
+    /* (1) Another initiation for the same peer was installed while ours was computed (the output path starts one when a
+     *     packet finds no session): ours is dropped, theirs stays, nothing is sent twice. */
+    struct wireguard_initiation_job job;
+    assert(wireguard_initiation_begin(devp(&A), pa, &job));
+    wireguard_initiation_compute(&job);
+    assert(job.ok);
+    struct message_handshake_initiation rival;
+    assert(wireguard_create_handshake_initiation(devp(&A), pa, &rival));
+    uint32_t rival_index = pa->handshake.local_index;
+    assert(rival_index == rival.sender);
+    assert(!wireguard_initiation_commit(devp(&A), pa, &job));
+    assert(pa->handshake.local_index == rival_index && pa->handshake.valid);              /* the rival is untouched */
+    assert(wireguardif_periodic_commit(&A.nif, ia, &job) == ERR_ARG);                      /* and nothing goes out */
+
+    /* (2) An inbound handshake changed the state instead: same refusal. */
+    assert(wireguard_initiation_begin(devp(&A), pa, &job));
+    wireguard_initiation_compute(&job);
+    pa->handshake.valid = false;                       /* what consuming a handshake does */
+    assert(!wireguard_initiation_commit(devp(&A), pa, &job));
+
+    /* (3) Untouched in between: installed (the single-membership case, unchanged behaviour). */
+    assert(wireguard_initiation_begin(devp(&A), pa, &job));
+    wireguard_initiation_compute(&job);
+    assert(wireguard_initiation_commit(devp(&A), pa, &job) && pa->handshake.local_index == job.index);
+
+    /* (4) The index drawn by begin was taken by someone (another device, another peer) before the commit. */
+    struct wireguard_peer *pb = P(&B, ib);
+    pa->handshake.valid = false;
+    assert(wireguard_initiation_begin(devp(&A), pa, &job));
+    wireguard_initiation_compute(&job);
+    pb->curr_keypair.local_index = job.index;           /* a handshake response elsewhere claimed it */
+    assert(wireguard_receiver_index_in_use(pool, job.index));
+    assert(!wireguard_initiation_commit(devp(&A), pa, &job));
+    assert(!pa->handshake.valid);
+
+    /* The pool-wide check also covers a NON-last slot of the SAME device (the old check compared only the last slot). */
+    u8_t extra;
+    assert(add_peer(&A, 99, &extra) == ERR_OK && extra != ia);
+    struct wireguard_peer *first = P(&A, 0), *last = P(&A, extra);
+    assert(first != last);
+    const uint32_t T = 0x13572468, U = 0x24681357;
+    first->prev_keypair.local_index = T;
+    const uint32_t script[] = { T, U };
+    script_set(script, 2);
+    assert(wireguard_generate_unique_index(devp(&A)) == U && g_idx_calls == 2);
+    script_set(NULL, 0);
+    dev_down(&A); dev_down(&B);
+    pool_expect_empty();
+}
+
 static void test_sliced_periodic_matches_monolithic(void) {
     pool_setup(12);
     struct dev M, S; u8_t i;
@@ -425,6 +486,7 @@ int main(void) {
     test_receiver_index_uniqueness_and_scoping();
     test_handshake_cursor_is_per_device();
     test_split_crypto();
+    test_initiation_commit_guards();
     test_sliced_periodic_matches_monolithic();
     puts("wg peer pool integration: ok");
     return 0;

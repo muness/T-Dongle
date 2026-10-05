@@ -348,6 +348,9 @@ struct wireguard_initiation_job {
     uint8_t cookie[WIREGUARD_COOKIE_LEN];
     bool use_cookie;
     uint32_t index;
+    /* The peer's handshake state when the job began: a commit refuses to install over anything else (see commit). */
+    bool prior_valid;
+    uint32_t prior_index;
     bool ok;
     struct wireguard_handshake handshake;
     struct message_handshake_initiation msg;

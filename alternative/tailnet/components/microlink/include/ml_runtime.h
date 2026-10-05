@@ -11,7 +11,11 @@
  * runs the task's teardown hook (derp: close the TLS connection; wg: remove the WireGuard interface) and only then
  * returns. After ml_rt_detach() returns true no shared task will ever touch the membership again, so microlink_destroy
  * can free it. If a task cannot let go within ML_RT_DETACH_TIMEOUT_MS, detach returns false, the membership stays
- * attached, and the caller leaks the context rather than free it under a running task (stop_incomplete).
+ * attached and the context is NOT freed under a running task (stop_incomplete). That is a deferral, not a leak: detach is
+ * idempotent, every microlink_stop recomputes stop_incomplete, and the gateway manager retries stop_member every ten
+ * seconds, so a slice that merely overran the timeout is reclaimed on the next tick. Only a slice that never returns
+ * (a deadlock, which the timeout counters in /status would show) keeps the context for good: bounded at one context
+ * per stuck membership, ~10 KB, and never a use-after-free.
  *
  * The negotiation token (ml_negotiation.h) lives here too: it is process wide state that outlives memberships.
  */

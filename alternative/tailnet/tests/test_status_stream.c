@@ -68,8 +68,8 @@ typedef struct {int holder_unused; unsigned phase; uint32_t held_ms, waiting, gr
 typedef struct {bool running; unsigned members; uint32_t starts, stops, attach_failures, detach_failures, stack_bytes[3], stack_free[3], passes[3], max_service_ms[3], slow_services[3], detach_timeouts[3]; ml_neg_status_t negotiation;} ml_rt_status_t;
 static void ml_rt_status(ml_rt_status_t *o) { memset(o, 0, sizeof(*o)); o->running = true; o->members = 1; o->stack_free[0] = 4000; o->stack_free[1] = UINT32_MAX; }
 static const char *ml_neg_phase_name(unsigned p) { return "derp"; }
-typedef struct {uint32_t capacity, used, peak, refused_full, refused_nomem, evictions_own, evictions_other, rejected, slot_bytes, device_bytes;} ml_wg_pool_status_t;
-static void ml_wg_pool_status(ml_wg_pool_status_t *o) { *o = (ml_wg_pool_status_t){12, 3, 5, 0, 0, 1, 2, 0, 904, 228}; }
+typedef struct {uint32_t capacity, used, peak, refused_full, refused_nomem, evictions_own, evictions_other, rejected, refused_largest, largest_low, slot_bytes, device_bytes;} ml_wg_pool_status_t;
+static void ml_wg_pool_status(ml_wg_pool_status_t *o) { *o = (ml_wg_pool_status_t){12, 3, 5, 0, 0, 1, 2, 0, 1, 20480, 904, 228}; }
 typedef struct {unsigned users, seedings, failures; unsigned long bytes; unsigned bytes_resident;} ml_rng_stats_t;
 static void ml_rng_stats(ml_rng_stats_t *o) { memset(o, 0, sizeof(*o)); o->users = 1; o->bytes_resident = 500; }
 typedef struct membership {
@@ -247,6 +247,8 @@ int main(void) {
                cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(rt, "tasks"), "net_io"), "stack_free")->valueint == 4000 &&
                cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(rt, "tasks"), "derp"), "stack_free")));
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "evictions_other")->valueint == 2);
+        assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "refused_largest")->valueint == 1);
+        assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "largest_low")->valueint == 20480);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "negotiation"), "holder"));
     }
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(m, "peers")) == 1);

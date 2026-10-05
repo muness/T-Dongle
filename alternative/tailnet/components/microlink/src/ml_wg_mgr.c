@@ -17,6 +17,8 @@
 #include "microlink_internal.h"
 #include "ml_config_httpd.h"
 #include "ml_peer_policy.h"
+#include "ml_admission.h"
+#include "esp_heap_caps.h"
 #include "ml_runtime.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -369,7 +371,25 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
  * ========================================================================== */
 
 /* Peer slots of the global pool: ledger-tagged to the `wg` owner (see peer_pool_reserve). */
-static void *wg_pool_alloc(size_t bytes) { return tdongle_heap_tag(TDONGLE_OWNER_WG, calloc(1, bytes)); }
+static struct { uint32_t refused_largest; uint32_t largest_low; } slot_guard = { .largest_low = UINT32_MAX };
+static void *wg_pool_alloc(size_t bytes) {
+    /* On demand, because a static pool would pin 12 slots for ever (ml_admission.h, ml_adm_slot_alloc_ok), but never the
+     * allocation that takes the largest free block under what the DERP TLS record buffer needs. Called under the core
+     * lock from add_peer, a handful of times per hour: two heap walks are affordable there. */
+    size_t before = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    void *block = calloc(1, bytes);
+    if (!block) return NULL;
+    size_t after = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (after < slot_guard.largest_low) slot_guard.largest_low = (uint32_t)after;
+    if (!ml_adm_slot_alloc_ok(before, after, ML_ADM_TLS_BLOCK_FLOOR)) {
+        slot_guard.refused_largest++;
+        ESP_LOGW(TAG, "WG peer slot refused: it would take the largest free block from %u to %u B (TLS needs %u)",
+                 (unsigned)before, (unsigned)after, (unsigned)ML_ADM_TLS_BLOCK_FLOOR);
+        free(block);
+        return NULL;
+    }
+    return tdongle_heap_tag(TDONGLE_OWNER_WG, block);
+}
 static void wg_pool_free(void *block) { tdongle_heap_free(TDONGLE_OWNER_WG, block); }
 
 /* Every hold of the lwIP core lock by this task is timed into the diagnostics ledger by call site (tdongle_lock_hold,
@@ -1038,6 +1058,8 @@ static struct {
     uint32_t refused;             /* no eligible victim: the activation was rejected */
 } pool_policy_stats;
 
+_Static_assert(ML_MAX_PEERS * ML_MUX_MAX <= ML_POLICY_MAX_CANDIDATES,
+               "the eviction scan must see every resident peer of every membership, or the LRU choice is not global");
 typedef struct {
     ml_victim_candidate_t cand[ML_POLICY_MAX_CANDIDATES];
     struct { microlink_t *ml; int idx; } who[ML_POLICY_MAX_CANDIDATES];
@@ -1098,6 +1120,8 @@ void ml_wg_pool_status(ml_wg_pool_status_t *out) {
     out->evictions_own = pool_policy_stats.evictions_own;
     out->evictions_other = pool_policy_stats.evictions_other;
     out->rejected = pool_policy_stats.refused;
+    out->refused_largest = slot_guard.refused_largest;
+    out->largest_low = slot_guard.largest_low;
     out->slot_bytes = (uint32_t)sizeof(struct wireguard_peer);
     out->device_bytes = (uint32_t)sizeof(struct wireguard_device);
 }

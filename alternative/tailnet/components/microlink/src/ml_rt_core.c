@@ -36,7 +36,7 @@ static bool wait_tasks_gone(ml_rt_core_t *core) {
 static bool stop_tasks(ml_rt_core_t *core) {
     __atomic_store_n(&core->stop, true, __ATOMIC_RELEASE);
     if (!wait_tasks_gone(core)) return false;
-    core->stops++;
+    __atomic_add_fetch(&core->stops, 1, __ATOMIC_RELAXED);
     return true;
 }
 
@@ -51,7 +51,7 @@ static bool start_tasks(ml_rt_core_t *core) {
             return false;
         }
     }
-    core->starts++;
+    __atomic_add_fetch(&core->starts, 1, __ATOMIC_RELAXED);
     return true;
 }
 
@@ -74,11 +74,11 @@ bool ml_rt_core_attach(ml_rt_core_t *core, void *member, bool *attached, int *wh
             ok = false; reason = 3; goto fail;
         }
     }
-    core->members++;
+    __atomic_add_fetch(&core->members, 1, __ATOMIC_SEQ_CST);
     *attached = true;
     goto out;
 fail:
-    core->attach_failures++;
+    __atomic_add_fetch(&core->attach_failures, 1, __ATOMIC_RELAXED);
     if (why) *why = reason;
 out:
     ml_mutex_unlock(&core->lock);
@@ -93,10 +93,10 @@ bool ml_rt_core_detach(ml_rt_core_t *core, void *member, bool *attached) {
             if (!ml_mux_detach(&core->mux[core->detach_order[i]], member, core->detach_timeout_ms)) ok = false;
         if (ok) {
             *attached = false;
-            if (core->members) core->members--;
+            if (core->members) __atomic_sub_fetch(&core->members, 1, __ATOMIC_SEQ_CST);
             if (core->members == 0) stop_tasks(core);
         } else {
-            core->detach_failures++;
+            __atomic_add_fetch(&core->detach_failures, 1, __ATOMIC_RELAXED);
         }
     }
     ml_mutex_unlock(&core->lock);
@@ -107,9 +107,9 @@ bool ml_rt_core_running(ml_rt_core_t *core) {
     return __atomic_load_n(&core->tasks_alive, __ATOMIC_SEQ_CST) > 0 && !__atomic_load_n(&core->stop, __ATOMIC_ACQUIRE);
 }
 
+/* Lock-free on purpose: written only under core->lock, but read by /status and by admission, and a detach that is
+ * waiting out a slow slice holds that lock for up to detach_timeout_ms per task (stop_wait_ms more for the last member).
+ * A status request must not queue behind it. */
 unsigned ml_rt_core_members(ml_rt_core_t *core) {
-    ml_mutex_lock(&core->lock);
-    unsigned n = core->members;
-    ml_mutex_unlock(&core->lock);
-    return n;
+    return __atomic_load_n(&core->members, __ATOMIC_SEQ_CST);
 }

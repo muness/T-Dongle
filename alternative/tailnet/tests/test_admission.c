@@ -1,6 +1,7 @@
 /* Admission from measured constants (ml_admission.h). Sizes below are the xtensa sizeof values of this tree. */
 #include <assert.h>
 #include <stdio.h>
+#include <sys/types.h>
 #include "ml_admission.h"
 
 int main(void) {
@@ -27,5 +28,18 @@ int main(void) {
     assert(first.required < 108200 && next.required < first.required);
     printf("admission: first membership needs %zu B free, each further one %zu B (steady %zu + negotiation %zu + reserve %zu)\n",
            first.required, next.required, next.member_steady, next.negotiation, next.recovery);
+    /* Peer-slot allocation guard: a slot may not be the allocation that takes the largest free block under the TLS floor. */
+    const size_t floor = ML_ADM_TLS_BLOCK_FLOOR;
+    assert(ml_adm_slot_alloc_ok(24576, 24576 - 904, floor));            /* the measured steady block, one slot out of it: fine */
+    assert(ml_adm_slot_alloc_ok(24576, 24576, floor));                   /* carved from a small hole: no effect */
+    assert(!ml_adm_slot_alloc_ok(floor + 100, floor + 100 - 904, floor)); /* this slot is the one that breaks the floor */
+    assert(!ml_adm_slot_alloc_ok(floor, floor - 1, floor));
+    assert(ml_adm_slot_alloc_ok(floor - 1, floor - 904, floor));         /* already below: not this allocation's doing */
+    /* Why the pool is not static: 12 slots resident for ever against the four admission charges per membership. */
+    const size_t static_extra = (12 - ML_ADM_PEER_SLOTS) * s.wg_slot;
+    assert(static_extra == 7232 && static_extra > 576);                  /* 576 B = the measured margin of the largest block */
+    printf("peer pool: a static pool would take %zu B more than the %d slots charged; free after boot ~107,000 B leaves the first membership %zd B of margin instead of %zd B\n",
+           static_extra, ML_ADM_PEER_SLOTS, (ssize_t)107000 - (ssize_t)first.required - (ssize_t)static_extra,
+           (ssize_t)107000 - (ssize_t)first.required);
     return 0;
 }

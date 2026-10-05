@@ -17,8 +17,8 @@
  *     context, say) is released while the task cannot be using it;
  *   - a detach waits at most for one bounded service slice of that task. If the slice
  *     does not end within the timeout, detach returns false, the context stays attached
- *     and the caller must not free it (microlink_destroy then leaks it on purpose,
- *     exactly like the old stop_incomplete rule, and the counter says so).
+ *     and the caller must not free it; it calls detach again later (the gateway
+ *     manager does, every ten seconds), which is idempotent, and the counter says so).
  *
  * A service function must be bounded (no blocking waits), must not call attach or
  * detach on its own mux, and must not take any lock that a thread holding the mux

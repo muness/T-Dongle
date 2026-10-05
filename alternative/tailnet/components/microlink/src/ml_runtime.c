@@ -18,6 +18,21 @@ static struct {
     TaskHandle_t task[ML_RT_TASK_COUNT];
 } rt;
 
+/* A shared task deletes itself when the last membership leaves, and wakers (queue producers on any core) hold nothing
+ * that keeps the task alive. rt.task[] is therefore only ever read or written inside this critical section, and a
+ * task clears its own entry in it BEFORE it signs off and deletes itself: a waker either notifies a task that cannot
+ * yet have been deleted (it is still in vTaskDelete's caller, waiting for this very section) or finds NULL. Without
+ * it, a handle read just before the delete was a notify into a freed TCB. */
+static portMUX_TYPE rt_task_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void rt_task_exit(ml_rt_core_t *core, ml_rt_task_t which) {
+    portENTER_CRITICAL(&rt_task_mux);
+    rt.task[which] = NULL;
+    portEXIT_CRITICAL(&rt_task_mux);
+    ml_rt_core_task_exit(core);     /* after the entry is clear: a restart's spawn can then own the slot */
+    vTaskDelete(NULL);
+}
+
 static const uint32_t stack_bytes[ML_RT_TASK_COUNT] = {
     ML_TASK_NET_IO_STACK, ML_TASK_DERP_TX_STACK, ML_TASK_WG_MGR_STACK,
 };
@@ -32,8 +47,7 @@ static void net_io_task(void *arg) {
     ESP_LOGI(TAG, "net_io started (Core %d)", xPortGetCoreID());
     uint8_t scratch[ML_NET_IO_SCRATCH_BYTES];
     while (!ml_rt_core_should_stop(core)) ml_net_io_pass(&core->mux[ML_RT_TASK_NET_IO], scratch);
-    ml_rt_core_task_exit(core);
-    vTaskDelete(NULL);
+    rt_task_exit(core, ML_RT_TASK_NET_IO);
 }
 
 /* Wait for a wake-up or the computed deadline, whichever is first. A deadline of UINT32_MAX means "nothing is due":
@@ -56,8 +70,7 @@ static void derp_task(void *arg) {
         ml_mux_pass(&core->mux[ML_RT_TASK_DERP]);
         wait_for_work(rt.derp_pass.wait_ms);
     }
-    ml_rt_core_task_exit(core);
-    vTaskDelete(NULL);
+    rt_task_exit(core, ML_RT_TASK_DERP);
 }
 
 /* The wg_mgr task runs when a packet, a peer update or an event arrives (producers call ml_rt_wake), or when the
@@ -73,8 +86,7 @@ static void wg_mgr_task(void *arg) {
         uint64_t now = ml_get_time_ms();
         wait_for_work(rt.wg_pass.next_due_ms > now ? (uint32_t)(rt.wg_pass.next_due_ms - now) : 0);
     }
-    ml_rt_core_task_exit(core);
-    vTaskDelete(NULL);
+    rt_task_exit(core, ML_RT_TASK_WG_MGR);
 }
 
 static bool platform_spawn(void *platform, unsigned index, ml_rt_core_t *core) {
@@ -89,18 +101,23 @@ static bool platform_spawn(void *platform, unsigned index, ml_rt_core_t *core) {
         [ML_RT_TASK_DERP] = { derp_task, "ml_derp", ML_TASK_DERP_TX_PRIO, ML_TASK_DERP_TX_CORE },
         [ML_RT_TASK_WG_MGR] = { wg_mgr_task, "ml_wg_mgr", ML_TASK_WG_MGR_PRIO, ML_TASK_WG_MGR_CORE },
     };
+    TaskHandle_t handle = NULL;
     if (xTaskCreatePinnedToCore(spec[index].fn, spec[index].name, stack_bytes[index], core, spec[index].prio,
-                                &rt.task[index], spec[index].core) != pdPASS) {
+                                &handle, spec[index].core) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create %s", spec[index].name);
-        rt.task[index] = NULL;
         return false;
     }
+    /* Published only now, and only by the creator, which holds the core lock: no stop can have been requested, so the
+     * task cannot have exited (and cleared its entry) before this store. */
+    portENTER_CRITICAL(&rt_task_mux);
+    rt.task[index] = handle;
+    portEXIT_CRITICAL(&rt_task_mux);
     return true;
 }
 static void platform_sleep(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
 static void platform_wake_all(void *platform) {
     (void)platform;
-    for (int i = 0; i < ML_RT_TASK_COUNT; i++) if (rt.task[i]) xTaskNotifyGive(rt.task[i]);
+    for (int i = 0; i < ML_RT_TASK_COUNT; i++) ml_rt_wake((ml_rt_task_t)i);
 }
 static const ml_rt_platform_t platform = { .spawn = platform_spawn, .sleep_ms = platform_sleep, .wake_all = platform_wake_all };
 
@@ -124,8 +141,11 @@ static void rt_init(void) {
 }
 
 void ml_rt_wake(ml_rt_task_t which) {
-    TaskHandle_t h = which < ML_RT_TASK_COUNT ? rt.task[which] : NULL;
+    if (which >= ML_RT_TASK_COUNT) return;
+    portENTER_CRITICAL(&rt_task_mux);       /* notify never blocks; the section is what keeps the TCB alive (see above) */
+    TaskHandle_t h = rt.task[which];
     if (h) xTaskNotifyGive(h);
+    portEXIT_CRITICAL(&rt_task_mux);
 }
 
 ml_neg_t *ml_rt_negotiation(void) {
@@ -161,13 +181,14 @@ void ml_rt_status(ml_rt_status_t *out) {
     memset(out, 0, sizeof(*out));
     out->running = ml_rt_core_running(&rt.core);
     out->members = ml_rt_core_members(&rt.core);
-    out->starts = rt.core.starts;
-    out->stops = rt.core.stops;
-    out->attach_failures = rt.core.attach_failures;
-    out->detach_failures = rt.core.detach_failures;
+    out->starts = __atomic_load_n(&rt.core.starts, __ATOMIC_RELAXED);
+    out->stops = __atomic_load_n(&rt.core.stops, __ATOMIC_RELAXED);
+    out->attach_failures = __atomic_load_n(&rt.core.attach_failures, __ATOMIC_RELAXED);
+    out->detach_failures = __atomic_load_n(&rt.core.detach_failures, __ATOMIC_RELAXED);
     for (int i = 0; i < ML_RT_TASK_COUNT; i++) {
         out->stack_bytes[i] = stack_bytes[i];
-        out->stack_free[i] = rt.task[i] && out->running ? (uint32_t)uxTaskGetStackHighWaterMark(rt.task[i]) : UINT32_MAX;
+        TaskHandle_t h = out->running ? ml_rt_task_handle((ml_rt_task_t)i) : NULL;
+        out->stack_free[i] = h ? (uint32_t)uxTaskGetStackHighWaterMark(h) : UINT32_MAX;
         out->passes[i] = __atomic_load_n(&rt.core.mux[i].passes, __ATOMIC_RELAXED);
         out->max_service_ms[i] = __atomic_load_n(&rt.core.mux[i].max_service_ms, __ATOMIC_RELAXED);
         out->slow_services[i] = __atomic_load_n(&rt.core.mux[i].slow_services, __ATOMIC_RELAXED);
@@ -178,7 +199,11 @@ void ml_rt_status(ml_rt_status_t *out) {
 
 TaskHandle_t ml_rt_task_handle(ml_rt_task_t which) {
     rt_init();
-    return which < ML_RT_TASK_COUNT ? rt.task[which] : NULL;
+    if (which >= ML_RT_TASK_COUNT) return NULL;
+    portENTER_CRITICAL(&rt_task_mux);
+    TaskHandle_t h = rt.task[which];
+    portEXIT_CRITICAL(&rt_task_mux);
+    return h;       /* a diagnostics reader may still race the task's exit; it never writes through the handle */
 }
 
 typedef struct { void (*fn)(microlink_t *, void *); void *arg; } held_call_t;

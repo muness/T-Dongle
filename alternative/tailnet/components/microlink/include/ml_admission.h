@@ -37,6 +37,8 @@
 #define ML_ADM_RECOVERY_BYTES   16384   /* kept free for HTTP/control recovery (the v120 panic was at 7,464 B free) */
 #define ML_ADM_LARGEST_BLOCK    24000   /* steady largest block measured 24,576 B; the TLS record buffer is ~16.7 KB */
 #define ML_ADM_PEER_SLOTS       4       /* resident WireGuard peers charged per membership (the pool holds 12 in all) */
+#define ML_ADM_TLS_BLOCK_FLOOR  17408   /* the DERP TLS record buffer (~16.7 KB) must always find one free block this big;
+                                           17 KiB. A peer slot may not be the allocation that takes the heap below it. */
 
 typedef struct {
     size_t context;          /* sizeof(microlink_t) */
@@ -78,4 +80,16 @@ static inline ml_adm_verdict_t ml_adm_decide(const ml_adm_budget_t *b, size_t fr
     if (free_now < b->required) return ML_ADM_REFUSED_BUDGET;
     if (largest < b->largest_block) return ML_ADM_REFUSED_LARGEST;
     return ML_ADM_OK;
+}
+
+/* The WireGuard peer-slot pool allocates its 904 B slots on demand, and a slot lives as long as its peer (hours). Long-lived
+ * small blocks scattered through a heap that is already fragmented are how the largest free block shrinks: steady state
+ * measured 24,576 B against the 24,000 B admission floor (a 576 B margin, smaller than ONE slot), and the pool may hold 12.
+ * A static pool would pin the full 12 x 904 = 10,848 B for ever (7,232 B more than the four slots admission charges at
+ * N = 1, against ~107 KB free after boot), so slots stay on demand and each allocation is checked instead: an allocation
+ * that is the one taking the largest free block from at least `floor` to below it is refused (and counted), which the pool
+ * reports as "no memory" and the policy as a rejected activation. A heap already below the floor is not made an excuse
+ * for refusing everything: the check is about what THIS allocation did. */
+static inline bool ml_adm_slot_alloc_ok(size_t largest_before, size_t largest_after, size_t floor) {
+    return !(largest_before >= floor && largest_after < floor);
 }

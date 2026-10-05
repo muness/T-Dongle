@@ -71,6 +71,43 @@ cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/
 build-host/test_map_request
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_project_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_project_stream
 build-host/test_project_stream
+# Shared runtime (ADR 0013 stage 1). The adversarial slicing check: two memberships share one DERP loop (the real
+# ml_derp_link state machine under the real ml_mux) while one member's server stalls, hangs or goes deaf. Virtual time
+# (exact) first, then real threads, sockets and a real clock under ASan/UBSan and under TSan.
+SHARED="components/microlink/src/ml_derp_link.c components/microlink/src/ml_mux.c components/microlink/src/ml_negotiation.c"
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -Itests $SHARED tests/test_shared_derp.c -o build-host/test_shared_derp
+build-host/test_shared_derp
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -pthread -Itests $SHARED tests/test_shared_derp_realtime.c -o build-host/test_shared_derp_rt
+build-host/test_shared_derp_rt
+cc $TD_INC -std=gnu11 -fsanitize=thread -g -Wall -Wextra -pthread -Itests $SHARED tests/test_shared_derp_realtime.c -o build-host/test_shared_derp_rt_tsan
+build-host/test_shared_derp_rt_tsan
+# The negotiation token, the control task's token rule, admission arithmetic and the pool eviction policy.
+for san in address,undefined thread; do
+ cc $TD_INC -std=gnu11 -fsanitize=$san -fno-sanitize-recover=all -g -Wall -Wextra -pthread components/microlink/src/ml_negotiation.c tests/test_negotiation.c -o build-host/test_negotiation_${san%%,*}
+ build-host/test_negotiation_${san%%,*}
+done
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -pthread components/microlink/src/ml_negotiation.c tests/test_coord_token.c -o build-host/test_coord_token
+build-host/test_coord_token
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra tests/test_admission.c -o build-host/test_admission
+build-host/test_admission
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra tests/test_peer_policy.c -o build-host/test_peer_policy
+build-host/test_peer_policy
+# The shared tasks' lifecycle: memberships join and leave while the tasks run; each is freed (and poisoned) the moment
+# detach returns, so a late touch by any task is a use-after-free (ASan) and an unsynchronised access a race (TSan).
+for san in address,undefined thread; do
+ cc $TD_INC -std=gnu11 -fsanitize=$san -fno-sanitize-recover=all -g -Wall -Wextra -pthread components/microlink/src/ml_rt_core.c components/microlink/src/ml_mux.c tests/test_rt_lifecycle.c -o build-host/test_rt_lifecycle_${san%%,*}
+ build-host/test_rt_lifecycle_${san%%,*}
+done
+# The global WireGuard peer-slot pool (generic core), then the real wireguard.c / wireguardif.c on lwIP fakes: receiver-index
+# uniqueness pool-wide, device-scoped lookups, split-crypto commit guards, per-device handshake cursor.
+wg=components/microlink/components/wireguard_lwip/src
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -I $wg tests/test_wg_peer_pool.c $wg/wireguard_pool.c -o build-host/test_wg_peer_pool
+build-host/test_wg_peer_pool
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_peer_pool_if.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_peer_pool_if
+build-host/test_wg_peer_pool_if
 python - <<'PYCODE'
 from pathlib import Path
 s=Path('main/gateway_main.c').read_text();a=s.index('#include "json_writer.inc"');b=s.index('static esp_err_t command(',a)

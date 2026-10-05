@@ -1548,7 +1548,10 @@ err_t wireguardif_periodic_commit(struct netif *netif, uint8_t peer_idx, struct 
     struct wireguard_device *device = (struct wireguard_device *)netif->state;
     struct wireguard_peer *peer = wireguard_device_peer(device, peer_idx);
     if (!peer || !wireguard_initiation_commit(device, peer, job)) {
-        return ERR_ARG;     // the peer went away or changed while the crypto ran: nothing to send
+        // The peer went away or changed while the crypto ran: nothing to send. The ephemeral private key and chaining
+        // state in the job must not outlive it on the caller's stack (the commit wipes them when there is a peer).
+        crypto_zero(&job->handshake, sizeof(job->handshake));
+        return ERR_ARG;
     }
     struct pbuf *pbuf = pbuf_alloc(PBUF_TRANSPORT, sizeof(struct message_handshake_initiation), PBUF_RAM);
     if (!pbuf) {

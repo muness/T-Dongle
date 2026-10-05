@@ -483,6 +483,7 @@ esp_err_t microlink_stop(microlink_t *ml) {
 
     ESP_LOGI(TAG, "Stopping...");
     xEventGroupSetBits(ml->events, ML_EVT_SHUTDOWN_REQUEST);
+    bool incomplete = false;    /* becomes ml->stop_incomplete once this stop has run to the end */
 
     /* Unblock the control task if it is parked in a blocking socket call so it can observe the shutdown bit
      * and self-delete BEFORE microlink_destroy() frees ml below. Without this a coord task in coord_recv
@@ -531,8 +532,8 @@ esp_err_t microlink_stop(microlink_t *ml) {
         int left = __atomic_load_n(&ml->tasks_alive, __ATOMIC_SEQ_CST);
         if (left > 0) {
             ESP_LOGE(TAG, "%d task(s) still running %d ms after the stop request -- "
-                          "the instance will be leaked rather than freed under them", left, waited);
-            ml->stop_incomplete = true;
+                          "the instance is kept (not freed) until a later stop finds them gone", left, waited);
+            incomplete = true;
         } else {
             ESP_LOGI(TAG, "All tasks exited (%d ms)", waited);
         }
@@ -544,9 +545,13 @@ esp_err_t microlink_stop(microlink_t *ml) {
      * its DERP connection and WireGuard interface under their locks, and returns only when no shared task can
      * touch ml again. If one cannot let go in time the membership stays attached and must not be freed. */
     if (!ml_rt_detach(ml)) {
-        ESP_LOGE(TAG, "a shared task still holds this membership -- the instance will be leaked rather than freed under it");
-        ml->stop_incomplete = true;
+        ESP_LOGE(TAG, "a shared task still holds this membership -- the instance is kept (not freed) until a later stop lets go");
+        incomplete = true;
     }
+    /* stop_incomplete is recomputed by every stop, never sticky: a slice that outran the detach timeout ends by itself,
+     * and the gateway manager retries stop_member every ten seconds. If the flag could only be set, that retry would
+     * detach successfully and still never destroy, turning a transient overrun into a permanent leak. */
+    __atomic_store_n(&ml->stop_incomplete, incomplete, __ATOMIC_RELEASE);
 
     /* A membership that is gone never keeps the negotiation token, whatever path it was on when it was stopped
      * (the control task and the DERP link release it themselves; this is the backstop for every other way out). */

@@ -154,8 +154,13 @@ struct derp_xport {
 static void xport_release_dns(struct derp_xport *xp) {
     if (xp->dns_slot < 0) return;
     dns_slot_t *slot = &dns_slots[xp->dns_slot];
+    /* dns_found runs on the lwIP thread with the core lock held and checks generation and state, then writes the answer:
+     * releasing under the same lock makes that check-then-write atomic against this release, so a late answer can never
+     * land in a slot another attempt has taken in between. (Callers hold no lwIP lock; the core lock is recursive.) */
+    LOCK_TCPIP_CORE();
     slot->generation++;
     __atomic_store_n(&slot->state, DNS_FREE, __ATOMIC_RELEASE);
+    UNLOCK_TCPIP_CORE();
     xp->dns_slot = -1;
 }
 
