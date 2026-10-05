@@ -466,6 +466,36 @@ static int ctrl_key_ensure(microlink_t *ml, const ctrl_key_transport_t *tls_tran
     *key_out = ml->ctrl_noise_pubkey;
     return 0;
 }
+/* A fetched key is a cache, not a pin (Tailscale's controlclient re-reads /key
+ * when the handshake fails). After CTRL_KEY_DROP_AFTER consecutive Noise
+ * handshake failures the cached key is dropped so ctrl_key_ensure() fetches it
+ * again before the next attempt, covering a server whose key was rotated. Drops
+ * are spaced by a doubling gap (30 s .. 10 min) so a down or hostile server
+ * cannot make the device hammer /key. A configured pin and the compiled-in
+ * Tailscale key are never dropped: only keys whose source is the fetch. */
+#define CTRL_KEY_DROP_AFTER 2
+#define CTRL_KEY_DROP_MIN_MS 30000u
+#define CTRL_KEY_DROP_MAX_MS 600000u
+static void ctrl_key_note_handshake(microlink_t *ml, bool ok, uint64_t now_ms) {
+    if (ok) {
+        ml->ctrl_key_failures = 0;
+        return;
+    }
+    if (ml->ctrl_key_auth != CTRL_KEY_TLS_VERIFIED && ml->ctrl_key_auth != CTRL_KEY_PLAINTEXT)
+        return;
+    if (++ml->ctrl_key_failures < CTRL_KEY_DROP_AFTER || now_ms < ml->ctrl_key_next_drop_ms)
+        return;
+    ml->ctrl_noise_pubkey_valid = false;
+    ml->ctrl_key_failures = 0;
+    ml->ctrl_key_refetches++;
+    ml->ctrl_key_drop_backoff_ms = ml->ctrl_key_drop_backoff_ms
+        ? (ml->ctrl_key_drop_backoff_ms >= CTRL_KEY_DROP_MAX_MS / 2 ? CTRL_KEY_DROP_MAX_MS
+                                                                    : ml->ctrl_key_drop_backoff_ms * 2)
+        : CTRL_KEY_DROP_MIN_MS;
+    ml->ctrl_key_next_drop_ms = now_ms + ml->ctrl_key_drop_backoff_ms;
+    ESP_LOGW(TAG, "Noise handshake keeps failing: dropping the fetched control key for %s; it is fetched again",
+             ml->ctrl_host_parsed);
+}
 /* --- end of the key-fetch core (the host tests compile everything above) --- */
 
 /* Production transports. TLS: esp_tls with the certificate bundle, hostname
@@ -2404,11 +2434,13 @@ void ml_coord_task(void *arg) {
             if (do_noise_handshake(ml, &noise) < 0) {
                 gateway_diag_record(ml, GATEWAY_DIAG_NOISE_FAILURE, errno);
                 ESP_LOGE(TAG, "Noise handshake failed");
+                ctrl_key_note_handshake(ml, false, ml_get_time_ms());
                 ml_conn_close(ml);
                 state = COORD_RECONNECTING;
                 break;
             }
             tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_NOISE);
+            ctrl_key_note_handshake(ml, true, 0);
             state = COORD_H2_PREFACE;
             break;
 

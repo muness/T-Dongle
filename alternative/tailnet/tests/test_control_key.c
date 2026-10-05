@@ -22,6 +22,7 @@ typedef struct {
     bool use_tls, ctrl_noise_pubkey_valid;
     uint8_t ctrl_noise_pubkey[32], ctrl_key_auth;
     char transport_error[64];
+    uint8_t ctrl_key_failures; uint32_t ctrl_key_drop_backoff_ms, ctrl_key_refetches; uint64_t ctrl_key_next_drop_ms;
 } microlink_t;
 static bool test_clock_valid = true;
 static bool ml_derp_clock_valid(void) { return test_clock_valid; }
@@ -219,4 +220,52 @@ int main(void) {
 
     puts("Control key: SaaS pinned, config pin, https verified (no plain fallback), http flagged, malformed/oversize/error responses refused, connection closed before parse");
     return 0;
+    /* Rotation: handshakes keep failing -> the fetched key is dropped and fetched again; the new key is used. */
+    {
+        reset_mocks();
+        microlink_t r = make("https://hs.example.com");
+        tls_mock.response = GOOD;
+        assert(!ensure(&r, &key) && r.ctrl_noise_pubkey_valid);
+        ctrl_key_note_handshake(&r, false, 1000);
+        assert(r.ctrl_noise_pubkey_valid);                                   /* one failure: keep */
+        ctrl_key_note_handshake(&r, true, 1100); ctrl_key_note_handshake(&r, false, 1200);
+        assert(r.ctrl_noise_pubkey_valid);                                   /* a success resets the count */
+        ctrl_key_note_handshake(&r, false, 1300);
+        assert(!r.ctrl_noise_pubkey_valid && r.ctrl_key_refetches == 1);     /* two in a row: drop */
+        static char rotated[400];
+        snprintf(rotated, sizeof(rotated), "%s", GOOD);
+        char *at = strstr(rotated, KEYHEX); memcpy(at, "11", 2);             /* the server now has a different key */
+        reset_mocks(); tls_mock.response = rotated;
+        assert(!ensure(&r, &key) && tls_mock.opens == 1 && key[0] == 0x11 && r.ctrl_noise_pubkey_valid);
+        ctrl_key_note_handshake(&r, true, 2000);
+        /* Drops are spaced: a second pair of failures inside the gap keeps the key (no /key hammering). */
+        ctrl_key_note_handshake(&r, false, 5000); ctrl_key_note_handshake(&r, false, 5100);
+        assert(r.ctrl_noise_pubkey_valid && r.ctrl_key_refetches == 1);
+        /* After the gap it drops again, with a doubled gap; a failed refetch leaves the key invalid and
+         * the caller (reconnect backoff) retries, never connecting with a missing key. */
+        ctrl_key_note_handshake(&r, false, 1300 + CTRL_KEY_DROP_MIN_MS + 1); ctrl_key_note_handshake(&r, false, 1300 + CTRL_KEY_DROP_MIN_MS + 2);
+        assert(!r.ctrl_noise_pubkey_valid && r.ctrl_key_refetches == 2 && r.ctrl_key_drop_backoff_ms == 2 * CTRL_KEY_DROP_MIN_MS);
+        reset_mocks(); tls_mock.open_fails = true;
+        assert(ensure(&r, &key) != 0 && !r.ctrl_noise_pubkey_valid && tls_mock.opens == 1);
+        uint64_t t = 1000000;
+        for (int i = 0; i < 20; i++) {                                       /* the gap saturates, never overflows */
+            r.ctrl_noise_pubkey_valid = true; r.ctrl_key_auth = CTRL_KEY_TLS_VERIFIED;
+            ctrl_key_note_handshake(&r, false, t); ctrl_key_note_handshake(&r, false, t); t += 10000000;
+            assert(r.ctrl_key_drop_backoff_ms <= CTRL_KEY_DROP_MAX_MS);
+        }
+        /* Plain-HTTP fetched keys are dropped the same way. */
+        microlink_t h = make("http://hs.lan"); h.ctrl_key_auth = CTRL_KEY_PLAINTEXT; h.ctrl_noise_pubkey_valid = true;
+        ctrl_key_note_handshake(&h, false, 10); ctrl_key_note_handshake(&h, false, 11);
+        assert(!h.ctrl_noise_pubkey_valid);
+        /* Never dropped: a configured pin, or the compiled-in SaaS key (nothing is fetched for it). */
+        microlink_t pin = make("https://hs.example.com");
+        memcpy(pin.ctrl_noise_pubkey, KEY, 32); pin.ctrl_noise_pubkey_valid = true; pin.ctrl_key_auth = CTRL_KEY_PINNED_CONFIG;
+        for (int i = 0; i < 50; i++) ctrl_key_note_handshake(&pin, false, 100000000ull * i);
+        assert(pin.ctrl_noise_pubkey_valid && !pin.ctrl_key_refetches);
+        reset_mocks();
+        assert(!ensure(&pin, &key) && !tls_mock.opens && key == pin.ctrl_noise_pubkey);
+        microlink_t sa = make(""); assert(!ensure(&sa, &key));
+        for (int i = 0; i < 50; i++) ctrl_key_note_handshake(&sa, false, 100000000ull * i);
+        assert(!sa.ctrl_key_refetches && !ensure(&sa, &key) && key == NULL && !tls_mock.opens);
+    }
 }

@@ -836,6 +836,10 @@ struct microlink_s {
     uint8_t ctrl_noise_pubkey[32];
     bool ctrl_noise_pubkey_valid;
     uint8_t ctrl_key_auth;           /* ML_CTRL_KEY_*: who vouches for the key above */
+    uint8_t ctrl_key_failures;       /* consecutive Noise handshake failures with a fetched key */
+    uint32_t ctrl_key_drop_backoff_ms; /* gap enforced between drops of the fetched key */
+    uint64_t ctrl_key_next_drop_ms;  /* no drop before this (uptime ms) */
+    uint32_t ctrl_key_refetches;     /* fetched keys dropped after failures */
 
     /* Subnet routes to advertise on register (Hostinfo.RoutableIPs).
      * Newline-separated CIDR string copied from microlink_config_t.advertise_routes.
