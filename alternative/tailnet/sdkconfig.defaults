@@ -78,7 +78,9 @@ CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
 CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y
 CONFIG_SPI_FLASH_ROM_IMPL=y
 CONFIG_ESP_EVENT_POST_FROM_IRAM_ISR=n
-CONFIG_SPI_MASTER_ISR_IN_IRAM=n
+# The LCD's SPI master ISR stays in IRAM. With CONFIG_SPI_MASTER_ISR_IN_IRAM=n the board panicked
+# (LoadProhibited in spi_intr -> spi_bus_lock_bg_exit, spi_master.c:1099, 2026-10-05). Saves only
+# ~3.8 KB, so it is not worth the risk.
 
 # Power and latency (ADR 0016, owner-approved 2026-10-05). The CPU boots at 240 MHz and esp_pm_configure()
 # (components/tdongle_runtime/tdongle_pm.c) lets it scale between 240 and 80 MHz: the forwarding tasks hold a
