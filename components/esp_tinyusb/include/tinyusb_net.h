@@ -140,6 +140,24 @@ typedef struct {
     uint32_t pm_acquired;        /*!< CPU-frequency lock acquisitions (0 unless CONFIG_PM_ENABLE) */
     uint32_t pm_released;
     uint32_t pm_held;            /*!< 1 while the lock is held */
+    /* Drain-rate evidence (ADR 0022). An IN transfer is one NTB (or a zero-length packet closing one whose size was a
+     * multiple of the 64 byte packet). ntb_bytes / ntb_xfers is the mean NTB; with the mean frame size it gives datagrams
+     * per NTB. The gap histogram is the time between consecutive IN completions seen by the TinyUSB task while frames
+     * were queued: each gap is one NTB's bus time plus the task's wake latency, so a mean far above the bus time of the
+     * mean NTB (about 0.85 ms per kilobyte at full speed) says the task is being starved, not the bus. */
+    uint32_t ntb_xfers;          /*!< IN completions that carried data (one NTB each) */
+    uint32_t ntb_zlp;            /*!< zero-length IN completions (ZLP after an NTB that was a multiple of 64 B) */
+    uint32_t ntb_bytes;          /*!< bytes carried by those NTBs, summed */
+    uint32_t ntb_max_bytes;      /*!< largest NTB completed */
+    uint32_t drains_sent[5];     /*!< drain passes that handed 1, 2, 3, 4, 5 or more frames to the NTBs */
+    uint32_t gap_count;          /*!< completions with a backlog, measured since the previous completion */
+    uint32_t gap_us_sum;
+    uint32_t gap_us_max;
+    uint32_t gap_hist[5];        /*!< < 1 ms, < 2 ms, < 4 ms, < 8 ms, >= 8 ms */
+    uint32_t cold_starts;        /*!< empty to non-empty transitions that were later handed to an NTB */
+    uint32_t cold_us_sum;        /*!< commit of the first frame to its hand-over: worker wake + deferral + TinyUSB task */
+    uint32_t cold_us_max;
+    uint32_t worker_demotions;   /*!< times the worker ran heap work at work_priority */
 } tinyusb_net_tx_stats_t;
 
 /**
@@ -152,7 +170,10 @@ typedef struct {
 typedef struct {
     unsigned base_frames;        /*!< permanent slabs, 2..TINYUSB_NET_TX_MAX_BASE_SLABS */
     unsigned max_chunks;         /*!< elastic chunks, 0..TINYUSB_NET_TX_MAX_CHUNKS (0: fixed ring) */
-    unsigned priority;           /*!< worker task priority */
+    unsigned priority;           /*!< worker task priority: the relay (notify, defer) runs here */
+    unsigned work_priority;      /*!< priority for the worker's heap work (growth, idle shrink); 0: the same as `priority`.
+                                      The relay must outrank the producers on its core so the first frame is not held behind
+                                      a decrypt run, but a heap walk must not delay the TinyUSB task it is serving. */
     int core;                    /*!< worker core (tskNO_AFFINITY for none) */
     size_t floor_free;           /*!< free internal heap that must remain after a growth */
     size_t floor_largest;        /*!< largest free internal block that must exist before AND after a growth */

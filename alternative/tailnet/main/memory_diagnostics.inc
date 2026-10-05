@@ -400,6 +400,25 @@ static void report_usb(jw_writer *w) {
     report_field(w, "tx_ntb_blocked", tx.ntb_blocked);
     report_field(w, "tx_xfer_events", tx.xfer_events);
     report_field(w, "tx_worker_stack_free", tx.worker_stack_free);
+    /* ADR 0022. Mean NTB = ntb_bytes / ntb_xfers; datagrams per NTB = sent / (ntb_xfers - ntb_zlp). The gap is the time between
+     * IN completions while frames were queued: bus time of the NTB plus the TinyUSB task's wake latency. cold_* is the wait of
+     * the first frame of a burst for its hand-over (relay wake + deferral + TinyUSB task). tools/usb_drain_model.py reads them. */
+    report_field(w, "ntb_xfers", tx.ntb_xfers);
+    report_field(w, "ntb_zlp", tx.ntb_zlp);
+    report_field(w, "ntb_bytes", tx.ntb_bytes);
+    report_field(w, "ntb_max_bytes", tx.ntb_max_bytes);
+    jw_raw(w, ",\"drains_sent\":[");
+    for (unsigned i = 0; i < 5; i++) { if (i) jw_char(w, ','); jw_number(w, tx.drains_sent[i]); }
+    jw_raw(w, "],\"gap_hist_ms\":[");
+    for (unsigned i = 0; i < 5; i++) { if (i) jw_char(w, ','); jw_number(w, tx.gap_hist[i]); }
+    jw_raw(w, "]");
+    report_field(w, "gap_count", tx.gap_count);
+    report_field(w, "gap_us_sum", tx.gap_us_sum);
+    report_field(w, "gap_us_max", tx.gap_us_max);
+    report_field(w, "cold_starts", tx.cold_starts);
+    report_field(w, "cold_us_sum", tx.cold_us_sum);
+    report_field(w, "cold_us_max", tx.cold_us_max);
+    report_field(w, "tx_worker_demotions", tx.worker_demotions);
     report_field(w, "tx_ntb_count", CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT);
     report_field(w, "rx_inflight_max", GATEWAY_USB_RX_INFLIGHT_MAX);
     report_field(w, "rx_inflight", atomic_load(&usb_rx_budget.inflight));

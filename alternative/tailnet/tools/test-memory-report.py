@@ -56,6 +56,9 @@ assert (usb["tx_grow_denied_gate"], usb["tx_grow_denied_heap"], usb["tx_grow_den
 assert (usb["tx_pm_acquired"], usb["tx_pm_released"], usb["tx_pm_held"]) == (20, 19, 1)
 assert usb["tx_high_water"] == 4212 and usb["tx_dropped_full"] == 7 and usb["tx_ntb_blocked"] == 4
 assert usb["tx_xfer_events"] == 55 and usb["tx_worker_stack_free"] == 900
+assert (usb["ntb_xfers"], usb["ntb_zlp"], usb["ntb_bytes"], usb["ntb_max_bytes"]) == (40, 2, 100000, 3190)
+assert usb["drains_sent"] == [1, 2, 3, 4, 5] and usb["gap_hist_ms"] == [6, 7, 8, 9, 10]
+assert (usb["gap_count"], usb["gap_us_sum"], usb["gap_us_max"], usb["cold_starts"], usb["cold_us_sum"], usb["cold_us_max"], usb["tx_worker_demotions"]) == (30, 150000, 21000, 21, 42000, 9000, 22)
 assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 22 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
 members = sections["members"]

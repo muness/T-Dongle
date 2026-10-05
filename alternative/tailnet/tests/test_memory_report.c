@@ -23,7 +23,10 @@ static void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *s) {
         .sent_bytes = 100000, .dropped_full = 7, .dropped_link_down = 1, .dropped_invalid = 2, .flushed_link_down = 3,
         .ntb_blocked = 4, .xfer_events = 55, .worker_stack_free = 900, .grow_events = 11, .shrink_events = 12,
         .reclaim_events = 13, .reclaimed_chunks = 14, .grow_denied_gate = 15, .grow_denied_heap = 16,
-        .grow_denied_largest = 17, .grow_denied_nomem = 18, .grow_raced = 19, .pm_acquired = 20, .pm_released = 19, .pm_held = 1};
+        .grow_denied_largest = 17, .grow_denied_nomem = 18, .grow_raced = 19, .pm_acquired = 20, .pm_released = 19, .pm_held = 1,
+        .ntb_xfers = 40, .ntb_zlp = 2, .ntb_bytes = 100000, .ntb_max_bytes = 3190, .drains_sent = {1, 2, 3, 4, 5},
+        .gap_count = 30, .gap_us_sum = 150000, .gap_us_max = 21000, .gap_hist = {6, 7, 8, 9, 10},
+        .cold_starts = 21, .cold_us_sum = 42000, .cold_us_max = 9000, .worker_demotions = 22};
 }
 static gateway_usb_rx_budget usb_rx_budget;
 #define GATEWAY_VERSION "0.0.0-test"

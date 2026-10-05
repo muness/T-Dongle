@@ -278,9 +278,11 @@ _Static_assert(GATEWAY_TASK_USB_ROUTES_CORE == ML_TASK_WG_MGR_CORE && GATEWAY_TA
 _Static_assert(ML_TASK_NET_IO_CORE == ML_TASK_DERP_TX_CORE && ML_TASK_NET_IO_PRIO > ML_TASK_DERP_TX_PRIO,
                "core 0: net_io > derp");
 _Static_assert(GATEWAY_TASK_USB_TX_CORE == TINYUSB_DEFAULT_TASK_AFFINITY && GATEWAY_TASK_USB_TX_CORE == ML_TASK_WG_MGR_CORE &&
-               GATEWAY_TASK_USB_TX_PRIO > TINYUSB_DEFAULT_TASK_PRIO && GATEWAY_TASK_USB_TX_PRIO > ML_TASK_COORD_PRIO &&
-               GATEWAY_TASK_USB_TX_PRIO < ML_TASK_WG_MGR_PRIO,
-               "core 1: usb_routes > wg_mgr > usb_txq > TinyUSB and coord");
+               GATEWAY_TASK_USB_TX_PRIO > GATEWAY_TASK_TINYUSB_PRIO && GATEWAY_TASK_TINYUSB_PRIO > GATEWAY_TASK_USB_ROUTES_PRIO &&
+               GATEWAY_TASK_USB_ROUTES_PRIO > ML_TASK_WG_MGR_PRIO && GATEWAY_TASK_USB_TX_WORK_PRIO < ML_TASK_WG_MGR_PRIO &&
+               GATEWAY_TASK_USB_TX_WORK_PRIO > ML_TASK_COORD_PRIO,
+               "core 1: usb_txq relay > TinyUSB > usb_routes > wg_mgr > usb_txq heap work > coord");
+_Static_assert(GATEWAY_TASK_USB_TX_PRIO < 22, "the USB tasks stay below the IDF system tasks (esp_timer 22, ipc 24)");
 static size_t member_queue_bytes(void) {
     return ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
            (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH +
@@ -1278,6 +1280,7 @@ static esp_err_t start_usb(void) {
                                     "USB network",
                                     ""};
     tinyusb_config_t usb = TINYUSB_DEFAULT_CONFIG();
+    if(gateway_tailnet_mode())usb.task.priority = GATEWAY_TASK_TINYUSB_PRIO;   /* ADR 0022: the IN pipe must not wait behind wg_mgr */
     usb.event_cb = usb_event;
     usb.descriptor.string = strings;
     usb.descriptor.string_count = sizeof(strings) / sizeof(strings[0]);
@@ -1290,7 +1293,7 @@ static esp_err_t start_usb(void) {
     result=tinyusb_net_init(&net);
     if(result==ESP_OK && gateway_tailnet_mode()){
         const tinyusb_net_tx_config_t tx = {.base_frames = GATEWAY_USB_TX_BASE_FRAMES, .max_chunks = GATEWAY_USB_TX_MAX_CHUNKS,
-                                            .priority = GATEWAY_TASK_USB_TX_PRIO, .core = GATEWAY_TASK_USB_TX_CORE,
+                                            .priority = GATEWAY_TASK_USB_TX_PRIO, .work_priority = GATEWAY_TASK_USB_TX_WORK_PRIO, .core = GATEWAY_TASK_USB_TX_CORE,
                                             .floor_free = GATEWAY_USB_TX_FLOOR_FREE, .floor_largest = GATEWAY_USB_TX_FLOOR_LARGEST,
                                             .idle_ms = GATEWAY_USB_TX_IDLE_MS, .gate = usb_tx_gate,
                                             .pm_begin = usb_tx_pm_begin, .pm_end = usb_tx_pm_end};
