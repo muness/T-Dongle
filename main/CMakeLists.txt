@@ -1,4 +1,6 @@
-if(TDONGLE_LEGACY_BRIDGE)
+# Read the build property, not the option: see the root CMakeLists.txt.
+idf_build_get_property(tdongle_legacy_bridge TDONGLE_LEGACY_BRIDGE)
+if(tdongle_legacy_bridge)
 idf_component_register(SRCS "bridge.c" "core.c" "settings.c" "control.c" "console.c" "portal.c" "ui.c" "view.c" "profile_json.c"
  INCLUDE_DIRS "." PRIV_REQUIRES esp_tinyusb esp_wifi esp_netif nvs_flash esp_timer esp_driver_gpio esp_driver_ledc esp_driver_spi esp_lcd st7735 esp_http_server json esp_system)
 else()

@@ -11,6 +11,14 @@ if(NOT TDONGLE_LEGACY_BRIDGE)
 endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
+# ESP-IDF expands component CMakeLists in a separate `cmake -P` process to
+# collect requirements; project variables/options are not visible there, only
+# build properties are. Publish the mode as a property for main/CMakeLists.txt.
+if(TDONGLE_LEGACY_BRIDGE)
+ idf_build_set_property(TDONGLE_LEGACY_BRIDGE 1)
+else()
+ idf_build_set_property(TDONGLE_LEGACY_BRIDGE 0)
+endif()
 if(TDONGLE_LEGACY_BRIDGE)
  project(tdongle_adapter VERSION 0.1.0)
 else()
