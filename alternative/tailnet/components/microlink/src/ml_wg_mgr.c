@@ -320,7 +320,7 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
     if (!ml) return ERR_CONN;
 
     /* Only control packets (handshake, cookie) are logged: a transport-data line per packet was ~140 formatted
-     * ESP_LOGI calls a second on the forwarding path (docs/adr/0017-wg-mgr-packet-path.md). */
+     * ESP_LOGI calls a second on the forwarding path (docs/adr/0018-wg-mgr-packet-path.md). */
     wg_log_udp_tx(dest_ip, dest_port, data, len);
 
     /* Use raw PCB to send — safe from any thread context */
@@ -380,18 +380,20 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
 }
 
 /* The same send without the copies: the datagram is already a contiguous PBUF_TRANSPORT pbuf (wireguardif builds it in
- * place), so it goes to the UDP pcb as it is. lwIP adds its headers in the headroom and removes them again, and the
- * caller's reference is untouched (udp_sendto does not consume the pbuf). */
+ * place), so it goes to the UDP pcb as it is. lwIP adds its UDP, IP and link headers in the headroom (and leaves them
+ * there: the pbuf's payload, len and tot_len are not the datagram any more once udp_sendto has run, so nothing here reads
+ * them afterwards) and the caller's reference is untouched (udp_sendto does not consume the pbuf). */
 static err_t wg_udp_output_pbuf_cb(uint32_t dest_ip, uint16_t dest_port, struct pbuf *p, void *ctx) {
     microlink_t *ml = (microlink_t *)ctx;
     if (!ml || !ml->wg_output_pcb) return ERR_CONN;
     const uint8_t *data = (const uint8_t *)p->payload;
-    wg_log_udp_tx(dest_ip, dest_port, data, p->tot_len);
+    const size_t len = p->tot_len;   /* before the send: lwIP prepends its headers to this pbuf in place and does not take them off */
+    wg_log_udp_tx(dest_ip, dest_port, data, len);
     ip_addr_t dst;
     IP_SET_TYPE_VAL(dst, IPADDR_TYPE_V4);
     ip4_addr_set_u32(ip_2_ip4(&dst), dest_ip);  /* already network byte order */
     err_t err = udp_sendto(ml->wg_output_pcb, p, &dst, dest_port);
-    wg_send_both(ml, dest_ip, data, p->tot_len);
+    wg_send_both(ml, dest_ip, data, len);
     return err;
 }
 
@@ -1347,7 +1349,7 @@ static void directory_reconcile(microlink_t *ml) {
     ml->directory_applied=generation;
 }
 /* ----------------------------------------------------------------------------
- * Egress: USB -> tunnel packets (docs/adr/0017-wg-mgr-packet-path.md)
+ * Egress: USB -> tunnel packets (docs/adr/0018-wg-mgr-packet-path.md)
  *
  * usb_routes builds the WireGuard datagram where it will be sent from: one lwIP RAM pbuf in the transport layout
  * [16 B header space][plaintext, zero padded to 16][16 B tag space], preceded by a small record (destination, enqueue
@@ -1360,6 +1362,8 @@ static void directory_reconcile(microlink_t *ml) {
 typedef struct { uint32_t vpn_ip, enq_us; uint16_t len; } ml_egress_meta_t;
 /* Units of work done in the current pass (packets, timers, drains): a pass that did none was idle. wg_mgr task only. */
 static unsigned g_pass_work;
+/* Arrival order of parked packets (wg_mgr task only): slots are reused in any order, so the flush goes by this, not by slot. */
+static uint32_t g_park_seq;
 unsigned ml_wg_pass_work_take(void) { unsigned n = g_pass_work; g_pass_work = 0; return n; }
 
 esp_err_t ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *data,size_t len) {
@@ -1401,8 +1405,17 @@ static void gateway_send_packet(microlink_t *ml,struct pbuf *packet,uint32_t vpn
     if(wg) {
         WGPERF_T(t);
         ip4_addr_t ip={.addr=htonl(vpn_ip)};
+        /* ChaCha20-Poly1305 over up to 1.4 KB is ~62k cycles (0.26 ms): not under the core lock (as the receive direction,
+         * PR #30). begin and commit hold it for the lookup, the nonce and the send; the seal in between touches only this
+         * packet's pbuf and a private copy of the key (wireguardif.c, wireguardif_tx_begin). */
+        struct wireguard_tx_job job;err_t result=ERR_CONN;int seal=0;
         ROUTE_MARK(4);
-        GATEWAY_WG_SITE(TDONGLE_LOCK_WG_OUTPUT, wireguardif_output_prepared(wg,packet,len,&ip));
+        WG_LOCKED(TDONGLE_LOCK_WG_OUTPUT, seal=wireguardif_tx_begin(wg,packet,len,&ip,&job,&result));
+        if(seal) {
+            wireguard_tx_seal(&job);
+            WG_LOCKED(TDONGLE_LOCK_WG_COMMIT, result=wireguardif_tx_commit(wg,&job));
+        }
+        (void)result;
         ROUTE_MARK(0);
         WGPERF_LAP(t,send);
     }
@@ -1445,7 +1458,7 @@ static void gateway_egress_packet(microlink_t *ml,struct pbuf *packet) {
     }
     if(idx>=0)for(unsigned i=0;i<ML_JIT_PENDING;i++)if(!ml->jit_pending[i].packet) {
         ml->jit_pending[i].packet=packet;ml->jit_pending[i].expires=ml_get_time_ms()+5000;
-        ml->jit_pending[i].vpn_ip=meta.vpn_ip;ml->jit_pending[i].len=meta.len;
+        ml->jit_pending[i].vpn_ip=meta.vpn_ip;ml->jit_pending[i].len=meta.len;ml->jit_pending[i].seq=++g_park_seq;
         WGPERF_COUNT(out_parked,1);
         ROUTE_MARK(3);
         ml_wg_mgr_trigger_handshake(ml,meta.vpn_ip);ROUTE_MARK(0);
@@ -1455,8 +1468,18 @@ static void gateway_egress_packet(microlink_t *ml,struct pbuf *packet) {
     ml->jit_dropped++;pbuf_free(packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
 }
 static void directory_flush_packets(microlink_t *ml) {
-    for(unsigned i=0;i<ML_JIT_PENDING;i++) {
-        struct pbuf *packet=ml->jit_pending[i].packet;if(!packet)continue;
+    /* In arrival order (oldest `seq` first), not slot order: a slot freed by one peer's packet is taken by the next packet
+     * of any peer, so slot order is not arrival order and would send a peer's newer packet ahead of its older one. */
+    unsigned done=0;
+    for(;;) {
+        int pick=-1;
+        for(unsigned i=0;i<ML_JIT_PENDING;i++) {
+            if(!ml->jit_pending[i].packet || (done&(1u<<i)))continue;
+            if(pick<0 || (int32_t)(ml->jit_pending[i].seq-ml->jit_pending[pick].seq)<0)pick=(int)i;
+        }
+        if(pick<0)break;
+        unsigned i=(unsigned)pick;done|=1u<<i;
+        struct pbuf *packet=ml->jit_pending[i].packet;
         int idx=find_peer_by_ip(ml,ml->jit_pending[i].vpn_ip);
         bool discard=idx<0 || ml_get_time_ms()>=ml->jit_pending[i].expires;
         if(discard){ml->jit_dropped++;WGPERF_COUNT(out_discard,1);pbuf_free(packet);gateway_release_slot(ml,i);continue;}

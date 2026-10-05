@@ -36,9 +36,10 @@ static unsigned counted_out_direct, counted_out_parked, counted_out_flushed, cou
 #define pdTRUE 1
 #define PBUF_TRANSPORT 0
 #define PBUF_RAM 0
-#define GATEWAY_WG_SITE(site,x) ({ lock_calls++; (x); })
 #define TDONGLE_LOCK_WG_OUTPUT 3
+#define TDONGLE_LOCK_WG_COMMIT 2
 #define ERR_OK 0
+#define ERR_CONN -11
 #define WIREGUARD_AUTHTAG_LEN 16
 #define WIREGUARDIF_DATA_HDR 16
 #define WIREGUARDIF_DATA_PAD(n) ((((size_t)(n)) + 15) & ~(size_t)15)
@@ -71,7 +72,7 @@ struct netif {int unused;};
 typedef struct {uint64_t jit_used_ms;uint32_t vpn_ip;bool active;int wg_peer_index;} ml_peer_t;
 typedef struct {
     unsigned state,jit_packet_count,jit_dropped,jit_hits;uint32_t peer_generation;int peer_update_queue;
-    struct {struct pbuf *packet;uint64_t expires;uint32_t vpn_ip;uint16_t len;} jit_pending[ML_JIT_PENDING];
+    struct {struct pbuf *packet;uint64_t expires;uint32_t vpn_ip;uint32_t seq;uint16_t len;} jit_pending[ML_JIT_PENDING];
     ml_peer_t peers[8];
     int peer_count;
     struct netif *wg_netif;
@@ -96,8 +97,19 @@ static int directory_activate(microlink_t *m,const ml_peer_update_t *r) {
 static err_t wireguardif_peer_is_up(struct netif *n,u8_t idx,void *ip,void *port){(void)n;(void)ip;(void)port;return session_up[idx]?0:-1;}
 static void ml_wg_mgr_trigger_handshake(microlink_t *m,uint32_t ip){(void)m;(void)ip;handshakes++;}
 static struct {uint32_t ip;uint16_t len;uint8_t first[48];unsigned n;bool layout_ok;size_t tot_len;} out;
-static err_t wireguardif_output_prepared(struct netif *n,struct pbuf *p,uint16_t len,const ip4_addr_t *ip) {
-    (void)n;out.ip=ntohl(ip->addr);out.len=len;out.n++;out.tot_len=p->tot_len;
+/* begin / seal / commit: the packet is "sent" at commit; begin and commit are the two lock holds, seal is outside them. */
+struct wireguard_tx_job {struct pbuf *pbuf;uint16_t len;uint32_t ip;};
+static unsigned seals,in_lock;static bool order_log_on;static unsigned order_n;static char order_log[16];static bool begin_refuses;
+#define WG_LOCKED(site,body) do { lock_calls++; in_lock++; body; in_lock--; } while(0)
+static int wireguardif_tx_begin(struct netif *n,struct pbuf *p,uint16_t len,const ip4_addr_t *ip,struct wireguard_tx_job *job,err_t *result) {
+    (void)n;assert(in_lock==1);if(begin_refuses){*result=-1;return 0;}
+    job->pbuf=p;job->len=len;job->ip=ntohl(ip->addr);*result=0;return 1;
+}
+static void wireguard_tx_seal(struct wireguard_tx_job *job){assert(in_lock==0 && job->pbuf);seals++;}   /* the seal is never under the lock */
+static err_t wireguardif_tx_commit(struct netif *n,struct wireguard_tx_job *job) {
+    (void)n;assert(in_lock==1);struct pbuf *p=job->pbuf;
+    if(order_log_on)order_log[order_n++]=(char)((uint8_t *)p->payload)[16];
+    out.ip=job->ip;out.len=job->len;out.n++;out.tot_len=p->tot_len;
     memcpy(out.first,p->payload,48<p->tot_len?48:p->tot_len);return 0;
 }
 typedef enum {WIREGUARD_DUMMY} dummy_t;
@@ -143,7 +155,7 @@ int main(void) {
     /* --- the session comes up: parked packets go out, slots and budget come back --- */
     session_up[0]=true;now=200;
     directory_flush_packets(&m);
-    assert(out.n==ML_JIT_PENDING && out.ip==IP1 && out.len==4 && !m.jit_packet_count && !live_pbufs && lock_calls==ML_JIT_PENDING);
+    assert(out.n==ML_JIT_PENDING && out.ip==IP1 && out.len==4 && !m.jit_packet_count && !live_pbufs && lock_calls==2*ML_JIT_PENDING && seals==ML_JIT_PENDING);
     assert(m.peers[0].jit_used_ms==200);
     /* --- resident peer with a session: sent in the same pass, no slot, no handshake call, no flush needed --- */
     reset_out();handshakes=0;lock_calls=0;counted_out_direct=0;
@@ -162,6 +174,24 @@ int main(void) {
     assert(!out.n);                                                                  /* B waits behind A */
     directory_flush_packets(&m);
     assert(out.n==2 && !live_pbufs && !m.jit_packet_count);
+    /* --- ordering across slot reuse: a freed low slot is taken by a newer packet; the flush still sends by arrival --- */
+    {
+        session_up[0]=false;session_up[1]=false;reset_out();
+        const char *seq1[4]={"1","2","3","4"};
+        uint32_t order_ip[4]={IP2,IP1,IP2,IP2};                /* slot 0: IP2 "1", slot 1: IP1 "2", slot 2: IP2 "3" */
+        for(int i=0;i<3;i++){assert(!ml_gateway_queue_packet(&m,order_ip[i],(const uint8_t *)seq1[i],1));}
+        pump(&m);
+        session_up[0]=true;directory_flush_packets(&m);          /* IP1's packet in slot 1 goes; slots 0 and 2 stay */
+        assert(out.n==1 && !m.jit_pending[1].packet && m.jit_pending[0].packet && m.jit_pending[2].packet);
+        assert(!ml_gateway_queue_packet(&m,IP2,(const uint8_t *)"4",1));pump(&m);   /* the new one takes the free slot 1 */
+        assert(m.jit_pending[1].packet && m.jit_pending[1].seq>m.jit_pending[2].seq);
+        session_up[1]=true;reset_out();
+        order_log_on=true;order_n=0;
+        directory_flush_packets(&m);
+        order_log_on=false;
+        assert(order_n==3 && order_log[0]=='1' && order_log[1]=='3' && order_log[2]=='4');   /* 1,3,4 not 1,4,3 */
+        assert(!live_pbufs && !m.jit_packet_count);
+    }
     /* --- peers: unknown and not in the directory is dropped; in the directory is activated under the odd generation --- */
     reset_out();m.jit_dropped=0;counted_out_discard=0;
     assert(!ml_gateway_queue_packet(&m,0x64400009,PLAIN,4));pump(&m);

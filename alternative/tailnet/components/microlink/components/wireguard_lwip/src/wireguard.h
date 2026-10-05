@@ -374,6 +374,19 @@ struct wireguard_rx_job {
     bool ok;
 };
 void wireguard_rx_decrypt(struct wireguard_rx_job *job);   /* needs no lock and touches no shared state */
+/* An outbound transport data message sealed outside the lwIP core lock (wireguardif_tx_begin / _commit). begin, under the
+ * lock, picks the keypair, writes the datagram header and reserves the nonce (sending_counter++); wireguard_tx_seal then
+ * encrypts the pbuf in place from a COPY of the key and touches no shared state; commit, under the lock again, re-finds the
+ * peer and sends. The pbuf stays owned by the caller throughout (nothing else can see it). */
+struct wireguard_tx_job {
+    struct pbuf *pbuf;         /* [16 B header][plaintext, zero padded][16 B tag space], contiguous */
+    size_t padded_len;
+    uint64_t nonce;
+    uint32_t remote_index;     /* identifies the keypair used, for the timestamp update in commit */
+    ip4_addr_t dest;           /* the tunnel address, to find the peer again */
+    uint8_t key[WIREGUARD_SESSION_KEY_LEN];
+};
+void wireguard_tx_seal(struct wireguard_tx_job *job);      /* needs no lock; writes only inside job->pbuf */
 
 bool wireguard_create_handshake_initiation(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_initiation *dst);
 bool wireguard_create_handshake_response(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_response *dst);

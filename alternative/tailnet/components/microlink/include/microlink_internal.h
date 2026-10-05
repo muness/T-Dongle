@@ -682,7 +682,7 @@ struct microlink_s {
     QueueHandle_t stun_rx_queue;        /* net_io -> coord */
     QueueHandle_t coord_cmd_queue;      /* any -> coord */
     volatile uint32_t peer_generation; /* even = peer metadata stable, odd = owner applying updates */
-    struct { struct pbuf *packet; uint64_t expires; uint32_t vpn_ip; uint16_t len; } jit_pending[ML_JIT_PENDING];   /* prepared egress pbufs, see ml_wg_mgr.c */
+    struct { struct pbuf *packet; uint64_t expires; uint32_t vpn_ip; uint32_t seq; uint16_t len; } jit_pending[ML_JIT_PENDING];   /* prepared egress pbufs, see ml_wg_mgr.c */
     volatile unsigned jit_packet_count;
     uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
     uint32_t directory_applied;

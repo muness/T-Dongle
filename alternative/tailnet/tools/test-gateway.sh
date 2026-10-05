@@ -195,6 +195,13 @@ cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefine
    tests/test_wg_egress.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
    $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
    $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_egress
+build-host/test_wg_egress race
+# The same egress sequence with the seal outside a mutex standing for the core lock, against a thread rolling keypairs: TSan.
+cc -std=gnu11 -O1 -g -fsanitize=thread -fno-sanitize-recover=all -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_egress.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_egress_tsan
+build-host/test_wg_egress_tsan race
 build-host/test_wg_egress
 cc $TD_INC -std=c11 -Wall -Wextra -fsanitize=address,undefined -g tests/test_wg_idle.c -o build-host/test_wg_idle
 build-host/test_wg_idle

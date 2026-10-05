@@ -235,6 +235,9 @@ void wireguardif_set_udp_output_pbuf(struct netif *netif, wireguard_udp_output_p
 #define WIREGUARDIF_DATA_PAD(n) ((((size_t)(n)) + 15) & ~(size_t)15)
 #define WIREGUARDIF_DATA_ALLOC(n) (WIREGUARDIF_DATA_HDR + WIREGUARDIF_DATA_PAD(n) + WIREGUARD_AUTHTAG_LEN)
 err_t wireguardif_output_prepared(struct netif *netif, struct pbuf *wg, uint16_t plain_len, const ip4_addr_t *ipaddr);
+/* The same in three steps, the seal outside the lwIP core lock (see wireguardif.c): begin and commit need the lock. */
+int wireguardif_tx_begin(struct netif *netif, struct pbuf *wg, uint16_t plain_len, const ip4_addr_t *ipaddr, struct wireguard_tx_job *job, err_t *result);
+err_t wireguardif_tx_commit(struct netif *netif, struct wireguard_tx_job *job);
 
 /* Diagnostics builds: per-stage cycle sink, set by the microlink manager (tdongle_wgperf). Compiled out otherwise. */
 #ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS

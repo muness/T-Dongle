@@ -1,7 +1,7 @@
 #pragma once
 /* Per-stage accounting of the shared wg_mgr packet path (serial `wgperf`, diagnostics builds only).
  *
- * The question this answers: where do the ~2.4 ms of wg_mgr CPU per forwarded packet go (docs/adr/0017-wg-mgr-packet-path.md)?
+ * The question this answers: where do the ~2.4 ms of wg_mgr CPU per forwarded packet go (docs/adr/0018-wg-mgr-packet-path.md)?
  * Every stage keeps a count, a total and a maximum, in CPU cycles (the Xtensa CCOUNT register, so one stamp costs about
  * one instruction and is exact at any DFS frequency) or, for cross-task latencies where the two stamps are taken on
  * different cores, in microseconds of esp_timer time. The unit of a stage is part of its definition below and is

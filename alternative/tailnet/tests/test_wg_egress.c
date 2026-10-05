@@ -10,6 +10,7 @@
  *      tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c $wg/crypto.c \
  *      $wg/crypto/refc/{blake2s,chacha20,chacha20poly1305,poly1305-donna,x25519}.c -o build-host/test_wg_egress */
 #include <assert.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -133,6 +134,204 @@ static void compare(size_t n, bool initiator, uint32_t last_rx, uint64_t counter
     pbuf_free(q); pbuf_free(w); rig_down(&a); rig_down(&b);
 }
 
+
+/* ---- split form: begin (lock) / seal (no lock) / commit (lock) ---- */
+static err_t split_send(struct netif *nif, struct pbuf *w, size_t n, ip4_addr_t *ip, struct wireguard_tx_job *out_job, void (*between)(void *), void *arg) {
+    struct wireguard_tx_job job; err_t r;
+    if (!wireguardif_tx_begin(nif, w, (uint16_t)n, ip, &job, &r)) return r;
+    if (between) between(arg);
+    wireguard_tx_seal(&job);
+    if (out_job) *out_job = job;
+    return wireguardif_tx_commit(nif, &job);
+}
+static void roll_keys(void *arg) {   /* what the lwIP receive path does under the lock while a seal is running */
+    struct wireguard_peer *p = arg;
+    p->prev_keypair = p->curr_keypair;
+    memset(&p->curr_keypair, 0, sizeof(p->curr_keypair));
+    p->curr_keypair.valid = true; p->curr_keypair.initiator = false; p->curr_keypair.last_rx = g_now; p->curr_keypair.sending_counter = 5000;
+    p->curr_keypair.remote_index = 0x55667788; memset(p->curr_keypair.sending_key, 0xEE, 32);
+}
+static void destroy_keys(void *arg) {
+    struct wireguard_peer *p = arg;
+    memset(&p->curr_keypair, 0, sizeof(p->curr_keypair)); memset(&p->prev_keypair, 0, sizeof(p->prev_keypair));
+}
+static void unplug_peer(void *arg) { struct dev *d = arg; wireguardif_remove_peer(&d->nif, 0); }
+
+static void split_tests(void) {
+    ip4_addr_t ip = dest();
+    /* 1. a run of packets: the counter advances by one per packet, the datagrams equal the copying path's, each opens with its own nonce */
+    for (int dir = 0; dir < 2; dir++) {
+        rig_t a, b; rig_up(&a); rig_up(&b);
+        set_keys(&a.peer->curr_keypair, true, 0, 41); set_keys(&b.peer->curr_keypair, true, 0, 41);
+        set_endpoint(a.peer, dir == 0); set_endpoint(b.peer, dir == 0);
+        wireguardif_set_udp_output(&a.d.nif, copy_cb, NULL); wireguardif_set_udp_output(&b.d.nif, copy_cb, NULL);
+        wireguardif_set_derp_output(&a.d.nif, derp_cb, NULL); wireguardif_set_derp_output(&b.d.nif, derp_cb, NULL);
+        for (unsigned i = 0; i < 40; i++) {
+            size_t n = 1 + (i * 37) % 1400; uint8_t plain[1400]; plaintext(plain, n, i);
+            struct pbuf *q = pbuf_alloc(PBUF_TRANSPORT, (u16_t)n, PBUF_RAM); pbuf_take(q, plain, (u16_t)n);
+            g_now += 3; sent.calls = 0;
+            assert(a.d.nif.output(&a.d.nif, q, &ip) == ERR_OK); sent_t old = sent; sent.calls = 0;
+            struct pbuf *w = prepare(plain, n);
+            assert(split_send(&b.d.nif, w, n, &ip, NULL, NULL, NULL) == ERR_OK);
+            assert(sent.calls == 1 && sent.len == old.len && !memcmp(sent.data, old.data, old.len));
+            assert(b.peer->curr_keypair.sending_counter == 42 + i && a.peer->curr_keypair.sending_counter == 42 + i);
+            assert(b.peer->curr_keypair.last_tx == a.peer->curr_keypair.last_tx && b.peer->last_tx == a.peer->last_tx);
+            uint8_t out[1424]; size_t padded = WIREGUARDIF_DATA_PAD(n);
+            assert(chacha20poly1305_decrypt(out, sent.data + 16, padded + 16, NULL, 0, 41 + i, b.peer->curr_keypair.sending_key));
+            assert(!memcmp(out, plain, n));
+            uint64_t c = 0; for (int k = 7; k >= 0; k--) c = (c << 8) | sent.data[8 + k];
+            assert(c == 41 + i);                                   /* the counter field of the header */
+            pbuf_free(q); pbuf_free(w);
+        }
+        rig_down(&a); rig_down(&b);
+    }
+    /* 2. responder whose current keypair has not received yet sends with prev; the split form chooses the same */
+    {
+        rig_t a, b; rig_up(&a); rig_up(&b);
+        for (rig_t *r = &a; r; r = (r == &a) ? &b : NULL) {
+            set_keys(&r->peer->curr_keypair, false, 0, 1);               /* responder, nothing received */
+            set_keys(&r->peer->prev_keypair, true, 0, 900); r->peer->prev_keypair.remote_index = 0x99aabbcc;
+            set_endpoint(r->peer, true); wireguardif_set_udp_output(&r->d.nif, copy_cb, NULL);
+        }
+        uint8_t plain[50]; plaintext(plain, 50, 3);
+        struct pbuf *q = pbuf_alloc(PBUF_TRANSPORT, 50, PBUF_RAM); pbuf_take(q, plain, 50);
+        sent.calls = 0; assert(a.d.nif.output(&a.d.nif, q, &ip) == ERR_OK); sent_t old = sent; sent.calls = 0;
+        struct pbuf *w = prepare(plain, 50);
+        assert(split_send(&b.d.nif, w, 50, &ip, NULL, NULL, NULL) == ERR_OK);
+        assert(sent.len == old.len && !memcmp(sent.data, old.data, old.len));
+        assert(b.peer->prev_keypair.sending_counter == 901 && b.peer->curr_keypair.sending_counter == 1);
+        assert(b.peer->prev_keypair.last_tx == a.peer->prev_keypair.last_tx && b.peer->prev_keypair.last_tx == g_now);
+        pbuf_free(q); pbuf_free(w); rig_down(&a); rig_down(&b);
+    }
+    /* 3. keep-alive shaped packet (no plaintext): 32 bytes, an empty AEAD that opens */
+    {
+        rig_t b; rig_up(&b); set_keys(&b.peer->curr_keypair, true, 0, 9); set_endpoint(b.peer, true);
+        wireguardif_set_udp_output(&b.d.nif, copy_cb, NULL);
+        struct pbuf *w = prepare((const uint8_t *)"", 0); sent.calls = 0;
+        assert(w->tot_len == 32 && split_send(&b.d.nif, w, 0, &ip, NULL, NULL, NULL) == ERR_OK);
+        uint8_t out[16];
+        assert(sent.len == 32 && sent.data[0] == 4 && chacha20poly1305_decrypt(out, sent.data + 16, 16, NULL, 0, 9, b.peer->curr_keypair.sending_key));
+        pbuf_free(w); rig_down(&b);
+    }
+    /* 4. the keypair changes between begin and commit: the datagram is already sealed with the key it reserved; the nonce is
+     *    used once; the timestamp goes to the keypair that now carries that remote index, and not to a stranger */
+    {
+        rig_t b; rig_up(&b); set_keys(&b.peer->curr_keypair, true, 0, 100); set_endpoint(b.peer, true);
+        wireguardif_set_udp_output(&b.d.nif, copy_cb, NULL);
+        uint8_t plain[200]; plaintext(plain, 200, 9); uint8_t oldkey[32]; memcpy(oldkey, b.peer->curr_keypair.sending_key, 32);
+        struct pbuf *w = prepare(plain, 200); sent.calls = 0; g_now += 9;
+        assert(split_send(&b.d.nif, w, 200, &ip, NULL, roll_keys, b.peer) == ERR_OK);
+        uint8_t out[224];
+        assert(chacha20poly1305_decrypt(out, sent.data + 16, 208 + 16, NULL, 0, 100, oldkey) && !memcmp(out, plain, 200));
+        assert(sent.data[4] == 0x44 && sent.data[5] == 0x33 && sent.data[6] == 0x22 && sent.data[7] == 0x11);   /* the old remote index */
+        assert(b.peer->prev_keypair.sending_counter == 101);                           /* reserved once, now the previous keypair */
+        assert(b.peer->prev_keypair.last_tx == g_now);                                 /* found by remote index after the roll */
+        assert(b.peer->curr_keypair.last_tx == 0 && b.peer->curr_keypair.sending_counter == 5000);   /* the new keypair is untouched */
+        pbuf_free(w);
+        /* destroyed between: still sent (sealed), no timestamp on a keypair that is gone */
+        set_keys(&b.peer->curr_keypair, true, 0, 7); w = prepare(plain, 200); sent.calls = 0;
+        assert(split_send(&b.d.nif, w, 200, &ip, NULL, destroy_keys, b.peer) == ERR_OK && sent.calls == 1);
+        assert(!chacha20poly1305_decrypt(out, sent.data + 16, 208 + 16, NULL, 0, 7, (const uint8_t[32]){0}));   /* not sealed with a zeroed key */
+        pbuf_free(w); rig_down(&b);
+    }
+    /* 5. the peer is removed between begin and commit: dropped, ERR_RTE, nothing sent, the pbuf is still the caller's */
+    {
+        rig_t b; rig_up(&b); set_keys(&b.peer->curr_keypair, true, 0, 1); set_endpoint(b.peer, true);
+        wireguardif_set_udp_output(&b.d.nif, copy_cb, NULL);
+        uint8_t plain[20]; plaintext(plain, 20, 1); struct pbuf *w = prepare(plain, 20); sent.calls = 0;
+        assert(split_send(&b.d.nif, w, 20, &ip, NULL, unplug_peer, &b.d) == ERR_RTE && sent.calls == 0);
+        pbuf_free(w); rig_down(&b);
+    }
+    /* 6. a pbuf shorter than the layout needs, or chained, is refused before anything is written or reserved */
+    {
+        rig_t b; rig_up(&b); set_keys(&b.peer->curr_keypair, true, 0, 1); set_endpoint(b.peer, true);
+        wireguardif_set_udp_output(&b.d.nif, copy_cb, NULL);
+        struct pbuf *w = pbuf_alloc(PBUF_TRANSPORT, WIREGUARDIF_DATA_ALLOC(64) - 1, PBUF_RAM); memset(w->payload, 0xCC, w->tot_len);
+        struct wireguard_tx_job job; err_t r;
+        assert(!wireguardif_tx_begin(&b.d.nif, w, 64, &ip, &job, &r) && r == ERR_ARG);
+        assert(b.peer->curr_keypair.sending_counter == 1 && ((uint8_t *)w->payload)[0] == 0xCC);
+        assert(!wireguardif_tx_begin(&b.d.nif, NULL, 64, &ip, &job, &r) && r == ERR_ARG);
+        pbuf_free(w); rig_down(&b);
+    }
+    /* 7. begin with no usable keypair has the copying path's side effects (lazy handshake armed) and reserves nothing */
+    {
+        rig_t b; rig_up(&b); b.peer->active = false;
+        struct pbuf *w = prepare((const uint8_t *)"x", 1); struct wireguard_tx_job job; err_t r;
+        assert(!wireguardif_tx_begin(&b.d.nif, w, 1, &ip, &job, &r) && r == ERR_CONN && b.peer->active);
+        pbuf_free(w); rig_down(&b);
+    }
+}
+
+/* `test_wg_egress race` (built with -fsanitize=thread): the egress task seals outside a mutex standing for the lwIP core lock
+ * while a "tcpip" thread rolls, destroys and replaces keypairs and sends its own datagrams from the same keypair under that
+ * mutex. TSan finds any read or write of shared peer state outside the lock; and every datagram that reached the wire must
+ * open with the key of its receiver index, with no (receiver index, nonce) pair used twice. */
+#include <pthread.h>
+static pthread_mutex_t core = PTHREAD_MUTEX_INITIALIZER;
+static int race_stop;
+static struct { uint32_t idx; uint64_t ctr; } seen_pairs[200000]; static unsigned n_seen;
+static uint8_t key_of(uint32_t idx, int i) { return (uint8_t)(idx * 7 + i); }
+static err_t race_cb(uint32_t ip, uint16_t port, const uint8_t *data, size_t len, void *ctx) {   /* runs under `core` (from commit) */
+    (void)ip; (void)port; (void)ctx;
+    uint32_t idx = data[4] | data[5] << 8 | data[6] << 16 | (uint32_t)data[7] << 24;
+    uint64_t c = 0; for (int k = 7; k >= 0; k--) c = (c << 8) | data[8 + k];
+    uint8_t key[32], out[1424]; for (int i = 0; i < 32; i++) key[i] = key_of(idx, i);
+    assert(chacha20poly1305_decrypt(out, data + 16, len - 16, NULL, 0, c, key));
+    assert(n_seen < 200000); seen_pairs[n_seen].idx = idx; seen_pairs[n_seen].ctr = c; n_seen++;
+    return ERR_OK;
+}
+static void race_keys(struct wireguard_keypair *k, uint32_t idx, uint64_t ctr) {
+    memset(k, 0, sizeof(*k)); k->valid = true; k->initiator = true; k->keypair_millis = g_now; k->sending_valid = true;
+    k->sending_counter = ctr; k->remote_index = idx; for (int i = 0; i < 32; i++) k->sending_key[i] = key_of(idx, i);
+}
+static void *tcpip_thread(void *arg) {
+    struct wireguard_peer *peer = arg; uint32_t gen = 1000;
+    while (!__atomic_load_n(&race_stop, __ATOMIC_ACQUIRE)) {
+        pthread_mutex_lock(&core);
+        switch (gen % 4) {
+        case 0: peer->prev_keypair = peer->curr_keypair; race_keys(&peer->curr_keypair, ++gen * 3, 0); gen--; break;   /* roll */
+        case 1: { uint8_t buf[48]; memset(buf, 0, 48); if (peer->curr_keypair.valid) {        /* its own keepalive-like seal */
+                    uint8_t *hdr = buf; hdr[0] = 4; hdr[4] = peer->curr_keypair.remote_index; hdr[5] = peer->curr_keypair.remote_index >> 8;
+                    hdr[6] = peer->curr_keypair.remote_index >> 16; hdr[7] = peer->curr_keypair.remote_index >> 24;
+                    uint64_t c = peer->curr_keypair.sending_counter;
+                    for (int k = 0; k < 8; k++) hdr[8 + k] = (uint8_t)(c >> (8 * k));
+                    wireguard_encrypt_packet(buf + 16, buf + 16, 16, &peer->curr_keypair);
+                    race_cb(0, 0, buf, 48, NULL); } } break;
+        case 2: memset(&peer->prev_keypair, 0, sizeof(peer->prev_keypair)); break;
+        default: peer->curr_keypair.last_rx = g_now; break;
+        }
+        gen++;
+        pthread_mutex_unlock(&core);
+        usleep(20);
+    }
+    return NULL;
+}
+static int race(void) {
+    rig_t b; rig_up(&b); race_keys(&b.peer->curr_keypair, 3, 0); set_endpoint(b.peer, true);
+    wireguardif_set_udp_output(&b.d.nif, copy_cb, NULL);
+    b.d.init.listen_port = 0;
+    struct wireguard_device *dev = (struct wireguard_device *)b.d.nif.state; dev->udp_output_fn = race_cb;
+    pthread_t th; pthread_create(&th, NULL, tcpip_thread, b.peer);
+    ip4_addr_t ip = dest(); unsigned sent_n = 0;
+    for (unsigned i = 0; i < 20000; i++) {
+        size_t n = 1 + (i * 53) % 1400; uint8_t plain[1400]; plaintext(plain, n, i);
+        struct pbuf *w = prepare(plain, n); struct wireguard_tx_job job; err_t r;
+        pthread_mutex_lock(&core); int go = wireguardif_tx_begin(&b.d.nif, w, (uint16_t)n, &ip, &job, &r); pthread_mutex_unlock(&core);
+        if (go) {
+            wireguard_tx_seal(&job);                                                   /* no lock */
+            pthread_mutex_lock(&core); r = wireguardif_tx_commit(&b.d.nif, &job); pthread_mutex_unlock(&core);
+            if (r == ERR_OK) sent_n++;
+        }
+        pbuf_free(w);
+    }
+    __atomic_store_n(&race_stop, 1, __ATOMIC_RELEASE); pthread_join(th, NULL);
+    /* nonce uniqueness per receiver index */
+    for (unsigned i = 0; i < n_seen; i++) for (unsigned j = i + 1; j < n_seen && j < i + 4000; j++) assert(!(seen_pairs[i].idx == seen_pairs[j].idx && seen_pairs[i].ctr == seen_pairs[j].ctr));
+    printf("wg egress race: %u datagrams sealed outside the lock while keypairs rolled; every one opens, no nonce reused\n", sent_n);
+    rig_down(&b);
+    return sent_n ? 0 : 1;
+}
+
 #include <time.h>
 /* `test_wg_egress bench`: the same datagram sealed through the copying path (what wireguardif_output did, plus the callback's
  * linearising copy) and through the prepared path, N times. Host numbers (an Apple-silicon laptop, -O1 here, the heap of
@@ -175,6 +374,7 @@ static int bench(void) {
 
 int main(int argc, char **argv) {
     if (argc > 1 && !strcmp(argv[1], "bench")) return bench();
+    if (argc > 1 && !strcmp(argv[1], "race")) return race();
     static const size_t lens[] = {1, 2, 15, 16, 17, 31, 32, 33, 100, 1399, 1400};
     for (unsigned i = 0; i < sizeof(lens) / sizeof(lens[0]); i++) {
         compare(lens[i], true, 0, 7, true, 1);       /* initiator, direct UDP, copying callback */
@@ -232,6 +432,7 @@ int main(int argc, char **argv) {
         a.d.nif.output(&a.d.nif, NULL, &(ip4_addr_t){.addr = PEER_IP});    /* lwIP never calls this with q NULL; keepalives do via the peer */
         rig_down(&a);
     }
+    split_tests();
     puts("wg egress: prepared in-place output equals the copying output (bytes, counters, timestamps, rekey flags, results); zero-copy callbacks see the same pbuf");
     return 0;
 }

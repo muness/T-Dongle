@@ -350,6 +350,31 @@ static struct wireguard_keypair *wireguardif_tx_keypair(struct wireguard_peer *p
     return NULL;
 }
 
+/* After a datagram used `keypair`: ask for a new handshake when it has carried REKEY_AFTER_MESSAGES or (initiator) is
+ * older than REKEY_AFTER_TIME. Shared by the copying and the in-place paths. */
+static void wireguardif_tx_rekey_check(struct wireguard_peer *peer, struct wireguard_keypair *keypair) {
+    if (keypair->sending_counter >= REKEY_AFTER_MESSAGES) {
+        peer->send_handshake = true;
+        WG_HSLOG("[WG_REKEY] peer=%02x%02x%02x%02x reason=counter "
+               "counter=%lu ep=%s:%u",
+               peer->public_key[0], peer->public_key[1],
+               peer->public_key[2], peer->public_key[3],
+               (unsigned long)keypair->sending_counter,
+               ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip),
+               peer->port);
+    } else if (keypair->initiator && wireguard_expired(keypair->keypair_millis, REKEY_AFTER_TIME)) {
+        peer->send_handshake = true;
+        WG_HSLOG("[WG_REKEY] peer=%02x%02x%02x%02x reason=initiator-timer "
+               "age_ms=%lu counter=%lu ep=%s:%u",
+               peer->public_key[0], peer->public_key[1],
+               peer->public_key[2], peer->public_key[3],
+               (unsigned long)(wireguard_sys_now() - keypair->keypair_millis),
+               (unsigned long)keypair->sending_counter,
+               ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip),
+               peer->port);
+    }
+}
+
 /* Fill the transport header, encrypt in place and send. `pbuf` is one contiguous RAM pbuf laid out as
  * [16-byte message_transport_data header][plaintext, zero padded to padded_len][16-byte tag space]. Does not free it. */
 static err_t wireguardif_tx_seal_send(struct netif *netif, struct wireguard_peer *peer, struct wireguard_keypair *keypair,
@@ -376,27 +401,7 @@ static err_t wireguardif_tx_seal_send(struct netif *netif, struct wireguard_peer
         keypair->last_tx = now;
     }
 
-    // Check to see if we should rekey
-    if (keypair->sending_counter >= REKEY_AFTER_MESSAGES) {
-        peer->send_handshake = true;
-        WG_HSLOG("[WG_REKEY] peer=%02x%02x%02x%02x reason=counter "
-               "counter=%lu ep=%s:%u",
-               peer->public_key[0], peer->public_key[1],
-               peer->public_key[2], peer->public_key[3],
-               (unsigned long)keypair->sending_counter,
-               ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip),
-               peer->port);
-    } else if (keypair->initiator && wireguard_expired(keypair->keypair_millis, REKEY_AFTER_TIME)) {
-        peer->send_handshake = true;
-        WG_HSLOG("[WG_REKEY] peer=%02x%02x%02x%02x reason=initiator-timer "
-               "age_ms=%lu counter=%lu ep=%s:%u",
-               peer->public_key[0], peer->public_key[1],
-               peer->public_key[2], peer->public_key[3],
-               (unsigned long)(wireguard_sys_now() - keypair->keypair_millis),
-               (unsigned long)keypair->sending_counter,
-               ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip),
-               peer->port);
-    }
+    wireguardif_tx_rekey_check(peer, keypair);
     return result;
 }
 
@@ -433,19 +438,79 @@ static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, con
  * ([16 B header space][plaintext of plain_len bytes, zero padded to a multiple of 16][16 B tag space], exactly
  * WIREGUARDIF_DATA_ALLOC(plain_len) bytes), so it is encrypted where it lies and handed to the UDP path as it is.
  * Same peer choice, keypair rules, counters, rekey flags and result codes as wireguardif_output(); the caller keeps
- * the pbuf reference and frees it. Core lock held, as for any netif output. */
-err_t wireguardif_output_prepared(struct netif *netif, struct pbuf *wg, uint16_t plain_len, const ip4_addr_t *ipaddr) {
+ * the pbuf reference and frees it.
+ *
+ * Three steps so the ChaCha20-Poly1305 runs outside the lwIP core lock, as the receive direction does (PR #30):
+ *   begin  (lock): find the peer, choose the keypair (same rules, same side effects), write the header, copy the key and
+ *                  reserve the nonce under the lock, so the counter is never used twice and keepalives, which the lwIP
+ *                  timer sends under the same lock, cannot collide with it. 1 = seal and commit; 0 = *result says why.
+ *   seal   (none): wireguard_tx_seal. The pbuf belongs to this caller alone, the key is a private copy.
+ *   commit (lock): find the peer again (it may have been removed meanwhile: the datagram is then dropped, ERR_RTE) and send
+ *                  through wireguardif_peer_output, which reads the endpoint as it is NOW. Timestamps as the one-piece form.
+ * The nonce is consumed even if commit drops the packet: WireGuard allows gaps in the counter. */
+int wireguardif_tx_begin(struct netif *netif, struct pbuf *wg, uint16_t plain_len, const ip4_addr_t *ipaddr, struct wireguard_tx_job *job, err_t *result) {
     struct wireguard_device *device = (struct wireguard_device *)netif->state;
     ip_addr_t addr;
     ip_addr_copy_from_ip4(addr, *ipaddr);
     WGIF_T(t);
     struct wireguard_peer *peer = peer_lookup_by_allowed_ip(device, &addr);
     WGIF_LAP(t, WGIF_STAGE_LOOKUP);
+    if (!peer) { *result = ERR_RTE; return 0; }
+    /* The pbuf is written to its full padded length: refuse one that is not what the layout says (never a silent overrun). */
+    if (!wg || wg->next != NULL || wg->tot_len < WIREGUARDIF_DATA_ALLOC(plain_len)) { *result = ERR_ARG; return 0; }
+    *result = ERR_CONN;
+    struct wireguard_keypair *keypair = wireguardif_tx_keypair(peer, result);
+    if (!keypair) return 0;
+    struct message_transport_data *hdr = (struct message_transport_data *)wg->payload;
+    hdr->type = MESSAGE_TRANSPORT_DATA;
+    hdr->reserved[0] = hdr->reserved[1] = hdr->reserved[2] = 0;
+    hdr->receiver = keypair->remote_index;
+    U64TO8_LITTLE(hdr->counter, keypair->sending_counter);
+    job->pbuf = wg;
+    job->padded_len = WIREGUARDIF_DATA_PAD(plain_len);
+    job->nonce = keypair->sending_counter;
+    job->remote_index = keypair->remote_index;
+    job->dest = *ipaddr;
+    memcpy(job->key, keypair->sending_key, WIREGUARD_SESSION_KEY_LEN);
+    keypair->sending_counter++;                       /* what wireguard_encrypt_packet does after sealing */
+    wireguardif_tx_rekey_check(peer, keypair);        /* the counter is the post-increment one, as before */
+    return 1;
+}
+
+void wireguard_tx_seal(struct wireguard_tx_job *job) {
+    WGIF_T(t);
+    uint8_t *dst = &((struct message_transport_data *)job->pbuf->payload)->enc_packet[0];
+    wireguard_aead_encrypt(dst, dst, job->padded_len, NULL, 0, job->nonce, job->key);
+    crypto_zero(job->key, sizeof(job->key));
+    WGIF_LAP(t, WGIF_STAGE_SEAL);
+}
+
+err_t wireguardif_tx_commit(struct netif *netif, struct wireguard_tx_job *job) {
+    struct wireguard_device *device = (struct wireguard_device *)netif->state;
+    ip_addr_t addr;
+    ip_addr_copy_from_ip4(addr, job->dest);
+    struct wireguard_peer *peer = peer_lookup_by_allowed_ip(device, &addr);
     if (!peer) return ERR_RTE;
-    err_t result = ERR_CONN;
-    struct wireguard_keypair *keypair = wireguardif_tx_keypair(peer, &result);
-    if (!keypair) return result;
-    return wireguardif_tx_seal_send(netif, peer, keypair, wg, WIREGUARDIF_DATA_PAD(plain_len));
+    WGIF_T(t);
+    err_t result = wireguardif_peer_output(netif, job->pbuf, peer);
+    WGIF_LAP(t, WGIF_STAGE_UDP);
+    if (result == ERR_OK) {
+        uint32_t now = wireguard_sys_now();
+        peer->last_tx = now;
+        /* the keypair it was sealed with, if it is still one of the two (it may have been rolled to prev, or destroyed) */
+        if (peer->curr_keypair.valid && peer->curr_keypair.remote_index == job->remote_index) peer->curr_keypair.last_tx = now;
+        else if (peer->prev_keypair.valid && peer->prev_keypair.remote_index == job->remote_index) peer->prev_keypair.last_tx = now;
+    }
+    return result;
+}
+
+/* The three steps in one, for callers that hold the lock throughout (and the equivalence tests). */
+err_t wireguardif_output_prepared(struct netif *netif, struct pbuf *wg, uint16_t plain_len, const ip4_addr_t *ipaddr) {
+    struct wireguard_tx_job job;
+    err_t result;
+    if (!wireguardif_tx_begin(netif, wg, plain_len, ipaddr, &job, &result)) return result;
+    wireguard_tx_seal(&job);
+    return wireguardif_tx_commit(netif, &job);
 }
 
 // This is used as the output function for the Wireguard netif
