@@ -6,7 +6,10 @@
 #include "tdongle_wgperf.h"
 #include "ml_rx_stats.h"
 #include "ml_net_io_drain.h"
+#include "wifi_stats.h"
+#if LWIP_STATS
 #include "lwip/stats.h"
+#endif
 extern void mgmt_write(const char *s);
 static const char *const owner_names[TDONGLE_OWNER_COUNT] = {"other", "tls", "control", "map", "peer", "wg", "packet", "context"};
 static const char *const phase_names[TDONGLE_PHASE_COUNT] = {"start", "control", "noise", "register", "map", "derp", "steady"};
@@ -218,6 +221,144 @@ static void report_lwip(jw_writer *w) {
     report_field(w, "wifi_static_rx", CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM);
     report_field(w, "wifi_dynamic_rx", CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM);
     report_field(w, "wifi_dynamic_tx", CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM);
+    report_end(w);
+}
+/* Wi-Fi / lwIP drop evidence (`wifistats`). Raw cumulative counters, one JSON line each; the coordinator reads twice
+ * (before and after an iperf run) and diffs. lwIP's counters are STAT_COUNTER wide (16 bits unless LWIP_STATS_LARGE):
+ * diff modulo 2^counter_bits. ESP-IDF v5.5.5 exposes NO Wi-Fi driver RX/TX error counters through a public API;
+ * esp_wifi_statis_dump() only prints text to the ROM console, which this image has switched off (CONFIG_ESP_CONSOLE_NONE),
+ * so the driver-side picture is the link state (RSSI/PHY) and the disconnect counters, plus lwIP and its pools below. */
+static void wifi_emit(void *context, const char *line) { memory_sink(context, line, strlen(line)); }
+static uint32_t wifi_report_uptime_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+static void report_wifi_link(jw_writer *w) {
+    wifi_link_info link = wifi_link_read();
+    char body[WIFI_LINK_JSON_MAX];
+    report_begin(w, "wifi_link");
+    report_field(w, "uptime_ms", wifi_report_uptime_ms());
+    jw_char(w, ',');
+    jw_key(w, "driver_counters");
+    jw_string(w, "not_exposed");
+    if (wifi_link_json(body, sizeof(body), &link, &wifi_link_stats)) {
+        jw_char(w, ',');
+        jw_key(w, "link");
+        jw_raw(w, body);
+    }
+    report_end(w);
+}
+static void report_wifi_lwip(jw_writer *w) {
+    uint32_t up = wifi_report_uptime_ms();
+    report_begin(w, "lwip_stats");
+    report_field(w, "uptime_ms", up);
+#if LWIP_STATS
+    report_field(w, "enabled", 1);
+    report_field(w, "counter_bits", sizeof(STAT_COUNTER) * 8);
+    report_end(w);
+    unsigned bits = sizeof(STAT_COUNTER) * 8;
+    ws_proto p;
+#define WS_PROTO(macro, field, label) do { if (macro) { WS_PROTO_FROM(p, lwip_stats.field); ws_emit_proto(wifi_emit, NULL, label, bits, up, &p); } } while (0)
+#if LINK_STATS
+    WS_PROTO(1, link, "link");
+#endif
+#if ETHARP_STATS
+    WS_PROTO(1, etharp, "etharp");
+#endif
+#if IP_STATS
+    WS_PROTO(1, ip, "ip");
+#endif
+#if ICMP_STATS
+    WS_PROTO(1, icmp, "icmp");
+#endif
+#if UDP_STATS
+    WS_PROTO(1, udp, "udp");
+#endif
+#if TCP_STATS
+    WS_PROTO(1, tcp, "tcp");
+#endif
+#undef WS_PROTO
+#if MEM_STATS || MEMP_STATS
+    ws_pool pool;
+#endif
+#if MEM_STATS
+    WS_POOL_FROM(pool, lwip_stats.mem);
+    ws_emit_pool(wifi_emit, NULL, "MEM", up, &pool);
+#endif
+#if MEMP_STATS
+    for (int i = 0; i < MEMP_MAX; i++) {
+        const struct stats_mem *m = lwip_stats.memp[i];
+        if (!m) continue;
+        char fallback[12];
+        const char *name = fallback;
+        snprintf(fallback, sizeof(fallback), "memp%d", i);
+#if LWIP_STATS_DISPLAY
+        if (m->name) name = m->name;
+#endif
+        WS_POOL_FROM(pool, *m);
+        ws_emit_pool(wifi_emit, NULL, name, up, &pool);
+    }
+#endif
+#else
+    report_field(w, "enabled", 0);
+    report_end(w);
+#endif
+}
+/* Zero the counters so the next reading starts from nothing. lwIP updates its counters without a lock, so an
+ * increment landing during the reset can be lost: acceptable for a drop hunt, and the caller diffs anyway. */
+static bool wifi_stats_reset(void) {
+    wifi_link_stats = (wifi_link_events){0};
+    bool lwip_reset = false;
+#if LWIP_STATS
+#if LINK_STATS
+    memset(&lwip_stats.link, 0, sizeof(lwip_stats.link));
+#endif
+#if ETHARP_STATS
+    memset(&lwip_stats.etharp, 0, sizeof(lwip_stats.etharp));
+#endif
+#if IP_STATS
+    memset(&lwip_stats.ip, 0, sizeof(lwip_stats.ip));
+#endif
+#if ICMP_STATS
+    memset(&lwip_stats.icmp, 0, sizeof(lwip_stats.icmp));
+#endif
+#if UDP_STATS
+    memset(&lwip_stats.udp, 0, sizeof(lwip_stats.udp));
+#endif
+#if TCP_STATS
+    memset(&lwip_stats.tcp, 0, sizeof(lwip_stats.tcp));
+#endif
+#if MEM_STATS
+    lwip_stats.mem.err = 0;
+    lwip_stats.mem.illegal = 0;
+    lwip_stats.mem.max = lwip_stats.mem.used;
+#endif
+#if MEMP_STATS
+    for (int i = 0; i < MEMP_MAX; i++)
+        if (lwip_stats.memp[i]) {
+            lwip_stats.memp[i]->err = 0;
+            lwip_stats.memp[i]->illegal = 0;
+            lwip_stats.memp[i]->max = lwip_stats.memp[i]->used;
+        }
+#endif
+    lwip_reset = true;
+#endif
+    return lwip_reset;
+}
+static void report_wifi_reset(jw_writer *w) {
+    bool lwip_reset = wifi_stats_reset();
+    report_begin(w, "wifi_stats_reset");
+    report_field(w, "uptime_ms", wifi_report_uptime_ms());
+    report_field(w, "events_reset", 1);
+    report_field(w, "lwip_reset", lwip_reset);
+    report_end(w);
+}
+/* The driver's own text dump. Prints to the ROM console, not here: kept for boards where one is attached. */
+static void report_wifi_dump(jw_writer *w) {
+    esp_err_t result = esp_wifi_statis_dump(WIFI_STATIS_ALL);
+    report_begin(w, "wifi_driver_dump");
+    report_field(w, "uptime_ms", wifi_report_uptime_ms());
+    report_field(w, "esp_err", (uint32_t)result);
+    jw_char(w, ',');
+    jw_key(w, "output");
+    jw_string(w, "rom_console_not_this_port");
     report_end(w);
 }
 /* USB data path: elastic transmit ring (tunnel to host) and receive budget (host to lwIP). Drops here are
@@ -556,6 +697,13 @@ bool gateway_memory_command(const char *line) {
         report_attribution(&w);
         report_lwip(&w);
         report_usb(&w);
+    } else if (!strcmp(line, "wifistats")) {
+        report_wifi_link(&w);
+        report_wifi_lwip(&w);
+    } else if (!strcmp(line, "wifistats reset")) {
+        report_wifi_reset(&w);
+    } else if (!strcmp(line, "wifistats dump")) {
+        report_wifi_dump(&w);
     } else if (!strcmp(line, "cpu")) {
         report_cpu(&w);
     } else if (!strcmp(line, "wgperf")) {

@@ -40,14 +40,18 @@ typedef struct {bool show_hidden;int scan_type;struct {struct {int min,max;}acti
 static wifi_ap_record_t found[8];static unsigned scan_cursor,scans;static int current_rssi=-80;
 static int esp_wifi_sta_get_ap_info(wifi_ap_record_t*a){if(!connected)return 1;memcpy(a->ssid,wifi_config.sta.ssid,32);a->ssid[32]=0;a->rssi=current_rssi;return 0;}
 static int esp_wifi_disconnect(void){connected=false;online=false;return 0;}
-static int esp_wifi_scan_start(wifi_scan_config_t*c,bool blocking){scan_cursor=0;scans++;return 0;}
+static void (*during_scan)(void);
+static int esp_wifi_scan_start(wifi_scan_config_t*c,bool blocking){scan_cursor=0;scans++;if(during_scan){void (*hook)(void)=during_scan;during_scan=0;hook();}return 0;}
 static int esp_wifi_scan_get_ap_record(wifi_ap_record_t*a){if(scan_cursor==8)return 1;*a=found[scan_cursor++];return 0;}
 static int esp_wifi_clear_ap_list(void){return 0;}
-static int esp_wifi_set_config(int i,wifi_config_t*c){wifi_config=*c;return 0;}
+static bool reject_config;
+static int esp_wifi_set_config(int i,wifi_config_t*c){if(reject_config)return 1;wifi_config=*c;return 0;}
 static int esp_wifi_connect(void){joins++;connected=true;online=true;return 0;}
 #include "tdongle_memory.h"
 void tdongle_memory_note(unsigned o,size_t n,int f){}
 #include "wifi_worker.inc"
+static void race_use_slot_one(void){assert(wifi_use_profile(1)==0);}
+static void race_edit(void){assert(wifi_save_profile(wifi_saved.profiles[wifi_saved.count-1].ssid,"",true));}
 int main(void){
  have_old=true;old_settings.version=CFG_VERSION;strcpy(old_settings.p[0].ssid,"bridge");strcpy(old_settings.p[0].pass,"secret");assert(wifi_load_profiles() && wifi_saved.count==1 && !strcmp(wifi_saved.profiles[0].ssid,"bridge"));have_old=false;
  memcpy(wifi_config.sta.ssid,"legacy",6);memcpy(wifi_config.sta.password,"secret",6);assert(wifi_load_profiles());assert(wifi_saved.count==1 && !strcmp(wifi_saved.profiles[0].ssid,"legacy"));
@@ -61,5 +65,43 @@ int main(void){
  wifi_retry_after[7]=(uint32_t)(test_time/1000)+60000;connected=online=false;wifi_rescan=true;wifi_maintain();assert(joins==2 && wifi_current==6); // failed strongest cannot trap retries
  wifi_rescan=true;wifi_maintain();assert(joins==2); // no oscillation while current scan signal is healthy
  unsigned previous=scans;current_rssi=-55;wifi_rescan=false;test_time+=61000000;wifi_maintain();assert(scans==previous);current_rssi=-85;test_time+=61000000;wifi_maintain();assert(scans==previous+1);
+ /* `use N`: deterministic, and the choice sticks against roaming until the user changes it or the join fails. */
+ {unsigned count=wifi_saved.count;assert(count==8);
+  assert(wifi_use_profile(0)==-1 && wifi_use_profile(9)==-1 && wifi_use_profile(-3)==-1 && wifi_pinned.slot==-1);
+  wifi_ready=false;assert(wifi_use_profile(1)==-1);wifi_ready=true;
+  unsigned revision_before=wifi_revision,joins_before=joins;
+  wifi_retry_after[0]=(uint32_t)(test_time/1000)+60000;
+  assert(wifi_use_profile(1)==0 && wifi_current==0 && wifi_pinned.slot==0 && joins==joins_before+1 && wifi_revision==revision_before+1 && wifi_retry_after[0]==0);
+  assert(!strcmp((char*)wifi_config.sta.ssid,wifi_saved.profiles[0].ssid) && !strcmp((char*)wifi_config.sta.password,wifi_saved.profiles[0].password));
+  assert(!wifi_scan_pauses_reconnect);
+  for(unsigned i=0;i<8;i++){strlcpy((char*)found[i].ssid,wifi_saved.profiles[i].ssid,33);found[i].rssi=i==7?-40:-85;}
+  /* Weak current network and a far stronger saved one: unpinned selection would roam; the pin must not. */
+  current_rssi=-88;connected=online=true;joins_before=joins;
+  for(int pass=0;pass<5;pass++){wifi_rescan=true;wifi_maintain();assert(joins==joins_before && wifi_current==0 && wifi_pinned.slot==0);}
+  /* Lost link: the worker retries the pinned network (even unseen) a bounded number of times, never another one. */
+  for(unsigned i=0;i<8;i++)found[i].ssid[0]=0;
+  for(int attempt=1;attempt<=WIFI_PIN_MAX_ATTEMPTS;attempt++){connected=online=false;wifi_rescan=true;wifi_maintain();assert(wifi_current==0 && wifi_pinned.slot==0 && joins==joins_before+attempt);}
+  /* Still not joined: the pin is given up, reported, and normal selection resumes. */
+  for(unsigned i=0;i<8;i++){strlcpy((char*)found[i].ssid,wifi_saved.profiles[i].ssid,33);found[i].rssi=i==7?-40:-85;}
+  connected=online=false;wifi_rescan=true;wifi_maintain();
+  assert(wifi_pinned.slot==-1 && wifi_pinned.failed_slot==1 && wifi_current==7);
+  /* A fresh `use` clears the failure; editing the saved list drops the pin. */
+  assert(wifi_use_profile(3)==0 && wifi_pinned.slot==2 && wifi_pinned.failed_slot==0 && wifi_current==2);
+  assert(!wifi_save_profile("another","key",false));   /* list full: refused, pin untouched */
+  assert(wifi_pinned.slot==2);
+  assert(wifi_save_profile(wifi_saved.profiles[7].ssid,"",true) && wifi_pinned.slot==-1 && wifi_current==-1);
+  assert(wifi_use_profile(2)==0);
+  /* Race: a `use` lands while the worker is scanning (members_lock is free then). The worker must notice the revision
+   * change, discard its stale choice without touching the pin, and rerun; it must never connect elsewhere in between. */
+  for(unsigned i=0;i<8;i++){strlcpy((char*)found[i].ssid,wifi_saved.profiles[i].ssid,33);found[i].rssi=i==7?-40:-85;}
+  connected=online=false;wifi_rescan=true;joins_before=joins;
+  during_scan=race_use_slot_one;wifi_maintain();
+  assert(joins==joins_before+1 && wifi_pinned.slot==0 && wifi_current==0 && wifi_rescan && !wifi_scan_pauses_reconnect);   /* only the `use` joined */
+  /* Editing the saved list mid-scan likewise aborts the pass and clears the pin. */
+  connected=online=false;wifi_rescan=true;joins_before=joins;during_scan=race_edit;wifi_maintain();
+  assert(joins==joins_before && wifi_pinned.slot==-1 && wifi_rescan);
+  /* The driver refusing the config leaves the previous pin alone and says so. */
+  reject_config=true;int old_pin=wifi_pinned.slot;assert(wifi_use_profile(1)==-2 && wifi_pinned.slot==old_pin && !wifi_scan_pauses_reconnect);reject_config=false;
+ }
  ((uint32_t*)disk)[0]=999;assert(!wifi_load_profiles());
 }
