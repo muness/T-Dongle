@@ -1,0 +1,205 @@
+/* offset      |    size */  type = struct microlink_s {
+/*      0      |      12 */    uint8_t txid_v4[12];
+/*     12      |      12 */    uint8_t txid_v6[12];
+/*     24      |       1 */    _Bool txid_v4_valid;
+/*     25      |       1 */    _Bool txid_v6_valid;
+/* XXX  6-byte hole      */
+/*     32      |    1280 */    ml_disco_probe_t pending_probes[32];
+/*   1312      |       4 */    int disco_probe_start_idx;
+/*   1316      |       4 */    int burst_count;
+/*   1320      |       8 */    uint64_t last_burst_ms;
+/*   1328      |      16 */    char identity_namespace[16];
+/*   1344      |     384 */    char auth_url[384];
+/*   1728      |      64 */    char last_error[64];
+/*   1792      |      64 */    char transport_error[64];
+/*   1856      |       4 */    unsigned int noise_error;
+/*   1860      |       4 */    unsigned int noise_frame_bytes;
+/*   1864      |       4 */    uint32_t read_expected;
+/*   1868      |       4 */    uint32_t read_received;
+/*   1872      |       4 */    uint32_t read_elapsed_ms;
+/*   1876      |       4 */    uint32_t read_errno;
+/*   1880      |       4 */    int32_t read_tls_result;
+/*   1884      |       4 */    int32_t conn_tls_result;
+/*   1888      |       4 */    uint32_t control_stage;
+/*   1892      |      49 */    char h2_debug[49];
+/* XXX  3-byte hole      */
+/*   1944      |       4 */    uint32_t map_attempts;
+/*   1948      |       4 */    uint32_t map_failures;
+/*   1952      |       4 */    uint32_t map_bytes;
+/*   1956      |       4 */    uint32_t map_declared_bytes;
+/*   1960      |       4 */    uint32_t map_projected_bytes;
+/*   1964      |       4 */    uint32_t map_heap_before;
+/*   1968      |       4 */    uint32_t map_heap_after;
+/*   1972      |       4 */    uint32_t map_largest_before;
+/*   1976      |       4 */    unsigned int map_error;
+/*   1980      |       4 */    unsigned int map_stream_id;
+/*   1984      |       4 */    unsigned int map_frame_type;
+/*   1988      |       4 */    uint32_t map_h2_error;
+/*   1992      |       4 */    uint32_t map_h2_last_stream;
+/*   1996      |      32 */    uint8_t node_key_challenge[32];
+/*   2028      |       1 */    _Bool has_node_key_challenge;
+/* XXX  3-byte hole      */
+/*   2032      |       4 */    void *wg_output_pcb;
+/* XXX  4-byte hole      */
+/*   2040      |       8 */    uint64_t last_stun_ms;
+/*   2048      |       8 */    uint64_t last_derp_keepalive_ms;
+/*   2056      |       8 */    uint64_t last_expiry_check_ms;
+/*   2064      |       8 */    uint64_t last_h2_ping_ms;
+/*   2072      |       9 */    uint8_t stream_header[9];
+/*   2081      |      56 */    uint8_t stream_special[56];
+/* XXX  3-byte hole      */
+/*   2140      |       4 */    size_t stream_header_used;
+/*   2144      |       4 */    size_t stream_special_used;
+/*   2148      |       4 */    uint32_t stream_remaining;
+/*   2152      |       4 */    uint32_t stream_id;
+/*   2156      |       1 */    uint8_t stream_type;
+/*   2157      |       1 */    uint8_t stream_flags;
+/*   2158      |       1 */    uint8_t stream_padding;
+/*   2159      |       1 */    _Bool stream_padding_pending;
+/*   2160      |       4 */    unsigned int map_generation;
+/*   2164      |      80 */    microlink_config_t config;
+/*   2244      |       4 */    volatile microlink_state_t state;
+/*   2248      |       4 */    volatile uint32_t vpn_ip;
+/*   2252      |     132 */    ml_published_name_t self_dns_name;
+/*   2384      |       1 */    _Bool identity_persistent;
+/* XXX  3-byte hole      */
+/*   2388      |       4 */    int register_user_id;
+/*   2392      |      48 */    char register_user_name[48];
+/*   2440      |       4 */    volatile uint32_t rc_coord_stream_wd;
+/*   2444      |       4 */    volatile uint32_t rc_coord_transport;
+/*   2448      |       4 */    volatile uint32_t rc_derp_rx_wd;
+/*   2452      |       4 */    volatile uint32_t rc_derp_retry;
+/*   2456      |       4 */    EventGroupHandle_t events;
+/*   2460      |       4 */    TaskHandle_t coord_task;
+/*   2464      |       4 */    volatile int tasks_alive;
+/*   2468      |       1 */    _Bool rt_attached;
+/*   2469      |       1 */    _Bool stop_incomplete;
+/* XXX  2-byte hole      */
+/*   2472      |       4 */    QueueHandle_t derp_tx_queue;
+/*   2476      |       4 */    QueueHandle_t disco_rx_queue;
+/*   2480      |       4 */    QueueHandle_t wg_rx_queue;
+/*   2484      |       4 */    QueueHandle_t stun_rx_queue;
+/*   2488      |       4 */    QueueHandle_t coord_cmd_queue;
+/*   2492      |       4 */    volatile uint32_t peer_generation;
+/*   2496      |     128 */    struct {
+/*      0      |       4 */        ml_peer_update_t *packet;
+/* XXX  4-byte hole      */
+/*      8      |       8 */        uint64_t expires;
+                               } jit_pending[8];
+/*   2624      |       4 */    volatile unsigned int jit_packet_count;
+/*   2628      |       4 */    uint32_t jit_hits;
+/*   2632      |       4 */    uint32_t jit_misses;
+/*   2636      |       4 */    uint32_t jit_evictions;
+/*   2640      |       4 */    uint32_t jit_rejected;
+/*   2644      |       4 */    uint32_t jit_dropped;
+/*   2648      |       4 */    uint32_t directory_applied;
+/* XXX  4-byte hole      */
+/*   2656      |      48 */    struct {
+/*   2656      |       1 */        uint8_t pending;
+/*   2657      |       1 */        uint8_t tokens;
+/* XXX  6-byte hole      */
+/*   2664      |       8 */        uint64_t refill_ms;
+/*   2672      |       8 */        uint64_t deadline_ms;
+/*   2680      |       8 */        uint64_t cooldown_until_ms;
+/*   2688      |       4 */        uint32_t started;
+/*   2692      |       4 */        uint32_t confirmed;
+/*   2696      |       4 */        uint32_t expired;
+/*   2700      |       4 */        uint32_t refused;
+
+                                   /* total size (bytes):   48 */
+                               } inbound_trial;
+/*   2704      |     148 */    ml_directory_t directory;
+/* XXX  4-byte hole      */
+/*   2856      |      48 */    ml_wg_loop_t wgm;
+/*   2904      |       1 */    volatile _Bool map_batch_pending;
+/* XXX  3-byte hole      */
+/*   2908      |       4 */    QueueHandle_t peer_update_queue;
+/*   2912      |      32 */    uint8_t machine_private_key[32];
+/*   2944      |      32 */    uint8_t machine_public_key[32];
+/*   2976      |      32 */    uint8_t wg_private_key[32];
+/*   3008      |      32 */    uint8_t wg_public_key[32];
+/*   3040      |      32 */    uint8_t disco_private_key[32];
+/*   3072      |      32 */    uint8_t disco_public_key[32];
+/*   3104      |     816 */    ml_derp_conn_t derp;
+/*   3920      |       4 */    int disco_sock4;
+/*   3924      |       4 */    int disco_sock6;
+/*   3928      |       4 */    int stun_sock;
+/*   3932      |       2 */    uint16_t disco_local_port;
+/* XXX  2-byte hole      */
+/*   3936      |       4 */    int coord_sock;
+/*   3940      |       1 */    _Bool use_tls;
+/* XXX  3-byte hole      */
+/*   3944      |       4 */    esp_tls_t *coord_tls;
+/*   3948      |       4 */    uint32_t h2_next_stream_id;
+/*   3952      |       4 */    void *wg_netif;
+/*   3956      |       4 */    void *upstream_netif;
+/*   3960      |    3712 */    ml_peer_t peers[8];
+/*   7672      |       4 */    int peer_count;
+/*   7676      |       4 */    uint32_t stun_public_ip;
+/*   7680      |       2 */    uint16_t stun_public_port;
+/* XXX  2-byte hole      */
+/*   7684      |       4 */    uint32_t last_ep_update_hash;
+/*   7688      |       4 */    uint32_t stun_primary_ip;
+/*   7692      |       4 */    uint32_t stun_fallback_ip;
+/*   7696      |       1 */    uint8_t stun_retry_count;
+/*   7697      |       1 */    _Bool stun_using_fallback;
+/* XXX  6-byte hole      */
+/*   7704      |       8 */    uint64_t stun_last_probe_ms;
+/*   7712      |       4 */    int stun_sock6;
+/*   7716      |      16 */    uint8_t stun_primary_ip6[16];
+/*   7732      |      16 */    uint8_t stun_public_ip6[16];
+/*   7748      |       2 */    uint16_t stun_public_port6;
+/*   7750      |       1 */    _Bool stun_has_ipv6;
+/* XXX  1-byte hole      */
+/*   7752      |       2 */    uint16_t stun_secondary_port;
+/*   7754      |       1 */    _Bool stun_nat_checked;
+/*   7755      |       1 */    _Bool nat_mapping_varies;
+/*   7756      |    1712 */    ml_derp_region_t derp_regions[4];
+/*   9468      |       1 */    uint8_t derp_region_count;
+/* XXX  1-byte hole      */
+/*   9470      |       2 */    uint16_t derp_home_region;
+/*   9472      |       2 */    uint16_t derp_region_default;
+/*   9474      |       8 */    uint16_t derp_rtt_ms[4];
+/* XXX  6-byte hole      */
+/*   9488      |       8 */    uint64_t connected_at_ms;
+/*   9496      |       8 */    volatile uint64_t derp_last_heartbeat_ms;
+/*   9504      |       8 */    volatile uint64_t ctrl_last_rx_ms;
+/*   9512      |       8 */    volatile uint64_t ctrl_stream_rx_ms;
+/*   9520      |       4 */    uint8_t *h2_acc;
+/*   9524      |       4 */    size_t h2_acc_len;
+/*   9528      |       4 */    uint8_t *lp_acc;
+/*   9532      |       4 */    size_t lp_acc_len;
+/*   9536      |       8 */    int64_t key_expiry_epoch;
+/*   9544      |       1 */    _Bool key_expired;
+/* XXX  3-byte hole      */
+/*   9548      |       4 */    uint32_t t_disco_heartbeat_ms;
+/*   9552      |       4 */    uint32_t t_stun_interval_ms;
+/*   9556      |       4 */    uint32_t t_ctrl_watchdog_ms;
+/*   9560      |       4 */    microlink_state_cb_t state_cb;
+/*   9564      |       4 */    void *state_cb_data;
+/*   9568      |       4 */    microlink_peer_cb_t peer_cb;
+/*   9572      |       4 */    void *peer_cb_data;
+/*   9576      |       4 */    microlink_data_cb_t data_cb;
+/*   9580      |       4 */    void *data_cb_data;
+/*   9584      |       4 */    ml_config_ctx_t *config_httpd;
+/*   9588      |      96 */    char nvs_auth_key[96];
+/*   9684      |      48 */    char nvs_device_name[48];
+/*   9732      |      64 */    char ctrl_host[64];
+/*   9796      |      64 */    char ctrl_host_parsed[64];
+/*   9860      |       8 */    char ctrl_port_str[8];
+/*   9868      |      72 */    char ctrl_host_hdr[72];
+/*   9940      |      32 */    uint8_t ctrl_noise_pubkey[32];
+/*   9972      |       1 */    _Bool ctrl_noise_pubkey_valid;
+/*   9973      |       1 */    uint8_t ctrl_key_auth;
+/*   9974      |       1 */    uint8_t ctrl_key_failures;
+/* XXX  1-byte hole      */
+/*   9976      |       4 */    uint32_t ctrl_key_drop_backoff_ms;
+/* XXX  4-byte hole      */
+/*   9984      |       8 */    uint64_t ctrl_key_next_drop_ms;
+/*   9992      |       4 */    uint32_t ctrl_key_refetches;
+/*   9996      |     256 */    char advertise_routes[256];
+/*  10252      |       1 */    uint8_t debug_flags;
+/* XXX  3-byte padding   */
+
+                               /* total size (bytes): 10256 */
+                             }

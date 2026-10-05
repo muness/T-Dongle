@@ -10,7 +10,11 @@
 #include "../main/route_table.c"
 #define pdTRUE 1
 struct netif {int id;};
-struct pbuf {size_t tot_len;uint8_t data[20];bool freed;};
+#define PBUF_FLAG_LLBCAST 0x02
+#define PBUF_FLAG_LLMCAST 0x04
+struct pbuf {size_t tot_len;uint8_t data[20];bool freed;uint8_t flags;};
+static unsigned activity_notes;
+static void tdongle_pm_note_activity(void){activity_notes++;}
 static struct netif usb,other;
 static void *usb_interface=&usb;
 static atomic_uint usb_generation=1;
@@ -31,6 +35,15 @@ static struct pbuf packet(size_t length,bool df) {
     struct pbuf p={.tot_len=length};p.data[0]=0x45;p.data[6]=df?0x40:0;p.data[16]=198;p.data[17]=18;p.data[19]=65;return p;
 }
 int main(void) {
+    /* The forwarding-activity hold (ADR 0016): every unicast packet through the hook raises the clock request,
+     * link-layer broadcast and multicast (neighbours' chatter) does not. */
+    {
+        struct pbuf u=packet(100,true),b=packet(100,true),m=packet(100,true);b.flags=PBUF_FLAG_LLBCAST;m.flags=PBUF_FLAG_LLMCAST;
+        activity_notes=0;gateway_host_input(&u,&other);assert(activity_notes==1 && processed==1);
+        gateway_host_input(&b,&other);gateway_host_input(&m,&usb);assert(activity_notes==1);   /* not counted, still handled */
+        struct pbuf q=packet(100,true);gateway_host_input(&q,&usb);assert(activity_notes==2);   /* the USB route path notes too */
+        processed=queued=0;atomic_store(&route_queued_bytes,0);
+    }
     /* Oversized packets: without DF they are dropped on lwIP (they could only be
      * fragmented, and fragments are rejected); with DF they are queued so that
      * usb_routes can answer with ICMP fragmentation-needed. Nothing routes on lwIP. */

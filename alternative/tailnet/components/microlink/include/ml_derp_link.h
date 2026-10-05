@@ -210,5 +210,12 @@ void ml_derp_link_service(ml_derp_link_t *l);
 #define ML_DERP_POLL_MS 10
 uint32_t ml_derp_link_wait_ms(ml_derp_link_t *l);
 
+/* Did the service pass that began with `frames_before` (frames_rx + frames_tx) do work that wants a fast CPU: a relay
+ * frame moved, or a connect step (TLS, key exchange) is in progress. An established relay with nothing to say is
+ * polled every ML_DERP_POLL_MS and must not hold the clock up for that (ADR 0016). */
+static inline bool ml_derp_link_busy(const ml_derp_link_t *l, uint32_t frames_before) {
+    return l->stats.frames_rx + l->stats.frames_tx != frames_before ||
+           (l->state >= ML_DERP_TRANSPORT && l->state < ML_DERP_READY);
+}
 static inline bool ml_derp_link_ready(const ml_derp_link_t *l) { return l->state == ML_DERP_READY; }
 const char *ml_derp_link_state_name(ml_derp_link_state_t s);

@@ -77,6 +77,23 @@ size_t heap_caps_get_allocated_size(void *p) { for (unsigned i = 0; i < 16; i++)
 bool ml_wg_crypto_bench(size_t len, unsigned rounds, uint32_t *aead_ns, uint32_t *copy_ns) { *aead_ns = 2000000; *copy_ns = 20000; return true; }
 void mgmt_write(const char *s) { fputs(s, stdout); }
 static void *tracked(size_t size) { void *p = malloc(size); for (unsigned i = 0; i < 16; i++) if (!sizes[i].block) { sizes[i] = (typeof(sizes[0])){p, size}; break; } return p; }
+/* `cpu`: the FreeRTOS task table (trace facility), pinned to fixed values. */
+#include "tdongle_pm_burst.h"
+typedef struct {bool scaling;int configure_error;uint32_t max_mhz,min_mhz,cpu_mhz,lock_create_failures;unsigned bursts;tdongle_pm_burst_stats_t burst[8];} tdongle_pm_status_t;
+static void tdongle_pm_status(tdongle_pm_status_t *o) { memset(o, 0, sizeof(*o)); o->cpu_mhz = 240; }
+#define portNUM_PROCESSORS 2
+typedef unsigned UBaseType_t;
+typedef int BaseType_t;
+typedef struct { TaskHandle_t xHandle; const char *pcTaskName; uint32_t ulRunTimeCounter; UBaseType_t uxCurrentPriority; uint32_t usStackHighWaterMark; } TaskStatus_t;
+static UBaseType_t task_count = 3;
+static UBaseType_t uxTaskGetNumberOfTasks(void) { return task_count; }
+static UBaseType_t uxTaskGetSystemState(TaskStatus_t *t, UBaseType_t n, uint32_t *total) {
+    static const char *const names[] = {"IDLE0", "ml_wg_mgr", "tiT"};
+    for (UBaseType_t i = 0; i < 3; i++) t[i] = (TaskStatus_t){(TaskHandle_t)(uintptr_t)(i + 1), names[i], 1000 * (i + 1), 5 + i, 700 + i};
+    *total = 4294967295u;
+    return 3;
+}
+static BaseType_t xTaskGetCoreID(TaskHandle_t h) { return (uintptr_t)h == 3 ? 0x7fffffff : (int)((uintptr_t)h - 1); }
 #include "json_writer.inc"
 #include "memory_diagnostics.inc"
 int main(void) {
@@ -94,11 +111,14 @@ int main(void) {
     }
     tdongle_memory_drop(TDONGLE_DROP_DERP_TX_FULL);
     tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 700);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 42000);
-    const char *commands[] = {"memory", "route", "members", "memory bench", "memory locks", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
+    const char *commands[] = {"memory", "route", "members", "memory bench", "memory locks", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));
     }
+    task_count = 40;   /* more tasks than the report's table: it must say so, not print an empty list silently */
+    puts("#> cpu_many");
+    gateway_memory_command("cpu");
     members_busy = true;
     puts("#> busy");
     gateway_memory_command("memory");
