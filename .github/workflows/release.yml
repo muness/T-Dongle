@@ -70,18 +70,27 @@ jobs:
             dist/tdongle-${{ steps.ver.outputs.version }}-full/
             site-out/
   publish:
-    # Publishing never runs for a branch dispatch or a dry run, only for a v* tag.
+    # Always runs so dry runs exercise routing and the artifact layout; the release and Pages steps
+    # run only for a v* tag (tag push, or tag dispatch with dry_run=false).
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.dry_run == false)
-    runs-on: [self-hosted, linux, x64, linux-general]
+    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/T-Dongle' && fromJSON('["self-hosted","linux","x64","linux-general"]') || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
       VERSION: ${{ needs.build.outputs.version }}
+      PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.dry_run == false) }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: release-${{ needs.build.outputs.version }}
+      - name: Verify release files
+        run: |
+          echo "publish=$PUBLISH runner=$RUNNER_NAME"
+          ls -l "dist/tdongle-$VERSION-full.tar.gz" "dist/tdongle-$VERSION-full.tar.gz.sha256" \
+            "dist/tdongle-$VERSION-full/app.bin" "dist/tdongle-$VERSION-full/bootloader.bin" \
+            "dist/tdongle-$VERSION-full/partition-table.bin" site-out/index.html
+          (cd dist && sha256sum -c "tdongle-$VERSION-full.tar.gz.sha256")
       - name: GitHub release
+        if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -91,6 +100,7 @@ jobs:
             "dist/tdongle-$VERSION-full/bootloader.bin#bootloader.bin (0x0)" \
             "dist/tdongle-$VERSION-full/partition-table.bin#partition-table.bin (0x8000)"
       - name: Publish flash page
+        if: env.PUBLISH == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ github.token }}
