@@ -15,6 +15,8 @@ extern void mgmt_write(const char *s);
 #define MEMORY_FEATURE ""
 #endif
 extern bool gateway_online(void);
+/* wireguard_lwip: ChaCha20-Poly1305 self-test + cycle benchmark (writes lines through the callback). */
+extern int wg_crypto_bench_run(void (*write)(const char *line));
 static QueueHandle_t commands;
 static StaticQueue_t command_queue;
 static uint8_t command_bytes[2*512];
@@ -50,6 +52,8 @@ static void command_task(void *arg) {
         } else if (!strcmp(line, "retry-startup")) {
             if(gateway_boot_retry()!=ESP_OK)mgmt_write("ERR Could not preserve crash evidence or reset recovery guard\r\n");
             else {mgmt_write("OK restarting services\r\ndone>\r\n");vTaskDelay(pdMS_TO_TICKS(300));esp_restart();}
+        } else if (!strcmp(line, "crypto bench")) {
+            wg_crypto_bench_run(mgmt_write);
         } else if(gateway_serial_command(line) || gateway_memory_command(line)) {
         }
         else if (!strcmp(line, "reboot")) {

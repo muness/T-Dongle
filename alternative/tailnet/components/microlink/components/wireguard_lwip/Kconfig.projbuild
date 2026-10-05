@@ -1,0 +1,10 @@
+menu "WireGuard crypto (wireguard_lwip)"
+
+    config WG_CRYPTO_BENCH_BASELINE
+        bool "Include the original ChaCha20-Poly1305 in `crypto bench` for A/B comparison"
+        default n
+        help
+            Links the pre-optimisation implementation (crypto/legacy) and prints its
+            timings next to the optimised code. Diagnostics only; adds about 4 KB of flash.
+
+endmenu
