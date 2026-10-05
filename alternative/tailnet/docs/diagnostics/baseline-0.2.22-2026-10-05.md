@@ -34,3 +34,16 @@ Tailnet mode delivers about 1–1.4 Mbit/s, far below the ~7 Mbit/s USB 1.1 ceil
 
 1. **Fixed (040aff5):** in router mode the USB host and the gateway had the same MAC, so macOS could not ARP the gateway.
 2. **Open:** the dongle's DNS returns NXDOMAIN for the MagicDNS names that `/status` advertises (`<host>.tail434280.ts.net`). Only `<host>.tailnet.tailnet` resolves.
+
+## Ceiling: transparent bridge on the same link (2026-10-05, integration 0010832, verified flash)
+
+The unified image was switched to `mode wifi_bridge`. The host used the bridged port (`en19`, 192.168.1.141) to reach a wired LAN iperf3 server at 192.168.1.2; the server itself sustains 2.37 Gbit/s wired. Dongle RSSI −50 dBm, channel 11, HT20.
+
+| Bridge | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| TCP up | 6.36 Mbit/s (132 retrans) | 6.27 (103) | 6.07 (87) |
+| TCP down | 5.03 (189) | 4.30 (181) | 4.82 (185) |
+
+UDP delivered: 4 Mbit/s offered gave 3.84 up / 3.57 down; 8 Mbit/s offered gave 6.59 up / 6.08 down (18–24% loss).
+
+Tailnet at the same integration point: about 2.0 Mbit/s up and 2.3 down. That is roughly 32% and 49% of the bridge. The bridge retransmits too, so part of the TCP loss is the radio link and not the firmware.
