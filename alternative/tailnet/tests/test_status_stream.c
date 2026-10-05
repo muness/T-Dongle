@@ -203,6 +203,13 @@ static wifi_link_info wifi_link_read(void){
     if(!wifi_link_up)return (wifi_link_info){.phy=WIFI_LINK_PHY_UNKNOWN,.ps=WIFI_LINK_PS_UNKNOWN,.secondary=WIFI_LINK_SECOND_UNKNOWN};
     return (wifi_link_info){.connected=true,.rssi_valid=true,.rssi=-61,.channel=11,.secondary=2,.phy=WIFI_LINK_PHY_HT40,.bw_cfg_mhz=40,.ap_bw_mhz=40,.ap_modes=WIFI_LINK_AP_B|WIFI_LINK_AP_G|WIFI_LINK_AP_N,.ps=0,.tx_power_valid=true,.tx_power_qdbm=80};
 }
+/* stand-ins for ml_heap_budget.h / usb_rx_budget.h (this file has its own admission stubs, so the real headers cannot be included) */
+#define ML_HB_FLOOR 29884
+#define ML_HB_RESERVE 16384
+#define ML_HB_PIN_BUFFERS 6
+typedef enum {ML_HB_JIT,ML_HB_DERP_TX,ML_HB_SITE_COUNT} ml_hb_site_t;
+static atomic_uint ml_hb_refused[ML_HB_SITE_COUNT]={[ML_HB_JIT]=5,[ML_HB_DERP_TX]=7};
+static struct {atomic_uint dropped_heap;} usb_rx_budget={.dropped_heap=3};
 #include "status_stream.inc"
 #undef calloc
 #undef strlcpy

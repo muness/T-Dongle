@@ -17,12 +17,21 @@ typedef struct membership {
  * net_io (7) outranks the shared derp task (5). Asserted in gateway_main.c; documented in ADR 0013/0015. */
 #define GATEWAY_TASK_USB_ROUTES_PRIO 8
 #define GATEWAY_TASK_USB_ROUTES_CORE 1
-/* usb_txq (esp_tinyusb transmit-ring worker): a notify-then-defer relay, a few hundred stack bytes. Core 1 with the TinyUSB task
- * (priority 5, TINYUSB_DEFAULT_TASK_AFFINITY = 1), so its usbd_defer_func wakes a task on its own core. Above the TinyUSB task
- * and coord (5), below wg_mgr (7) and usb_routes (8): a published frame reaches the TinyUSB queue promptly and the worker can
- * never delay forwarding or a handshake. Its 1,536 B stack, 340 B TCB and 4,576 B ring are allocated at USB start, before
- * admission, so they are already out of the free heap that admission measures (ADR 0015). */
-#define GATEWAY_TASK_USB_TX_PRIO 6
+/* The USB IN pipe is served by two tasks that must not wait behind forwarding work (ADR 0022). A full-speed IN transfer ends,
+ * the controller interrupt queues an event, and until the TinyUSB task has run the next NTB is not on the bus: the host's polls
+ * are NAKed and the wire idles. Under an inbound flood wg_mgr (7) and usb_routes (8) are runnable for most of the core, and a
+ * TinyUSB task at 5 ran only when they blocked: board UDP -R drained ~2.6 Mbit/s of a 9 Mbit/s pipe (two 1,242 B datagrams per
+ * 3,200 B NTB, one NTB per ~7 ms) while the bridge, with nothing competing, drained 6. So on core 1 the order is
+ *   usb_txq relay 10 > TinyUSB 9 > usb_routes 8 > wg_mgr 7 > usb_txq heap work 6 > coord 5.
+ * The relay (notify, then usbd_defer_func) is a few microseconds and must outrank the producers on its core so the first frame of
+ * a burst is not held behind a decrypt run. Both together cost the forwarding path a few microseconds per USB event (an NTB
+ * is 2 to 5 datagrams): the TinyUSB task's own work is an NTB copy and, for upload, a malloc+memcpy per received datagram,
+ * about 3 % of the core at the 12 Mbit/s bus limit. The worker drops to 6 only for a pass that is about to grow
+ * (heap walks; tinyusb_net_tx_config_t.work_priority) so that it never delays the tasks it serves. 9 and 10 are below the IDF
+ * system tasks on core 1 (ipc 24, esp_timer 22). The legacy bridge keeps TinyUSB at its default (5). */
+#define GATEWAY_TASK_TINYUSB_PRIO 9
+#define GATEWAY_TASK_USB_TX_PRIO 10
+#define GATEWAY_TASK_USB_TX_WORK_PRIO 6
 #define GATEWAY_TASK_USB_TX_CORE 1
 extern membership_t *members;
 extern esp_netif_t *usb_interface;

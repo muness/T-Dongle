@@ -44,7 +44,7 @@ def compiles(override=None):
 #define MEMP_NUM_TCP_SEG {value('MEMP_NUM_TCP_SEG', override)}
 """)
         (d / "t.c").write_text('#include "tcp_window_budget.h"\nint main(void){return 0;}\n')
-        r = subprocess.run(["cc", "-std=c11", "-fsyntax-only", "-I", str(d), "-I", str(root / "main"), str(d / "t.c")], capture_output=True, text=True)
+        r = subprocess.run(["cc", "-std=c11", "-fsyntax-only", "-I", str(d), "-I", str(root / "main"), "-I", str(root / "components/microlink/include"), str(d / "t.c")], capture_output=True, text=True)
         return r.returncode == 0, r.stderr
 
 ok, err = compiles()
@@ -58,15 +58,18 @@ refused = {
     "window can pin over half the Wi-Fi RX pool": {"CONFIG_LWIP_TCP_WND_DEFAULT": 17280, "CONFIG_LWIP_TCP_RECVMBOX_SIZE": 14},
     "send buffer larger than the segment pool": {"CONFIG_LWIP_TCP_SND_BUF_DEFAULT": 40 * 1440},
     "window below two segments": {"CONFIG_LWIP_TCP_WND_DEFAULT": 1440},
+    "window pins more Wi-Fi buffers than the heap budget allows (ADR 0022)": {"CONFIG_LWIP_TCP_WND_DEFAULT": 7 * 1440, "CONFIG_LWIP_TCP_RECVMBOX_SIZE": 9, "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM": 32},
 }
 for name, override in refused.items():
     accepted, _ = compiles(override)
     assert not accepted, f"build assertion did not reject: {name}"
 # Window scaling would lift the 64 KB bound, so the check must follow the option, not the value.
-assert compiles({"CONFIG_LWIP_TCP_WND_DEFAULT": 70000, "CONFIG_LWIP_TCP_RECVMBOX_SIZE": 60, "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM": 128, "scale": 1})[0]
+# With scaling on, the 64 KB rule is not what refuses a 70,000 B window any more; the heap budget still does (ADR 0022).
+scaled_ok, scaled_err = compiles({"CONFIG_LWIP_TCP_WND_DEFAULT": 70000, "CONFIG_LWIP_TCP_RECVMBOX_SIZE": 60, "CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM": 128, "scale": 1})
+assert not scaled_ok and "64 KB" not in scaled_err and "heap budget" in scaled_err
 
 wnd = int(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"])
-assert wnd > 5760 and wnd % int(cfg.get("CONFIG_LWIP_TCP_MSS", 1440)) == 0, "window should be a whole number of segments and larger than the 5,760 B baseline"
-print("TCP window: sdkconfig.defaults satisfies the build assertions; 5 wrong configurations are rejected.")
+assert wnd >= 5760 and wnd % int(cfg.get("CONFIG_LWIP_TCP_MSS", 1440)) == 0, "window should be a whole number of segments and at least the 5,760 B baseline"
+print("TCP window: sdkconfig.defaults satisfies the build assertions; 6 wrong configurations are rejected.")
 for rtt in (36, 64):
     print(f"  window {wnd} B at {rtt} ms RTT caps one connection at {wnd * 8 / rtt / 1000:.2f} Mbit/s (baseline 5,760 B: {5760 * 8 / rtt / 1000:.2f})")

@@ -993,6 +993,88 @@ static void test_hardening(void) {
     assert(tinyusb_net_init(&ncfg) == ESP_OK);
 }
 
+
+/* ADR 0022: the evidence counters (NTB size, frames per drain, completion gaps, cold-start latency) and the worker's
+ * priority split (relay high, heap work low, only when there is heap work). */
+static void test_drain_evidence_and_priority(void) {
+    tinyusb_net_tx_config_t c = cfg_with(3, 4);
+    c.priority = 10; c.work_priority = 6;
+    ring_reset(c);
+    prio_sets = 0;
+    /* No elastic memory and no growth wanted: the relay pass never touches the priority. */
+    assert(send_len(300) == ESP_OK);
+    atomic_store(&mock_us, 1000);
+    pump();
+    assert(prio_sets == 0 && stats().worker_demotions == 0);
+    drain_all();
+    /* Cold start: committed at t=5000 us, handed over by the consumer at t=5700 us. */
+    ring_reset(c);
+    atomic_store(&mock_us, 5000);
+    assert(send_len(400) == ESP_OK);
+    assert(send_len(500) == ESP_OK);          /* not a new edge: the queue was already non-empty */
+    atomic_store(&mock_us, 5700);
+    pump();
+    tinyusb_net_tx_stats_t st = stats();
+    assert(st.cold_starts == 1 && st.cold_us_sum == 700 && st.cold_us_max == 700);
+    assert(st.drains_sent[1] == 1 && st.drains_sent[0] == 0);       /* both frames in one pass */
+    /* A second edge after the queue emptied is measured again, and a stale (flushed) frame is not a cold start. */
+    atomic_store(&mock_us, 9000);
+    assert(send_len(600) == ESP_OK);
+    atomic_store(&mock_us, 9100);
+    pump();
+    st = stats();
+    assert(st.cold_starts == 2 && st.cold_us_sum == 800 && st.cold_us_max == 700 && st.drains_sent[0] == 1);
+    /* Completions: sizes, a ZLP, and gaps counted only while frames are queued. */
+    ring_reset(c);
+    ntb_credit = 0;                            /* every NTB in flight: frames stay queued */
+    assert(send_len(700) == ESP_OK);
+    pump();
+    assert(s_tx.frames_queued == 1);
+    atomic_store(&mock_us, 10000); __wrap_netd_xfer_cb(0, 0x81, 0, 3000);      /* first completion: no previous one */
+    atomic_store(&mock_us, 10900); __wrap_netd_xfer_cb(0, 0x81, 0, 2500);      /* 0.9 ms */
+    atomic_store(&mock_us, 13000); __wrap_netd_xfer_cb(0, 0x81, 0, 0);         /* 2.1 ms, a ZLP */
+    atomic_store(&mock_us, 30000); __wrap_netd_xfer_cb(0, 0x81, 0, 64);        /* 17 ms */
+    st = stats();
+    assert(st.ntb_xfers == 3 && st.ntb_zlp == 1 && st.ntb_bytes == 3000 + 2500 + 64 && st.ntb_max_bytes == 3000);
+    assert(st.gap_count == 3 && st.gap_us_sum == 900 + 2100 + 17000 && st.gap_us_max == 17000);
+    assert(st.gap_hist[0] == 1 && st.gap_hist[2] == 1 && st.gap_hist[4] == 1 && st.gap_hist[1] == 0);
+    ntb_credit = -1;
+    drain_all();
+    /* Idle completions (nothing queued) do not produce gaps. */
+    atomic_store(&mock_us, 50000); __wrap_netd_xfer_cb(0, 0x81, 0, 64);
+    atomic_store(&mock_us, 90000); __wrap_netd_xfer_cb(0, 0x81, 0, 64);
+    assert(stats().gap_count == 3);
+    /* Heap work: growth demotes the worker for the growth and restores the relay priority, once per pass. */
+    ring_reset(c);
+    prio_sets = 0;
+    fill_pressure(3);
+    int before_prio = prio_sets;
+    tx_worker_step();
+    assert(prio_sets == before_prio + 2 && prio_cur == 10);                  /* down, then back up */
+    assert(stats().worker_demotions >= 1);
+    drain_all();
+    /* Housekeeping with an elastic chunk present but no growth wanted (an idle pass) is not demoted. */
+    ring_reset(c);
+    fill_pressure(3);
+    tx_worker_step();                          /* grows a chunk */
+    drain_all();
+    prio_sets = 0;
+    assert(s_tx.chunks_present != 0 && !atomic_load(&s_tx.grow_wanted));
+    tx_worker_step();
+    assert(prio_sets == 0 && prio_cur == 10);
+    /* Equal or unset work priority: never a call. */
+    c.work_priority = 0; ring_reset(c);
+    prio_sets = 0;
+    fill_pressure(3);
+    tx_worker_step();
+    assert(prio_sets == 0);
+    c.work_priority = 10; ring_reset(c);
+    fill_pressure(3);
+    tx_worker_step();
+    assert(prio_sets == 0);
+    drain_all();
+}
+
 int main(void) {
     tinyusb_net_config_t cfg = {.free_tx_buffer = released_ring};
     assert(tinyusb_net_init(&cfg) == ESP_OK);
@@ -1007,6 +1089,7 @@ int main(void) {
     test_exactly_once_and_triggers();
     test_sync_and_ring_share_the_pipe();
     test_link_loss();
+    test_drain_evidence_and_priority();
 #if CONFIG_PM_ENABLE
     test_pm_lock();
 #endif

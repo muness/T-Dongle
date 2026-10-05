@@ -27,6 +27,7 @@
 static const char *TAG = "ml_net_io";
 
 ml_rx_stats_t ml_rx_stats;   /* zero-initialised; see ml_rx_stats.h */
+atomic_uint ml_hb_refused[ML_HB_SITE_COUNT];   /* refusals by the heap budget, by site (ml_heap_budget.h) */
 ml_wgrx_budget_t ml_wgrx_budget;   /* bytes of WireGuard datagrams waiting in any membership's wg_rx_queue; see ml_wg_rx_budget.h */
 bool ml_wgrx_join_busy(void) { return ml_neg_busy(ml_rt_negotiation()); }   /* a join holds the negotiation token: the queue yields heap to it */
 

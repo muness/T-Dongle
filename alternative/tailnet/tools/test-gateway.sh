@@ -23,6 +23,8 @@ build-host/test_usb_identity
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I main tests/test_usb_rx_budget.c -o build-host/test_usb_rx_budget
 build-host/test_usb_rx_budget
 python3 tools/test-tcp-window.py
+python3 tools/test-heap-budget.py
+python3 tools/usb_drain_model.py --check
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
 build-host/test_router
 # Router hot path (docs/research/forwarding-latency.md): RAM-resident O(1) tables, RCU membership pinning, incremental checksums.

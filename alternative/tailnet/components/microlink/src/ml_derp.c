@@ -740,6 +740,14 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
 
     /* Relay buffer goes to SPIRAM (not DMA, not latency-critical): with a deeper TX queue this can hold
      * ~64 x ~1.3KB in-flight — keep it off the chronically-tight internal DRAM. */
+    /* The queue is up to ML_DERP_TX_QUEUE_DEPTH packets per membership in internal heap (this board has no SPIRAM). Past the
+     * elastic floor (ml_heap_budget.h, ADR 0022) WireGuard TRANSPORT data (type 4) is refused and counted, which the sender sees
+     * as ordinary loss; handshakes (types 1, 2) and DISCO, without which a path cannot be established or recovered, are not. */
+    bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
+    if (len >= 4 && data[0] == 0x04 && !ml_hb_ok(heap_caps_get_free_size(MALLOC_CAP_INTERNAL), len + 16u)) {
+        ml_hb_refuse(ML_HB_DERP_TX);
+        return ESP_ERR_NO_MEM;
+    }
     uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, ml_psram_malloc(len));
     if (!pkt_data) return ESP_ERR_NO_MEM;
     memcpy(pkt_data, data, len);
@@ -753,7 +761,6 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
 
     /* WG handshake packets (type 1=init, 2=response) get priority — front of queue.
      * This ensures handshake responses aren't delayed behind DISCO pings. */
-    bool is_wg_handshake = (len >= 4 && (data[0] == 0x01 || data[0] == 0x02));
 
     /* Try to send to queue */
     if ((is_wg_handshake ? xQueueSendToFront(ml->derp_tx_queue, &item, 0)

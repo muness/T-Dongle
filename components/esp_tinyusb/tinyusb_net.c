@@ -15,6 +15,7 @@
 #include "device/usbd_pvt.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 
 #define MAC_ADDR_LEN 6
 
@@ -254,10 +255,18 @@ static struct {
     int8_t reading;                 // slab the consumer peeked and has not advanced past, or -1
     uint16_t reading_rd;            // offset of that record: it is the consumer's, a flush must not count it
     bool resv_open;                 // producer between reserve and commit
+    bool cold_pending;              // the queue went empty to non-empty and that first frame has not been handed over
+    uint32_t cold_edge_us;          // when
+    uint32_t cold_starts, cold_us_sum, cold_us_max;     // under the lock (written by the consumer inside it)
     uint32_t high_water_bytes, high_water_slabs;
     // ---- producer only ----
     // ---- TinyUSB task only ----
     bool blocked;                   // last drain stopped on can_xmit() == false
+    uint32_t last_comp_us;          // previous IN completion while frames were queued, 0 when the queue was empty then
+    // Evidence counters: written by the TinyUSB task only, read by anyone (atomic so a reader never races).
+    _Atomic uint32_t gap_count, gap_us_sum, gap_us_max, gap_hist[5];
+    _Atomic uint32_t drains_sent[5];
+    _Atomic uint32_t ntb_xfers, ntb_zlp, ntb_bytes, ntb_max_bytes;
     // ---- worker only ----
     uint32_t grow_retry;            // tick before which a refused growth is not retried
     uint32_t grow_backoff;          // ms of the last refusal's back-off, 0 after a growth
@@ -277,6 +286,7 @@ static struct {
     _Atomic uint32_t grow_events, shrink_events, reclaim_events, reclaimed_chunks;
     _Atomic uint32_t deny_gate, deny_heap, deny_largest, deny_nomem, grow_raced;
     _Atomic uint32_t pm_acquired, pm_released;
+    _Atomic uint32_t demotions;
 } s_tx;
 
 static portMUX_TYPE s_tx_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -378,10 +388,14 @@ static bool tx_reserve_locked(uint32_t need, unsigned *slab, uint32_t *off)
     return true;
 }
 
-static void tx_commit_locked(unsigned s, uint32_t need)
+static void tx_commit_locked(unsigned s, uint32_t need, uint32_t now_us)
 {
     s_tx.slab[s].fill = s_tx.slab[s].resv;
     s_tx.resv_open = false;
+    if (s_tx.frames_queued == 0) {
+        s_tx.cold_pending = true;       // the consumer measures how long this frame waited for the first hand-over
+        s_tx.cold_edge_us = now_us;
+    }
     s_tx.frames_queued++;
     s_tx.used_bytes += need;
     if (s_tx.used_bytes > s_tx.high_water_bytes) {
@@ -426,7 +440,7 @@ static bool tx_peek_locked(tx_rec_t *r)
 
 /* Consumer, under the lock: the record returned by peek has been handed over (or discarded). True when the
  * queue just became empty. A flush that ran in between moved rd: then there is nothing to advance. */
-static bool tx_advance_locked(const tx_rec_t *r)
+static bool tx_advance_locked(const tx_rec_t *r, bool sent, uint32_t now_us)
 {
     s_tx.reading = -1;
     tx_slab_t *sl = &s_tx.slab[r->slab];
@@ -438,6 +452,17 @@ static bool tx_advance_locked(const tx_rec_t *r)
     sl->rd = (uint16_t)(sl->rd + need);
     s_tx.used_bytes -= need;
     s_tx.frames_queued--;
+    if (s_tx.cold_pending) {
+        s_tx.cold_pending = false;
+        if (sent) {
+            uint32_t waited = now_us - s_tx.cold_edge_us;
+            s_tx.cold_starts++;
+            s_tx.cold_us_sum += waited;
+            if (waited > s_tx.cold_us_max) {
+                s_tx.cold_us_max = waited;
+            }
+        }
+    }
     bool emptied = s_tx.frames_queued == 0;
     if (emptied) {
         atomic_store_explicit(&s_tx.pm_want, false, memory_order_release);
@@ -476,6 +501,7 @@ static uint32_t tx_discard_locked(void)
     }
     s_tx.frames_queued = 0;
     s_tx.used_bytes = 0;
+    s_tx.cold_pending = false;
     atomic_store_explicit(&s_tx.pm_want, false, memory_order_release);
     while (s_tx.fifo_n > 1 && (int)s_tx.fifo[s_tx.fifo_head] != s_tx.reading) {
         tx_drop_front_locked();
@@ -746,8 +772,9 @@ esp_err_t tinyusb_net_tx_ring_send(const void *buffer, uint16_t len)
     uint16_t hdr[2] = { len, atomic_load_explicit(&s_tx.gen, memory_order_relaxed) };
     memcpy(dst, hdr, sizeof(hdr));
     memcpy(dst + TX_REC_HDR, buffer, len);
+    uint32_t now_us = (uint32_t)esp_timer_get_time();     // outside the section: a register read, but not ours to hold it for
     TX_ENTER();
-    tx_commit_locked(slab, need);
+    tx_commit_locked(slab, need, now_us);
     TX_EXIT();
     atomic_fetch_add_explicit(&s_tx.enq_frames, 1, memory_order_relaxed);
     atomic_fetch_add_explicit(&s_tx.enq_bytes, len, memory_order_relaxed);
@@ -762,6 +789,7 @@ static void tx_drain(void)
 {
     bool ready = tud_ready();
     bool notify = false;
+    unsigned handed = 0;
     for (;;) {
         tx_rec_t r;
         TX_ENTER();
@@ -799,13 +827,18 @@ static void tx_drain(void)
             tud_network_xmit(&packet, r.len);     // copies synchronously, outside the lock: the slab is still ours
             atomic_fetch_add_explicit(&s_tx.sent_frames, 1, memory_order_relaxed);
             atomic_fetch_add_explicit(&s_tx.sent_bytes, r.len, memory_order_relaxed);
+            handed++;
         } else {
             atomic_fetch_add_explicit(&s_tx.flushed, 1, memory_order_relaxed);
         }
+        uint32_t now_us = (uint32_t)esp_timer_get_time();
         TX_ENTER();
-        bool emptied = tx_advance_locked(&r);
+        bool emptied = tx_advance_locked(&r, !stale, now_us);
         TX_EXIT();
         notify |= emptied;
+    }
+    if (handed) {
+        s_tx.drains_sent[(handed > 5 ? 5 : handed) - 1]++;     // TinyUSB task only
     }
     if (notify || atomic_load_explicit(&s_tx.reap_pending, memory_order_relaxed)) {
         xTaskNotifyGive(s_tx.worker);       // queue became empty (drop the PM lock) or a retiring chunk emptied
@@ -827,7 +860,31 @@ bool __wrap_netd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, 
 {
     bool ret = __real_netd_xfer_cb(rhport, ep_addr, result, xferred_bytes);
     if ((ep_addr & 0x80u) && atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {
+        uint32_t now_us = (uint32_t)esp_timer_get_time();   // only with the ring on: the legacy bridge's IN path makes no extra call
         atomic_fetch_add_explicit(&s_tx.xfer_events, 1, memory_order_relaxed);
+        if (xferred_bytes) {
+            s_tx.ntb_xfers++;
+            s_tx.ntb_bytes += xferred_bytes;
+            if (xferred_bytes > s_tx.ntb_max_bytes) {
+                s_tx.ntb_max_bytes = xferred_bytes;
+            }
+        } else {
+            s_tx.ntb_zlp++;
+        }
+        if (atomic_load_explicit(&s_tx.pm_want, memory_order_relaxed)) {      // frames are queued: this gap is the bus, not idleness
+            if (s_tx.last_comp_us) {
+                uint32_t gap = now_us - s_tx.last_comp_us;
+                s_tx.gap_count++;
+                s_tx.gap_us_sum += gap;
+                if (gap > s_tx.gap_us_max) {
+                    s_tx.gap_us_max = gap;
+                }
+                s_tx.gap_hist[gap < 1000u ? 0 : gap < 2000u ? 1 : gap < 4000u ? 2 : gap < 8000u ? 3 : 4]++;
+            }
+            s_tx.last_comp_us = now_us ? now_us : 1u;
+        } else {
+            s_tx.last_comp_us = 0;
+        }
         tx_drain();
     }
     return ret;
@@ -880,8 +937,22 @@ static void tx_worker_step(void)
             usbd_defer_func(do_drain, NULL, false);     // may wait for TinyUSB; we hold no lock
         }
     }
+    // Growth (the largest-block walk, the allocation, the gate's mutex) runs below the producers: the relay above must outrank them, this
+    // must not delay the TinyUSB task or the forwarding task. Only a pass that is about to grow demotes. Housekeeping (retire, one
+    // idle free per pass) stays at the relay priority: it is a few microseconds inside a critical section, which no priority
+    // changes, and a demotion costs more than that: with wg_mgr or usb_routes runnable the worker yields at the call and the relay
+    // is not served again until they block (ADR 0022). An idle pass with elastic chunks present is therefore not demoted.
+    bool heap_work = s_tx.cfg.work_priority != 0 && s_tx.cfg.work_priority != s_tx.cfg.priority &&
+                     atomic_load_explicit(&s_tx.grow_wanted, memory_order_relaxed);
     tx_housekeeping();
+    if (heap_work) {
+        vTaskPrioritySet(NULL, s_tx.cfg.work_priority);
+        atomic_fetch_add_explicit(&s_tx.demotions, 1, memory_order_relaxed);
+    }
     tx_try_grow();
+    if (heap_work) {
+        vTaskPrioritySet(NULL, s_tx.cfg.priority);
+    }
     tx_pm_reconcile();              // a drain that ran meanwhile may have emptied the queue
 }
 
@@ -901,6 +972,7 @@ esp_err_t tinyusb_net_tx_ring_start(const tinyusb_net_tx_config_t *cfg)
         ESP_RETURN_ON_FALSE(s_tx.cfg.base_frames == cfg->base_frames && s_tx.cfg.max_chunks == cfg->max_chunks &&
                             s_tx.cfg.floor_free == cfg->floor_free && s_tx.cfg.floor_largest == cfg->floor_largest &&
                             s_tx.cfg.gate == cfg->gate && s_tx.cfg.idle_ms == cfg->idle_ms &&
+                            s_tx.cfg.priority == cfg->priority && s_tx.cfg.work_priority == cfg->work_priority &&
                             s_tx.cfg.pm_begin == cfg->pm_begin && s_tx.cfg.pm_end == cfg->pm_end,
                             ESP_ERR_INVALID_STATE, TAG, "TX ring already configured differently");
         atomic_store(&s_tx.enabled, true);
@@ -926,8 +998,11 @@ esp_err_t tinyusb_net_tx_ring_start(const tinyusb_net_tx_config_t *cfg)
 
 void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out)
 {
-    uint32_t chunks, present, hw_bytes, hw_slabs;
+    uint32_t chunks, present, hw_bytes, hw_slabs, cold_n, cold_sum, cold_max;
     TX_ENTER();
+    cold_n = s_tx.cold_starts;
+    cold_sum = s_tx.cold_us_sum;
+    cold_max = s_tx.cold_us_max;
     chunks = s_tx.chunks_live;
     present = s_tx.chunks_present;
     hw_bytes = s_tx.high_water_bytes;
@@ -964,7 +1039,22 @@ void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out)
         .pm_acquired = atomic_load(&s_tx.pm_acquired),
         .pm_released = atomic_load(&s_tx.pm_released),
         .pm_held = atomic_load(&s_tx.pm_held),
+        .ntb_xfers = atomic_load(&s_tx.ntb_xfers),
+        .ntb_zlp = atomic_load(&s_tx.ntb_zlp),
+        .ntb_bytes = atomic_load(&s_tx.ntb_bytes),
+        .ntb_max_bytes = atomic_load(&s_tx.ntb_max_bytes),
+        .gap_count = atomic_load(&s_tx.gap_count),
+        .gap_us_sum = atomic_load(&s_tx.gap_us_sum),
+        .gap_us_max = atomic_load(&s_tx.gap_us_max),
+        .cold_starts = cold_n,
+        .cold_us_sum = cold_sum,
+        .cold_us_max = cold_max,
+        .worker_demotions = atomic_load(&s_tx.demotions),
     };
+    for (unsigned i = 0; i < 5; i++) {
+        out->drains_sent[i] = atomic_load(&s_tx.drains_sent[i]);
+        out->gap_hist[i] = atomic_load(&s_tx.gap_hist[i]);
+    }
 }
 
 esp_err_t tinyusb_net_init(const tinyusb_net_config_t *cfg)

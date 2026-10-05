@@ -26,20 +26,27 @@ CONFIG_LWIP_IPV6=y
 CONFIG_LWIP_TCPIP_CORE_LOCKING=y
 CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=8192
 
-# TCP window: 8 x MSS (11,520 B) instead of 4 x (5,760 B). The window is global (IDF lwIP has no
-# per-socket window option and window scaling needs SPIRAM), so it is sized for the DERP relay
-# sockets, the only ones that ever need more than 2-3 segments in flight, and bounded by what
-# the Wi-Fi RX pool can pin. The receive mailbox must be WND/MSS + 2. tools/test-tcp-window.py
-# and main/tcp_window_budget.h reject inconsistent values. See docs/adr/0015-data-plane-io.md.
-CONFIG_LWIP_TCP_WND_DEFAULT=11520
+# Wi-Fi buffers pinned by sockets (ADR 0022). A datagram or segment that has reached a socket pins the driver's RX buffer, a heap block,
+# until the application reads it; nothing checks the heap when the driver allocates it, so the largest burst one socket can pin must
+# fit between the elastic floor and the recovery reserve: main/ml_heap_budget.h derives ML_HB_PIN_BUFFERS (6 at the current
+# negotiation peak) and the build asserts every setting below against it (gateway_main.c, tcp_window_budget.h,
+# tools/test-heap-budget.py). Board finding: with 10 UDP slots and an 8-segment window, free heap fell to 3 KB under a 6 Mbit/s flood.
+#
+# TCP window: 6 x MSS (8,640 B; was 8 x = 11,520, 4 x = 5,760 before ADR 0015). The window is global (IDF lwIP has no
+# per-socket window option and window scaling needs SPIRAM), so it is sized for the DERP relay sockets, the only ones that ever
+# need more than 2-3 segments in flight. 6 segments is the most that can be pinned within the heap budget; the relay's ceiling is
+# window / RTT (1.9 Mbit/s at 36 ms, 1.1 at 64 ms; 8 segments gave 2.6 and 1.4). The receive mailbox must be WND/MSS + 2.
+# tools/test-tcp-window.py and main/tcp_window_budget.h reject inconsistent values. See docs/adr/0015-data-plane-io.md, 0022.
+CONFIG_LWIP_TCP_WND_DEFAULT=8640
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
-CONFIG_LWIP_TCP_RECVMBOX_SIZE=10
-# UDP receive mailbox, per socket: 6 -> 10. lwIP frees a datagram it cannot post to a full mailbox without counting it
-# anywhere, which is where the silent ~7 % loss of tailnet UDP came from (docs/adr/0019-inbound-loss.md). The main fix is
-# that net_io now empties a ready socket (ml_net_io_drain.h); this only widens the burst that can arrive between two net_io
-# runs (net_io is priority 7 on the core of the Wi-Fi and tcpip tasks). 4 B per slot per UDP socket, but a queued datagram
-# pins its Wi-Fi RX buffer until net_io reads it, so it stays small: 10 of the 22 Wi-Fi RX buffers at the very worst.
-CONFIG_LWIP_UDP_RECVMBOX_SIZE=10
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=8
+# UDP receive mailbox, per socket: 6 (the IDF default) again, after 6 -> 10 in ADR 0019. lwIP frees a datagram it cannot post to a full
+# mailbox without counting it anywhere (docs/adr/0019-inbound-loss.md); the cure for that silent loss is net_io emptying a ready
+# socket (ml_net_io_drain.h), which stays. The 10 slots only widened the burst between two net_io runs, and each queued datagram pins
+# a Wi-Fi RX buffer (~1.66 KB of heap) arriving before any heap check can run: ten of them are 16.6 KB, more than the heap holds above
+# the recovery reserve once the USB ring and the WireGuard queue have taken their share (ADR 0022). Losses past 6 per burst are
+# visible as `lwip udp_recv - ml.udp_rx` in tools/inbound_accounting.py. Re-test 8 only together with a smaller negotiation peak.
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=6
 CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y
 CONFIG_MBEDTLS_CHACHAPOLY_C=y
@@ -48,7 +55,10 @@ CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
+# TX buffers copy each outgoing frame (upload, ACKs) and are held until the frame is sent: the pool is the bound on that pin,
+# so it is the same number as the RX burst (ADR 0022). A full pool makes esp_wifi_internal_tx fail, lwIP returns ERR_MEM, and TCP
+# or the WireGuard sender sees ordinary loss. Upload here is 1-2 Mbit/s, a handful of frames in flight.
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=6
 
 # Management/DNS reservation and dynamic membership admission use this total.
 CONFIG_LWIP_MAX_SOCKETS=20

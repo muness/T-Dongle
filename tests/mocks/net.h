@@ -73,6 +73,10 @@ static void xEventGroupSetBits(EventGroupHandle_t e,int b){*e|=b;}
 static void xEventGroupClearBits(EventGroupHandle_t e,int b){*e&=~b;}
 static int xEventGroupWaitBits(EventGroupHandle_t e,int b,int clear,int all,int timeout){assert(!in_producer);(void)all;(void)timeout;if(schedule==0)run_deferred();int ret=*e&b;if(clear)*e&=~b;return ret;}
 static void usbd_defer_func(void(*f)(void*),void *a,bool isr){assert(!in_producer&&!in_crit);(void)isr;pthread_mutex_lock(&defer_lock);assert(pending<8);deferred[pending]=f;args[pending++]=a;pthread_mutex_unlock(&defer_lock);}
+static _Atomic int64_t mock_us;                   /* esp_timer_get_time(): the test moves it */
+static int64_t esp_timer_get_time(void){return atomic_load(&mock_us);}
+static int prio_sets, prio_cur=-1;
+static void vTaskPrioritySet(TaskHandle_t h,unsigned p){assert(h==NULL&&!in_crit&&!in_producer);prio_sets++;prio_cur=(int)p;}
 static uint32_t xTaskGetTickCount(void){return atomic_load(&mock_tick);}
 static void vTaskDelay(TickType_t ticks){assert(!in_producer&&!in_crit);atomic_fetch_add(&mock_tick,(uint32_t)ticks);if(delay_hook)delay_hook();}
 

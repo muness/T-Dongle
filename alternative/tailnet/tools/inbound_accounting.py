@@ -57,6 +57,12 @@ def snapshot(console, wgperf=False, reset_wgperf=False):
                                   "pool": {r["name"]: {"err": r.get("err", 0)} for r in stats.get("lwip_pool", []) if r["name"] in LWIP_POOL_ERRORS}}
     except Exception:  # older firmware, or a build without the command: the rest of the snapshot stands
         pass
+    try:
+        low = console.json_command("memory low").get("heap_low")
+        if low:
+            data["heap_low"] = low[0]
+    except Exception:  # firmware without `memory low`
+        pass
     if wgperf:
         report = console.json_command("wgperf").get("wgperf")
         if report:
@@ -133,6 +139,27 @@ def wgperf_summary(before, after):
     return out
 
 
+def usb_drain(before, after, bus_ms_per_kb=0.85):
+    """The USB IN pipe over the run (ADR 0022), from the usb counters: NTBs, datagrams per NTB, the gap between IN completions while
+    frames were queued against the bus time of the mean NTB (what is left is the TinyUSB task's wake latency), and the cold start."""
+    u = lambda n: after["usb"].get(n, 0) - before["usb"].get(n, 0)      # noqa: E731
+    hist = lambda n: [a - b for a, b in zip(after["usb"].get(n, []), before["usb"].get(n, []))]      # noqa: E731
+    xfers = u("ntb_xfers")
+    if not xfers:
+        return {}
+    out = {"ntb_xfers": xfers, "ntb_zlp": u("ntb_zlp"), "mean_ntb_bytes": round(u("ntb_bytes") / xfers),
+           "frames_per_ntb": round(u("tx_sent") / xfers, 2), "drains_sent": hist("drains_sent"), "worker_demotions": u("tx_worker_demotions")}
+    if u("gap_count"):
+        gap = u("gap_us_sum") / u("gap_count") / 1000.0
+        bus = out["mean_ntb_bytes"] / 1024.0 * bus_ms_per_kb
+        out.update({"gap_mean_ms": round(gap, 2), "gap_max_ms": after["usb"].get("gap_us_max", 0) / 1000.0, "gap_hist_ms": hist("gap_hist_ms"),
+                    "bus_ms_of_mean_ntb": round(bus, 2), "wake_latency_ms": round(max(0.0, gap - bus), 2)})
+    if u("cold_starts"):
+        out["cold_start_mean_ms"] = round(u("cold_us_sum") / u("cold_starts") / 1000.0, 2)
+        out["cold_start_max_ms"] = after["usb"].get("cold_us_max", 0) / 1000.0
+    return out
+
+
 def reconcile(before, after, sent=None, received=None):
     """Returns (rows, summary): rows are (label, value, note); summary is a dict of the totals."""
     ml = lambda n: delta(before, after, "ml", n)          # noqa: E731
@@ -148,7 +175,7 @@ def reconcile(before, after, sent=None, received=None):
     rows += [
         ("lwip udp_recv", lw("udp_recv"), "every UDP datagram lwIP accepted, counted before the socket mailbox"),
         ("net_io udp_rx", ml("udp_rx"), "read from the sockets by net_io"),
-        ("  drains >= 8 deep", ml("drain_deep"), f"of {ml('drain_calls')} drains: the mailbox (10 slots) was within two datagrams of the silent overflow"),
+        ("  drains >= 4 deep", ml("drain_deep"), f"of {ml('drain_calls')} drains: the mailbox (6 slots) was within two datagrams of the silent overflow"),
         ("mailbox loss", mailbox, "udp_recv - udp_rx: lwIP's uncounted drop (plus a few non-net_io datagrams, DNS); must be ~0"),
         ("net_io -> wg_rx_queue", ml("udp_wg"), "classified WireGuard"),
         ("  queue full", ml("q_wg_full") + ml("derp_q_wg_full"), "wg_rx_queue overflow (was invisible without diagnostics)"),
@@ -187,6 +214,15 @@ def reconcile(before, after, sent=None, received=None):
     perf = wgperf_summary(before, after)
     if perf:
         summary["wgperf"] = perf
+    drain = usb_drain(before, after)
+    if drain:
+        summary["usb_drain"] = drain
+    summary["heap_min_free"] = after.get("heap", {}).get("min")
+    heap_refused = (after["usb"].get("rx_dropped_heap", 0) - before["usb"].get("rx_dropped_heap", 0))
+    if heap_refused:
+        summary["usb_rx_refused_for_heap"] = heap_refused
+    if after.get("heap_low"):
+        summary["heap_low"] = after["heap_low"]
     if sent is not None and received is not None:
         summary["end_to_end_loss"] = sent - received
         summary["loss_pct"] = round(100.0 * (sent - received) / sent, 2) if sent else 0.0
@@ -214,6 +250,26 @@ def render(rows, summary):
         for name in ("lock_wait", "lock_hold"):
             if name in perf:
                 lines.append(f"  core lock, {name:<9} {perf[name]['count']:>8} times, mean {perf[name]['mean_cy']} cycles, max {perf[name]['max_cy']}")
+    drain = summary.get("usb_drain")
+    if drain:
+        lines.append(f"USB IN pipe: {drain['ntb_xfers']} NTBs ({drain['ntb_zlp']} ZLPs), mean {drain['mean_ntb_bytes']} B = {drain['frames_per_ntb']} frames per NTB; "
+                     f"frames per drain pass (1,2,3,4,5+) {drain['drains_sent']}")
+        if "gap_mean_ms" in drain:
+            lines.append(f"  gap between IN completions with a backlog: mean {drain['gap_mean_ms']} ms (max {drain['gap_max_ms']}), histogram <1,<2,<4,<8,>=8 ms {drain['gap_hist_ms']}; "
+                         f"bus time of the mean NTB {drain['bus_ms_of_mean_ntb']} ms, so wake latency about {drain['wake_latency_ms']} ms")
+        if "cold_start_mean_ms" in drain:
+            lines.append(f"  first frame of a burst waited {drain['cold_start_mean_ms']} ms (max {drain['cold_start_max_ms']}) for its hand-over")
+    if summary.get("heap_min_free") is not None:
+      lines.append(f"heap minimum since boot {summary['heap_min_free']} B (recovery reserve 16,384 B)"
+                 + (f"; USB frames refused for the heap floor {summary['usb_rx_refused_for_heap']}" if summary.get("usb_rx_refused_for_heap") else ""))
+    low = summary.get("heap_low")
+    if low and low.get("records"):
+        lines.append(f"heap minimum records (new minima below the {low['floor']} B elastic floor; highest free seen {low['free_hi']} B):")
+        for r in low["records"]:
+            held = r["tx_elastic"] + r["wgq"] + r["rx_inflight"] * 1534 + r["packet_live"]
+            dropped = low["free_hi"] - r["free"]
+            lines.append(f"  t={r['uptime_ms']} ms min {r['min']} B free {r['free']} B: dropped {dropped} B from the peak, of which ring elastic {r['tx_elastic']}, "
+                         f"wg queue {r['wgq']}, usb rx {r['rx_inflight']} frames, tagged packets {r['packet_live']}; unexplained (Wi-Fi buffers pinned by sockets, lwIP) {dropped - held}")
     if "end_to_end_loss" in summary:
         lines.append(f"end to end: lost {summary['end_to_end_loss']} ({summary['loss_pct']} %), unattributed {summary['unattributed']} "
                      "(sent - received - mailbox - counted; DNS and control datagrams make a few of either sign)")

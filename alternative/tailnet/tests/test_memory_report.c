@@ -1,4 +1,5 @@
 /* Prints every diagnostics report the serial console can produce; tools/test-memory-report.py checks the JSON. */
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -23,7 +24,10 @@ static void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *s) {
         .sent_bytes = 100000, .dropped_full = 7, .dropped_link_down = 1, .dropped_invalid = 2, .flushed_link_down = 3,
         .ntb_blocked = 4, .xfer_events = 55, .worker_stack_free = 900, .grow_events = 11, .shrink_events = 12,
         .reclaim_events = 13, .reclaimed_chunks = 14, .grow_denied_gate = 15, .grow_denied_heap = 16,
-        .grow_denied_largest = 17, .grow_denied_nomem = 18, .grow_raced = 19, .pm_acquired = 20, .pm_released = 19, .pm_held = 1};
+        .grow_denied_largest = 17, .grow_denied_nomem = 18, .grow_raced = 19, .pm_acquired = 20, .pm_released = 19, .pm_held = 1,
+        .ntb_xfers = 40, .ntb_zlp = 2, .ntb_bytes = 100000, .ntb_max_bytes = 3190, .drains_sent = {1, 2, 3, 4, 5},
+        .gap_count = 30, .gap_us_sum = 150000, .gap_us_max = 21000, .gap_hist = {6, 7, 8, 9, 10},
+        .cold_starts = 21, .cold_us_sum = 42000, .cold_us_max = 9000, .worker_demotions = 22};
 }
 static gateway_usb_rx_budget usb_rx_budget;
 #define GATEWAY_VERSION "0.0.0-test"
@@ -115,6 +119,11 @@ static int wifi_current = 1;   /* slot 2 selected and pinned: the report shows t
 static wifi_pin wifi_pinned = {1, 0, 0};
 #include "json_writer.inc"
 #include "wifi_link.inc"
+/* esp_timer's periodic API, for heap_low_start() (never run on the host). */
+typedef void *esp_timer_handle_t;
+typedef struct { void (*callback)(void *); const char *name; } esp_timer_create_args_t;
+static int esp_timer_create(const esp_timer_create_args_t *a, esp_timer_handle_t *h) { (void)a; (void)h; return 0; }
+static int esp_timer_start_periodic(esp_timer_handle_t h, uint64_t us) { (void)h; (void)us; return 0; }
 #include "memory_diagnostics.inc"
 int main(void) {
     microlink_t client = {(void *)3000, true, false, 0, NULL};
@@ -139,7 +148,19 @@ int main(void) {
     for (unsigned i = 0; i < WG_RXS_COUNT; i++) for (unsigned k = 0; k < 200 + i; k++) wireguard_rx_stat_add((wireguard_rx_stat_t)i);
     lwip_stats.udp.recv = 5000; lwip_stats.udp.drop = 1; lwip_stats.udp.memerr = 2; lwip_stats.udp.err = 3;
     tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 700);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 42000);
-    const char *commands[] = {"memory", "route", "inbound", "members", "memory bench", "memory locks", "wgperf", "wgperf logbench", "wgperf reset", "wgperf", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
+    /* `memory low`: only a NEW minimum below the elastic floor is recorded; the first record is kept when the ring wraps. */
+    {
+        heap_low_rec_t r = {.uptime_ms = 1000, .min_free = 40000, .free_now = 40000, .largest = 24000};
+        assert(!heap_low_note(&r));                                      /* above the floor: nothing */
+        r.min_free = 29000; r.free_now = 31000; r.tx_ring_bytes = 7620; r.tx_elastic_bytes = 3048; r.wgq_bytes = 5000; r.rx_inflight = 3; r.packet_live = 5200;
+        assert(heap_low_note(&r));
+        assert(!heap_low_note(&r));                                      /* the same minimum again: nothing */
+        for (uint32_t m = 28000; m > 28000 - 10 * 500; m -= 500) { r.min_free = m; r.uptime_ms++; assert(heap_low_note(&r)); }
+        assert(heap_low_count == 11 && heap_low_rec[0].min_free == 29000 && heap_low_rec[0].free_hi == 40000);
+        assert(heap_low_rec[1 + (11 - 1 - 1) % 7].min_free == 23500);   /* the newest record is the lowest */
+        assert(heap_low_free_hi == 40000);
+    }
+    const char *commands[] = {"memory", "memory low", "route", "inbound", "members", "memory bench", "memory locks", "wgperf", "wgperf logbench", "wgperf reset", "wgperf", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));
