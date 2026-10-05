@@ -27,6 +27,13 @@
 #include "tinyusb.h"
 #include "tinyusb_default_config.h"
 #include "tinyusb_net.h"
+#include "usb_rx_budget.h"
+/* Tunnel-to-USB transmit ring (heap, allocated once at USB start). 6 KB holds four full frames;
+ * raise it only if the "usb" memory report shows dropped_full with high_water at ring_bytes. */
+#ifndef GATEWAY_USB_TX_RING_BYTES
+#define GATEWAY_USB_TX_RING_BYTES 6144
+#endif
+#define GATEWAY_USB_TX_PRIORITY 5  /* with the original bridge's usb_tx worker, below tcpip and Wi-Fi */
 #include <ctype.h>
 #include <strings.h>
 #include <time.h>
@@ -399,25 +406,34 @@ static void manager(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
+/* Runs in the lwIP core-lock holder (tcpip task, WireGuard manager): it must never wait.
+ * The frame is copied into the USB transmit ring and a worker hands it to TinyUSB; a full ring
+ * drops the frame (counted), which TCP treats as loss. See docs/adr/0014-data-plane-io.md. */
 static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
-    void *copy = malloc(len);
-    if (!copy)
-        return ESP_ERR_NO_MEM;
-    memcpy(copy, buffer, len);
-    esp_err_t err = tinyusb_net_send_sync(copy, len, copy, pdMS_TO_TICKS(50));
-    if (err != ESP_OK)
-        free(copy);
-    return err;
+    if (len > UINT16_MAX)
+        return ESP_ERR_INVALID_SIZE;
+    return tinyusb_net_tx_ring_send(buffer, (uint16_t)len);
 }
-static void usb_free_tx(void *buffer, void *ctx) { if(gateway_tailnet_mode())free(buffer);else tdongle_l2_release(buffer); }
-static void usb_free_rx(void *handle, void *buffer) { free(buffer); }
+/* Called only for tdongle_l2 (bridge mode) frames sent with tinyusb_net_send_sync. */
+static void usb_free_tx(void *buffer, void *ctx) { if(!gateway_tailnet_mode())tdongle_l2_release(buffer); }
+static gateway_usb_rx_budget usb_rx_budget;
+static void usb_free_rx(void *handle, void *buffer) {
+    free(buffer);
+    gateway_usb_rx_release(&usb_rx_budget);
+}
 static esp_err_t usb_rx(void *buffer, uint16_t len, void *ctx) {
     if(!gateway_tailnet_mode())return tdongle_l2_host(buffer,len);
     if (!usb_interface) return ESP_ERR_INVALID_STATE;
-    void *copy = malloc(len);
-    if (!copy)
+    if (!gateway_usb_rx_admit(&usb_rx_budget, len))
         return ESP_ERR_NO_MEM;
+    void *copy = malloc(len);
+    if (!copy) {
+        gateway_usb_rx_release(&usb_rx_budget);
+        atomic_fetch_add_explicit(&usb_rx_budget.dropped_nomem, 1, memory_order_relaxed);
+        return ESP_ERR_NO_MEM;
+    }
     memcpy(copy, buffer, len);
+    /* esp_netif frees the copy through usb_free_rx exactly once, on every path including errors. */
     return esp_netif_receive(usb_interface, copy, len, NULL);
 }
 static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
@@ -1136,6 +1152,7 @@ static esp_err_t start_usb(void) {
     if(gateway_tailnet_mode()){uint8_t device[6];gateway_usb_macs(identity_mac,device,net.mac_addr);}
     else memcpy(net.mac_addr, identity_mac, 6);
     result=tinyusb_net_init(&net);
+    if(result==ESP_OK && gateway_tailnet_mode())result=tinyusb_net_tx_ring_start(GATEWAY_USB_TX_RING_BYTES,GATEWAY_USB_TX_PRIORITY);
     extern esp_err_t gateway_console_start(void);
     esp_err_t console=gateway_console_start();
     return console!=ESP_OK?console:result;

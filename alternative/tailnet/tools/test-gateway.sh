@@ -17,6 +17,8 @@ done
 (cd ../.. && TEST_CFLAGS="-fsanitize=address,undefined -g" python3 tools/test_net.py)
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g tests/test_usb_identity.c -o build-host/test_usb_identity
 build-host/test_usb_identity
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I main tests/test_usb_rx_budget.c -o build-host/test_usb_rx_budget
+build-host/test_usb_rx_budget
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
 build-host/test_router
 : "${IDF_PATH:?Source ESP-IDF for the same cJSON used by the firmware}"

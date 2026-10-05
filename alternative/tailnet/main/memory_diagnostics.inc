@@ -190,6 +190,32 @@ static void report_lwip(jw_writer *w) {
     report_field(w, "wifi_dynamic_tx", CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM);
     report_end(w);
 }
+/* USB data path: transmit ring (tunnel to host) and receive budget (host to lwIP). Drops here are
+ * backpressure, not faults; tune GATEWAY_USB_TX_RING_BYTES from dropped_full vs high_water. */
+static void report_usb(jw_writer *w) {
+    tinyusb_net_tx_stats_t tx;
+    tinyusb_net_tx_ring_stats(&tx);
+    report_begin(w, "usb");
+    report_field(w, "tx_ring_bytes", tx.ring_bytes);
+    report_field(w, "tx_high_water", tx.high_water_bytes);
+    report_field(w, "tx_enqueued", tx.enqueued_frames);
+    report_field(w, "tx_enqueued_bytes", tx.enqueued_bytes);
+    report_field(w, "tx_sent", tx.sent_frames);
+    report_field(w, "tx_sent_bytes", tx.sent_bytes);
+    report_field(w, "tx_dropped_full", tx.dropped_full);
+    report_field(w, "tx_dropped_link_down", tx.dropped_link_down);
+    report_field(w, "tx_dropped_invalid", tx.dropped_invalid);
+    report_field(w, "tx_flushed_link_down", tx.flushed_link_down);
+    report_field(w, "tx_ntb_blocked", tx.ntb_blocked);
+    report_field(w, "tx_ntb_count", CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT);
+    report_field(w, "rx_inflight_max", GATEWAY_USB_RX_INFLIGHT_MAX);
+    report_field(w, "rx_inflight", atomic_load(&usb_rx_budget.inflight));
+    report_field(w, "rx_high_water", atomic_load(&usb_rx_budget.high_water));
+    report_field(w, "rx_dropped_busy", atomic_load(&usb_rx_budget.dropped_busy));
+    report_field(w, "rx_dropped_nomem", atomic_load(&usb_rx_budget.dropped_nomem));
+    report_field(w, "rx_dropped_invalid", atomic_load(&usb_rx_budget.dropped_invalid));
+    report_end(w);
+}
 static void report_phases(jw_writer *w) {
     tdongle_member_phases m;
     for (unsigned slot = 0; slot < TDONGLE_MEMORY_MEMBERS; slot++) {
@@ -285,6 +311,7 @@ bool gateway_memory_command(const char *line) {
         report_heap(&w);
         report_attribution(&w);
         report_lwip(&w);
+        report_usb(&w);
     } else if (!strcmp(line, "members")) {
         report_phases(&w);
         report_admission(&w);

@@ -31,9 +31,9 @@ def reports(command, kind=None):
     return [x for x in sections[command] if isinstance(x, dict) and (kind is None or x["kind"] == kind)]
 
 memory = reports("memory")
-assert [x["kind"] for x in memory] == ["heap", "attribution", "lwip"], memory
+assert [x["kind"] for x in memory] == ["heap", "attribution", "lwip", "usb"], memory
 assert all(x["schema"] == 1 for x in memory)
-heap, attribution, lwip = memory
+heap, attribution, lwip, usb = memory
 assert heap["free"] == 60000 and heap["min"] == 31000 and heap["largest"] == 24576 and heap["total"] == 300000
 assert list(heap["owners"]) == ["other", "tls", "control", "map", "peer", "wg", "packet", "context"]
 assert heap["owners"]["packet"]["live"] == 1500 and heap["owners"]["map"]["peak"] == 900 and heap["owners"]["packet"]["allocs"] == 1
@@ -45,6 +45,8 @@ assert attribution["synthetic"] == 28672 + 3 * 336 + 1234 and attribution["unatt
 assert attribution["n2"] == {"lp_acc_capacity": 65536, "lp_acc_allocated": False, "h2_window_advertised": 65536, "h2_acc_live_max": 0,
                              "gateway_plain_static": 20496, "gateway_json_static": 16384}, attribution["n2"]
 assert lwip["tcp_wnd"] == 5760 and lwip["pbuf_pool_size"] == 16
+assert usb["tx_ring_bytes"] == 6144 and usb["tx_high_water"] == 4212 and usb["tx_dropped_full"] == 7 and usb["tx_ntb_blocked"] == 4
+assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 12 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
 members = sections["members"]
 phases = reports("members", "phases")
@@ -67,4 +69,4 @@ for command, lines in sections.items():
     for item in lines:
         if isinstance(item, dict):
             assert len(json.dumps(item, separators=(",", ":"))) < 1800, (command, item["kind"])  # bounded, fits the console queue in a few chunks
-print("Serial reports: heap, attribution, lwip, phases, admission, bench and guard parse as bounded one-line JSON.")
+print("Serial reports: heap, attribution, lwip, usb, phases, admission, bench and guard parse as bounded one-line JSON.")
