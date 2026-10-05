@@ -75,6 +75,92 @@ static void dns_poll_upstream(dns_workspace *work) {
     }
     if(!active){close(work->upstream_sock);work->upstream_sock=-1;}
 }
+/* A name reaches a membership in one of two forms: "<peer>.<label>.tailnet"
+ * or the peer's MagicDNS name "<peer>.<tailnet-domain>", where the domain is
+ * the membership's own DNS name without its first label and trailing dot. */
+typedef enum { DNS_NAME_NONE, DNS_NAME_QUALIFIED, DNS_NAME_MAGIC } dns_form;
+static size_t dns_magic_suffix(const membership_t *m, const char **suffix) {
+    if(!m->client)return 0;
+    const char *self=m->client->self_dns_name;
+    size_t n=strnlen(self,sizeof(m->client->self_dns_name));
+    if(n==sizeof(m->client->self_dns_name))return 0;
+    if(n && self[n-1]=='.')n--;
+    const char *dot=memchr(self,'.',n);
+    if(!dot || dot==self || (size_t)(dot-self)+1>=n)return 0;
+    *suffix=dot+1;
+    return n-(size_t)(dot+1-self);
+}
+static dns_form dns_name_form(const membership_t *m, const char *name, size_t len) {
+    size_t label_len=strlen(m->label);
+    if(len>label_len+9 && name[len-label_len-9]=='.' && !strncasecmp(name+len-label_len-8,m->label,label_len) && !strcasecmp(name+len-8,".tailnet"))return DNS_NAME_QUALIFIED;
+    const char *suffix;
+    size_t n=dns_magic_suffix(m,&suffix);
+    if(n && len>n+1 && name[len-n-1]=='.' && !strncasecmp(name+len-n,suffix,n))return DNS_NAME_MAGIC;
+    return DNS_NAME_NONE;
+}
+/* Number of memberships whose MagicDNS domain contains name. Lock held. */
+static unsigned dns_magic_claims(const char *name, size_t len) {
+    unsigned claims=0;
+    for(membership_t *m=members;m;m=m->next)claims+=dns_name_form(m,name,len)==DNS_NAME_MAGIC;
+    return claims;
+}
+typedef struct { unsigned matches; bool temporary; uint32_t member, generation, alias; } dns_match;
+/* Look for one peer of m whose name in the given form equals name. Cached and
+ * fresh matches both count so that duplicates stay ambiguous. */
+static void dns_match_member(dns_workspace *work, membership_t *m, const char *name, dns_form form, dns_match *r) {
+    if (!m->client || m->client->state != ML_STATE_CONNECTED || !m->client->directory.session_valid) {r->temporary=true;return;}
+    uint32_t generation=__atomic_load_n(&m->client->directory.generation,__ATOMIC_ACQUIRE);
+    for(unsigned c=0;c<4;c++)if(work->cache[c].alias && work->cache[c].member==m->id && work->cache[c].generation==generation && (int32_t)(work->cache[c].expires-xTaskGetTickCount())>0 && !strcasecmp(work->cache[c].name,name)) {
+        r->alias=work->cache[c].alias;work->cache[c].used=++work->clock;r->matches++;dns_count(1);return;
+    }
+    const char *suffix=NULL;
+    size_t suffix_len=form==DNS_NAME_MAGIC ? dns_magic_suffix(m,&suffix) : 0;
+    for (unsigned i = 0; i < m->client->directory.count; i++) {
+        ml_peer_update_t *p=&work->record;
+        if(!ml_directory_at(m->client,i,p)){r->temporary=true;continue;}
+        char *peer=work->peer, *candidate=work->qualified;
+        strlcpy(peer, p->hostname, sizeof(work->peer));
+        char *dot = strchr(peer, '.');
+        int written;
+        if(form==DNS_NAME_QUALIFIED) {
+            if (dot)
+                *dot = 0;
+            written=snprintf(candidate, sizeof(work->qualified), "%s.%s.tailnet", peer, m->label);
+        } else if(dot) /* the directory stores the full MagicDNS name */
+            written=snprintf(candidate, sizeof(work->qualified), "%s", peer);
+        else /* peers restored from the NVS cache keep only their first label */
+            written=snprintf(candidate, sizeof(work->qualified), "%s.%.*s", peer, (int)suffix_len, suffix);
+        if (written>=(int)sizeof(work->qualified) || strcasecmp(name, candidate) || !p->vpn_ip)continue;
+        r->matches++;
+        uint32_t alias=gateway_alias(m->id, p->vpn_ip);
+        if(!alias){r->temporary=true;continue;}
+        r->alias=alias;r->member=m->id;r->generation=generation;
+    }
+    if(generation!=__atomic_load_n(&m->client->directory.generation,__ATOMIC_ACQUIRE))r->temporary=true;
+}
+static void dns_cache_store(dns_workspace *work, const char *name, const dns_match *r) {
+    unsigned victim=0;
+    for(unsigned c=0;c<4;c++)if(!work->cache[c].alias || work->cache[c].used<work->cache[victim].used)victim=c;
+    if(strlen(name)>=sizeof(work->cache[victim].name))return;
+    strlcpy(work->cache[victim].name,name,sizeof(work->cache[victim].name));
+    work->cache[victim].member=r->member;work->cache[victim].generation=r->generation;
+    work->cache[victim].alias=r->alias;work->cache[victim].used=++work->clock;work->cache[victim].expires=xTaskGetTickCount()+pdMS_TO_TICKS(30000);
+}
+/* Resolve a tailnet name to its USB alias, or 0 (NXDOMAIN, or SERVFAIL when
+ * *temporary). Lock held. A MagicDNS domain claimed by two memberships is
+ * ambiguous even if only one of them has the peer. */
+static uint32_t dns_resolve(dns_workspace *work, const char *name, size_t len, bool *temporary) {
+    dns_match r={0};
+    if(dns_magic_claims(name,len)>1)return 0;
+    for (membership_t *m = members; m; m = m->next) {
+        dns_form form=dns_name_form(m,name,len);
+        if(form!=DNS_NAME_NONE)dns_match_member(work,m,name,form,&r);
+    }
+    *temporary=r.temporary;
+    if (r.matches != 1 || r.temporary)return 0;
+    if(r.member)dns_cache_store(work,name,&r);
+    return r.alias;
+}
 static void dns_task(void *arg) {
     dns_workspace *work=arg;
     int sock=work->sock;
@@ -112,52 +198,19 @@ static void dns_task(void *arg) {
         TickType_t lookup_started=xTaskGetTickCount();
         uint32_t alias = 0;
         bool temporary=false;
-        if (tailnet && type == 1 && klass == 1 &&
-            xSemaphoreTake(members_lock, pdMS_TO_TICKS(50)) == pdTRUE) {
-            unsigned matches = 0;
-            uint32_t found_member=0,found_generation=0;
-            for (membership_t *m = members; m; m = m->next) {
-                size_t label_len=strlen(m->label);
-                if(len<=label_len+9 || name[len-label_len-9]!='.' || strncasecmp(name+len-label_len-8,m->label,label_len))continue;
-                if (!m->client || m->client->state != ML_STATE_CONNECTED || !m->client->directory.session_valid) {temporary=true;continue;}
-                uint32_t generation=__atomic_load_n(&m->client->directory.generation,__ATOMIC_ACQUIRE);
-                bool cached=false;
-                for(unsigned c=0;c<4;c++)if(work->cache[c].alias && work->cache[c].member==m->id && work->cache[c].generation==generation && (int32_t)(work->cache[c].expires-xTaskGetTickCount())>0 && !strcasecmp(work->cache[c].name,name)) {
-                    alias=work->cache[c].alias;work->cache[c].used=++work->clock;matches++;cached=true;break;
-                }
-                if(cached){dns_count(1);continue;}
-                for (unsigned i = 0; i < m->client->directory.count; i++) {
-                        ml_peer_update_t *p=&work->record;
-                        if(!ml_directory_at(m->client,i,p)){temporary=true;continue;}
-                        char *peer=work->peer, *qualified=work->qualified;
-                        strlcpy(peer, p->hostname, sizeof(work->peer));
-                        char *dot = strchr(peer, '.');
-                        if (dot)
-                            *dot = 0;
-                        snprintf(qualified, sizeof(work->qualified), "%s.%s.tailnet", peer, m->label);
-                        if (!strcasecmp(name, qualified) && p->vpn_ip) {
-                            matches++;
-                            alias = gateway_alias(m->id, p->vpn_ip);
-                            if(!alias){temporary=true;continue;}
-                            found_member=m->id;found_generation=generation;
-
-                        }
-                    }
-                if(generation!=__atomic_load_n(&m->client->directory.generation,__ATOMIC_ACQUIRE))temporary=true;
-            }
-            if (matches != 1 || temporary)
-                alias = 0;
-            else if(found_member) {
-                unsigned victim=0;
-                for(unsigned c=0;c<4;c++)if(!work->cache[c].alias || work->cache[c].used<work->cache[victim].used)victim=c;
-                if(strlen(name)<sizeof(work->cache[victim].name)) {
-                    strlcpy(work->cache[victim].name,name,sizeof(work->cache[victim].name));
-                    work->cache[victim].member=found_member;work->cache[victim].generation=found_generation;
-                    work->cache[victim].alias=alias;work->cache[victim].used=++work->clock;work->cache[victim].expires=xTaskGetTickCount()+pdMS_TO_TICKS(30000);
-                }
-            }
+        /* MagicDNS ownership is only known under the membership lock, so every
+         * IN query takes it; if it is busy, only .tailnet names are answered
+         * (SERVFAIL) and everything else keeps its upstream path. */
+        bool locked = (!tailnet || (type == 1 && klass == 1)) && xSemaphoreTake(members_lock, pdMS_TO_TICKS(50)) == pdTRUE;
+        if (locked && !tailnet)
+            tailnet = dns_magic_claims(name, len) != 0;
+        if (tailnet && type == 1 && klass == 1) {
+            if (locked)
+                alias = dns_resolve(work, name, len, &temporary);
+            else {temporary=true;dns_count(2);}
+        }
+        if (locked)
             xSemaphoreGive(members_lock);
-        } else if(tailnet && type==1 && klass==1) {temporary=true;dns_count(2);}
         if (tailnet) {
             dns_count(0);
             if(temporary)dns_count(3);else if(!alias && type==1)dns_count(4);
