@@ -171,7 +171,7 @@ typedef struct {
     unsigned base_frames;        /*!< permanent slabs, 2..TINYUSB_NET_TX_MAX_BASE_SLABS */
     unsigned max_chunks;         /*!< elastic chunks, 0..TINYUSB_NET_TX_MAX_CHUNKS (0: fixed ring) */
     unsigned priority;           /*!< worker task priority: the relay (notify, defer) runs here */
-    unsigned work_priority;      /*!< priority for the worker's heap work (growth, idle shrink); 0: the same as `priority`.
+    unsigned work_priority;      /*!< priority for a growth pass (heap walks); 0: the same as `priority`. Retire and idle shrink stay at `priority`.
                                       The relay must outrank the producers on its core so the first frame is not held behind
                                       a decrypt run, but a heap walk must not delay the TinyUSB task it is serving. */
     int core;                    /*!< worker core (tskNO_AFFINITY for none) */

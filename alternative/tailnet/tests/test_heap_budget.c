@@ -184,6 +184,23 @@ int main(void) {
         assert(after == (long)ML_HB_FLOOR - c_frame && (long)ML_HB_FLOOR - after <= (long)ML_HB_SLACK_BYTES);
         assert(after - (long)ML_HB_PIN_BYTES >= (long)ML_HB_RESERVE);   /* and then the whole pin burst arrives */
     }
+    /* How far the slack goes. N checkers that pass on the same free value f leave f - sum(costs) >= FLOOR - (sum - max): the largest
+     * one is free, the rest come out of the slack. Two cores and a preemption in the check-to-allocate window make three concurrent
+     * checkers the design point (a ring chunk and two frames: 3,068 B <= 3,328 B); a fourth (and the two exempt USB frames below the
+     * floor) is not covered, and what it costs is bounded here: the pin burst still lands on top, and the heap stays far from empty.
+     * Stated in ADR 0022 as the one place the bound is not proved, only quantified. */
+    {
+        const long c_ring = CHUNK_BYTES + 16, c_frame = 1518 + 16, pins = (long)ML_HB_PIN_BYTES, floor = (long)ML_HB_FLOOR, reserve = (long)ML_HB_RESERVE;
+        long three = floor - 2 * c_frame - pins;               /* ring chunk + two frames race, then the largest pin burst */
+        assert(2 * c_frame <= (long)ML_HB_SLACK_BYTES && three >= reserve);
+        long four = floor - 3 * c_frame - pins;                /* a fourth checker */
+        assert(four < reserve && four >= reserve - 1500 && four > 14000);
+        long stacked = floor - 2 * c_frame - 2 * c_frame - pins; /* ... and the two exempt USB frames admitted below the floor */
+        assert(stacked < reserve && stacked >= reserve - 3000);
+        printf("  racing checkers: ring chunk + 2 frames + pin burst: %ld B (reserve %ld); a fourth: %ld B; plus both exempt USB frames: %ld B\n",
+               three, reserve, four, stacked);
+        (void)c_ring;
+    }
     /* A floor that leaves out the pinned buffers must break the reserve (the slack is the arithmetic above). */
     for (int term = 0; term < 1; term++) {
         model_t m = now; m.legacy = true;

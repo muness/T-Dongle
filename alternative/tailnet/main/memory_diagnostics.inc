@@ -399,6 +399,15 @@ static bool heap_low_note(const heap_low_rec_t *in) {
 }
 static void heap_low_tick(void *arg) {
     (void)arg;
+    /* Cheap reads first. heap_caps_get_largest_free_block walks the heap with its lock held, and this runs at esp_timer priority (22)
+     * 100 times a second on the core of the Wi-Fi and lwIP tasks: only a tick that is about to record a new minimum may pay for it,
+     * or the sampler perturbs the bursts it is there to explain. */
+    uint32_t min_now = (uint32_t)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
+    if (min_now >= heap_low_last_min || min_now >= ML_HB_FLOOR) {
+        heap_low_rec_t quiet = {.min_free = min_now, .free_now = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_INTERNAL)};
+        (void)heap_low_note(&quiet);
+        return;
+    }
     tinyusb_net_tx_stats_t tx;
     tinyusb_net_tx_ring_stats(&tx);
     heap_low_rec_t r = {.uptime_ms = (uint32_t)(esp_timer_get_time() / 1000),

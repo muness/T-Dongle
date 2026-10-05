@@ -858,9 +858,9 @@ static void do_drain(void *ctx)
 bool __real_netd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes);
 bool __wrap_netd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes)
 {
-    uint32_t now_us = (uint32_t)esp_timer_get_time();
     bool ret = __real_netd_xfer_cb(rhport, ep_addr, result, xferred_bytes);
     if ((ep_addr & 0x80u) && atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {
+        uint32_t now_us = (uint32_t)esp_timer_get_time();   // only with the ring on: the legacy bridge's IN path makes no extra call
         atomic_fetch_add_explicit(&s_tx.xfer_events, 1, memory_order_relaxed);
         if (xferred_bytes) {
             s_tx.ntb_xfers++;
@@ -937,16 +937,18 @@ static void tx_worker_step(void)
             usbd_defer_func(do_drain, NULL, false);     // may wait for TinyUSB; we hold no lock
         }
     }
-    // Heap work (idle shrink, growth with its heap walks) runs below the producers: the relay above must outrank them, this
-    // must not delay the TinyUSB task or the forwarding task. Only when there is some, so the common pass makes no call.
+    // Growth (the largest-block walk, the allocation, the gate's mutex) runs below the producers: the relay above must outrank them, this
+    // must not delay the TinyUSB task or the forwarding task. Only a pass that is about to grow demotes. Housekeeping (retire, one
+    // idle free per pass) stays at the relay priority: it is a few microseconds inside a critical section, which no priority
+    // changes, and a demotion costs more than that: with wg_mgr or usb_routes runnable the worker yields at the call and the relay
+    // is not served again until they block (ADR 0022). An idle pass with elastic chunks present is therefore not demoted.
     bool heap_work = s_tx.cfg.work_priority != 0 && s_tx.cfg.work_priority != s_tx.cfg.priority &&
-                     (atomic_load_explicit(&s_tx.present_mirror, memory_order_relaxed) != 0 ||
-                      atomic_load_explicit(&s_tx.grow_wanted, memory_order_relaxed));
+                     atomic_load_explicit(&s_tx.grow_wanted, memory_order_relaxed);
+    tx_housekeeping();
     if (heap_work) {
         vTaskPrioritySet(NULL, s_tx.cfg.work_priority);
         atomic_fetch_add_explicit(&s_tx.demotions, 1, memory_order_relaxed);
     }
-    tx_housekeeping();
     tx_try_grow();
     if (heap_work) {
         vTaskPrioritySet(NULL, s_tx.cfg.priority);

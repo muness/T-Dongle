@@ -26,8 +26,8 @@ typedef struct membership {
  * The relay (notify, then usbd_defer_func) is a few microseconds and must outrank the producers on its core so the first frame of
  * a burst is not held behind a decrypt run. Both together cost the forwarding path a few microseconds per USB event (an NTB
  * is 2 to 5 datagrams): the TinyUSB task's own work is an NTB copy and, for upload, a malloc+memcpy per received datagram,
- * about 3 % of the core at the 12 Mbit/s bus limit. The worker's heap work (growth heap walks, idle shrink) drops to 6 while
- * it runs (tinyusb_net_tx_config_t.work_priority) so that it never delays the tasks it serves. 9 and 10 are below the IDF
+ * about 3 % of the core at the 12 Mbit/s bus limit. The worker drops to 6 only for a pass that is about to grow
+ * (heap walks; tinyusb_net_tx_config_t.work_priority) so that it never delays the tasks it serves. 9 and 10 are below the IDF
  * system tasks on core 1 (ipc 24, esp_timer 22). The legacy bridge keeps TinyUSB at its default (5). */
 #define GATEWAY_TASK_TINYUSB_PRIO 9
 #define GATEWAY_TASK_USB_TX_PRIO 10

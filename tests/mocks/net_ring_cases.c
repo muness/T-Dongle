@@ -1053,6 +1053,15 @@ static void test_drain_evidence_and_priority(void) {
     assert(prio_sets == before_prio + 2 && prio_cur == 10);                  /* down, then back up */
     assert(stats().worker_demotions >= 1);
     drain_all();
+    /* Housekeeping with an elastic chunk present but no growth wanted (an idle pass) is not demoted. */
+    ring_reset(c);
+    fill_pressure(3);
+    tx_worker_step();                          /* grows a chunk */
+    drain_all();
+    prio_sets = 0;
+    assert(s_tx.chunks_present != 0 && !atomic_load(&s_tx.grow_wanted));
+    tx_worker_step();
+    assert(prio_sets == 0 && prio_cur == 10);
     /* Equal or unset work priority: never a call. */
     c.work_priority = 0; ring_reset(c);
     prio_sets = 0;
