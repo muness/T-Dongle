@@ -8,6 +8,9 @@ typedef struct membership {
     char label[24], ns[16], key[160], hostname[48], error[64];
     bool enabled;
     microlink_t *client;
+#ifdef CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE
+    uint32_t next_attempt_ms; /* diagnostics: an over-budget attempt is retried at most once a minute */
+#endif
 } membership_t;
 extern membership_t *members;
 extern esp_netif_t *usb_interface;
@@ -21,3 +24,8 @@ void gateway_dns_domains_refresh(void);
 bool gateway_tailnet_mode(void);
 
 bool gateway_serial_command(const char *line);
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+bool gateway_memory_command(const char *line);
+#else
+static inline bool gateway_memory_command(const char *line) { (void)line; return false; }
+#endif
