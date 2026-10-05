@@ -47,7 +47,7 @@ static int gateway_read_map(microlink_t *ml, ml_noise_state_t *noise,
                 result = gateway_map_fail(ml, 3, "Pending HTTP/2 bytes exceed capacity"); break;
             }
             n = ml->h2_acc_len; memcpy(gateway_plain, ml->h2_acc, n);
-            free(ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0;
+            tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0;
         } else n = noise_recv_inplace(ml, noise, gateway_plain, sizeof(gateway_plain));
         if (n < 0) {
             if ((errno == EAGAIN || errno == EWOULDBLOCK) && !used && !initial)

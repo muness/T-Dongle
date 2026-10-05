@@ -1,7 +1,7 @@
 /* Read only through the terminator: TCP segmentation/coalescing never consumes
  * the beginning of msg2. Header storage is bounded and released before Noise. */
 static int gateway_read_upgrade(microlink_t *ml) {
-    char *headers = ml_psram_malloc(2049);
+    char *headers = tdongle_heap_tag(TDONGLE_OWNER_CONTROL, ml_psram_malloc(2049));
     if (!headers) { errno = ENOMEM; return -1; }
     size_t used = 0;
     int result = -1;
@@ -19,7 +19,7 @@ static int gateway_read_upgrade(microlink_t *ml) {
     }
     errno = used == 2048 ? EMSGSIZE : ETIMEDOUT;
 done:
-    free(headers);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, headers);
     return result;
 }
 
@@ -65,7 +65,7 @@ static int gateway_early_exact(microlink_t *ml, ml_noise_state_t *noise,
 }
 static int gateway_read_early(microlink_t *ml, ml_noise_state_t *noise) {
     ml->has_node_key_challenge = false;
-    gateway_early_cursor *c = ml_psram_malloc(sizeof(*c));
+    gateway_early_cursor *c = tdongle_heap_tag(TDONGLE_OWNER_CONTROL, ml_psram_malloc(sizeof(*c)));
     if (!c) { errno = ENOMEM; return -1; }
     c->used = c->length = 0;
     uint8_t header[9];
@@ -78,7 +78,7 @@ static int gateway_read_early(microlink_t *ml, ml_noise_state_t *noise) {
                           ((uint32_t)header[6] << 16) |
                           ((uint32_t)header[7] << 8) | header[8];
         if (!length || length > 1024) { errno = EMSGSIZE; goto done; }
-        json = ml_psram_malloc(length + 1);
+        json = tdongle_heap_tag(TDONGLE_OWNER_CONTROL, ml_psram_malloc(length + 1));
         if (!json) { errno = ENOMEM; goto done; }
         if (gateway_early_exact(ml, noise, c, (uint8_t *)json, length) < 0) goto done;
         json[length] = 0;
@@ -99,9 +99,9 @@ static int gateway_read_early(microlink_t *ml, ml_noise_state_t *noise) {
         cJSON_Delete(root);
     }
     size_t tail = c->length - c->used, prefix = early ? 0 : sizeof(header);
-    free(ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0;
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0;
     if (tail + prefix) {
-        ml->h2_acc = ml_psram_malloc(tail + prefix);
+        ml->h2_acc = tdongle_heap_tag(TDONGLE_OWNER_CONTROL, ml_psram_malloc(tail + prefix));
         if (!ml->h2_acc) { errno = ENOMEM; goto done; }
         if (prefix) memcpy(ml->h2_acc, header, prefix);
         memcpy(ml->h2_acc + prefix, c->frame + c->used, tail);
@@ -109,6 +109,6 @@ static int gateway_read_early(microlink_t *ml, ml_noise_state_t *noise) {
     }
     result = 0;
 done:
-    free(json); free(c);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, json); tdongle_heap_free(TDONGLE_OWNER_CONTROL, c);
     return result;
 }

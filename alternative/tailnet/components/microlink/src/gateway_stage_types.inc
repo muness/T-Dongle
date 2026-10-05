@@ -25,7 +25,7 @@ typedef struct {
 static gateway_stage *gateway_capture;
 static ml_peer_update_t *gateway_peer_alloc(void) {
     if (!gateway_capture)
-        return ml_psram_calloc(1, sizeof(ml_peer_update_t));
+        return tdongle_heap_tag(TDONGLE_OWNER_PEER, ml_psram_calloc(1, sizeof(ml_peer_update_t)));
     gateway_stage *s = gateway_capture;
 #ifdef GATEWAY_FLASH_DIRECTORY
     memset(&gateway_capture->scratch,0,sizeof(gateway_capture->scratch));

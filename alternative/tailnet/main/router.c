@@ -380,7 +380,7 @@ int gateway_host_input(struct pbuf *p,struct netif *input) {
     if(usb_interface && input==esp_netif_get_netif_impl(usb_interface) &&
        pbuf_copy_partial(p,first,20,0)==20 && (rd32(first+16)&0xfffe0000)==0xc6120000) {
         route_item item={p,input,atomic_load(&usb_generation)};
-        if(p->tot_len>1400 || !routes_ready || !route_queue || xQueueSend(route_queue,&item,0)!=pdTRUE)pbuf_free(p);
+        if(p->tot_len>1400 || !routes_ready || !route_queue || xQueueSend(route_queue,&item,0)!=pdTRUE){tdongle_memory_drop(TDONGLE_DROP_ROUTER_INGRESS);pbuf_free(p);}
         return 1;
     }
 #endif

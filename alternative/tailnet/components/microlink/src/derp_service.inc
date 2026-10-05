@@ -5,11 +5,11 @@ static void derp_service_io(microlink_t *ml,uint32_t *frames_tx,uint32_t *frames
     for(unsigned i=0;i<4 && ml_get_time_ms()-started<30;i++) {
         ml_derp_tx_item_t item;
         if(xQueueReceive(ml->derp_tx_queue,&item,0)!=pdTRUE)break;
-        if(!ml->derp.connected){free(item.data);continue;}
+        if(!ml->derp.connected){tdongle_heap_free(TDONGLE_OWNER_PACKET, item.data);continue;}
         int result=item.frame_type==DERP_FRAME_SEND_PACKET
             ?derp_send_packet(ml,item.dest_pubkey,item.data,item.len)
             :derp_write_frame(ml,item.frame_type,item.data,item.len);
-        free(item.data);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, item.data);
         if(result<0){ml->derp.connected=false;xEventGroupSetBits(ml->events,ML_EVT_DERP_RECONNECT);break;}
         (*frames_tx)++;
     }

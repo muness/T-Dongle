@@ -49,6 +49,7 @@ static void release(void *p) {
     }
 }
 #define free release
+#include "tdongle_memory.h" /* its inline free() must hit the leak-counting release() */
 static uint8_t *delivered;
 static size_t delivered_len;
 static uint8_t delivered_key[32];

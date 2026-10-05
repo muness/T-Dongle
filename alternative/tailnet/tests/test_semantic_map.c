@@ -1,4 +1,5 @@
 #include "cJSON.h"
+#include "ml_gateway_limits.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,6 +9,9 @@
 #include <ctype.h>
 #include <limits.h>
 #include <errno.h>
+static void release(void *p);
+#define free release
+#include "tdongle_memory.h" /* its inline free() must hit the leak-counting release() */
 static size_t test_strlcpy(char *out,const char *src,size_t size) {
     size_t length=strlen(src);
     if(size){size_t n=length<size-1?length:size-1;memcpy(out,src,n);out[n]=0;}
@@ -94,6 +98,7 @@ static void *ml_psram_calloc(size_t n, size_t size) {
         live++;
     return p;
 }
+#undef free
 static void release(void *p) {
     if (p) {
         assert(live);

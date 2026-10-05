@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "tdongle_memory.h"
 #define pdTRUE 1
 #define DERP_FRAME_SEND_PACKET 4
 #define ML_EVT_DERP_RECONNECT 2
