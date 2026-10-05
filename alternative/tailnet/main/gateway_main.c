@@ -33,6 +33,7 @@
 #include "tinyusb_default_config.h"
 #include "tinyusb_net.h"
 #include "usb_rx_budget.h"
+#include "wifi_pin_budget.h"
 #include "tcp_window_budget.h"
 /* Tunnel-to-USB transmit ring (ADR 0015). Three full frames are permanent (3 x 1524 B, allocated once at USB start,
  * paid for by the two IN NTBs being 3,200 B rather than 6,400 B). On top of that the worker task adds elastic chunks
@@ -63,7 +64,12 @@ _Static_assert(GATEWAY_USB_TX_BASE_FRAMES >= 3, "the permanent ring must hold th
 _Static_assert(GATEWAY_USB_TX_MAX_FRAMES >= 16 && GATEWAY_USB_TX_MAX_FRAMES <= 24, "elastic cap: 16 to 24 frames (ADR 0015)");
 _Static_assert(GATEWAY_USB_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_BYTES <= 32 * 1024, "the elastic part must stay within 32 KB");
 _Static_assert(CONFIG_LWIP_UDP_RECVMBOX_SIZE <= ML_HB_PIN_BUFFERS, "a UDP socket mailbox can pin more Wi-Fi RX buffers than the heap budget allows (ml_heap_budget.h)");
-_Static_assert(CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM <= ML_HB_PIN_BUFFERS, "the Wi-Fi TX pool can pin more buffers than the heap budget allows (ml_heap_budget.h)");
+/* The Wi-Fi TX pool is no longer held to the pin burst by its size: wifi_pin_budget.h counts the buffers in flight at the one place
+ * they start and admits them to a band (paid for by the floor) or to the heap above the floor, so the pool can be the driver's
+ * 16 (ADR 0022 amendment 2). What the pool must do is hold the band and fit the FIFO that follows it (asserted there). */
+_Static_assert(CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM >= GATEWAY_WIFI_TX_BAND_MAX && CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM <= GW_WTX_RING,
+               "the Wi-Fi TX pool must hold the TX band and fit the pin budget's FIFO (wifi_pin_budget.h)");
+_Static_assert(GATEWAY_WIFI_TX_POOL == CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM, "the pin budget must follow the configured TX pool");
 _Static_assert(GATEWAY_USB_TX_FLOOR_FREE == ML_HB_FLOOR, "the USB ring grows only above the one elastic floor");
 _Static_assert(GATEWAY_USB_TX_FLOOR_FREE >= ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES,
                "growth must leave one negotiation peak and the recovery reserve");
@@ -188,6 +194,7 @@ static wifi_config_t wifi_config;
 #include "wifi_policy.h"
 #include "wifi_profiles.inc"
 #include "wifi_link.inc"
+#include "wifi_pins.inc"
 #include "serial_setup.inc"
 
 extern const char setup_html_start[] asm("_binary_setup_html_start");
@@ -551,11 +558,13 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
         online = false;
         wifi_link_event_disconnected((const wifi_event_sta_disconnected_t *)data);
         if(!gateway_tailnet_mode())tdongle_l2_link(false);
+        else wifi_pins_link_changed();
         if(!wifi_scan_pauses_reconnect && wifi_current>=0 && wifi_pinned.slot!=wifi_current)
             wifi_retry_after[wifi_current]=(uint32_t)(esp_timer_get_time()/1000)+60000;
         /* Worker rescans with backoff; never reconnect recursively here. */
     }
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED)wifi_link_event_connected();
+    if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && gateway_tailnet_mode())wifi_pins_link_changed();
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && !gateway_tailnet_mode()){online=true;tdongle_l2_link(true);}
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
         online = true;
@@ -1019,7 +1028,26 @@ static esp_err_t status(httpd_req_t *req) {
         NUM("floor", ML_HB_FLOOR);NUM("reserve", ML_HB_RESERVE);NUM("pin_buffers", ML_HB_PIN_BUFFERS);
         NUM("refused_usb_rx", atomic_load(&usb_rx_budget.dropped_heap));
         NUM("refused_pending", atomic_load(&ml_hb_refused[ML_HB_JIT]));
-        jw_key(w, "refused_derp_tx");jw_number(w, atomic_load(&ml_hb_refused[ML_HB_DERP_TX]));
+        NUM("refused_derp_tx", atomic_load(&ml_hb_refused[ML_HB_DERP_TX]));
+        NUM("refused_rx_ctrl", atomic_load(&ml_hb_refused[ML_HB_RX_CTRL]));NUM("refused_derp_rx", atomic_load(&ml_hb_refused[ML_HB_DERP_RX]));
+        jw_key(w, "refused_wg_copy");jw_number(w, atomic_load(&ml_hb_refused[ML_HB_WG_COPY]));
+        jw_raw(w, "},");
+    }
+    {   /* ADR 0022 amendment 2: Wi-Fi driver buffers pinned by the data path, counted where they start. tx_stale and tx_unmatched say
+         * whether the driver's tx-done callback can be trusted (both ~0); tx_refused_* and rx_dropped are the price of the floor. */
+        jw_raw(w, "\"wifi_pins\":{");
+        BOOL("installed", wifi_pins_installed);BOOL("tx_done_cb", wifi_pins_tx_done_ok);
+        NUM("tx_pool", GATEWAY_WIFI_TX_POOL);NUM("band_total", GATEWAY_WIFI_BAND_TOTAL);NUM("tx_band_max", GATEWAY_WIFI_TX_BAND_MAX);NUM("rx_band_max", GATEWAY_WIFI_RX_BAND_MAX);
+        NUM("tx_inflight", wifi_pins_tx_outstanding());NUM("tx_high_water", atomic_load(&wifi_pins.tx_high_water));
+        NUM("tx_charged", atomic_load(&wifi_pins.tx_charged));NUM("tx_done", atomic_load(&wifi_pins.tx_done));
+        NUM("tx_aborted", atomic_load(&wifi_pins.tx_aborted));NUM("tx_flushed", atomic_load(&wifi_pins.tx_flushed));
+        NUM("tx_stale", atomic_load(&wifi_pins.tx_stale));NUM("tx_unmatched", atomic_load(&wifi_pins.tx_unmatched));
+        NUM("tx_band_admits", atomic_load(&wifi_pins.tx_band));NUM("tx_elastic_admits", atomic_load(&wifi_pins.tx_elastic));
+        NUM("tx_refused_pool", atomic_load(&wifi_pins.tx_refused_pool));NUM("tx_refused_heap", atomic_load(&wifi_pins.tx_refused_heap));
+        NUM("rx_inflight", wifi_pins_rx_inflight());NUM("rx_high_water", atomic_load(&wifi_pins.rx_high_water));
+        NUM("rx_band_admits", atomic_load(&wifi_pins.rx_band));NUM("rx_elastic_admits", atomic_load(&wifi_pins.rx_elastic));
+        NUM("rx_released", atomic_load(&wifi_pins.rx_released));NUM("rx_unmatched", atomic_load(&wifi_pins.rx_unmatched));
+        jw_key(w, "rx_dropped");jw_number(w, atomic_load(&wifi_pins.rx_dropped));
         jw_raw(w, "},");
     }
     jw_raw(w, "\"members\":[");
@@ -1419,7 +1447,11 @@ static void wifi_power_save_off(void) {
     if(e!=ESP_OK)ESP_LOGW("wifi","esp_wifi_set_ps(NONE) failed: %s; modem sleep stays on",esp_err_to_name(e));
 }
 static esp_err_t start_wifi(void) {
-    if(gateway_tailnet_mode() && !esp_netif_create_default_wifi_sta())return ESP_ERR_NO_MEM;
+    if(gateway_tailnet_mode()){
+        esp_netif_t *sta=esp_netif_create_default_wifi_sta();
+        if(!sta)return ESP_ERR_NO_MEM;
+        wifi_pins_install(sta);   /* ADR 0022 amendment 2: count and bound the driver buffers this netif pins, before Wi-Fi runs */
+    }
     if(!gateway_tailnet_mode()){uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);START_TRY(tdongle_l2_start(mac));}
     wifi_init_config_t w=WIFI_INIT_CONFIG_DEFAULT();
     START_TRY(esp_wifi_init(&w));
@@ -1429,6 +1461,7 @@ static esp_err_t start_wifi(void) {
     START_TRY(esp_wifi_set_mode(WIFI_MODE_STA));
     START_TRY(esp_wifi_set_config(WIFI_IF_STA,&wifi_config));
     START_TRY(esp_wifi_start());
+    wifi_pins_start();
     wifi_power_save_off();
     wifi_ready=true;
     wifi_rescan=true;

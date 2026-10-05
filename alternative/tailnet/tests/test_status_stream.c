@@ -207,9 +207,21 @@ static wifi_link_info wifi_link_read(void){
 #define ML_HB_FLOOR 29884
 #define ML_HB_RESERVE 16384
 #define ML_HB_PIN_BUFFERS 6
-typedef enum {ML_HB_JIT,ML_HB_DERP_TX,ML_HB_SITE_COUNT} ml_hb_site_t;
-static atomic_uint ml_hb_refused[ML_HB_SITE_COUNT]={[ML_HB_JIT]=5,[ML_HB_DERP_TX]=7};
+typedef enum {ML_HB_JIT,ML_HB_DERP_TX,ML_HB_RX_CTRL,ML_HB_DERP_RX,ML_HB_WG_COPY,ML_HB_SITE_COUNT} ml_hb_site_t;
+static atomic_uint ml_hb_refused[ML_HB_SITE_COUNT]={[ML_HB_JIT]=5,[ML_HB_DERP_TX]=7,[ML_HB_RX_CTRL]=11,[ML_HB_DERP_RX]=13,[ML_HB_WG_COPY]=17};
 static struct {atomic_uint dropped_heap;} usb_rx_budget={.dropped_heap=3};
+/* stand-ins for wifi_pin_budget.h / wifi_pins.inc (the same field names the status code reads) */
+#define GATEWAY_WIFI_TX_POOL 16
+#define GATEWAY_WIFI_BAND_TOTAL 5
+#define GATEWAY_WIFI_TX_BAND_MAX 4
+#define GATEWAY_WIFI_RX_BAND_MAX 4
+static bool wifi_pins_installed=true, wifi_pins_tx_done_ok=true;
+static struct {
+    atomic_uint tx_high_water, tx_charged, tx_done, tx_aborted, tx_flushed, tx_stale, tx_unmatched, tx_band, tx_elastic,
+        tx_refused_pool, tx_refused_heap, rx_high_water, rx_band, rx_elastic, rx_released, rx_unmatched, rx_dropped;
+} wifi_pins={.tx_high_water=9,.tx_charged=100,.tx_done=98,.tx_stale=1,.tx_refused_heap=4,.rx_dropped=6};
+static unsigned wifi_pins_tx_outstanding(void){return 2;}
+static unsigned wifi_pins_rx_inflight(void){return 3;}
 #include "status_stream.inc"
 #undef calloc
 #undef strlcpy
@@ -267,6 +279,22 @@ int main(void) {
         assert(cJSON_GetObjectItem(wl, "beacon_timeouts")->valueint == 1 && cJSON_GetObjectItem(wl, "last_disconnect_reason")->valueint == 200);
         assert(!cJSON_GetObjectItem(wl, "ssid") && !cJSON_GetObjectItem(wl, "bssid"));
         assert(cJSON_IsBool(cJSON_GetObjectItem(root, "wifi")) && cJSON_GetObjectItem(root, "firmware") && cJSON_GetObjectItem(root, "saved_wifi"));
+    }
+    {   /* the heap budget's refusal counters by site (ADR 0022 and amendment 2) */
+        cJSON *hb = cJSON_GetObjectItem(root, "heap_budget");
+        assert(hb && cJSON_GetObjectItem(hb, "floor")->valueint == 29884 && cJSON_GetObjectItem(hb, "refused_pending")->valueint == 5);
+        assert(cJSON_GetObjectItem(hb, "refused_derp_tx")->valueint == 7 && cJSON_GetObjectItem(hb, "refused_rx_ctrl")->valueint == 11 &&
+               cJSON_GetObjectItem(hb, "refused_derp_rx")->valueint == 13 && cJSON_GetObjectItem(hb, "refused_wg_copy")->valueint == 17);
+    }
+    {   /* Wi-Fi pin budget (ADR 0022 amendment 2): additive object, the counters that say whether tx-done can be trusted */
+        cJSON *wp = cJSON_GetObjectItem(root, "wifi_pins");
+        assert(wp && cJSON_IsTrue(cJSON_GetObjectItem(wp, "installed")) && cJSON_IsTrue(cJSON_GetObjectItem(wp, "tx_done_cb")));
+        assert(cJSON_GetObjectItem(wp, "tx_pool")->valueint == 16 && cJSON_GetObjectItem(wp, "band_total")->valueint == 5 &&
+               cJSON_GetObjectItem(wp, "tx_band_max")->valueint == 4 && cJSON_GetObjectItem(wp, "rx_band_max")->valueint == 4);
+        assert(cJSON_GetObjectItem(wp, "tx_inflight")->valueint == 2 && cJSON_GetObjectItem(wp, "tx_high_water")->valueint == 9 &&
+               cJSON_GetObjectItem(wp, "tx_stale")->valueint == 1 && cJSON_GetObjectItem(wp, "tx_refused_heap")->valueint == 4);
+        assert(cJSON_GetObjectItem(wp, "rx_inflight")->valueint == 3 && cJSON_GetObjectItem(wp, "rx_dropped")->valueint == 6);
+        assert(cJSON_GetObjectItem(wp, "rx_unmatched") && cJSON_GetObjectItem(wp, "tx_unmatched"));
     }
     {   /* the shared runtime's decision inputs and the pool are reported */
         cJSON *adm = cJSON_GetObjectItem(root, "admission");

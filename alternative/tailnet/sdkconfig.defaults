@@ -53,12 +53,18 @@ CONFIG_MBEDTLS_CHACHAPOLY_C=y
 
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
 
+# RX buffers pinned by lwIP (socket mailboxes, the TCP window, the tcpip mailbox) are counted and held to the same floor where the frame
+# enters lwIP (main/wifi_pins.inc, GATEWAY_WIFI_RX_GATE): the per-socket limits do not bound the pool (board heap minimum 5,000 B under a
+# 6 Mbit/s UDP download). The pool is the driver's limit; the floor decides.
 CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
 
-# TX buffers copy each outgoing frame (upload, ACKs) and are held until the frame is sent: the pool is the bound on that pin,
-# so it is the same number as the RX burst (ADR 0022). A full pool makes esp_wifi_internal_tx fail, lwIP returns ERR_MEM, and TCP
-# or the WireGuard sender sees ordinary loss. Upload here is 1-2 Mbit/s, a handful of frames in flight.
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=6
+# TX buffers copy each outgoing frame (upload, ACKs) and are held until the frame is sent. The pool is the driver's limit, not ours:
+# main/wifi_pin_budget.h counts the buffers in flight at the one place they start (the STA netif's transmit) and admits a frame to a
+# band the heap floor pays for (5 buffers shared with RX, 4 at most per direction) or to the heap above the floor (ML_HB_FLOOR), so 16 only happen when the heap allows them and
+# a refusal is ERR_MEM, which lwIP's TCP treats as local back-pressure (ADR 0022 amendment 2). This was 6 after PR #42 (the pool itself
+# was the bound: upload TCP 2.4 Mbit/s); at 16 with no budget the board's heap minimum was 2,536 B. The value must hold the band and
+# fit the budget's FIFO (16): both are build assertions.
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=16
 
 # Management/DNS reservation and dynamic membership admission use this total.
 CONFIG_LWIP_MAX_SOCKETS=20

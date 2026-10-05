@@ -266,10 +266,15 @@ def render(rows, summary):
     if low and low.get("records"):
         lines.append(f"heap minimum records (new minima below the {low['floor']} B elastic floor; highest free seen {low['free_hi']} B):")
         for r in low["records"]:
-            held = r["tx_elastic"] + r["wgq"] + r["rx_inflight"] * 1534 + r["packet_live"]
+            # The WireGuard queue's datagrams are packet blocks: wgq is a part of packet_live, not a second term.
+            held = r["tx_elastic"] + r["rx_inflight"] * 1534 + r["packet_live"]
             dropped = low["free_hi"] - r["free"]
+            pins = ""
+            if "wifi_rx_pins" in r:
+                pins = f"; Wi-Fi buffers pinned: {r['wifi_rx_pins']} RX, {r['wifi_tx_inflight']} TX in flight (~{r['wifi_rx_pins'] * 1664 + r['wifi_tx_inflight'] * 1664} B at full size)"
             lines.append(f"  t={r['uptime_ms']} ms min {r['min']} B free {r['free']} B: dropped {dropped} B from the peak, of which ring elastic {r['tx_elastic']}, "
-                         f"wg queue {r['wgq']}, usb rx {r['rx_inflight']} frames, tagged packets {r['packet_live']}; unexplained (Wi-Fi buffers pinned by sockets, lwIP) {dropped - held}")
+                         f"usb rx {r['rx_inflight']} frames, tagged packets {r['packet_live']} (wg queue {r['wgq']} of them); "
+                         f"unexplained (Wi-Fi buffers pinned by sockets, lwIP) {dropped - held}{pins}")
     if "end_to_end_loss" in summary:
         lines.append(f"end to end: lost {summary['end_to_end_loss']} ({summary['loss_pct']} %), unattributed {summary['unattributed']} "
                      "(sent - received - mailbox - counted; DNS and control datagrams make a few of either sign)")

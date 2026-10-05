@@ -368,11 +368,14 @@ static void report_wifi_dump(jw_writer *w) {
  * sampler (esp_timer task, diagnostics builds only) notices every NEW heap-wide minimum below the elastic floor and records, at that
  * moment, what the firmware's own buffers held: the USB ring (capacity and elastic part), the WireGuard queue, USB receive frames in
  * flight and the tagged packet owner. Whatever the drop from the highest free level seen does not explain with those is the pinned
- * Wi-Fi buffers and lwIP: `unexplained` = (free_hi - free_now) - ring_elastic - wgq - rx_inflight x 1,534 - packet_live. The last
+ * Wi-Fi buffers and lwIP: `unexplained` = (free_hi - free_now) - ring_elastic - rx_inflight x 1,534 - packet_live (the WireGuard queue's
+ * datagrams are packet blocks, so wgq is part of packet_live and not subtracted again), which should now be about wifi_rx_pins x 1,664 B +
+ * wifi_tx_inflight buffers (the pin counters of wifi_pin_budget.h are recorded with it) and lwIP's own small blocks. The last
  * eight records are kept; the first and the lowest are never overwritten. tools/heap_low.py prints the decomposition. */
 enum { HEAP_LOW_RECORDS = 8, HEAP_LOW_PERIOD_US = 10000 };
 typedef struct {
     uint32_t uptime_ms, min_free, free_now, free_hi, largest, tx_ring_bytes, tx_elastic_bytes, wgq_bytes, rx_inflight, packet_live;
+    uint32_t wifi_rx_pins, wifi_tx_inflight;      /* Wi-Fi buffers pinned by the data path at that moment (wifi_pin_budget.h): what `unexplained` was */
 } heap_low_rec_t;
 static heap_low_rec_t heap_low_rec[HEAP_LOW_RECORDS];
 static unsigned heap_low_count;                 /* records ever written */
@@ -416,7 +419,8 @@ static void heap_low_tick(void *arg) {
                         .largest = (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                         .tx_ring_bytes = tx.ring_bytes, .tx_elastic_bytes = tx.elastic_held_bytes,
                         .wgq_bytes = (uint32_t)ml_wgrx_queued(&ml_wgrx_budget), .rx_inflight = atomic_load(&usb_rx_budget.inflight),
-                        .packet_live = tdongle_heap_owner(TDONGLE_OWNER_PACKET).live};
+                        .packet_live = tdongle_heap_owner(TDONGLE_OWNER_PACKET).live,
+                        .wifi_rx_pins = wifi_pins_rx_inflight(), .wifi_tx_inflight = wifi_pins_tx_outstanding()};
     (void)heap_low_note(&r);
 }
 static void heap_low_start(void) {
@@ -454,6 +458,8 @@ static void report_heap_low(jw_writer *w) {
         report_field(w, "wgq", r->wgq_bytes);
         report_field(w, "rx_inflight", r->rx_inflight);
         report_field(w, "packet_live", r->packet_live);
+        report_field(w, "wifi_rx_pins", r->wifi_rx_pins);
+        report_field(w, "wifi_tx_inflight", r->wifi_tx_inflight);
         jw_char(w, '}');
     }
     jw_char(w, ']');

@@ -114,6 +114,10 @@ unsigned ml_wg_replay_window(void) { return WIREGUARD_REPLAY_WINDOW_SIZE; }
 unsigned ml_wg_rx_batch_size(void) { return 8; }
 #include "ml_wg_rx_budget.h"
 ml_wgrx_budget_t ml_wgrx_budget = {.bytes = 4096, .peak = 11000};
+#include "wifi_pin_budget.h"
+static gateway_wifi_pins wifi_pins = GATEWAY_WIFI_PINS_INIT;
+static unsigned wifi_pins_tx_outstanding(void) { return gw_wtx_outstanding(&wifi_pins); }
+static unsigned wifi_pins_rx_inflight(void) { return gw_wrx_inflight(&wifi_pins); }
 static int wifi_current = 1;   /* slot 2 selected and pinned: the report shows the user's choice */
 #include "wifi_policy.h"
 static wifi_pin wifi_pinned = {1, 0, 0};
@@ -153,6 +157,7 @@ int main(void) {
         heap_low_rec_t r = {.uptime_ms = 1000, .min_free = 40000, .free_now = 40000, .largest = 24000};
         assert(!heap_low_note(&r));                                      /* above the floor: nothing */
         r.min_free = 29000; r.free_now = 31000; r.tx_ring_bytes = 7620; r.tx_elastic_bytes = 3048; r.wgq_bytes = 5000; r.rx_inflight = 3; r.packet_live = 5200;
+        r.wifi_rx_pins = 4; r.wifi_tx_inflight = 2;
         assert(heap_low_note(&r));
         assert(!heap_low_note(&r));                                      /* the same minimum again: nothing */
         for (uint32_t m = 28000; m > 28000 - 10 * 500; m -= 500) { r.min_free = m; r.uptime_ms++; assert(heap_low_note(&r)); }

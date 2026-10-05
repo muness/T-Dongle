@@ -62,6 +62,7 @@ assert (usb["gap_count"], usb["gap_us_sum"], usb["gap_us_max"], usb["cold_starts
 low = reports("memory low", "heap_low")[0]
 assert low["floor"] == 29884 and low["reserve"] == 16384 and low["events"] == 11 and low["free_hi"] == 40000 and len(low["records"]) == 8
 assert low["records"][0]["min"] == 29000 and min(x["min"] for x in low["records"]) == 23500 and low["records"][0]["wgq"] == 5000
+assert low["records"][0]["wifi_rx_pins"] == 4 and low["records"][0]["wifi_tx_inflight"] == 2
 assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 22 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
 members = sections["members"]
