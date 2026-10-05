@@ -284,7 +284,20 @@ static void scenario_pings_and_oversize(void) {
     fake_server_send(&A, vnow, 2, 300);
     run(50);
     assert(A.delivered == 1 && A.delivered_bad == 0);   /* the stream stayed in sync */
-    b_bounded("A's ping, oversize frame and allocation failure");
+    /* A refusal by the heap budget (rx_admit, asked with the packet's size before anything is allocated) is the same: the packet is read
+     * off the wire and dropped, counted, the connection and the stream stay as they were. Control frames are never asked about. */
+    unsigned asked = A.rx_asked;
+    A.refuse_rx = true;
+    long live = A.live_allocs;
+    fake_server_send(&A, vnow, 3, 400);
+    run(50);
+    A.refuse_rx = false;
+    assert(A.link.state == ML_DERP_READY && A.link.stats.alloc_drops == 2 && A.delivered == 1 && A.live_allocs == live);
+    assert(A.rx_asked == asked + 1 && A.rx_asked_bytes == 400);
+    fake_server_send(&A, vnow, 4, 400);
+    run(50);
+    assert(A.delivered == 2 && A.delivered_bad == 0 && A.rx_asked == asked + 2);
+    b_bounded("A's ping, oversize frame, allocation failure and budget refusal");
     end_checks();
 }
 static void scenario_detach_midstream(void) {

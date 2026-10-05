@@ -243,9 +243,9 @@ static int rx_header_done(ml_derp_link_t *l) {
     if (relayed) {
         l->rx.want_src = true;
         len -= 32;
-        l->rx.sink = l->ops->alloc(l->user, len);
+        l->rx.sink = (!l->ops->rx_admit || l->ops->rx_admit(l->user, len)) ? l->ops->alloc(l->user, len) : NULL;
         if (l->rx.sink) l->rx.sink_len = len;
-        else l->stats.alloc_drops++;   /* read it off the wire and drop it; the stream stays in sync */
+        else l->stats.alloc_drops++;   /* refused or no heap: read it off the wire and drop it; the stream stays in sync */
     } else if (type == ML_DERP_FRAME_PING) {
         if (len <= ML_DERP_PONG_MAX && l->ctl.state == ML_DERP_CTL_NONE) {
             l->rx.sink = l->ctl.frame + 5;

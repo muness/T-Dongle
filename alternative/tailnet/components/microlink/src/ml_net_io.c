@@ -58,11 +58,33 @@ static pkt_type_t classify_packet(const uint8_t *data, size_t len) {
     return PKT_UNKNOWN;
 }
 
-/* Takes ownership of `data`. Returns true when a queue the wg_mgr task reads gained a packet (the caller wakes it, once per drain). */
-static bool route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
-                              uint32_t src_ip, uint16_t src_port) {
-    pkt_type_t type = classify_packet(data, len);
+/* The elastic check for a datagram, made BEFORE the copy that crosses to the receiving task, so a refused datagram never takes heap
+ * (it used to be copied first and freed when the queue refused it: one block, but allocated below the floor and a malloc/free pair
+ * per refusal in a flood). True: the caller makes the copy and owns what the check reserved (WireGuard: ml_wgrx_release when the copy
+ * is not queued). DISCO and STUN: the floor, with the small-datagram exemption for an empty queue (ml_hb_rx_ok). */
+static bool net_io_admit(microlink_t *ml, pkt_type_t type, size_t len) {
+    const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    if (type == PKT_WIREGUARD) {
+        ml_wgrx_verdict_t admit = ml_wgrx_admit_gated(&ml_wgrx_budget, len, free_internal, ml_wgrx_join_busy);
+        if (admit == ML_WGRX_OK) return true;
+        if (admit == ML_WGRX_BYTES) ML_RX_STAT(q_wg_bytes); else ML_RX_STAT(q_wg_heap);
+        static uint32_t wg_rx_refused = 0;
+        if ((++wg_rx_refused & 0x1F) == 1)
+            ESP_LOGW(TAG, "WG-RX(direct) queue budget: refused %lu (%s)", (unsigned long)wg_rx_refused, admit == ML_WGRX_BYTES ? "bytes" : "heap");
+        tdongle_memory_drop(TDONGLE_DROP_NET_WG_FULL);
+        return false;
+    }
+    QueueHandle_t queue = type == PKT_STUN ? ml->stun_rx_queue : ml->disco_rx_queue;
+    if (ml_hb_rx_ok(free_internal, len, !queue || uxQueueMessagesWaiting(queue) == 0)) return true;
+    ml_hb_refuse(ML_HB_RX_CTRL);
+    tdongle_memory_drop(type == PKT_STUN ? TDONGLE_DROP_NET_STUN_FULL : TDONGLE_DROP_NET_DISCO_FULL);
+    return false;
+}
 
+/* Takes ownership of `data`, which net_io_admit has admitted (a WireGuard datagram holds its ml_wgrx reservation).
+ * Returns true when a queue the wg_mgr task reads gained a packet (the caller wakes it, once per drain). */
+static bool route_udp_packet(microlink_t *ml, pkt_type_t type, uint8_t *data, size_t len,
+                              uint32_t src_ip, uint16_t src_port) {
     /* Log ALL direct UDP packets for debugging */
     ESP_LOGD(TAG, "UDP RX: %d bytes from %d.%d.%d.%d:%d type=%s hdr=%02x",
              (int)len,
@@ -84,7 +106,6 @@ static bool route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
     bool wake_wg = false;
     switch (type) {
     case PKT_STUN:
-        ML_RX_STAT(udp_stun);
         if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
             ML_RX_STAT(q_stun_full);
             tdongle_memory_drop(TDONGLE_DROP_NET_STUN_FULL);
@@ -92,25 +113,13 @@ static bool route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
         }
         break;
     case PKT_DISCO:
-        ML_RX_STAT(udp_disco);
         if (xQueueSend(ml->disco_rx_queue, &pkt, 0) != pdTRUE) {
             ML_RX_STAT(q_disco_full);
             tdongle_memory_drop(TDONGLE_DROP_NET_DISCO_FULL);
             tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
         } else wake_wg = true;
         break;
-    case PKT_WIREGUARD: {
-        ML_RX_STAT(udp_wg);
-        ml_wgrx_verdict_t admit = ml_wgrx_admit_gated(&ml_wgrx_budget, len, heap_caps_get_free_size(MALLOC_CAP_INTERNAL), ml_wgrx_join_busy);
-        if (admit != ML_WGRX_OK) {
-            if (admit == ML_WGRX_BYTES) ML_RX_STAT(q_wg_bytes); else ML_RX_STAT(q_wg_heap);
-            static uint32_t wg_rx_refused = 0;
-            if ((++wg_rx_refused & 0x1F) == 1)
-                ESP_LOGW(TAG, "WG-RX(direct) queue budget: refused %lu (%s)", (unsigned long)wg_rx_refused, admit == ML_WGRX_BYTES ? "bytes" : "heap");
-            tdongle_memory_drop(TDONGLE_DROP_NET_WG_FULL);
-            tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
-            break;
-        }
+    case PKT_WIREGUARD:
         if (xQueueSend(ml->wg_rx_queue, &pkt, 0) != pdTRUE) {
             ml_wgrx_release(len);
             ML_RX_STAT(q_wg_full);
@@ -122,9 +131,7 @@ static bool route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
             tdongle_heap_free(TDONGLE_OWNER_PACKET, data);  /* Queue full, drop */
         } else wake_wg = true;
         break;
-    }
     default:
-        ML_RX_STAT(udp_unclassified);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
         break;
     }
@@ -194,29 +201,23 @@ static int sock_recv(void *ctx, uint8_t *buf, size_t cap, uint32_t *src_ip, uint
 
 static void sock_sink(void *ctx, const uint8_t *data, int n, uint32_t src_ip, uint16_t src_port) {
     sock_drain_t *s = ctx;
+    const pkt_type_t type = s->stun ? PKT_STUN : classify_packet(data, (size_t)n);
+    if (type == PKT_UNKNOWN) {
+        ML_RX_STAT(udp_unclassified);   /* too short to be anything: discarded without a copy */
+        return;
+    }
+    if (type == PKT_STUN) ML_RX_STAT(udp_stun);
+    else if (type == PKT_DISCO) ML_RX_STAT(udp_disco);
+    else ML_RX_STAT(udp_wg);
+    if (!net_io_admit(s->ml, type, (size_t)n)) return;   /* refused before any heap was taken (a refusal is a counted drop) */
     uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(n));
     if (!pkt_data) {
         ML_RX_STAT(udp_alloc_fail);
+        if (type == PKT_WIREGUARD) ml_wgrx_release((size_t)n);
         return;
     }
     memcpy(pkt_data, data, n);
-    if (s->stun) {
-        ML_RX_STAT(udp_stun);
-        ml_rx_packet_t pkt = {
-            .data = pkt_data,
-            .len = n,
-            .src_ip = src_ip,
-            .src_port = src_port,
-            .via_derp = false,
-        };
-        if (xQueueSend(s->ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
-            ML_RX_STAT(q_stun_full);
-            tdongle_memory_drop(TDONGLE_DROP_NET_STUN_FULL);
-            tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt_data);
-        }
-    } else if (route_udp_packet(s->ml, pkt_data, n, src_ip, src_port)) {
-        s->wake = true;
-    }
+    if (route_udp_packet(s->ml, type, pkt_data, n, src_ip, src_port)) s->wake = true;
 }
 
 static void drain_one(microlink_t *ml, int fd, bool v6, bool stun, uint8_t *scratch) {

@@ -690,6 +690,16 @@ static void op_release(void *user, void *block) {
     (void)user;
     tdongle_heap_free(TDONGLE_OWNER_PACKET, block);
 }
+/* A relayed packet about to get its receive buffer (ml_derp_link.c rx_next): the elastic floor, before the allocation instead of after it
+ * (op_deliver's byte and heap check for WireGuard data stays: it also reserves the queue bytes). The destination is not known until the
+ * packet is read, so the small-frame exemption follows the DISCO queue: a small relayed frame is taken when that queue is empty. */
+static bool op_rx_admit(void *user, size_t bytes) {
+    microlink_t *ml = user;
+    if (ml_hb_rx_ok(heap_caps_get_free_size(MALLOC_CAP_INTERNAL), bytes, !ml->disco_rx_queue || uxQueueMessagesWaiting(ml->disco_rx_queue) == 0)) return true;
+    ml_hb_refuse(ML_HB_DERP_RX);
+    tdongle_memory_drop(TDONGLE_DROP_DERP_RX_FULL);
+    return false;
+}
 static uint64_t op_now(void *user) {
     (void)user;
     return ml_get_time_ms();
@@ -709,6 +719,7 @@ static const ml_derp_link_ops_t derp_ops = {
     .now_ms = op_now,
     .alloc = op_alloc,
     .release = op_release,
+    .rx_admit = op_rx_admit,
     .io_read = op_io_read,
     .io_write = op_io_write,
     .transport_open = op_transport_open,
