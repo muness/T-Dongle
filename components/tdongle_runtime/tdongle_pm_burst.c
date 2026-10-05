@@ -87,10 +87,18 @@ void tdongle_pm_activity_init(tdongle_pm_activity_t *a, tdongle_pm_burst_t *burs
     a->ctx = ctx;
 }
 
+/* The lock is taken BEFORE `held` is published. The other order (flag first) left a window in which a tick saw the flag,
+ * cleared it and ended a burst that had not begun (an underflow, ignored), after which the begin completed with the flag
+ * clear: the CPU stayed pinned at maximum until some later note happened to restart the cycle (tests: tick inside start).
+ * Now a tick that sees `held` always finds the begin that goes with it. A note that loses the race for the flag undoes
+ * its own begin; the counter nests, so the lock itself is never released in between. */
 static void activity_start(tdongle_pm_activity_t *a) {
-    if (atomic_exchange_explicit(&a->held, true, memory_order_acq_rel)) return;
-    atomic_fetch_add_explicit(&a->starts, 1, memory_order_relaxed);
     tdongle_pm_burst_begin(a->burst);
+    if (atomic_exchange_explicit(&a->held, true, memory_order_acq_rel)) {
+        tdongle_pm_burst_end(a->burst);
+        return;
+    }
+    atomic_fetch_add_explicit(&a->starts, 1, memory_order_relaxed);
     if (a->arm) a->arm(a->ctx, a->hold_us);
 }
 

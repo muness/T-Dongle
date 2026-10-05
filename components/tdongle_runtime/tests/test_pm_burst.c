@@ -204,6 +204,38 @@ static void test_activity_isr(void) {
     assert(atomic_load(&held) == 1);
 }
 
+/* A tick that preempts a note between "the activity flag is set" and "the burst begins" (a real window: note() ran
+ * activity_start, which published `held` before it took the lock) used to end a burst that had not begun: an underflow,
+ * and then the note's begin left the lock held with the flag clear, so nothing would ever release it. The fake interrupt
+ * test hook runs at the start of every begin/end, which is exactly that window, so the interleaving is forced here. */
+static tdongle_pm_activity_t *window_act; static uint32_t window_now; static bool window_armed; static int window_calls;
+static bool window_isr(void) {
+    /* call 1 is note() asking whether it runs in an interrupt; call 2 is the begin inside activity_start */
+    if (window_armed && ++window_calls == 2) { window_armed = false; tdongle_pm_activity_tick(window_act, window_now); }
+    return in_isr;
+}
+static const tdongle_pm_ops_t window_ops = { fake_acquire, fake_release, fake_now, window_isr };
+static void test_activity_tick_inside_start(void) {
+    reset();
+    tdongle_pm_burst_t b; tdongle_pm_activity_t a;
+    tdongle_pm_burst_init(&b, "fwd", &window_ops, NULL);
+    tdongle_pm_activity_init(&a, &b, 200000, NULL, NULL);
+    tdongle_pm_activity_note(&a, 1000);                      /* take the lock once so `held` is set... */
+    tdongle_pm_activity_tick(&a, 1000 + 250000);             /* ...and let the quiet spell release it */
+    assert(atomic_load(&held) == 0 && stats(&b).depth == 0);
+    window_act = &a; window_now = 1000 + 250000 * 3;         /* the tick would find the spell long over */
+    window_armed = true; window_calls = 0;
+    tdongle_pm_activity_note(&a, 1000 + 250000 * 2);         /* idle -> active, with the tick landing inside it */
+    window_armed = false;
+    tdongle_pm_burst_stats_t s = stats(&b);
+    assert(s.underflows == 0);                               /* no end without its begin */
+    /* Whatever the tick decided, the flag and the lock must agree: held <=> one begin outstanding. */
+    assert(s.depth == (a.held ? 1u : 0u) && atomic_load(&held) == (int)s.depth);
+    tdongle_pm_activity_tick(&a, 1000 + 250000 * 5);         /* a later tick releases it */
+    s = stats(&b);
+    assert(atomic_load(&held) == 0 && s.depth == 0 && s.underflows == 0 && atomic_load(&below_zero) == 0);
+}
+
 /* Producers note continuously while a timer thread ticks: the lock is never released under a live stream's feet for
  * long, never leaked, and always balanced. */
 static tdongle_pm_burst_t th_burst; static tdongle_pm_activity_t th_act;
@@ -236,11 +268,11 @@ static void test_activity_threads(void) {
     tdongle_pm_activity_tick(&th_act, atomic_load(&th_clock) + 1000000);
     tdongle_pm_burst_stats_t s = stats(&th_burst);
     assert(atomic_load(&held) == 0 && s.depth == 0 && s.underflows == 0 && atomic_load(&below_zero) == 0);
-    assert(s.acquires == s.releases && s.acquires <= th_act.starts);   /* a start that crosses a pending end only nests */
+    assert(s.acquires == s.releases);   /* every begin, including the one a losing note undoes, is matched by an end */
 }
 
 int main(void) {
-    test_activity(); test_activity_stale_clock(); test_activity_isr(); test_activity_threads();
+    test_activity(); test_activity_stale_clock(); test_activity_isr(); test_activity_tick_inside_start(); test_activity_threads();
     test_nesting(); test_error_paths(); test_isr(); test_release_all(); test_model(); test_threads();
     puts("pm burst: nesting, error paths, interrupt refusal, task exit, model and threads passed");
     return 0;
