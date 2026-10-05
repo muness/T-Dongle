@@ -1256,7 +1256,7 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     cJSON *node = cJSON_GetObjectItem(resp_json, "Node");
     if (node) {
         cJSON *name=cJSON_GetObjectItem(node,"Name");
-        if(cJSON_IsString(name)&&name->valuestring&&strlen(name->valuestring)<sizeof(ml->self_dns_name))strlcpy(ml->self_dns_name,name->valuestring,sizeof(ml->self_dns_name));
+        if(cJSON_IsString(name)&&name->valuestring)ml_published_name_set(&ml->self_dns_name,name->valuestring);
         cJSON *addresses = cJSON_GetObjectItem(node, "Addresses");
         if (addresses && cJSON_GetArraySize(addresses) > 0) {
             const char *addr = cJSON_GetArrayItem(addresses, 0)->valuestring;
@@ -2207,7 +2207,7 @@ static void apply_long_poll_map(microlink_t *ml, cJSON *update_json) {
     cJSON *node = cJSON_GetObjectItem(update_json, "Node");
     if (node) {
         cJSON *name=cJSON_GetObjectItem(node,"Name");
-        if(cJSON_IsString(name)&&name->valuestring&&strlen(name->valuestring)<sizeof(ml->self_dns_name))strlcpy(ml->self_dns_name,name->valuestring,sizeof(ml->self_dns_name));
+        if(cJSON_IsString(name)&&name->valuestring)ml_published_name_set(&ml->self_dns_name,name->valuestring);
         cJSON *addresses = cJSON_GetObjectItem(node, "Addresses");
         if (addresses && cJSON_GetArraySize(addresses) > 0) {
             const char *addr = cJSON_GetArrayItem(addresses, 0)->valuestring;

@@ -12,6 +12,8 @@
 static void release(void *p);
 #define free release
 #include "tdongle_memory.h" /* its inline free() must hit the leak-counting release() */
+#include "../components/microlink/include/ml_published_name.h"
+static const char *dns_text(const ml_published_name_t *n){static char b[ML_PUBLISHED_NAME_MAX];ml_published_name_get(n,b,sizeof(b),NULL);return b;}
 static size_t test_strlcpy(char *out,const char *src,size_t size) {
     size_t length=strlen(src);
     if(size){size_t n=length<size-1?length:size-1;memcpy(out,src,n);out[n]=0;}
@@ -48,7 +50,8 @@ typedef struct {
     volatile uint32_t peer_generation;
     volatile bool map_batch_pending;
     unsigned vpn_ip, map_generation;
-    char self_dns_name[128], last_error[64];
+    ml_published_name_t self_dns_name;
+    char last_error[64];
     bool key_expired;
     unsigned derp_region_default;
     uint8_t derp_region_count;
@@ -284,7 +287,7 @@ int main(void) {
                     "\"2\":{\"RegionID\":2},\"3\":{\"RegionID\":3},\"5\":{"
                     "\"RegionID\":5},\"4\":{\"RegionID\":4,\"Nodes\":[{"
                     "\"HostName\":\"derp\",\"IPv4\":\"1.2.3.4\"}]}}}}"));
-    assert(m.vpn_ip == 0x64030405 && strstr(m.self_dns_name, ".ts.net") &&
+    assert(m.vpn_ip == 0x64030405 && strstr(dns_text(&m.self_dns_name), ".ts.net") &&
            m.derp_region_count == 4 && m.derp_regions[3].region_id == 4 &&
            !allocations);
     reset();
@@ -302,7 +305,7 @@ int main(void) {
     m = (microlink_t){0};
     reject_queue = true;
     assert(!feed(&m, "{\"Node\":{\"Name\":\"unchanged\"},\"Peers\":[]}"));
-    assert(!m.self_dns_name[0] && !m.map_generation && !live);
+    assert(!dns_text(&m.self_dns_name)[0] && !m.map_generation && !live);
     reset();
     m = (microlink_t){0};
     char *large = malloc(400000);
@@ -310,7 +313,7 @@ int main(void) {
     size_t n = strlen(large);
     memset(large + n, 'x', 300000);
     strcpy(large + n + 300000, "\",\"Node\":{\"Name\":\"kept\"}}");
-    assert(feed(&m, large) && !strcmp(m.self_dns_name, "kept") &&
+    assert(feed(&m, large) && !strcmp(dns_text(&m.self_dns_name), "kept") &&
            !allocations); /* standard malloc is not staged allocator */
     reset();
     m = (microlink_t){0};
@@ -377,7 +380,7 @@ int main(void) {
     }
     int noise = 0;
     assert(gateway_read_map(&m, &noise, 3, true) == 0 &&
-           m.map_generation == 1 && !strcmp(m.self_dns_name, "kept") &&
+           m.map_generation == 1 && !strcmp(dns_text(&m.self_dns_name), "kept") &&
            !allocations);
 #undef free
     free(large);

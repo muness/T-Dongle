@@ -8,6 +8,7 @@ bool gateway_boot_recovery(void){return false;}
 #include <stdlib.h>
 #include <string.h>
 #include "../main/socket_budget.h"
+#include "../components/microlink/include/ml_published_name.h"
 #define CONFIG_LWIP_MAX_SOCKETS 20
 gateway_socket_stats gateway_sockets_snapshot(void) {return (gateway_socket_stats){.open=10,.peak=12,.last_errno=23,.failures=1};}
 static int esp_reset_reason(void) {return 1;}
@@ -34,7 +35,8 @@ typedef struct {
     unsigned peer_generation,state, vpn_ip;
     void *wg_netif;
     bool key_expired, stop_incomplete;
-    char last_error[64], transport_error[64], self_dns_name[128], auth_url[384];
+    char last_error[64], transport_error[64], auth_url[384];
+    ml_published_name_t self_dns_name;
     unsigned map_attempts, map_failures, map_error, map_bytes,
         map_declared_bytes, map_projected_bytes, map_heap_before,
         map_heap_after, map_largest_before, map_stream_id, map_frame_type,
@@ -180,7 +182,7 @@ static void setup(void) {
     c->map_h2_error=1;c->map_h2_last_stream=7;
     c->wg_netif = c;
     c->vpn_ip = 0x64010203;
-    strcpy(c->self_dns_name, "dongle.ts.net");
+    ml_published_name_set(&c->self_dns_name, "dongle.ts.net");
     strcpy(c->auth_url, "https://login/?x=\"\\");
     c->directory.count=1;c->directory.session_valid=true;
     c->peer_count = 1;

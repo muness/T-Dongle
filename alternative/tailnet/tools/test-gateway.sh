@@ -130,3 +130,9 @@ python tools/test-resilience.py
 python tools/test-lcd.py
 python3 tools/test-measurement-scripts.py
 python3 tools/test-memory-report.py
+
+# self_dns_name publication (seqlock) under a concurrent writer: address/undefined and thread sanitizers.
+cc -std=c11 -Wall -Wextra -fsanitize=address,undefined -g -pthread tests/test_published_name.c -o build-host/test_published_name
+build-host/test_published_name
+cc -std=c11 -Wall -Wextra -fsanitize=thread -g -pthread tests/test_published_name.c -o build-host/test_published_name_tsan
+build-host/test_published_name_tsan

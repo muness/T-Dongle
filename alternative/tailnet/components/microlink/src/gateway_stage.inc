@@ -232,7 +232,7 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
     if (s->has_ip)
         ml->vpn_ip = s->vpn_ip;
     if (s->has_name)
-        strlcpy(ml->self_dns_name, s->dns, sizeof(ml->self_dns_name));
+        ml_published_name_set(&ml->self_dns_name, s->dns);
     ml->map_generation++;
     if (s->expired) {
         ml->key_expired = true;

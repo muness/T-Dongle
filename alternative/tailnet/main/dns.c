@@ -89,9 +89,22 @@ static size_t dns_domain_of(const char *self, size_t cap, const char **suffix) {
     *suffix=dot+1;
     return n-(size_t)(dot+1-self);
 }
-static size_t dns_magic_suffix(const membership_t *m, const char **suffix) {
+/* A consistent copy of the membership's name, taken from the control task's
+ * seqlock. The copy lives in one scratch buffer guarded by members_lock, which
+ * every caller holds, so the suffix pointer stays valid until the next call and
+ * nothing is added to the DNS task's stack. *known is false when no consistent
+ * copy was obtained (the control task was mid-write); the caller must not treat
+ * that as "this membership has no domain". */
+static char dns_self_scratch[ML_PUBLISHED_NAME_MAX];
+static size_t dns_magic_suffix_known(const membership_t *m, const char **suffix, bool *known) {
+    *known=true;
     if(!m->client)return 0;
-    return dns_domain_of(m->client->self_dns_name,sizeof(m->client->self_dns_name),suffix);
+    if(!ml_published_name_get(&m->client->self_dns_name,dns_self_scratch,sizeof(dns_self_scratch),NULL)){*known=false;return 0;}
+    return dns_domain_of(dns_self_scratch,sizeof(dns_self_scratch),suffix);
+}
+static size_t dns_magic_suffix(const membership_t *m, const char **suffix) {
+    bool known;
+    return dns_magic_suffix_known(m,suffix,&known);
 }
 /* name is "<label>.<suffix>" with at least one label before the suffix. */
 static bool dns_in_domain(const char *name, size_t len, const char *suffix, size_t n) {
@@ -109,7 +122,8 @@ static dns_form dns_name_form(const membership_t *m, const char *name, size_t le
  * ordinary host queries never touch members_lock (held for map application and
  * membership start/stop). Single writer at a time (callers hold members_lock),
  * readers are the DNS task: a sequence counter, odd while rewriting, makes a
- * torn read detectable. The snapshot only decides "is this name ours?"; the
+ * torn read detectable. The names it is built from are themselves read through
+ * the control task's seqlock (ml_published_name_t). The snapshot only decides "is this name ours?"; the
  * answer itself is always computed under members_lock. */
 #define DNS_DOMAINS 6
 static struct {
@@ -137,22 +151,22 @@ static dns_domain_result dns_domain_lookup(const char *name, size_t len) {
 /* Republish the memberships' MagicDNS domains. Call with members_lock held
  * after anything that can change them: adding, removing or stopping a
  * membership, and periodically, because map updates rewrite self_dns_name in
- * the control task without a notification. A domain not yet published is
+ * the control task without a notification (read through its seqlock). A domain not yet published is
  * answered by the upstream resolver, so keep the calls frequent. */
 void gateway_dns_domains_refresh(void) {
     __typeof__(dns_domains_next) *next=&dns_domains_next;
     memset(next,0,sizeof(*next));
     for(membership_t *m=members;m;m=m->next) {
         const char *suffix;
-        size_t n=dns_magic_suffix(m,&suffix);
+        bool known;
+        size_t n=dns_magic_suffix_known(m,&suffix,&known);
+        /* No consistent copy right now: absence proves nothing for this round. */
+        if(!known){next->overflow=true;continue;}
         if(!n)continue;
         if(next->count==DNS_DOMAINS){next->overflow=true;continue;}
         next->domain[next->count].len=n;
         memcpy(next->domain[next->count].name,suffix,n);
         next->count++;
-        /* The control task rewrites the name unlocked; drop a torn copy. */
-        const char *again;
-        if(dns_magic_suffix(m,&again)!=n || memcmp(again,suffix,n))return;
     }
     if(next->count==dns_domains.count && next->overflow==dns_domains.overflow && !memcmp(next->domain,dns_domains.domain,sizeof(next->domain)))return;
     uint32_t seq=dns_domains.seq;

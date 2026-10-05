@@ -17,6 +17,7 @@
 
 #include "microlink.h"
 #include "ml_config_httpd.h"
+#include "ml_published_name.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -536,7 +537,10 @@ struct microlink_s {
     /* State (atomic reads from any task, writes only from coord) */
     volatile microlink_state_t state;
     volatile uint32_t vpn_ip;
-    char self_dns_name[128];
+    /* MagicDNS name of this node. Written by the control task, read by the
+     * status, LCD and DNS tasks: use ml_published_name_set/get, never the
+     * text directly (it can be mid-rewrite). */
+    ml_published_name_t self_dns_name;
 
     /* True when load_or_generate_keys() found every keypair in NVS at
      * boot (i.e. this device has a persistent node identity). False

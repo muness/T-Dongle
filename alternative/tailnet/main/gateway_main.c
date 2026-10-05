@@ -731,7 +731,7 @@ static esp_err_t status(httpd_req_t *req) {
         v->routing_ready = m->enabled && c->wg_netif &&
                            c->state == ML_STATE_CONNECTED && !c->key_expired &&
                            !c->last_error[0] && c->directory.session_valid;
-        strlcpy(v->dns, c->self_dns_name, sizeof(v->dns));
+        ml_published_name_get(&c->self_dns_name, v->dns, sizeof(v->dns), NULL);
         strlcpy(v->login, c->auth_url, sizeof(v->login));
         strlcpy(v->protocol_error,
                 c->last_error[0] ? c->last_error : c->transport_error,
