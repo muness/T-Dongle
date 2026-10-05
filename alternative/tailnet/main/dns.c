@@ -79,24 +79,88 @@ static void dns_poll_upstream(dns_workspace *work) {
  * or the peer's MagicDNS name "<peer>.<tailnet-domain>", where the domain is
  * the membership's own DNS name without its first label and trailing dot. */
 typedef enum { DNS_NAME_NONE, DNS_NAME_QUALIFIED, DNS_NAME_MAGIC } dns_form;
-static size_t dns_magic_suffix(const membership_t *m, const char **suffix) {
-    if(!m->client)return 0;
-    const char *self=m->client->self_dns_name;
-    size_t n=strnlen(self,sizeof(m->client->self_dns_name));
-    if(n==sizeof(m->client->self_dns_name))return 0;
+/* The domain of a DNS name: everything after its first label, no trailing dot. */
+static size_t dns_domain_of(const char *self, size_t cap, const char **suffix) {
+    size_t n=strnlen(self,cap);
+    if(n==cap)return 0;
     if(n && self[n-1]=='.')n--;
     const char *dot=memchr(self,'.',n);
     if(!dot || dot==self || (size_t)(dot-self)+1>=n)return 0;
     *suffix=dot+1;
     return n-(size_t)(dot+1-self);
 }
+static size_t dns_magic_suffix(const membership_t *m, const char **suffix) {
+    if(!m->client)return 0;
+    return dns_domain_of(m->client->self_dns_name,sizeof(m->client->self_dns_name),suffix);
+}
+/* name is "<label>.<suffix>" with at least one label before the suffix. */
+static bool dns_in_domain(const char *name, size_t len, const char *suffix, size_t n) {
+    return n && len>n+1 && name[len-n-1]=='.' && !strncasecmp(name+len-n,suffix,n);
+}
 static dns_form dns_name_form(const membership_t *m, const char *name, size_t len) {
     size_t label_len=strlen(m->label);
     if(len>label_len+9 && name[len-label_len-9]=='.' && !strncasecmp(name+len-label_len-8,m->label,label_len) && !strcasecmp(name+len-8,".tailnet"))return DNS_NAME_QUALIFIED;
     const char *suffix;
     size_t n=dns_magic_suffix(m,&suffix);
-    if(n && len>n+1 && name[len-n-1]=='.' && !strncasecmp(name+len-n,suffix,n))return DNS_NAME_MAGIC;
+    if(dns_in_domain(name,len,suffix,n))return DNS_NAME_MAGIC;
     return DNS_NAME_NONE;
+}
+/* Lock-free view of the MagicDNS domains the memberships currently report, so
+ * ordinary host queries never touch members_lock (held for map application and
+ * membership start/stop). Single writer at a time (callers hold members_lock),
+ * readers are the DNS task: a sequence counter, odd while rewriting, makes a
+ * torn read detectable. The snapshot only decides "is this name ours?"; the
+ * answer itself is always computed under members_lock. */
+#define DNS_DOMAINS 6
+static struct {
+    uint32_t seq;
+    bool overflow; /* more memberships than slots: absence proves nothing */
+    uint8_t count;
+    struct { uint8_t len; char name[128]; } domain[DNS_DOMAINS];
+} dns_domains, dns_domains_next; /* _next is scratch, guarded by members_lock */
+typedef enum { DNS_DOMAIN_NO, DNS_DOMAIN_YES, DNS_DOMAIN_UNKNOWN } dns_domain_result;
+static dns_domain_result dns_domain_lookup(const char *name, size_t len) {
+    for(unsigned attempt=0;attempt<4;attempt++) {
+        uint32_t before=__atomic_load_n(&dns_domains.seq,__ATOMIC_ACQUIRE);
+        if(before&1)continue;
+        bool hit=false;
+        unsigned count=dns_domains.count;
+        bool overflow=dns_domains.overflow;
+        if(count>DNS_DOMAINS)count=DNS_DOMAINS;
+        for(unsigned i=0;i<count && !hit;i++)hit=dns_in_domain(name,len,dns_domains.domain[i].name,dns_domains.domain[i].len&127);
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        if(__atomic_load_n(&dns_domains.seq,__ATOMIC_RELAXED)!=before)continue;
+        return hit ? DNS_DOMAIN_YES : (overflow ? DNS_DOMAIN_UNKNOWN : DNS_DOMAIN_NO);
+    }
+    return DNS_DOMAIN_UNKNOWN;
+}
+/* Republish the memberships' MagicDNS domains. Call with members_lock held
+ * after anything that can change them: adding, removing or stopping a
+ * membership, and periodically, because map updates rewrite self_dns_name in
+ * the control task without a notification. A domain not yet published is
+ * answered by the upstream resolver, so keep the calls frequent. */
+void gateway_dns_domains_refresh(void) {
+    __typeof__(dns_domains_next) *next=&dns_domains_next;
+    memset(next,0,sizeof(*next));
+    for(membership_t *m=members;m;m=m->next) {
+        const char *suffix;
+        size_t n=dns_magic_suffix(m,&suffix);
+        if(!n)continue;
+        if(next->count==DNS_DOMAINS){next->overflow=true;continue;}
+        next->domain[next->count].len=n;
+        memcpy(next->domain[next->count].name,suffix,n);
+        next->count++;
+        /* The control task rewrites the name unlocked; drop a torn copy. */
+        const char *again;
+        if(dns_magic_suffix(m,&again)!=n || memcmp(again,suffix,n))return;
+    }
+    if(next->count==dns_domains.count && next->overflow==dns_domains.overflow && !memcmp(next->domain,dns_domains.domain,sizeof(next->domain)))return;
+    uint32_t seq=dns_domains.seq;
+    __atomic_store_n(&dns_domains.seq,seq+1,__ATOMIC_RELAXED);
+    __atomic_thread_fence(__ATOMIC_RELEASE);
+    dns_domains.count=next->count;dns_domains.overflow=next->overflow;
+    memcpy(dns_domains.domain,next->domain,sizeof(next->domain));
+    __atomic_store_n(&dns_domains.seq,seq+2,__ATOMIC_RELEASE);
 }
 /* Number of memberships whose MagicDNS domain contains name. Lock held. */
 static unsigned dns_magic_claims(const char *name, size_t len) {
@@ -149,9 +213,9 @@ static void dns_cache_store(dns_workspace *work, const char *name, const dns_mat
 /* Resolve a tailnet name to its USB alias, or 0 (NXDOMAIN, or SERVFAIL when
  * *temporary). Lock held. A MagicDNS domain claimed by two memberships is
  * ambiguous even if only one of them has the peer. */
-static uint32_t dns_resolve(dns_workspace *work, const char *name, size_t len, bool *temporary) {
+static uint32_t dns_resolve(dns_workspace *work, const char *name, size_t len, unsigned claims, bool *temporary) {
     dns_match r={0};
-    if(dns_magic_claims(name,len)>1)return 0;
+    if(claims>1)return 0;
     for (membership_t *m = members; m; m = m->next) {
         dns_form form=dns_name_form(m,name,len);
         if(form!=DNS_NAME_NONE)dns_match_member(work,m,name,form,&r);
@@ -198,17 +262,27 @@ static void dns_task(void *arg) {
         TickType_t lookup_started=xTaskGetTickCount();
         uint32_t alias = 0;
         bool temporary=false;
-        /* MagicDNS ownership is only known under the membership lock, so every
-         * IN query takes it; if it is busy, only .tailnet names are answered
-         * (SERVFAIL) and everything else keeps its upstream path. */
-        bool locked = (!tailnet || (type == 1 && klass == 1)) && xSemaphoreTake(members_lock, pdMS_TO_TICKS(50)) == pdTRUE;
-        if (locked && !tailnet)
-            tailnet = dns_magic_claims(name, len) != 0;
-        if (tailnet && type == 1 && klass == 1) {
-            if (locked)
-                alias = dns_resolve(work, name, len, &temporary);
-            else {temporary=true;dns_count(2);}
+        /* Names of ".tailnet" or inside a membership's MagicDNS domain are
+         * answered here. The domain list is a lock-free snapshot, so ordinary
+         * names never wait on members_lock; only a name inside a known domain
+         * takes it, and a busy lock is then SERVFAIL, never a forward. */
+        bool maybe = false;
+        if (!tailnet) {
+            dns_domain_result domain = dns_domain_lookup(name, len);
+            tailnet = domain == DNS_DOMAIN_YES;
+            maybe = domain == DNS_DOMAIN_UNKNOWN; /* snapshot unusable: ask under the lock */
         }
+        bool lookup = tailnet && type == 1 && klass == 1;
+        bool locked = (lookup || maybe) && xSemaphoreTake(members_lock, pdMS_TO_TICKS(50)) == pdTRUE;
+        if (locked && (tailnet || maybe)) {
+            /* Re-check ownership: the domain may have gone since the snapshot. */
+            bool qualified = len >= 8 && !strcasecmp(name + len - 8, ".tailnet");
+            unsigned claims = qualified ? 0 : dns_magic_claims(name, len);
+            tailnet = qualified || claims != 0;
+            lookup = tailnet && type == 1 && klass == 1;
+            if (lookup)
+                alias = dns_resolve(work, name, len, claims, &temporary);
+        } else if (lookup) {temporary=true;dns_count(2);}
         if (locked)
             xSemaphoreGive(members_lock);
         if (tailnet) {

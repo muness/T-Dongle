@@ -297,6 +297,7 @@ bool gateway_display_state(lcd_state *s) {
     s->wifi=online;s->recovery=gateway_boot_needs_attention();
     if(xSemaphoreTake(members_lock,pdMS_TO_TICKS(10))!=pdTRUE)return false;
     s->saved_wifi=wifi_saved.count!=0;
+    gateway_dns_domains_refresh();
     for(membership_t *m=members;m;m=m->next){
         s->saved++;if(!m->enabled)continue;s->enabled++;
         microlink_t *c=m->client;
@@ -337,6 +338,7 @@ static void manager(void *arg) {
                                 sizeof(m->error));
                 }
             }
+            gateway_dns_domains_refresh();
             xSemaphoreGive(members_lock);
         }
         vTaskDelay(pdMS_TO_TICKS(10000));
@@ -651,6 +653,7 @@ static esp_err_t status(httpd_req_t *req) {
         free(snapshot);
         return status_busy(req);
     }
+    gateway_dns_domains_refresh();
     unsigned peer_offset=0,peer_member=0;char query[64]={0},offset_text[16];
     if(httpd_req_get_url_query_str(req,query,sizeof(query))==ESP_OK &&
        httpd_query_key_value(query,"peer_offset",offset_text,sizeof(offset_text))==ESP_OK)
@@ -1016,6 +1019,7 @@ static esp_err_t command(httpd_req_t *req) {
         }
     } else
         error = "Unknown action";
+    gateway_dns_domains_refresh();
     xSemaphoreGive(members_lock);
     cJSON_Delete(j);
     memset(body, 0, sizeof(body));
