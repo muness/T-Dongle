@@ -11,6 +11,14 @@ if(NOT TDONGLE_LEGACY_BRIDGE)
 endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
+# ESP-IDF expands component CMakeLists in a separate `cmake -P` process to
+# collect requirements; project variables/options are not visible there, only
+# build properties are. Publish the mode as a property for main/CMakeLists.txt.
+if(TDONGLE_LEGACY_BRIDGE)
+ idf_build_set_property(TDONGLE_LEGACY_BRIDGE 1)
+else()
+ idf_build_set_property(TDONGLE_LEGACY_BRIDGE 0)
+endif()
 # Network input reaches cJSON_Parse (control responses, the /key reply, the DERP
 # map, setup requests) on tasks whose stacks are sized from measurements. cJSON
 # recurses once per nesting level, so the default limit of 1000 lets a hostile
