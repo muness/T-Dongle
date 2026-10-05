@@ -4,7 +4,7 @@
  * one point where it succeeds. Invariant (tests/test_wg_rx_counters.c): every datagram counted by `rx_data` ends in exactly one
  * of the terminal counters, so
  *
- *   rx_data == rx_no_peer + rx_keepalive_skipped + rx_keypair_unusable + rx_expired +
+ *   rx_data == rx_no_peer + rx_keypair_unusable + rx_expired +
  *              rx_alloc_fail + rx_session_gone + rx_decrypt_fail + rx_keepalive + rx_replay_dup + rx_replay_old +
  *              rx_replay_limit + rx_bad_ip + rx_allowed_ip + rx_bad_length + rx_input_fail + rx_delivered
  *
@@ -19,7 +19,6 @@
     X(rx_data)              /* transport datagrams that entered the data path */ \
     X(rx_bad_type)          /* not a WireGuard message at all (bad type, wrong length for its type): not part of rx_data */ \
     X(rx_no_peer)           /* receiver index belongs to no peer or keypair (stale session, scan, or another device's packet) */ \
-    X(rx_keepalive_skipped) /* 32-byte (empty) datagram discarded before decryption by the wg_mgr split path (see ADR 0019) */ \
     X(rx_keypair_unusable)  /* the keypair cannot receive (receiving_valid cleared) */ \
     X(rx_expired)           /* REJECT_AFTER_TIME or REJECT_AFTER_MESSAGES: session refused and destroyed */ \
     X(rx_alloc_fail)        /* no memory for the plaintext buffer */ \

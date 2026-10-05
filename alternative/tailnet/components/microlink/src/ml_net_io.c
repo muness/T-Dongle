@@ -161,13 +161,13 @@ static int sock_recv(void *ctx, uint8_t *buf, size_t cap, uint32_t *src_ip, uint
     if (s->v6) {
         struct sockaddr_in6 a6;
         socklen_t len = sizeof(a6);
-        n = ml_recvfrom(s->fd, buf, cap, 0, (struct sockaddr *)&a6, &len);
+        n = ml_recvfrom(s->fd, buf, cap, MSG_DONTWAIT, (struct sockaddr *)&a6, &len);
         *src_ip = 0;   /* IPv6: the parser reads the address from the payload (parse_response_ipv6) */
         *src_port = ntohs(a6.sin6_port);
     } else {
         struct sockaddr_in a4;
         socklen_t len = sizeof(a4);
-        n = ml_recvfrom(s->fd, buf, cap, 0, (struct sockaddr *)&a4, &len);
+        n = ml_recvfrom(s->fd, buf, cap, MSG_DONTWAIT, (struct sockaddr *)&a4, &len);
         *src_ip = ntohl(a4.sin_addr.s_addr);
         *src_port = ntohs(a4.sin_port);
     }

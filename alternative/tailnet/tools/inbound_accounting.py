@@ -22,7 +22,7 @@ from dongle_serial import Console  # noqa: E402
 
 # Counters that are a datagram leaving the path without being delivered, by layer.
 ML_LOSS = ["udp_rx_empty", "udp_unclassified", "udp_alloc_fail", "q_wg_full", "derp_q_wg_full", "wg_sender_unknown", "wg_no_netif", "wg_pbuf_fail"]
-WG_LOSS = ["rx_no_peer", "rx_keepalive_skipped", "rx_keypair_unusable", "rx_expired", "rx_alloc_fail", "rx_session_gone", "rx_decrypt_fail",
+WG_LOSS = ["rx_no_peer", "rx_keypair_unusable", "rx_expired", "rx_alloc_fail", "rx_session_gone", "rx_decrypt_fail",
            "rx_replay_dup", "rx_replay_old", "rx_replay_limit", "rx_bad_ip", "rx_allowed_ip", "rx_bad_length", "rx_input_fail"]
 ROUTE_LOSS = ["tunnel_malformed", "tunnel_nomem", "bad_packet", "reply_no_member", "reply_not_us", "reply_flow_range", "reply_no_flow",
               "reply_generation", "reply_owner", "reply_idle", "usb_tx_err", "tx_fail"]

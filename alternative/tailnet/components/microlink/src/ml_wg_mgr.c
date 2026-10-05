@@ -2274,6 +2274,10 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
         tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
         return;
     }
+    /* A keepalive (transport data, empty plaintext: 16-byte header + 16-byte tag) is processed like any authenticated message
+     * (endpoint, timers, keypair confirmation) but, as before it was decrypted at all, is not "use" of the peer for residency:
+     * a peer's idle PersistentKeepalive must not keep its slot from eviction (directory_activate_idle). */
+    const bool keepalive_only = pkt->len == 32 && pkt->data[0] == 0x04;
     pbuf_take(p, pkt->data, pkt->len);
     tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);  /* Original data no longer needed — pbuf has its own copy */
     WGPERF_LAP(t, rx_prep);
@@ -2302,7 +2306,7 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
         WGPERF_LAP(t, rx_deliver);
     }
 #ifdef ESP_PLATFORM
-    if(sender>=0 && wg_peer_activity(ml,sender)!=sender_activity)
+    if(sender>=0 && !keepalive_only && wg_peer_activity(ml,sender)!=sender_activity)
         ml->peers[sender].jit_used_ms=ml_get_time_ms();
     directory_trial_poll(ml);
 #endif

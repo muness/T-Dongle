@@ -169,11 +169,73 @@ static void t_delivered(bool split) {
 static void t_keepalive(bool split) {
     uint8_t dg[64]; size_t n = seal(dg, LOCAL_INDEX, 5, NULL, 0);
     assert(n == 32);
+    uint32_t before_rx = PEER->last_rx = 0;
     snap(); deliver(dg, n, split, 1);
-    if (split) { EXPECT_ONLY(rx_keepalive_skipped); assert(PEER->port == 0); }   /* documented: this path has never decrypted one */
-    else { EXPECT_ONLY(rx_keepalive); assert(PEER->port == 41641); }
+    EXPECT_ONLY(rx_keepalive);                                            /* both entry points: decrypted, authenticated, accepted */
+    assert(PEER->port == 41641 && PEER->ip.addr == from_addr(1).addr);   /* an authenticated keepalive moves the endpoint (roaming)... */
+    assert(PEER->last_rx != before_rx && PEER->curr_keypair.last_rx == PEER->last_rx);   /* ...and is "something received" for every timer */
     assert(delivered == 0 && input_calls == 0);
+    /* it consumed counter 5: a replay from elsewhere is refused and changes nothing (kernel: keepalives are replay-checked too) */
+    PEER->ip = from_addr(9); PEER->port = 9999; PEER->last_rx = 7;
+    snap(); deliver(dg, n, split, 2);
+    EXPECT_ONLY(rx_replay_dup);
+    assert(PEER->ip.addr == from_addr(9).addr && PEER->port == 9999 && PEER->last_rx == 7);
 }
+/* Whitepaper 5.4.6: the responder confirms its next keypair on the first valid transport message, and a keepalive is exactly
+ * what an initiator sends first when it has nothing else to say. The wg_mgr split path used to discard it unseen, leaving the
+ * responder with an unconfirmed keypair (it may not send on it) until real data arrived. */
+static void t_keepalive_promotes(bool split) {
+    set_receiving(&PEER->next_keypair, NEXT_INDEX);
+    PEER->prev_keypair = PEER->curr_keypair; PEER->curr_keypair.valid = false;
+    uint8_t dg[64]; size_t n = seal(dg, NEXT_INDEX, 0, NULL, 0);
+    snap(); deliver(dg, n, split, 1);
+    EXPECT_ONLY(rx_keepalive);
+    assert(PEER->curr_keypair.valid && PEER->curr_keypair.local_index == NEXT_INDEX && !PEER->next_keypair.valid);
+    assert(PEER->curr_keypair.last_rx != 0 && PEER->curr_keypair.replay.counter == 0);
+    snap(); deliver(dg, n, split, 2);                                      /* the confirming keepalive is in the LIVE window: replay refused */
+    EXPECT_ONLY(rx_replay_dup);
+    assert(PEER->curr_keypair.valid && PEER->prev_keypair.local_index == LOCAL_INDEX);
+}
+/* A replay of the promoting datagram must not promote anything: the forged datagram is authentic but already seen. */
+static void t_replay_cannot_promote(bool split) {
+    set_receiving(&PEER->next_keypair, NEXT_INDEX);
+    uint8_t dg[1600]; size_t n = good(dg, NEXT_INDEX, 4, 100);
+    PEER->next_keypair.replay.counter = 4;                                  /* counter 4 was accepted earlier (recorded as the highest) ... */
+    PEER->next_keypair.replay.ring[0] = 1u << 4;                            /* ... and its bit is set */
+    snap(); deliver(dg, n, split, 3);
+    EXPECT_ONLY(rx_replay_dup);
+    assert(PEER->next_keypair.valid && PEER->curr_keypair.local_index == LOCAL_INDEX && PEER->port == 0 && PEER->last_rx == 0);
+}
+/* The same counter twice in flight (both begun before either completes): authentication succeeds for both, the replay window
+ * is consulted and updated only at completion, under the lock, so exactly one is accepted. */
+static void t_same_counter_in_flight(bool split) {
+    (void)split;
+    uint8_t a[1600], b[1600]; ip_addr_t addr = from_addr(1);
+    size_t na = good(a, LOCAL_INDEX, 21, 100), nb = good(b, LOCAL_INDEX, 21, 100);
+    struct wireguard_rx_job ja, jb;
+    struct pbuf *pa = pbuf_alloc(PBUF_TRANSPORT, (u16_t)na, PBUF_RAM), *pb = pbuf_alloc(PBUF_TRANSPORT, (u16_t)nb, PBUF_RAM);
+    memcpy(pa->payload, a, na); memcpy(pb->payload, b, nb);
+    snap();
+    assert(wireguardif_rx_begin(&D.nif, pa, &addr, 41641, &ja) && wireguardif_rx_begin(&D.nif, pb, &addr, 41641, &jb));
+    wireguard_rx_decrypt(&jb); wireguard_rx_decrypt(&ja);
+    wireguardif_rx_complete(&D.nif, &addr, 41641, &jb);
+    wireguardif_rx_complete(&D.nif, &addr, 41641, &ja);
+    assert(delivered == 1 && delta(WG_RXS_rx_delivered) == 1 && delta(WG_RXS_rx_replay_dup) == 1 && delta(WG_RXS_rx_data) == 2);
+    terminal_sum_check();
+    /* and one on the NEXT keypair, promoted by the first completion, while the second was decrypted against the same key */
+    set_receiving(&PEER->next_keypair, NEXT_INDEX);
+    na = good(a, NEXT_INDEX, 3, 100); nb = good(b, NEXT_INDEX, 3, 100);
+    pa = pbuf_alloc(PBUF_TRANSPORT, (u16_t)na, PBUF_RAM); pb = pbuf_alloc(PBUF_TRANSPORT, (u16_t)nb, PBUF_RAM);
+    memcpy(pa->payload, a, na); memcpy(pb->payload, b, nb);
+    delivered = 0; snap();
+    assert(wireguardif_rx_begin(&D.nif, pa, &addr, 41641, &ja) && wireguardif_rx_begin(&D.nif, pb, &addr, 41641, &jb));
+    wireguard_rx_decrypt(&ja); wireguard_rx_decrypt(&jb);
+    wireguardif_rx_complete(&D.nif, &addr, 41641, &ja);
+    wireguardif_rx_complete(&D.nif, &addr, 41641, &jb);
+    assert(delivered == 1 && delta(WG_RXS_rx_replay_dup) == 1 && PEER->curr_keypair.local_index == NEXT_INDEX);
+    terminal_sum_check();
+}
+
 static void t_no_peer(bool split) {
     uint8_t dg[1600]; size_t n = good(dg, 0xDEAD0001u, 0, 100);
     snap(); deliver(dg, n, split, 1);
@@ -403,7 +465,7 @@ static void t_identity(void) {
         terminal_sum_check();
         for (unsigned i = 0; i < WG_RXS_COUNT; i++) {
             bool unreachable_here = i == WG_RXS_rx_bad_type || i == WG_RXS_rx_expired || i == WG_RXS_rx_keypair_unusable || i == WG_RXS_rx_session_gone ||
-                                    (split && i == WG_RXS_rx_keepalive) || (!split && i == WG_RXS_rx_keepalive_skipped);
+                                    false;
             if (!unreachable_here && wireguard_rx_stat_get(i) == 0) { fprintf(stderr, "mixed run never reached %s (split=%d)\n", wireguard_rx_stat_name(i), split); abort(); }
         }
         rig_down();
@@ -495,6 +557,9 @@ int main(void) {
     each_path(t_bad_type);
     each_path(t_promotion);
     each_path(t_prev_keypair);
+    each_path(t_keepalive_promotes);
+    each_path(t_replay_cannot_promote);
+    each_path(t_same_counter_in_flight);
     printf("rx counters: every drop point increments exactly its counter, on both entry points\n");
     t_identity();
     t_ordering();

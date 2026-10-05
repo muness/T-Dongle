@@ -839,10 +839,6 @@ int wireguardif_rx_begin(struct netif *netif, struct pbuf *p, const ip_addr_t *a
         WG_RX_STAT(rx_data);
         if (!peer) {
             WG_RX_STAT(rx_no_peer);
-        } else if (len == 16 + WIREGUARD_AUTHTAG_LEN) {   // (wireguard_get_message_type already refused anything shorter)
-            // Empty plaintext: a keepalive. This path has never decrypted one (it would update the endpoint and timers and
-            // promote a responder's next keypair); it is counted here, not changed. See docs/adr/0019-inbound-loss.md.
-            WG_RX_STAT(rx_keepalive_skipped);
         } else if (wireguardif_rx_data_prepare(device, peer, msg_data, len - 16, job)) {
             job->input = p;
             return 1;
