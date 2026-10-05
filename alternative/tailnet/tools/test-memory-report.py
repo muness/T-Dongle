@@ -47,7 +47,12 @@ assert attribution["synthetic"] == (7168 + 7680 + 8192 + 3 * 336) + (8704 + 336 
 assert attribution["n2"] == {"lp_acc_capacity": 65536, "lp_acc_allocated": False, "h2_window_advertised": 65536, "h2_acc_live_max": 0,
                              "gateway_plain_static": 20496, "gateway_json_static": 16384}, attribution["n2"]
 assert lwip["tcp_wnd"] == 5760 and lwip["pbuf_pool_size"] == 16
-assert usb["tx_ring_bytes"] == 4576 and usb["tx_high_water"] == 4212 and usb["tx_dropped_full"] == 7 and usb["tx_ntb_blocked"] == 4
+assert usb["tx_ring_bytes"] == 9144 and usb["tx_ring_base_bytes"] == 4572 and usb["tx_ring_max_bytes"] == 35052
+assert usb["tx_elastic_held_bytes"] == 6096 and usb["tx_elastic_chunks"] == 2 and usb["tx_high_water_slabs"] == 9
+assert (usb["tx_grow_events"], usb["tx_shrink_events"], usb["tx_reclaim_events"], usb["tx_reclaimed_chunks"]) == (11, 12, 13, 14)
+assert (usb["tx_grow_denied_gate"], usb["tx_grow_denied_heap"], usb["tx_grow_denied_largest"], usb["tx_grow_denied_nomem"], usb["tx_grow_raced"]) == (15, 16, 17, 18, 19)
+assert (usb["tx_pm_acquired"], usb["tx_pm_released"], usb["tx_pm_held"]) == (20, 19, 1)
+assert usb["tx_high_water"] == 4212 and usb["tx_dropped_full"] == 7 and usb["tx_ntb_blocked"] == 4
 assert usb["tx_xfer_events"] == 55 and usb["tx_worker_stack_free"] == 900
 assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 22 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
