@@ -1,0 +1,119 @@
+type = struct {
+/*      0      |       8 */    uint64_t jit_used_ms;
+/*      8      |       4 */    uint32_t vpn_ip;
+/*     12      |      32 */    uint8_t public_key[32];
+/*     44      |      32 */    uint8_t disco_key[32];
+/*     76      |      64 */    char hostname[64];
+/*    140      |       1 */    _Bool active;
+/*    141      |       1 */    _Bool unconfirmed;
+/* XXX  2-byte hole      */
+/*    144      |      64 */    struct {
+/*      0      |       4 */        uint32_t ip;
+/*      4      |       2 */        uint16_t port;
+/*      6      |       1 */        _Bool is_ipv6;
+                               } endpoints[8];
+/*    208      |       4 */    int endpoint_count;
+/*    212      |       2 */    uint16_t derp_region;
+/* XXX  2-byte hole      */
+/*    216      |       8 */    uint64_t last_ping_sent_ms;
+/*    224      |       8 */    uint64_t last_pong_recv_ms;
+/*    232      |       8 */    uint64_t trust_until_ms;
+/*    240      |       8 */    uint64_t last_send_ms;
+/*    248      |       8 */    uint64_t last_upgrade_ms;
+/*    256      |       8 */    uint64_t last_cmm_rx_ms;
+/*    264      |       8 */    uint64_t best_last_pong_ms;
+/*    272      |      32 */    uint8_t disco_shared[32];
+/*    304      |      32 */    uint8_t disco_shared_for[32];
+/*    336      |       1 */    _Bool disco_shared_valid;
+/* XXX  3-byte hole      */
+/*    340      |       4 */    uint32_t best_ip;
+/*    344      |       2 */    uint16_t best_port;
+/*    346      |       1 */    _Bool has_direct_path;
+/* XXX  1-byte hole      */
+/*    348      |       4 */    int wg_peer_index;
+/*    352      |       8 */    uint64_t last_init_handshake_ms;
+/*    360      |       8 */    uint64_t peer_added_ms;
+/*    368      |       1 */    _Bool derp_fallback_active;
+/* XXX  7-byte hole      */
+/*    376      |       8 */    uint64_t last_derp_attempt_ms;
+/*    384      |       1 */    _Bool is_exit_node;
+/* XXX  3-byte hole      */
+/*    388      |      64 */    microlink_route_t subnet_routes[8];
+/*    452      |       1 */    uint8_t subnet_route_count;
+/*    453      |       1 */    _Bool online;
+/* XXX  2-byte hole      */
+/*    456      |       8 */    uint64_t node_id;
+                               /* total size (bytes):  464 */
+                             }
+type = struct {
+/*      0      |       2 */    uint16_t region_id;
+/*      2      |       8 */    char code[8];
+/*     10      |      24 */    char name[24];
+/*     34      |     392 */    ml_derp_node_t nodes[2];
+/*    426      |       1 */    uint8_t node_count;
+/*    427      |       1 */    _Bool avoid;
+                               /* total size (bytes):  428 */
+                             }
+type = struct ml_derp_link {
+/*      0      |       4 */    const ml_derp_link_ops_t *ops;
+/*      4      |       4 */    void *user;
+/*      8      |       4 */    ml_derp_link_state_t state;
+/*     12      |       1 */    _Bool wanted;
+/* XXX  3-byte hole      */
+/*     16      |      24 */    ml_derp_pace_t pace;
+/*     40      |       1 */    uint8_t burst_left;
+/* XXX  3-byte hole      */
+/*     44      |       4 */    uint32_t burst_gap_ms;
+/*     48      |       8 */    uint64_t next_attempt_ms;
+/*     56      |       8 */    uint64_t connect_started_ms;
+/*     64      |       8 */    uint64_t phase_started_ms;
+/*     72      |       8 */    uint64_t last_recv_ms;
+/*     80      |       1 */    _Bool token_held;
+/*     81      |       1 */    _Bool transport_open;
+/*     82      |      64 */    struct {
+/*     82      |       4 */        uint8_t tail[4];
+/*     86      |      16 */        uint8_t line[16];
+/*    102      |       2 */        uint16_t seen;
+/*    104      |      40 */        uint8_t key[40];
+/*    144      |       1 */        uint8_t key_used;
+/*    145      |       1 */        _Bool key_ok;
+                                   /* total size (bytes):   64 */
+                               } hs;
+/* XXX  6-byte hole      */
+/*    152      |      72 */    struct {
+/*    152      |       5 */        uint8_t hdr[5];
+/*    157      |       1 */        uint8_t hdr_used;
+/*    158      |       1 */        uint8_t type;
+/* XXX  1-byte hole      */
+/*    160      |       4 */        uint32_t remaining;
+/*    164      |      32 */        uint8_t src[32];
+/*    196      |       1 */        uint8_t src_used;
+/*    197      |       1 */        _Bool want_src;
+/* XXX  2-byte hole      */
+/*    200      |       4 */        uint8_t *sink;
+/*    204      |       4 */        size_t sink_len;
+/*    208      |       4 */        size_t sink_used;
+/* XXX  4-byte hole      */
+/*    216      |       8 */        uint64_t started_ms;
+                                   /* total size (bytes):   72 */
+                               } rx;
+/*    224      |      24 */    struct {
+/*    224      |       4 */        uint8_t *buf;
+/*    228      |       4 */        size_t len;
+/*    232      |       4 */        size_t off;
+/*    236      |       1 */        _Bool owned;
+/* XXX  3-byte hole      */
+/*    240      |       8 */        uint64_t progress_ms;
+                                   /* total size (bytes):   24 */
+                               } tx;
+/*    248      |      76 */    struct {
+/*    248      |       4 */        enum {ML_DERP_CTL_NONE, ML_DERP_CTL_QUEUED, ML_DERP_CTL_SENDING} state;
+/*    252      |      69 */        uint8_t frame[69];
+/*    321      |       1 */        uint8_t len;
+/* XXX  2-byte padding   */
+                                   /* total size (bytes):   76 */
+                               } ctl;
+/*    324      |      48 */    ml_derp_link_stats_t stats;
+/* XXX  4-byte padding   */
+                               /* total size (bytes):  376 */
+                             }
