@@ -79,7 +79,8 @@ typedef struct {
 } microlink_t;
 static bool reject,session_up[8],directory_has;static unsigned handshakes;static uint64_t now;
 #define MALLOC_CAP_INTERNAL 1
-#define ML_ADM_RECOVERY_BYTES 16384
+#include "ml_heap_budget.h"
+atomic_uint ml_hb_refused[ML_HB_SITE_COUNT];
 static size_t free_heap=1u<<20;
 static size_t heap_caps_get_free_size(int caps){(void)caps;return free_heap;}
 static void *queue[64];static unsigned queued;
@@ -222,6 +223,16 @@ int main(void) {
     reject=false;fail_pbuf_alloc=1;assert(ml_gateway_queue_packet(&m,IP1,PLAIN,4)==ESP_ERR_NO_MEM);assert(!m.jit_packet_count && !live_pbufs);
     fail_pbuf_alloc=0;
     free_heap=ML_ADM_RECOVERY_BYTES+100;assert(ml_gateway_queue_packet(&m,1,PLAIN,4)==ESP_ERR_NO_MEM && !m.jit_packet_count);   /* never below the recovery reserve */
+    /* the one elastic floor (ADR 0022): a refusal at the floor plus the packet's cost, an admission one byte above, each counted */
+    {
+        unsigned before=atomic_load(&ml_hb_refused[ML_HB_JIT]);
+        size_t need=WIREGUARDIF_DATA_ALLOC(4)+sizeof(ml_egress_meta_t)+sizeof(struct pbuf)+64;
+        free_heap=ML_HB_FLOOR+need-1;assert(ml_gateway_queue_packet(&m,IP1,PLAIN,4)==ESP_ERR_NO_MEM && !m.jit_packet_count && !live_pbufs);
+        assert(atomic_load(&ml_hb_refused[ML_HB_JIT])==before+1);
+        free_heap=ML_HB_FLOOR+need;
+        session_up[0]=false;queued=0;assert(!ml_gateway_queue_packet(&m,IP1,PLAIN,4));assert(atomic_load(&ml_hb_refused[ML_HB_JIT])==before+1);
+        pump(&m);for(unsigned i=0;i<ML_JIT_PENDING;i++)m.jit_pending[i].expires=0;directory_flush_packets(&m);assert(!live_pbufs && !m.jit_packet_count);
+    }
     free_heap=1u<<20;
     assert(ml_gateway_queue_packet(&m,IP1,PLAIN,0)==ESP_ERR_INVALID_STATE && ml_gateway_queue_packet(&m,IP1,PLAIN,1401)==ESP_ERR_INVALID_STATE);
     m.state=0;assert(ml_gateway_queue_packet(&m,IP1,PLAIN,4)==ESP_ERR_INVALID_STATE);m.state=4;

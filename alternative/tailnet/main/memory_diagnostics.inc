@@ -425,6 +425,7 @@ static void report_usb(jw_writer *w) {
     report_field(w, "rx_high_water", atomic_load(&usb_rx_budget.high_water));
     report_field(w, "rx_dropped_busy", atomic_load(&usb_rx_budget.dropped_busy));
     report_field(w, "rx_dropped_nomem", atomic_load(&usb_rx_budget.dropped_nomem));
+    report_field(w, "rx_dropped_heap", atomic_load(&usb_rx_budget.dropped_heap));
     report_field(w, "rx_dropped_invalid", atomic_load(&usb_rx_budget.dropped_invalid));
     report_end(w);
 }

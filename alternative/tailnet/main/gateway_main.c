@@ -62,6 +62,9 @@ _Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE >= 2 * (1518 + 4) + 64, "
 _Static_assert(GATEWAY_USB_TX_BASE_FRAMES >= 3, "the permanent ring must hold three full frames");
 _Static_assert(GATEWAY_USB_TX_MAX_FRAMES >= 16 && GATEWAY_USB_TX_MAX_FRAMES <= 24, "elastic cap: 16 to 24 frames (ADR 0015)");
 _Static_assert(GATEWAY_USB_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_BYTES <= 32 * 1024, "the elastic part must stay within 32 KB");
+_Static_assert(CONFIG_LWIP_UDP_RECVMBOX_SIZE <= ML_HB_PIN_BUFFERS, "a UDP socket mailbox can pin more Wi-Fi RX buffers than the heap budget allows (ml_heap_budget.h)");
+_Static_assert(CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM <= ML_HB_PIN_BUFFERS, "the Wi-Fi TX pool can pin more buffers than the heap budget allows (ml_heap_budget.h)");
+_Static_assert(GATEWAY_USB_TX_FLOOR_FREE == ML_HB_FLOOR, "the USB ring grows only above the one elastic floor");
 _Static_assert(GATEWAY_USB_TX_FLOOR_FREE >= ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES,
                "growth must leave one negotiation peak and the recovery reserve");
 _Static_assert(GATEWAY_USB_TX_FLOOR_LARGEST >= ML_ADM_LARGEST_BLOCK, "growth must keep the admission largest-block floor");
@@ -271,7 +274,7 @@ static bool stop_member(membership_t *m) {
  * token (ml_negotiation.h). Shared registration/map byte buffers are static, not charged per member. The decision
  * inputs are all in /status. */
 _Static_assert(GATEWAY_USB_RX_INFLIGHT_MAX >= ROUTE_QUEUE_DEPTH + ROUTE_HOLD_SLOTS + 4, "USB receive slots must leave room beyond what the router can hold");
-_Static_assert(ROUTE_HEAP_RESERVE == ML_ADM_RECOVERY_BYTES, "the router queue must stop at the same recovery reserve admission keeps");
+_Static_assert(ROUTE_HEAP_RESERVE == ML_HB_FLOOR && ROUTE_HEAP_RESERVE >= ML_ADM_RECOVERY_BYTES, "the router queue must stop at the one elastic floor (ml_heap_budget.h)");
 _Static_assert(GATEWAY_TASK_USB_ROUTES_CORE == ML_TASK_WG_MGR_CORE && GATEWAY_TASK_USB_ROUTES_PRIO > ML_TASK_WG_MGR_PRIO &&
                ML_TASK_WG_MGR_PRIO > ML_TASK_COORD_PRIO && ML_TASK_COORD_CORE == ML_TASK_WG_MGR_CORE,
                "core 1: usb_routes > wg_mgr > coord");
@@ -527,7 +530,7 @@ static void usb_free_rx(void *handle, void *buffer) {
 static esp_err_t usb_rx(void *buffer, uint16_t len, void *ctx) {
     if(!gateway_tailnet_mode())return tdongle_l2_host(buffer,len);
     if (!usb_interface) return ESP_ERR_INVALID_STATE;
-    if (!gateway_usb_rx_admit(&usb_rx_budget, len))
+    if (!gateway_usb_rx_admit(&usb_rx_budget, len, heap_caps_get_free_size(MALLOC_CAP_INTERNAL)))
         return ESP_ERR_NO_MEM;
     void *copy = malloc(len);
     if (!copy) {
@@ -1011,6 +1014,14 @@ static esp_err_t status(httpd_req_t *req) {
         heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
     NUM("minimum_free_memory",
         heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    {   /* ADR 0022: the one elastic floor and what was refused for it (each refusal a dropped packet, never silent). */
+        jw_raw(w, "\"heap_budget\":{");
+        NUM("floor", ML_HB_FLOOR);NUM("reserve", ML_HB_RESERVE);NUM("pin_buffers", ML_HB_PIN_BUFFERS);
+        NUM("refused_usb_rx", atomic_load(&usb_rx_budget.dropped_heap));
+        NUM("refused_pending", atomic_load(&ml_hb_refused[ML_HB_JIT]));
+        jw_key(w, "refused_derp_tx");jw_number(w, atomic_load(&ml_hb_refused[ML_HB_DERP_TX]));
+        jw_raw(w, "},");
+    }
     jw_raw(w, "\"members\":[");
     const char *diagnostic_names[] = {
         "map_attempts",      "map_failures",       "map_error",

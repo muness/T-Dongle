@@ -8,6 +8,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include "ml_heap_budget.h"
 
 #define GATEWAY_USB_RX_FRAME_MIN 14u
 #define GATEWAY_USB_RX_FRAME_MAX 1518u   /* 1500 MTU + Ethernet header + VLAN tag */
@@ -23,11 +24,20 @@ typedef struct {
     atomic_uint dropped_busy;     /* in-flight cap reached */
     atomic_uint dropped_nomem;    /* malloc failed */
     atomic_uint dropped_invalid;  /* length outside 14..1518 */
+    atomic_uint dropped_heap;     /* free internal heap would fall below the elastic floor (ADR 0022) */
     atomic_uint high_water;
 } gateway_usb_rx_budget;
 
-/* TinyUSB task. True: the caller now owns one slot and must release it exactly once. */
-static inline bool gateway_usb_rx_admit(gateway_usb_rx_budget *b, unsigned len) {
+/* Frames that are admitted whatever the heap says (ARP, DHCP, DNS, a TCP ACK that frees the peer): at most this many in flight, so the
+ * exemption costs at most 2 x 1,518 B below the floor, inside the racing-checker slack (ml_heap_budget.h). */
+#define GATEWAY_USB_RX_HEAP_EXEMPT 2u
+_Static_assert(GATEWAY_USB_RX_HEAP_EXEMPT * (GATEWAY_USB_RX_FRAME_MAX + 16u) <= ML_HB_SLACK_BYTES + ML_HB_PIN_BUF_BYTES, "exempt frames must fit the budget's slack");
+
+/* TinyUSB task. True: the caller now owns one slot and must release it exactly once. `free_internal` is the free internal heap
+ * (injected so the host tests can set it). Past GATEWAY_USB_RX_HEAP_EXEMPT frames in flight a frame is refused, and counted, when
+ * it would leave less than ML_HB_FLOOR free: before this the 22 slots (33 KB) had no heap check at all, and an upload flood could
+ * take every byte the heap had (min free 5,884 B after iperf runs, docs/diagnostics/baseline-0.2.22). */
+static inline bool gateway_usb_rx_admit(gateway_usb_rx_budget *b, unsigned len, size_t free_internal) {
     if (len < GATEWAY_USB_RX_FRAME_MIN || len > GATEWAY_USB_RX_FRAME_MAX) {
         atomic_fetch_add_explicit(&b->dropped_invalid, 1, memory_order_relaxed);
         return false;
@@ -36,6 +46,11 @@ static inline bool gateway_usb_rx_admit(gateway_usb_rx_budget *b, unsigned len) 
     if (now > GATEWAY_USB_RX_INFLIGHT_MAX) {
         atomic_fetch_sub_explicit(&b->inflight, 1, memory_order_acq_rel);
         atomic_fetch_add_explicit(&b->dropped_busy, 1, memory_order_relaxed);
+        return false;
+    }
+    if (now > GATEWAY_USB_RX_HEAP_EXEMPT && !ml_hb_ok(free_internal, len + 16u)) {
+        atomic_fetch_sub_explicit(&b->inflight, 1, memory_order_acq_rel);
+        atomic_fetch_add_explicit(&b->dropped_heap, 1, memory_order_relaxed);
         return false;
     }
     if (now > atomic_load_explicit(&b->high_water, memory_order_relaxed))

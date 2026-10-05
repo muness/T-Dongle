@@ -148,7 +148,7 @@ def reconcile(before, after, sent=None, received=None):
     rows += [
         ("lwip udp_recv", lw("udp_recv"), "every UDP datagram lwIP accepted, counted before the socket mailbox"),
         ("net_io udp_rx", ml("udp_rx"), "read from the sockets by net_io"),
-        ("  drains >= 8 deep", ml("drain_deep"), f"of {ml('drain_calls')} drains: the mailbox (10 slots) was within two datagrams of the silent overflow"),
+        ("  drains >= 4 deep", ml("drain_deep"), f"of {ml('drain_calls')} drains: the mailbox (6 slots) was within two datagrams of the silent overflow"),
         ("mailbox loss", mailbox, "udp_recv - udp_rx: lwIP's uncounted drop (plus a few non-net_io datagrams, DNS); must be ~0"),
         ("net_io -> wg_rx_queue", ml("udp_wg"), "classified WireGuard"),
         ("  queue full", ml("q_wg_full") + ml("derp_q_wg_full"), "wg_rx_queue overflow (was invisible without diagnostics)"),

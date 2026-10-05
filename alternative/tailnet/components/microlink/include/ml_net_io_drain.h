@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include "ml_rx_stats.h"
 
-#define ML_NET_IO_DEEP 8            /* a drain this deep means the mailbox (CONFIG_LWIP_UDP_RECVMBOX_SIZE, 10) was within two datagrams of overflowing */
+#define ML_NET_IO_DEEP 4            /* a drain this deep means the mailbox (CONFIG_LWIP_UDP_RECVMBOX_SIZE, 6) was within two datagrams of overflowing */
 #define ML_NET_IO_DRAIN_CAP 16      /* datagrams per socket per pass: >= the mailbox, so a full mailbox is emptied in one go */
 #define ML_DRAIN_EMPTY (-1)         /* recv: nothing (more) to read (EAGAIN / EWOULDBLOCK) */
 #define ML_DRAIN_ERROR (-2)         /* recv: failed for another reason */

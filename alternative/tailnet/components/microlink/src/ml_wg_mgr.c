@@ -1385,8 +1385,8 @@ unsigned ml_wg_pass_work_take(void) { unsigned n = g_pass_work; g_pass_work = 0;
 esp_err_t ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *data,size_t len) {
     if(!ml || !data || !len || len>1400 || ml->state!=ML_STATE_CONNECTED)return ESP_ERR_INVALID_STATE;
     /* Pending packets are not charged to admission at all (ml_admission.h, elastic): they come from free heap
-     * above the recovery reserve, and is refused here when it would not. */
-    if(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)<ML_ADM_RECOVERY_BYTES+WIREGUARDIF_DATA_ALLOC(len)+sizeof(ml_egress_meta_t)+sizeof(struct pbuf)+64)return ESP_ERR_NO_MEM;
+     * above the one elastic floor (ml_heap_budget.h, ADR 0022), and are refused (counted) here when they would not. */
+    if(!ml_hb_ok(heap_caps_get_free_size(MALLOC_CAP_INTERNAL),WIREGUARDIF_DATA_ALLOC(len)+sizeof(ml_egress_meta_t)+sizeof(struct pbuf)+64)){ml_hb_refuse(ML_HB_JIT);return ESP_ERR_NO_MEM;}
     unsigned old=__atomic_fetch_add(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
     if(old>=ML_JIT_PENDING) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
     WGPERF_T(t);

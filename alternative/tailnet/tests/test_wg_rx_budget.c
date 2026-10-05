@@ -44,35 +44,28 @@ static void t_model(void) {
     assert(atomic_load(&b.bytes) == 0);
     printf("  model: %u admitted, %u refused for bytes, %u for heap; peak %u of %u\n", admitted, bytes_refused, heap_refused, atomic_load(&b.peak), ML_WG_RX_QUEUE_BYTES);
 }
-/* ---- the join gate: elastic memory yields one negotiation peak to a join in progress ---- */
+/* ---- one floor (ADR 0022): the queue stops where the USB ring stops, with or without a join, and never asks the negotiation lock ---- */
 static bool g_busy; static unsigned g_busy_asked;
 static bool busy_fn(void) { g_busy_asked++; return g_busy; }
-static void t_join_gate(void) {
+static void t_one_floor(void) {
     const size_t len = 1264, cost = len + ML_WG_RX_OVERHEAD;
     ml_wgrx_budget_t b = {0};
-    /* plenty of heap: the question is never asked (no negotiation lock on the hot path) */
-    g_busy = true; g_busy_asked = 0;
-    assert(ml_wgrx_admit_gated(&b, len, ML_WG_RX_JOIN_FLOOR_FREE + cost, busy_fn) == ML_WGRX_OK && g_busy_asked == 0);
+    assert(ML_WG_RX_FLOOR_FREE == ML_WG_RX_JOIN_FLOOR_FREE && ML_WG_RX_FLOOR_FREE == ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES);
+    assert(ML_WG_RX_FLOOR_FREE == 16384 + 13500);
+    for (int busy = 0; busy < 2; busy++) {
+        g_busy = busy; g_busy_asked = 0;
+        atomic_store(&b.bytes, 0);
+        assert(ml_wgrx_admit_gated(&b, len, ML_WG_RX_FLOOR_FREE + cost - 1, busy_fn) == ML_WGRX_HEAP && atomic_load(&b.bytes) == 0);   /* nothing reserved */
+        assert(ml_wgrx_admit_gated(&b, len, ML_WG_RX_FLOOR_FREE + cost, busy_fn) == ML_WGRX_OK && atomic_load(&b.bytes) == cost);
+        assert(g_busy_asked == 0);                                  /* the hot path never takes the negotiation lock */
+    }
+    /* the old floor (recovery reserve only) no longer admits: that is what let the flood run 13 KB below the ring's floor */
     atomic_store(&b.bytes, 0);
-    /* between the floors: refused while a join runs, admitted otherwise (and then the question is asked) */
-    const size_t mid = ML_WG_RX_JOIN_FLOOR_FREE + cost - 1;
-    g_busy = true; g_busy_asked = 0;
-    assert(ml_wgrx_admit_gated(&b, len, mid, busy_fn) == ML_WGRX_HEAP && g_busy_asked == 1 && atomic_load(&b.bytes) == 0);   /* nothing reserved */
-    g_busy = false;
-    assert(ml_wgrx_admit_gated(&b, len, mid, busy_fn) == ML_WGRX_OK && atomic_load(&b.bytes) == cost);
-    atomic_store(&b.bytes, 0);
-    /* the lower floor holds with or without a join, and the byte cap is unchanged */
-    g_busy = false; g_busy_asked = 0;
-    assert(ml_wgrx_admit_gated(&b, len, ML_WG_RX_FLOOR_FREE + cost - 1, busy_fn) == ML_WGRX_HEAP && g_busy_asked == 0);
-    assert(ml_wgrx_admit_gated(&b, len, ML_WG_RX_FLOOR_FREE + cost, busy_fn) == ML_WGRX_OK);
-    /* no gate function: the old rule exactly */
-    ml_wgrx_budget_t c = {0};
-    assert(ml_wgrx_admit(&c, len, mid) == ML_WGRX_OK);
-    /* the arithmetic: the join floor is the USB ring's (recovery + one negotiation peak) */
-    assert(ML_WG_RX_JOIN_FLOOR_FREE == 16384 + 13500);
+    assert(ml_wgrx_admit(&b, len, (size_t)ML_ADM_RECOVERY_BYTES + cost) == ML_WGRX_HEAP);
+    assert(ml_wgrx_admit(&b, 28, ML_WG_RX_FLOOR_FREE + 28 + ML_WG_RX_OVERHEAD) == ML_WGRX_OK);
     /* queued bytes are readable for admission (reclaimable) */
-    assert(ml_wgrx_queued(&c) == cost);
-    printf("  join gate: floor %d B normally, %d B while a join runs\n", ML_WG_RX_FLOOR_FREE, ML_WG_RX_JOIN_FLOOR_FREE);
+    assert(ml_wgrx_queued(&b) == 28 + ML_WG_RX_OVERHEAD);
+    printf("  one floor: %d B with or without a join (was %d B outside a join)\n", ML_WG_RX_FLOOR_FREE, ML_ADM_RECOVERY_BYTES);
 }
 /* the sizes the design quotes */
 static void t_quoted_capacity(void) {
@@ -138,7 +131,7 @@ static void t_threads(void) {
 int main(void) {
     t_model();
     t_quoted_capacity();
-    t_join_gate();
+    t_one_floor();
     t_threads();
     printf("wg rx budget ok\n");
     return 0;

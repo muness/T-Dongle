@@ -4,6 +4,7 @@
  * Rationale and heap accounting: docs/adr/0015-data-plane-io.md. */
 #pragma once
 #include "lwip/opt.h"
+#include "ml_heap_budget.h"
 
 /* IDF lwIP has no per-socket TCP_WINDOW/TCP_SNDBUF (its Kconfig help is stale), TCP_WND is a
  * compile-time constant used as the per-pcb maximum, and LWIP_WND_SCALE needs SPIRAM. So the
@@ -15,6 +16,9 @@ _Static_assert(DEFAULT_TCP_RECVMBOX_SIZE >= TCP_WND / TCP_MSS + 2, "TCP receive 
 /* With CONFIG_LWIP_L2_TO_L3_COPY off, queued TCP data pins Wi-Fi RX buffers. One stalled socket
  * must not be able to take more than half of the dynamic RX pool. */
 _Static_assert(TCP_WND / TCP_MSS <= CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM / 2, "TCP window can pin more than half the Wi-Fi RX buffers");
+/* A received segment pins a Wi-Fi RX buffer (a heap block) until the application reads it, and the driver allocates it without a heap
+ * check: the window bounds that pin. It must not exceed the burst the elastic heap floor leaves room for (ml_heap_budget.h, ADR 0022). */
+_Static_assert(TCP_WND / TCP_MSS <= ML_HB_PIN_BUFFERS, "TCP window can pin more Wi-Fi RX buffers than the heap budget allows");
 /* lwIP's default segment pool is 16. IDF builds with MEMP_MEM_MALLOC (the pool is heap and not a limit), so
  * this only keeps the send buffer within that default; the real bound is per socket. */
 _Static_assert(TCP_SND_BUF / TCP_MSS <= MEMP_NUM_TCP_SEG, "TCP send buffer needs more segments than the pool holds");

@@ -48,8 +48,11 @@
 #define ROUTE_BURST_PACKETS 32
 /* The queue's byte budget is a ceiling. When the internal heap is low it shrinks
  * so a stalled consumer cannot pin the memory Wi-Fi and WireGuard need. */
+#include "ml_heap_budget.h"
 #ifndef ROUTE_HEAP_RESERVE
-#define ROUTE_HEAP_RESERVE 16384 /* = ML_ADM_RECOVERY_BYTES (asserted in gateway_main.c): the queue never eats the recovery reserve */
+/* The one elastic floor (ADR 0022): recovery reserve + negotiation peak, so Wi-Fi buffers pinned after the check cannot take the heap
+ * below the recovery reserve. Was the recovery reserve alone (16,384 B). */
+#define ROUTE_HEAP_RESERVE ML_HB_FLOOR
 #endif
 #define ROUTE_QUEUE_BYTES_MIN 2800 /* two full packets always fit */
 static inline unsigned rt_queue_budget(size_t free_heap) {
