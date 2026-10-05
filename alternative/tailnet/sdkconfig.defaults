@@ -22,6 +22,15 @@ CONFIG_LWIP_IPV4_NAPT=y
 CONFIG_LWIP_IPV6=y
 CONFIG_LWIP_TCPIP_CORE_LOCKING=y
 CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=8192
+
+# TCP window: 8 x MSS (11,520 B) instead of 4 x (5,760 B). The window is global (IDF lwIP has no
+# per-socket window option and window scaling needs SPIRAM), so it is sized for the DERP relay
+# sockets, the only ones that ever need more than 2-3 segments in flight, and bounded by what
+# the Wi-Fi RX pool can pin. The receive mailbox must be WND/MSS + 2. tools/test-tcp-window.py
+# and main/tcp_window_budget.h reject inconsistent values. See docs/adr/0014-data-plane-io.md.
+CONFIG_LWIP_TCP_WND_DEFAULT=11520
+CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=10
 CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y
 CONFIG_MBEDTLS_CHACHAPOLY_C=y

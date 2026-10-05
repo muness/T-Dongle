@@ -28,6 +28,7 @@
 #include "tinyusb_default_config.h"
 #include "tinyusb_net.h"
 #include "usb_rx_budget.h"
+#include "tcp_window_budget.h"
 /* Tunnel-to-USB transmit ring (heap, allocated once at USB start). 6 KB holds four full frames;
  * raise it only if the "usb" memory report shows dropped_full with high_water at ring_bytes. */
 #ifndef GATEWAY_USB_TX_RING_BYTES
