@@ -71,18 +71,86 @@ void wireguard_init() {
     wireguard_blake2s_final(&ctx, identifier_hash);
 }
 
+// ---------------------------------------------------------------------------
+// Global peer-slot pool. All wireguard_device instances (tailnet memberships) draw their
+// peers from this one capped pool; see wireguard_pool.h. Serialised by the lwIP core lock.
+// ---------------------------------------------------------------------------
+static wg_pool_t s_peer_pool;
+static bool s_peer_pool_ready;
+
+wg_pool_t *wireguard_peer_pool(void) {
+    if (!s_peer_pool_ready) {
+        s_peer_pool_ready = wg_pool_init(&s_peer_pool, WIREGUARD_POOL_SLOTS, sizeof(struct wireguard_peer), NULL, NULL);
+    }
+    return s_peer_pool_ready ? &s_peer_pool : NULL;
+}
+
+bool wireguard_pool_configure(size_t capacity, wg_pool_alloc_fn alloc, wg_pool_free_fn free_fn) {
+    wg_pool_t *pool = wireguard_peer_pool();
+    return pool && wg_pool_configure(pool, capacity, sizeof(struct wireguard_peer), alloc, free_fn);
+}
+
+wg_pool_stats_t wireguard_pool_stats(void) {
+    return wg_pool_get_stats(wireguard_peer_pool());
+}
+
+struct wireguard_peer *wireguard_device_peer(struct wireguard_device *dev, uint8_t index) {
+    if (!dev || index >= WIREGUARD_MAX_PEERS) {
+        return NULL;
+    }
+    return dev->peers[index];
+}
+
+uint8_t wireguard_device_peer_count(const struct wireguard_device *dev) {
+    uint8_t n = 0;
+    for (int x = 0; dev && x < WIREGUARD_MAX_PEERS; x++) {
+        n += dev->peers[x] != NULL;
+    }
+    return n;
+}
+
 struct wireguard_peer *peer_alloc(struct wireguard_device *device) {
-    struct wireguard_peer *result = NULL;
-    struct wireguard_peer *tmp;
+    wg_pool_t *pool = wireguard_peer_pool();
     int x;
-    for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        tmp = &device->peers[x];
-        if (!tmp->valid) {
-            result = tmp;
-            break;
+    if (!device || !pool) {
+        return NULL;
+    }
+    for (x = 0; x < WIREGUARD_MAX_PEERS; x++) {
+        if (!device->peers[x]) {
+            // Pool refusal (full / no memory) is counted by the pool itself.
+            struct wireguard_peer *peer = (struct wireguard_peer *)wg_pool_acquire(pool, device);
+            device->peers[x] = peer;
+            return peer;
         }
     }
-    return result;
+    return NULL; // this device's table is full
+}
+
+bool peer_free(struct wireguard_device *device, struct wireguard_peer *peer) {
+    int x;
+    if (!device || !peer) {
+        return false;
+    }
+    for (x = 0; x < WIREGUARD_MAX_PEERS; x++) {
+        if (device->peers[x] == peer) {
+            device->peers[x] = NULL;
+            wg_pool_release(wireguard_peer_pool(), peer); // wipes, then frees
+            return true;
+        }
+    }
+    return false;
+}
+
+void wireguard_device_release_peers(struct wireguard_device *device) {
+    if (!device) {
+        return;
+    }
+    // Release by owner tag (not just the table) so no slot can outlive its device even if
+    // the table was already cleared; then drop the now dangling pointers.
+    wg_pool_release_owner(wireguard_peer_pool(), device);
+    for (int x = 0; x < WIREGUARD_MAX_PEERS; x++) {
+        device->peers[x] = NULL;
+    }
 }
 
 struct wireguard_peer *peer_lookup_by_pubkey(struct wireguard_device *device, uint8_t *public_key) {
@@ -90,8 +158,8 @@ struct wireguard_peer *peer_lookup_by_pubkey(struct wireguard_device *device, ui
     struct wireguard_peer *tmp;
     int x;
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        tmp = &device->peers[x];
-        if (tmp->valid) {
+        tmp = wireguard_device_peer(device, (uint8_t)x);
+        if (tmp && tmp->valid) {
             if (memcmp(tmp->public_key, public_key, WIREGUARD_PUBLIC_KEY_LEN) == 0) {
                 result = tmp;
                 break;
@@ -104,8 +172,11 @@ struct wireguard_peer *peer_lookup_by_pubkey(struct wireguard_device *device, ui
 uint8_t wireguard_peer_index(struct wireguard_device *device, struct wireguard_peer *peer) {
     uint8_t result = 0xFF;
     uint8_t x;
+    if (!peer) {
+        return result;
+    }
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        if (peer == &device->peers[x]) {
+        if (peer == wireguard_device_peer(device, x)) {
             result = x;
             break;
         }
@@ -114,22 +185,19 @@ uint8_t wireguard_peer_index(struct wireguard_device *device, struct wireguard_p
 }
 
 struct wireguard_peer *peer_lookup_by_peer_index(struct wireguard_device *device, uint8_t peer_index) {
-    struct wireguard_peer *result = NULL;
-    if (peer_index < WIREGUARD_MAX_PEERS) {
-        if (device->peers[peer_index].valid) {
-            result = &device->peers[peer_index];
-        }
-    }
-    return result;
+    struct wireguard_peer *result = wireguard_device_peer(device, peer_index);
+    return (result && result->valid) ? result : NULL;
 }
 
+// Lookups below are deliberately scoped to THIS device's table: a receiver index that
+// happens to be live in another device's slot must never resolve here.
 struct wireguard_peer *peer_lookup_by_receiver(struct wireguard_device *device, uint32_t receiver) {
     struct wireguard_peer *result = NULL;
     struct wireguard_peer *tmp;
     int x;
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        tmp = &device->peers[x];
-        if (tmp->valid) {
+        tmp = wireguard_device_peer(device, (uint8_t)x);
+        if (tmp && tmp->valid) {
             if ((tmp->curr_keypair.valid && (tmp->curr_keypair.local_index == receiver)) ||
                 (tmp->next_keypair.valid && (tmp->next_keypair.local_index == receiver)) ||
                 (tmp->prev_keypair.valid && (tmp->prev_keypair.local_index == receiver))
@@ -147,8 +215,8 @@ struct wireguard_peer *peer_lookup_by_handshake(struct wireguard_device *device,
     struct wireguard_peer *tmp;
     int x;
     for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-        tmp = &device->peers[x];
-        if (tmp->valid) {
+        tmp = wireguard_device_peer(device, (uint8_t)x);
+        if (tmp && tmp->valid) {
             if (tmp->handshake.valid && tmp->handshake.initiator && (tmp->handshake.local_index == receiver)) {
                 result = tmp;
                 break;
@@ -375,29 +443,49 @@ struct wireguard_keypair *get_peer_keypair_for_idx(struct wireguard_peer *peer, 
     return NULL;
 }
 
-static uint32_t wireguard_generate_unique_index(struct wireguard_device *device) {
-    // We need a random 32-bit number but make sure it's not already been used in the context of this device
+struct index_probe {
+    uint32_t index;
+    bool found;
+};
+
+static bool index_probe_cb(void *slot, const void *owner, void *ctx) {
+    const struct wireguard_peer *peer = (const struct wireguard_peer *)slot;
+    struct index_probe *probe = (struct index_probe *)ctx;
+    (void)owner;
+    // Deliberately ignores the .valid flags: a stale index in a destroyed/idle state
+    // is harmless to skip, and the check stays conservative.
+    if (probe->index == peer->curr_keypair.local_index ||
+        probe->index == peer->prev_keypair.local_index ||
+        probe->index == peer->next_keypair.local_index ||
+        probe->index == peer->handshake.local_index) {
+        probe->found = true;
+        return false;
+    }
+    return true;
+}
+
+bool wireguard_receiver_index_in_use(const wg_pool_t *pool, uint32_t index) {
+    struct index_probe probe = { index, false };
+    wg_pool_each(pool, index_probe_cb, &probe);
+    return probe.found;
+}
+
+uint32_t wireguard_generate_unique_index(struct wireguard_device *device) {
+    // We need a random 32-bit number that is not in use by ANY peer of ANY device: the
+    // pool is shared, and a collision between memberships would let one membership's
+    // transport packets be attributed to (and fail against) the other's session.
+    // (Previously this only looked at the device's own peers and, due to an assignment
+    // inside the loop instead of an accumulation, only at the LAST peer slot.)
+    const wg_pool_t *pool = wireguard_peer_pool();
     uint32_t result;
     uint8_t buf[4];
-    int x;
-    struct wireguard_peer *peer;
-    bool existing;
+    (void)device;
     do {
         do {
             wireguard_random_bytes(buf, 4);
             result = U8TO32_LITTLE(buf);
         } while ((result == 0) || (result == 0xFFFFFFFF)); // Don't allow 0 or 0xFFFFFFFF as valid values
-
-        existing = false;
-        for (x=0; x < WIREGUARD_MAX_PEERS; x++) {
-            peer = &device->peers[x];
-            existing = (result == peer->curr_keypair.local_index) ||
-                    (result == peer->prev_keypair.local_index) ||
-                    (result == peer->next_keypair.local_index) ||
-                    (result == peer->handshake.local_index);
-
-        }
-    } while (existing);
+    } while (wireguard_receiver_index_in_use(pool, result));
 
     return result;
 }
@@ -760,14 +848,45 @@ bool wireguard_process_cookie_message(struct wireguard_device *device, struct wi
     return result;
 }
 
-bool wireguard_create_handshake_initiation(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_initiation *dst) {
+/* ---------------------------------------------------------------------------
+ * Handshake initiation in three steps, so the crypto can run OUTSIDE the lwIP core lock.
+ *
+ * Creating an initiation is two X25519 operations, a handful of BLAKE2s/ChaCha20-Poly1305 calls and a TAI64N read:
+ * about 40 ms on the S3. Done under the core lock it stalls every socket in the system for that long. The steps:
+ *   begin   (lock held)    copy what the crypto reads out of the device and peer, draw a receiver index
+ *   compute (NO lock)      all the cryptography, on the job's own storage; touches no device, peer or lwIP state
+ *   commit  (lock held)    if the peer is still the one the job was made for, install the handshake state
+ * wireguard_create_handshake_initiation() below is the three in a row, for callers that hold the lock throughout.
+ * ------------------------------------------------------------------------- */
+bool wireguard_initiation_begin(struct wireguard_device *device, struct wireguard_peer *peer, struct wireguard_initiation_job *job) {
+    if (!device || !peer || !peer->valid) {
+        return false;
+    }
+    memset(job, 0, sizeof(*job));
+    memcpy(job->device_public, device->public_key, WIREGUARD_PUBLIC_KEY_LEN);
+    memcpy(job->peer_public, peer->public_key, WIREGUARD_PUBLIC_KEY_LEN);
+    memcpy(job->peer_dh, peer->public_key_dh, WIREGUARD_PUBLIC_KEY_LEN);
+    memcpy(job->label_mac1_key, peer->label_mac1_key, WIREGUARD_SESSION_KEY_LEN);
+    job->use_cookie = !((peer->cookie_millis == 0) || wireguard_expired(peer->cookie_millis, COOKIE_SECRET_MAX_AGE));
+    if (job->use_cookie) {
+        memcpy(job->cookie, peer->cookie, WIREGUARD_COOKIE_LEN);
+    }
+    job->prior_valid = peer->handshake.valid;
+    job->prior_index = peer->handshake.local_index;
+    job->index = wireguard_generate_unique_index(device);
+    return true;
+}
+
+void wireguard_initiation_compute(struct wireguard_initiation_job *job) {
     uint8_t timestamp[WIREGUARD_TAI64N_LEN];
     uint8_t key[WIREGUARD_SESSION_KEY_LEN];
     uint8_t dh_calculation[WIREGUARD_PUBLIC_KEY_LEN];
     bool result = false;
 
-    struct wireguard_handshake *handshake = &peer->handshake;
+    struct wireguard_handshake *handshake = &job->handshake;
+    struct message_handshake_initiation *dst = &job->msg;
 
+    memset(handshake, 0, sizeof(*handshake));
     memset(dst, 0, sizeof(struct message_handshake_initiation));
 
     // Ci := Hash(Construction) (precalculated hash)
@@ -777,7 +896,7 @@ bool wireguard_create_handshake_initiation(struct wireguard_device *device, stru
     memcpy(handshake->hash, identifier_hash, WIREGUARD_HASH_LEN);
 
     // Hi := Hash(Hi || Spubr)
-    wireguard_mix_hash(handshake->hash, peer->public_key, WIREGUARD_PUBLIC_KEY_LEN);
+    wireguard_mix_hash(handshake->hash, job->peer_public, WIREGUARD_PUBLIC_KEY_LEN);
 
     // (Eprivi, Epubi) := DH-Generate()
     wireguard_generate_private_key(handshake->ephemeral_private);
@@ -786,28 +905,24 @@ bool wireguard_create_handshake_initiation(struct wireguard_device *device, stru
         // Ci := Kdf1(Ci, Epubi)
         wireguard_kdf1(handshake->chaining_key, handshake->chaining_key, dst->ephemeral, WIREGUARD_PUBLIC_KEY_LEN);
 
-        // msg.ephemeral := Epubi
-        // Done above - public keys is calculated into dst->ephemeral
-
         // Hi := Hash(Hi || msg.ephemeral)
         wireguard_mix_hash(handshake->hash, dst->ephemeral, WIREGUARD_PUBLIC_KEY_LEN);
 
         // Calculate DH(Eprivi,Spubr)
-        wireguard_x25519(dh_calculation, handshake->ephemeral_private, peer->public_key);
+        wireguard_x25519(dh_calculation, handshake->ephemeral_private, job->peer_public);
         if (!crypto_equal(dh_calculation, zero_key, WIREGUARD_PUBLIC_KEY_LEN)) {
 
             // (Ci,k) := Kdf2(Ci,DH(Eprivi,Spubr))
             wireguard_kdf2(handshake->chaining_key, key, handshake->chaining_key, dh_calculation, WIREGUARD_PUBLIC_KEY_LEN);
 
             // msg.static := AEAD(k,0,Spubi, Hi)
-            wireguard_aead_encrypt(dst->enc_static, device->public_key, WIREGUARD_PUBLIC_KEY_LEN, handshake->hash, WIREGUARD_HASH_LEN, 0, key);
+            wireguard_aead_encrypt(dst->enc_static, job->device_public, WIREGUARD_PUBLIC_KEY_LEN, handshake->hash, WIREGUARD_HASH_LEN, 0, key);
 
             // Hi := Hash(Hi || msg.static)
             wireguard_mix_hash(handshake->hash, dst->enc_static, sizeof(dst->enc_static));
 
-            // (Ci,k) := Kdf2(Ci,DH(Sprivi,Spubr))
-            // note DH(Sprivi,Spubr) is precomputed per peer
-            wireguard_kdf2(handshake->chaining_key, key, handshake->chaining_key, peer->public_key_dh, WIREGUARD_PUBLIC_KEY_LEN);
+            // (Ci,k) := Kdf2(Ci,DH(Sprivi,Spubr)); DH(Sprivi,Spubr) is precomputed per peer
+            wireguard_kdf2(handshake->chaining_key, key, handshake->chaining_key, job->peer_dh, WIREGUARD_PUBLIC_KEY_LEN);
 
             // msg.timestamp := AEAD(k, 0, Timestamp(), Hi)
             wireguard_tai64n_now(timestamp);
@@ -817,7 +932,7 @@ bool wireguard_create_handshake_initiation(struct wireguard_device *device, stru
             wireguard_mix_hash(handshake->hash, dst->enc_timestamp, sizeof(dst->enc_timestamp));
 
             dst->type = MESSAGE_HANDSHAKE_INITIATION;
-            dst->sender = wireguard_generate_unique_index(device);
+            dst->sender = job->index;
 
             handshake->valid = true;
             handshake->initiator = true;
@@ -829,23 +944,53 @@ bool wireguard_create_handshake_initiation(struct wireguard_device *device, stru
 
     if (result) {
         // 5.4.4 Cookie MACs
-        // msg.mac1 := Mac(Hash(Label-Mac1 || Spubm' ), msgA)
-        // The value Hash(Label-Mac1 || Spubm' ) above can be pre-computed
-        wireguard_mac(dst->mac1, dst, (sizeof(struct message_handshake_initiation)-(2*WIREGUARD_COOKIE_LEN)), peer->label_mac1_key, WIREGUARD_SESSION_KEY_LEN);
+        // msg.mac1 := Mac(Hash(Label-Mac1 || Spubm' ), msgA); the key is pre-computed per peer
+        wireguard_mac(dst->mac1, dst, (sizeof(struct message_handshake_initiation)-(2*WIREGUARD_COOKIE_LEN)), job->label_mac1_key, WIREGUARD_SESSION_KEY_LEN);
 
-        // if Lm = E or Lm ≥ 120:
-        if ((peer->cookie_millis == 0) || wireguard_expired(peer->cookie_millis, COOKIE_SECRET_MAX_AGE)) {
+        if (!job->use_cookie) {
             // msg.mac2 := 0
             crypto_zero(dst->mac2, WIREGUARD_COOKIE_LEN);
         } else {
             // msg.mac2 := Mac(Lm, msgB)
-            wireguard_mac(dst->mac2, dst, (sizeof(struct message_handshake_initiation)-(WIREGUARD_COOKIE_LEN)), peer->cookie, WIREGUARD_COOKIE_LEN);
-
+            wireguard_mac(dst->mac2, dst, (sizeof(struct message_handshake_initiation)-(WIREGUARD_COOKIE_LEN)), job->cookie, WIREGUARD_COOKIE_LEN);
         }
     }
+    job->ok = result;
 
+    // peer_dh is DH(our static private, peer static public): long-lived secret material, not needed after the KDF above.
+    crypto_zero(job->peer_dh, sizeof(job->peer_dh));
     crypto_zero(key, sizeof(key));
     crypto_zero(dh_calculation, sizeof(dh_calculation));
+}
+
+bool wireguard_initiation_commit(struct wireguard_device *device, struct wireguard_peer *peer, struct wireguard_initiation_job *job) {
+    (void)device;
+    // The peer may have been removed, replaced or re-keyed while the crypto ran outside the lock, and the lock was free
+    // for ~40 ms: another initiation for this peer (the output path starts one when a packet finds no session) or an
+    // inbound handshake may have installed its own state meanwhile. Installing ours over it would send a second,
+    // competing initiation and orphan the first one's response, so a changed handshake state refuses the commit.
+    // The receiver index chosen in begin was only drawn, not reserved (nothing records it until now): it must still
+    // be unused pool-wide, which makes "unique across every device" exact rather than 1 - 2^-32.
+    bool same = job->ok && peer && peer->valid && memcmp(peer->public_key, job->peer_public, WIREGUARD_PUBLIC_KEY_LEN) == 0 &&
+                peer->handshake.valid == job->prior_valid && peer->handshake.local_index == job->prior_index &&
+                !wireguard_receiver_index_in_use(wireguard_peer_pool(), job->index);
+    if (same) {
+        memcpy(&peer->handshake, &job->handshake, sizeof(peer->handshake));
+    }
+    // Ephemeral private key and chaining state must not linger in the job either way.
+    crypto_zero(&job->handshake, sizeof(job->handshake));
+    return same;
+}
+
+bool wireguard_create_handshake_initiation(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_initiation *dst) {
+    struct wireguard_initiation_job job;
+    bool result = false;
+    if (wireguard_initiation_begin(device, peer, &job)) {
+        wireguard_initiation_compute(&job);
+        memcpy(dst, &job.msg, sizeof(*dst));
+        result = wireguard_initiation_commit(device, peer, &job);
+    }
+    crypto_zero(&job, sizeof(job));
     return result;
 }
 

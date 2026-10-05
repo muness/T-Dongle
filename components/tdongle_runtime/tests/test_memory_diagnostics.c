@@ -122,10 +122,21 @@ static void admissions_ring(void){
  no.member_id=3;tdongle_memory_admission_note(&no);ok.member_id=2;tdongle_memory_admission_note(&ok);tdongle_memory_admission_note(&no);
  assert(tdongle_memory_admission_count()==5);
 }
+static void lock_holds(void){
+ memset(lock_stats,0,sizeof(lock_stats));
+ tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC,10);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC,99);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC,100);
+ tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC,999);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC,1000);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC,66000);
+ tdongle_lock_stats s=tdongle_lock_stats_get(TDONGLE_LOCK_WG_PERIODIC);
+ assert(s.count==6 && s.bucket[0]==2 && s.bucket[1]==1 && s.bucket[3]==1 && s.bucket[4]==1 && s.bucket[8]==1);   /* <100, <250, <1000, <2000, >=30000 */
+ assert(s.max_us==66000 && s.over_1ms==2 && s.total_us==10+99+100+999+1000+66000);
+ assert(tdongle_lock_stats_get(TDONGLE_LOCK_WG_OUTPUT).count==0 && tdongle_lock_stats_get((tdongle_lock_site)99).count==0);
+ tdongle_lock_hold((tdongle_lock_site)99,5);   /* unknown sites are filed under "other", never lost or out of bounds */
+ assert(tdongle_lock_stats_get(TDONGLE_LOCK_WG_OTHER).count==1);
+}
 int main(void){
  /* Release-size guard: the diagnostic state is the whole static overhead of the profile. */
- assert(tdongle_memory_ledger_bytes()==sizeof(owners)+sizeof(slots)+sizeof(admissions)+sizeof(drop_count) && tdongle_memory_ledger_bytes()<=2048);
- ledger();phases();slot_reuse();drops();admissions_ring();
+ assert(tdongle_memory_ledger_bytes()==sizeof(owners)+sizeof(slots)+sizeof(admissions)+sizeof(drop_count)+sizeof(lock_stats) && tdongle_memory_ledger_bytes()<=2048);
+ ledger();phases();slot_reuse();drops();admissions_ring();lock_holds();
  assert(allocator_calls==0);
  return 0;
 }

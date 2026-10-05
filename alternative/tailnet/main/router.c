@@ -688,7 +688,7 @@ bool gateway_routes_init(void) {
     /* Core 1 with the shared wg_mgr, one level above it (7): forwarding must
      * not wait behind a handshake, and it costs well under 5% of a core. Wi-Fi,
      * tcpip and net_io stay on core 0. */
-    if (xTaskCreatePinnedToCore(route_task, "usb_routes", 4096, NULL, 8, NULL, 1) != pdPASS) {
+    if (xTaskCreatePinnedToCore(route_task, "usb_routes", 4096, NULL, GATEWAY_TASK_USB_ROUTES_PRIO, NULL, GATEWAY_TASK_USB_ROUTES_CORE) != pdPASS) {
         vQueueDelete(route_queue);
         route_queue = NULL;
         routes_ready = false;

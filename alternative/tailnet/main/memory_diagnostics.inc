@@ -56,16 +56,24 @@ static bool memory_snapshot(memory_member *out, unsigned *count, unsigned *omitt
         if (!c) continue;
         if (*count == MEMORY_MEMBER_LIMIT) { (*omitted)++; continue; }
         memory_member *v = &out[(*count)++];
-        TaskHandle_t tasks[4] = {c->net_io_task, c->derp_tx_task, c->coord_task, c->wg_mgr_task};
-        const uint32_t stacks[4] = {ML_TASK_NET_IO_STACK, ML_TASK_DERP_TX_STACK, ML_TASK_COORD_STACK, ML_TASK_WG_MGR_STACK};
+        /* A membership owns one task, its control task. net_io, derp and wg_mgr are shared: their headroom is reported
+         * under every membership they serve (stack_free keeps its four slots) but their bytes are counted once, in
+         * `shared_runtime`. */
+        const bool shared = c->rt_attached && !c->stop_incomplete;
+        TaskHandle_t tasks[4] = {shared ? ml_rt_task_handle(ML_RT_TASK_NET_IO) : NULL,
+                                 shared ? ml_rt_task_handle(ML_RT_TASK_DERP) : NULL,
+                                 c->coord_task,
+                                 shared ? ml_rt_task_handle(ML_RT_TASK_WG_MGR) : NULL};
         *v = (memory_member){.id = m->id, .h2_acc = c->h2_acc_len, .lp_acc = c->lp_acc != NULL};
         for (unsigned t = 0; t < 4; t++) {
             v->stack_free[t] = UINT32_MAX;
             if (!tasks[t] || c->stop_incomplete) continue;
-            v->tasks++;
-            v->stacks += stacks[t];
-            v->tcbs += sizeof(StaticTask_t);
             v->stack_free[t] = uxTaskGetStackHighWaterMark(tasks[t]);
+        }
+        if (tasks[2] && !c->stop_incomplete) {
+            v->tasks = 1;
+            v->stacks = ML_TASK_COORD_STACK;
+            v->tcbs = sizeof(StaticTask_t);
         }
     }
     xSemaphoreGive(members_lock);
@@ -128,6 +136,17 @@ static void report_attribution(jw_writer *w) {
     bool lp_acc = false;
     uint32_t h2_acc = 0;
     for (unsigned i = 0; i < TDONGLE_OWNER_COUNT; i++) tagged += tdongle_heap_owner((tdongle_owner)i).live;
+    /* The three shared tasks exist once, while any membership is attached. */
+    ml_rt_status_t shared_rt;
+    ml_rt_status(&shared_rt);
+    uint32_t shared_tasks = 0, shared_stacks = 0, shared_tcbs = 0;
+    if (shared_rt.running)
+        for (unsigned t = 0; t < ML_RT_TASK_COUNT; t++) {
+            shared_tasks++;
+            shared_stacks += shared_rt.stack_bytes[t];
+            shared_tcbs += sizeof(StaticTask_t);
+        }
+    synthetic += shared_stacks + shared_tcbs;
     for (unsigned i = 0; i < count; i++) {
         synthetic += snapshot[i].stacks + snapshot[i].tcbs + member_queue_bytes();
         lp_acc |= snapshot[i].lp_acc;
@@ -144,6 +163,11 @@ static void report_attribution(jw_writer *w) {
     report_field(w, "unattributed", allocated > accounted ? allocated - accounted : 0);
     report_field(w, "overattributed", accounted > allocated ? accounted - allocated : 0);
     report_field(w, "members_omitted", omitted);
+    jw_raw(w, ",\"shared_runtime\":{\"tasks\":");
+    jw_number(w, shared_tasks);
+    report_field(w, "stacks", shared_stacks);
+    report_field(w, "tcbs", shared_tcbs);
+    jw_char(w, '}');
     jw_raw(w, ",\"members\":[");
     for (unsigned i = 0; i < count; i++) {
         memory_member *v = &snapshot[i];
@@ -189,6 +213,36 @@ static void report_lwip(jw_writer *w) {
     report_field(w, "wifi_static_rx", CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM);
     report_field(w, "wifi_dynamic_rx", CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM);
     report_field(w, "wifi_dynamic_tx", CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM);
+    report_end(w);
+}
+/* How long the lwIP core lock was held by the shared wg_mgr task, by call site: a histogram, so a board run can show whether
+ * any single hold exceeds the ~1 ms budget (over_1ms) and how long the worst one was. */
+static void report_locks(jw_writer *w) {
+    static const char *const sites[TDONGLE_LOCK_SITE_COUNT] = {"wg_other", "wg_periodic", "wg_commit", "wg_output", "wg_peer"};
+    report_begin(w, "locks");
+    jw_raw(w, ",\"bucket_limits_us\":[");
+    for (unsigned b = 0; b < TDONGLE_LOCK_BUCKETS - 1; b++) {
+        if (b) jw_char(w, ',');
+        jw_number(w, tdongle_lock_bucket_limit_us[b]);
+    }
+    jw_raw(w, "],\"sites\":{");
+    for (unsigned i = 0; i < TDONGLE_LOCK_SITE_COUNT; i++) {
+        tdongle_lock_stats s = tdongle_lock_stats_get((tdongle_lock_site)i);
+        if (i) jw_char(w, ',');
+        jw_key(w, sites[i]);
+        jw_raw(w, "{\"count\":");
+        jw_number(w, s.count);
+        report_field(w, "max_us", s.max_us);
+        report_field(w, "over_1ms", s.over_1ms);
+        report_field(w, "total_us", (uint32_t)s.total_us);
+        jw_raw(w, ",\"buckets\":[");
+        for (unsigned b = 0; b < TDONGLE_LOCK_BUCKETS; b++) {
+            if (b) jw_char(w, ',');
+            jw_number(w, s.bucket[b]);
+        }
+        jw_raw(w, "]}");
+    }
+    jw_char(w, '}');
     report_end(w);
 }
 /* Forwarding counters and the queue/cache bounds they are read against. */
@@ -302,6 +356,8 @@ bool gateway_memory_command(const char *line) {
     } else if (!strcmp(line, "members")) {
         report_phases(&w);
         report_admission(&w);
+    } else if (!strcmp(line, "memory locks")) {
+        report_locks(&w);
     } else if (!strcmp(line, "memory bench"))
         report_bench(&w);
     else if (!strncmp(line, "memory guard", 12) && (!line[12] || line[12] == ' ')) {

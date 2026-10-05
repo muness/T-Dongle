@@ -22,6 +22,7 @@
 #ifdef CONFIG_ML_ZERO_COPY_WG
 
 #include "microlink_internal.h"
+#include "ml_runtime.h"
 #include "esp_log.h"
 #include "lwip/udp.h"
 #include "lwip/pbuf.h"
@@ -88,6 +89,7 @@ static void zc_pcb_recv_cb(void *arg, struct udp_pcb *pcb,
             entry->src_ip_nbo = ip_addr_get_ip4_u32(addr);
             entry->src_port = port;
             __atomic_store_n(&ml->zc.rx_head, next, __ATOMIC_RELEASE);
+            ml_rt_wake(ML_RT_TASK_WG_MGR);   /* event driven: without this the ring waits for the 250 ms housekeeping tick */
         }
         /* else: ring full, drop (DISCO is retried by design) */
         pbuf_free(p);

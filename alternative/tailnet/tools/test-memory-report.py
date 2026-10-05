@@ -39,9 +39,11 @@ assert list(heap["owners"]) == ["other", "tls", "control", "map", "peer", "wg", 
 assert heap["owners"]["packet"]["live"] == 1500 and heap["owners"]["map"]["peak"] == 900 and heap["owners"]["packet"]["allocs"] == 1
 assert heap["guard_floor"] == 12288 and heap["ledger_bytes"] > 0 and heap["drops"]["derp_tx_full"] == 1
 assert heap["queue_depth"] == {"derp_tx": 8, "disco_rx": 8, "wg_rx": 8, "stun_rx": 4}
-assert attribution["tagged"] == 2400 and attribution["members"][0]["id"] == 7 and attribution["members"][0]["tasks"] == 3
-assert attribution["members"][0]["stacks"] == 6144 + 10240 + 12288 and attribution["members"][0]["stack_free"] == [1000, 2000, 3000, None]
-assert attribution["synthetic"] == 28672 + 3 * 336 + 1234 and attribution["unattributed"] == 300000 - 60000 - 2400 - attribution["synthetic"]
+assert attribution["tagged"] == 2400 and attribution["members"][0]["id"] == 7 and attribution["members"][0]["tasks"] == 1
+# A membership keeps ONE task (control); net_io, derp and wg_mgr exist once, counted under shared_runtime.
+assert attribution["members"][0]["stacks"] == 8704 and attribution["members"][0]["stack_free"] == [1000, 2000, 3000, 4000]
+assert attribution["shared_runtime"] == {"tasks": 3, "stacks": 7168 + 7680 + 8192, "tcbs": 3 * 336}, attribution["shared_runtime"]
+assert attribution["synthetic"] == (7168 + 7680 + 8192 + 3 * 336) + (8704 + 336 + 1234) and attribution["unattributed"] == 300000 - 60000 - 2400 - attribution["synthetic"]
 assert attribution["n2"] == {"lp_acc_capacity": 65536, "lp_acc_allocated": False, "h2_window_advertised": 65536, "h2_acc_live_max": 0,
                              "gateway_plain_static": 20496, "gateway_json_static": 16384}, attribution["n2"]
 assert lwip["tcp_wnd"] == 5760 and lwip["pbuf_pool_size"] == 16
@@ -55,6 +57,10 @@ admission = reports("members", "admission")[0]
 assert admission["override"] is True and len(admission["attempts"]) == 6
 assert [a["verdict"] for a in admission["attempts"]] == ["refused_budget", "refused_largest", "refused_sockets", "override", "refused_floor", "start_failed"], admission
 
+locks = reports("memory locks", "locks")[0]
+assert locks["bucket_limits_us"] == [100, 250, 500, 1000, 2000, 5000, 10000, 30000]
+assert locks["sites"]["wg_periodic"]["count"] == 2 and locks["sites"]["wg_periodic"]["max_us"] == 42000 and locks["sites"]["wg_periodic"]["over_1ms"] == 1
+assert locks["sites"]["wg_periodic"]["buckets"] == [0, 0, 0, 1, 0, 0, 0, 0, 1] and locks["sites"]["wg_other"]["count"] == 0
 route = reports("route", "route")[0]
 assert route["forwarded_out"] == 0 and route["alias_miss"] == 9 and route["queue_full"] == 30 and route["queue_depth"] == 16 and route["flow_slots"] == 64, route
 assert len([k for k in route if k not in ("schema", "kind")]) == 19 + 4, route

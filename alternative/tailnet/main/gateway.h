@@ -12,6 +12,11 @@ typedef struct membership {
     uint32_t next_attempt_ms; /* diagnostics: an over-budget attempt is retried at most once a minute */
 #endif
 } membership_t;
+/* Core 1 task priorities, highest first: Wi-Fi/tcpip are on core 0 (23, 18). usb_routes (forwarding) outranks the shared
+ * wg_mgr (ML_TASK_WG_MGR_PRIO) so a packet never waits behind a handshake, and wg_mgr outranks coord. On core 0 the shared
+ * net_io (7) outranks the shared derp task (5). Asserted in gateway_main.c; documented in ADR 0013/0014. */
+#define GATEWAY_TASK_USB_ROUTES_PRIO 8
+#define GATEWAY_TASK_USB_ROUTES_CORE 1
 extern membership_t *members;
 extern esp_netif_t *usb_interface;
 extern SemaphoreHandle_t members_lock;
