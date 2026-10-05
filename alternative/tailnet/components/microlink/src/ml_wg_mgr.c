@@ -329,6 +329,13 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
 
     /* Use raw PCB to send — safe from any thread context */
     if (!ml->wg_output_pcb) return ERR_CONN;
+    /* The copying send is for a pbuf chain, which this firmware never builds (wg_udp_output_pbuf_cb sends the one-piece pbuf as it is), but it
+     * is a heap allocation on the data path: transport data is refused below the elastic floor like the rest (ADR 0022). */
+    if (len >= 4 && data[0] == 0x04 &&
+        !ml_hb_ok(heap_caps_get_free_size(MALLOC_CAP_INTERNAL), len + (size_t)LWIP_MEM_ALIGN_SIZE((u16_t)PBUF_TRANSPORT) + sizeof(ml_spiram_pbuf_t) + 32u)) {
+        ml_hb_refuse(ML_HB_WG_COPY);
+        return ERR_MEM;
+    }
 
     /* Throughput-stability fix (2026-05-24, re-applied after the WiFi
      * channel-mismatch fix uncovered this as the residual stutter

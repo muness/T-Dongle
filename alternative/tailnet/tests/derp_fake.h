@@ -52,6 +52,9 @@ typedef struct {
     unsigned connected_events, disconnected_events, failed_events, deferred_events;
     long live_allocs;
     bool alloc_fail;
+    bool refuse_rx;             /* rx_admit says no (the heap budget, ADR 0022) */
+    unsigned rx_asked;          /* times rx_admit was asked */
+    size_t rx_asked_bytes;      /* ... and the size it was last asked about */
     /* negotiation token (shared pointer; NULL = free pass) */
     ml_neg_t *neg;              /* the real negotiation token, shared between fakes (NULL = free pass) */
     int my_id;
@@ -61,6 +64,7 @@ typedef struct {
 static uint64_t fake_time(void *u) { return *((fake_t *)u)->clock; }
 static void *fake_alloc(void *u, size_t n) { fake_t *f = u; if (f->alloc_fail) return NULL; f->live_allocs++; return malloc(n); }
 static void fake_release_block(void *u, void *p) { fake_t *f = u; if (p) { f->live_allocs--; free(p); } }
+static bool fake_rx_admit(void *u, size_t n) { fake_t *f = u; f->rx_asked++; f->rx_asked_bytes = n; return !f->refuse_rx; }
 
 static int fake_read(void *u, uint8_t *buf, size_t len) {
     fake_t *f = u;
@@ -170,7 +174,7 @@ static void fake_token_release(void *u) {
 }
 
 static const ml_derp_link_ops_t fake_ops = {
-    .now_ms = fake_time, .alloc = fake_alloc, .release = fake_release_block,
+    .now_ms = fake_time, .alloc = fake_alloc, .release = fake_release_block, .rx_admit = fake_rx_admit,
     .io_read = fake_read, .io_write = fake_write,
     .transport_open = fake_transport_open, .transport_step = fake_transport_step, .transport_close = fake_transport_close,
     .clock_valid = fake_clock_valid, .make_upgrade_request = fake_upgrade, .make_client_info = fake_client_info,

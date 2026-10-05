@@ -103,6 +103,9 @@ typedef struct {
     uint64_t (*now_ms)(void *user);
     void *(*alloc)(void *user, size_t bytes);
     void (*release)(void *user, void *block);
+    /* Optional (NULL admits everything): asked before the receive buffer of a relayed packet of `bytes` is allocated. False: the frame
+     * is read off the wire and dropped (counted in alloc_drops) and the stream stays in sync. The heap budget's check (ADR 0022). */
+    bool (*rx_admit)(void *user, size_t bytes);
 
     /* Established transport (TLS). >0 bytes moved, 0 would block, <0 the connection is gone. */
     int (*io_read)(void *user, uint8_t *buf, size_t len);

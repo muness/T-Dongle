@@ -29,11 +29,15 @@
  * gateway_main.c, tcp_window_budget.h and tools/test-heap-budget.py hold the lwIP and Wi-Fi settings to. When the negotiation peak
  * shrinks again (it was 16,000 B, is 13,500 B), the largest allowed burst shrinks with it, loudly, at build time.
  *
- * What is NOT bounded here, said plainly. The pool of dynamic Wi-Fi RX buffers (16) is larger than ML_HB_PIN_BUFFERS (6). Each
- * source (the UDP mailbox, the TCP window) is held to 6 on its own; a direct-path UDP flood and a relayed TCP flood at the same
- * instant could pin 6 more (up to 9,984 B), taking the minimum to about the recovery reserve minus that. The diagnostics build
- * records the owner breakdown at every new heap minimum (`memory` -> `heap_low`), which is the evidence that says whether that
- * corner is real.
+ * Wi-Fi buffers (amendment 2, 2026-10-06). The pool of dynamic Wi-Fi buffers is larger than ML_HB_PIN_BUFFERS (6): 16 RX and 16 TX. Each
+ * unchecked source (the UDP mailbox, the TCP window, the tcpip mailbox, the TX pool) was held to 6 on its own and nothing held them
+ * together, and the board's minimum under a 6 Mbit/s UDP download plus TCP download was 5,000 B. They are now counted where they
+ * start and admitted to the same budget (main/wifi_pin_budget.h): a shared BAND of ML_HB_PIN_BUFFERS - 1 buffers (5, at most 4 per direction, plus 1 for the RX frame under
+ * check) that the floor pays for, and anything beyond it only while the free heap stays at or above ML_HB_FLOOR. TX: the STA netif's
+ * transmit, released by the driver's tx-done callback. RX: where the frame enters lwIP, released when its pbuf is freed.
+ * The remaining unchecked allocations on the data path are each one block at a time, inside the racing-checker slack: the DERP link's
+ * transmit frame (one per link, built from a queue entry that is released at once), the router's output pbuf (replaces the datagram
+ * it was made from), and the WireGuard datagram copy for a pbuf chain (never built here, checked anyway).
  *
  * Every refusal is counted (ml_hb_refused[], /status `heap_budget`), never silent, never a crash: the datagram or frame is dropped
  * and TCP or the sender treats it as loss.
@@ -68,11 +72,24 @@ _Static_assert(ML_HB_FLOOR == ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES, "on
 /* The check every elastic consumer makes: after taking `cost` bytes, at least ML_HB_FLOOR must remain free. */
 static inline bool ml_hb_ok(size_t free_internal, size_t cost) { return free_internal >= (size_t)ML_HB_FLOOR + cost; }
 
+/* A datagram or relay frame about to be copied into a heap block that then waits in a queue the receiver reads (net_io, the DERP link):
+ * the elastic check, with one exemption so a path can still be discovered and kept alive in a flood: a small datagram (DISCO pings and
+ * pongs are ~150 B, STUN responses ~100 B, CallMeMaybe a few hundred) is taken when its destination queue is EMPTY, which costs at most
+ * one such block per queue (two queues and the DERP receive buffer per membership) below the floor. WireGuard data has no exemption
+ * (ml_wgrx_admit_gated is the check there, bytes as well as heap). */
+#define ML_HB_RX_SMALL_BYTES 512u
+static inline bool ml_hb_rx_ok(size_t free_internal, size_t len, bool destination_empty) {
+    return (destination_empty && len <= ML_HB_RX_SMALL_BYTES) || ml_hb_ok(free_internal, len + 16u);
+}
+
 /* Where a refusal happened. Always on (one relaxed increment on a path that is already dropping a packet). */
 /* The WireGuard receive queue (ml.q_wg_heap) and the router queue (route.* drops) already count their own refusals. */
 typedef enum {
     ML_HB_JIT,          /* packet pending a peer handshake */
     ML_HB_DERP_TX,      /* relay transmit queue */
+    ML_HB_RX_CTRL,      /* DISCO or STUN datagram from the UDP socket, refused before its copy was made */
+    ML_HB_DERP_RX,      /* relayed frame refused before its receive buffer was allocated */
+    ML_HB_WG_COPY,      /* WireGuard datagram copy for a pbuf chain refused */
     ML_HB_SITE_COUNT
 } ml_hb_site_t;
 extern atomic_uint ml_hb_refused[ML_HB_SITE_COUNT];

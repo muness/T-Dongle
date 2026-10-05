@@ -174,6 +174,20 @@ int main(void) {
     }
     printf("  worst case over F0 34-44 KB and 6 seeds: now %ld B (reserve %d), before %ld B\n", worst_now, ML_HB_RESERVE, worst_before);
     assert(worst_before < (long)ML_HB_RESERVE - 8000);     /* the old constants break the reserve by a wide margin (upload had no check at all) */
+    /* ADR 0022 amendment 2: the receive-side copies (net_io's DISCO and STUN datagrams, the DERP link's receive buffer). The elastic check, with
+     * one exemption so a path survives a flood: a small datagram into an EMPTY queue. Exactly at the floor + len + 16 is admitted, one byte
+     * less is not (unless exempt); a datagram over ML_HB_RX_SMALL_BYTES or into a queue that already holds one never is exempt. */
+    {
+        assert(ml_hb_rx_ok(0, 150, true) && ml_hb_rx_ok(0, ML_HB_RX_SMALL_BYTES, true));
+        assert(!ml_hb_rx_ok(0, ML_HB_RX_SMALL_BYTES + 1, true) && !ml_hb_rx_ok(0, 150, false));
+        assert(ml_hb_rx_ok((size_t)ML_HB_FLOOR + 1400 + 16, 1400, false) && !ml_hb_rx_ok((size_t)ML_HB_FLOOR + 1400 + 15, 1400, false));
+        assert(ml_hb_rx_ok((size_t)ML_HB_FLOOR + 1400 + 16, 1400, true) && !ml_hb_rx_ok((size_t)ML_HB_FLOOR + 1400 + 15, 1400, true));
+        /* What the exemption can take below the floor: one block per empty queue (disco, stun) and the DERP receive buffer, per membership. */
+        const long per_membership = 3 * (ML_HB_RX_SMALL_BYTES + 16);
+        assert(per_membership == 1584 && per_membership < (long)ML_HB_PIN_BUF_BYTES);
+        printf("  receive copies: small datagram into an empty queue exempt (<= %u B, at most %ld B per membership below the floor), everything else at the floor\n",
+               ML_HB_RX_SMALL_BYTES, per_membership);
+    }
     /* The racing-checker slack, by arithmetic: two checkers that both pass on the same free value f >= FLOOR + max(c1, c2) leave
      * f - c1 - c2 >= FLOOR - min(c1, c2): at most one buffer below the floor. The largest cost is a ring chunk against a full frame. */
     {

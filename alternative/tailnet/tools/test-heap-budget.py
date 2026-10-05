@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """ADR 0022: the lwIP and Wi-Fi settings in sdkconfig.defaults must satisfy the heap budget in components/microlink/include/ml_heap_budget.h.
 
-Each setting that lets a socket or the driver pin Wi-Fi buffers (the UDP receive mailbox, the TCP window in segments, the Wi-Fi TX
-pool) is compiled against the real header, which refuses a build where the largest burst does not fit between the elastic floor and
-the recovery reserve. Then each limit is shown to be live by compiling one step past it, and the sanitized adversarial simulation
-(tests/test_heap_budget.c) is built and run.
+Each setting that lets a socket pin Wi-Fi buffers (the UDP receive mailbox, the TCP window in segments) is compiled against the real
+header, which refuses a build where the largest burst does not fit between the elastic floor and the recovery reserve. The Wi-Fi TX
+pool is no longer one of them (amendment 2): the driver's buffers are counted at run time (main/wifi_pin_budget.h), so the pool only
+has to hold the band and fit the budget's FIFO, which is compiled against the real header too. Then each limit is shown to be live by
+compiling one step past it, and the sanitized adversarial simulations (tests/test_heap_budget.c, tests/test_wifi_pin_budget.c, the
+latter also under ThreadSanitizer) are built and run.
 """
 import pathlib
 import re
@@ -30,13 +32,13 @@ assert int(cfg["CONFIG_LWIP_TCP_WND_DEFAULT"]) % MSS == 0
 def compiles(udp_slots, tx_buffers, tcp_segments):
     with tempfile.TemporaryDirectory() as d:
         src = pathlib.Path(d) / "t.c"
-        src.write_text(f"""#include "ml_heap_budget.h"
+        src.write_text(f"""#define CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM {tx_buffers}
+#include "wifi_pin_budget.h"
 _Static_assert({udp_slots} <= ML_HB_PIN_BUFFERS, "udp mailbox");
-_Static_assert({tx_buffers} <= ML_HB_PIN_BUFFERS, "wifi tx pool");
 _Static_assert({tcp_segments} <= ML_HB_PIN_BUFFERS, "tcp window");
 int main(void) {{ return 0; }}
 """)
-        r = subprocess.run(["cc", "-std=c11", "-fsyntax-only", "-I", str(root / "components/microlink/include"), str(src)], capture_output=True, text=True)
+        r = subprocess.run(["cc", "-std=c11", "-fsyntax-only", "-I", str(root / "components/microlink/include"), "-I", str(root / "main"), str(src)], capture_output=True, text=True)
         return r.returncode == 0, r.stderr
 
 with tempfile.TemporaryDirectory() as d:
@@ -47,14 +49,23 @@ with tempfile.TemporaryDirectory() as d:
 limit = int(limit)
 ok, err = compiles(udp, tx, segs)
 if not ok:
-    sys.exit(f"sdkconfig.defaults violates the heap budget (limit {limit} pinned Wi-Fi buffers per source; UDP mailbox {udp}, TX pool {tx}, TCP window {segs} segments):\n{err}")
-for name, args in (("UDP mailbox", (limit + 1, tx, segs)), ("Wi-Fi TX pool", (udp, limit + 1, segs)), ("TCP window", (udp, tx, limit + 1))):
+    sys.exit(f"sdkconfig.defaults violates the heap budget (limit {limit} pinned Wi-Fi buffers per socket; UDP mailbox {udp}, TCP window {segs} segments; TX pool {tx} against a FIFO of 16 and a band of 1):\n{err}")
+# The TX pool: no longer limited to the pin burst, but it must hold the band and fit the FIFO. 16 is the driver's size and the FIFO's: 17 and 0 are rejected.
+for name, args in (("UDP mailbox", (limit + 1, tx, segs)), ("TCP window", (udp, tx, limit + 1)), ("Wi-Fi TX pool above the budget's FIFO", (udp, 17, segs)),
+                   ("Wi-Fi TX pool below its band", (udp, 0, segs))):
     accepted, _ = compiles(*args)
     assert not accepted, f"the heap budget did not reject a {name} one past the limit"
-print(f"heap budget: UDP mailbox {udp}, Wi-Fi TX pool {tx}, TCP window {segs} segments, all within {limit} pinned Wi-Fi buffers; the limit is live (one past it is rejected for each).")
+accepted, _ = compiles(udp, 16, segs)
+assert accepted, "a TX pool of 16 (the driver's size, runtime-bounded) must be accepted"
+print(f"heap budget: UDP mailbox {udp} and TCP window {segs} segments within {limit} pinned Wi-Fi buffers; Wi-Fi TX pool {tx} within the budget's FIFO (16); each limit is live (one past it is rejected).")
 
 binary = root / "build-host" / "test_heap_budget"
 binary.parent.mkdir(exist_ok=True)
 subprocess.run(["cc", "-std=c11", "-O1", "-g", "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined", "-Wall", "-Wextra",
                 "-I", str(root / "components/microlink/include"), "-I", str(root / "main"), str(root / "tests/test_heap_budget.c"), "-o", str(binary)], check=True)
 subprocess.run([str(binary)], check=True)
+for name, sanitizers in (("test_wifi_pin_budget", "address,undefined"), ("test_wifi_pin_budget_tsan", "thread")):
+    binary = root / "build-host" / name
+    subprocess.run(["cc", "-std=c11", "-O1", "-g", f"-fsanitize={sanitizers}", "-fno-sanitize-recover=all", "-Wall", "-Wextra", "-Werror", "-pthread",
+                    "-I", str(root / "components/microlink/include"), "-I", str(root / "main"), str(root / "tests/test_wifi_pin_budget.c"), "-o", str(binary)], check=True)
+    subprocess.run([str(binary)], check=True)

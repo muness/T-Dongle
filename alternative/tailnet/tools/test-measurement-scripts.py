@@ -251,13 +251,17 @@ def test_inbound_accounting():
                                "cold_us_max": 5000, "drains_sent": [3, 90, 4, 2, 1], "gap_hist_ms": [0, 10, 20, 60, 9], "tx_worker_demotions": 3, "rx_dropped_heap": 5})
     drain_after["heap"] = {"uptime_ms": 9, "free": 30000, "min": 17000, "largest": 20000}
     drain_after["heap_low"] = {"floor": 29884, "reserve": 16384, "free_hi": 37000, "events": 1, "records": [
-        {"uptime_ms": 9000, "min": 17000, "free": 18000, "largest": 9000, "tx_ring": 7620, "tx_elastic": 3048, "wgq": 5000, "rx_inflight": 2, "packet_live": 1000}]}
+        {"uptime_ms": 9000, "min": 17000, "free": 18000, "largest": 9000, "tx_ring": 7620, "tx_elastic": 3048, "wgq": 5000, "rx_inflight": 2, "packet_live": 1000,
+         "wifi_rx_pins": 4, "wifi_tx_inflight": 1}]}
     rows, summary = inbound_accounting.reconcile(drain_before, drain_after, 100, 100)
     d = summary["usb_drain"]
     assert d["ntb_xfers"] == 100 and d["mean_ntb_bytes"] == 2540 and d["frames_per_ntb"] == 2.0 and d["gap_mean_ms"] == 7.4 and d["wake_latency_ms"] > 4.5
     assert d["cold_start_mean_ms"] == 1.2 and d["drains_sent"] == [3, 90, 4, 2, 1] and summary["usb_rx_refused_for_heap"] == 5 and summary["heap_min_free"] == 17000
     text = inbound_accounting.render(rows, summary)
     assert "USB IN pipe: 100 NTBs" in text and "wake latency about" in text and "unexplained" in text and "dropped 19000 B from the peak" in text
+    # The wg queue is part of packet_live (its datagrams are packet blocks): 19,000 - (3,048 elastic + 2 x 1,534 usb frames + 1,000 packets) = 11,884, not 6,884.
+    assert "unexplained (Wi-Fi buffers pinned by sockets, lwIP) 11884" in text and "wg queue 5000 of them" in text
+    assert "Wi-Fi buffers pinned: 4 RX, 1 TX in flight (~8320 B at full size)" in text
     # lwIP's udp.recv is 16 bits wide and wraps: a run that crosses the wrap must not show a negative (or huge) mailbox loss.
     wrap_before, wrap_after = snap(base=0), snap({"udp_rx": 1000, "udp_wg": 990, "wg_in": 990, "wg_to_wireguardif": 990}, {"rx_data": 990, "rx_delivered": 990}, {"forwarded_in": 990, "usb_tx": 990}, {"tx_sent": 990})
     wrap_before["inbound"]["lwip"]["udp_recv"] = 65000
