@@ -229,7 +229,9 @@ static void handle(char *line) {
                    "\"password\":\"password\",\"priority\":50}, display "
                    "BRIGHTNESS ROTATION DIM_SECONDS, setup, cancel, reset, "
                    "confirm-reset, reboot, bootloader, setup N (preselect slot N). Profiles validate by association "
-                   "before replacing saved data. No console echo.\r\n");
+                   "before replacing saved data. No console echo. Extensions: capabilities.\r\n");
+    else if (!strcmp(line, "capabilities"))
+        mgmt_write("capabilities schema=1 features=telemetry\r\n");
     else if (!strcmp(line, "portal"))
         portal_trace_dump();
     else if (!strcmp(line, "status") || !strcmp(line, "show") || !strcmp(line, "diagnostics"))
