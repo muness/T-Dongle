@@ -2,8 +2,6 @@
  * 16-bit STAT_COUNTER as ESP-IDF v5.5.5 (LWIP_STATS_LARGE is 0). */
 #pragma once
 #include <stdint.h>
-#define LWIP_STATS 1
-#define UDP_STATS 1
 typedef uint16_t STAT_COUNTER;
 struct stats_proto { STAT_COUNTER xmit, recv, fw, drop, chkerr, lenerr, memerr, rterr, proterr, opterr, err, cachehit; };
 struct stats_mem { const char *name; STAT_COUNTER err; uint16_t avail, used, max; STAT_COUNTER illegal; };

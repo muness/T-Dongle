@@ -165,7 +165,7 @@ for command in sections:
 nostats = out / "test_memory_report_nostats"
 subprocess.run(["cc", "-std=gnu11", "-g", "-fsanitize=address,undefined", "-DHOST_LWIP_STATS=0", "-DCONFIG_TDONGLE_MEMORY_DIAGNOSTICS=1",
                 "-DCONFIG_TDONGLE_MEMORY_GUARD_FLOOR_BYTES=12288", "-I", str(r / "tests/host"), "-I", str(r / "main"),
-                "-I", str(runtime / "tests/stubs"), "-I", str(runtime / "include"), "-I", str(r / "components/microlink/include"),
+                "-I", str(runtime / "tests/stubs"), "-I", str(runtime / "include"), "-I", str(r / "components/microlink/include"), "-I", str(r / "components/microlink/components/wireguard_lwip/src"),
                 str(r / "tests/test_memory_report.c"), str(runtime / "memory.c"), str(runtime / "memory_diagnostics.c"), "-o", str(nostats)], check=True)
 text2 = subprocess.run([str(nostats)], check=True, capture_output=True, text=True).stdout
 block = text2.split("#> wifistats_before\n")[1].split("#> ")[0]
