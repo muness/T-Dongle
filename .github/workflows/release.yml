@@ -15,8 +15,6 @@ jobs:
     runs-on: [self-hosted, linux, x64, linux-general]
     timeout-minutes: 45
     steps:
-      - name: Verify home lab builder connection
-        run: curl --fail --silent --show-error --max-time 15 http://fleet-broker.tail434280.ts.net:8080/healthz
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y git wget flex bison gperf python3-venv cmake ninja-build ccache libffi-dev libssl-dev libusb-1.0-0
       - run: tools/bootstrap.sh
