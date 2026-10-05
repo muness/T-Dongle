@@ -85,3 +85,19 @@ E10 (MSS/MTU). Capture on host: `tcpdump -ni <usb iface> -s 0 tcp` during iperf;
 - Not verified: TinyUSB task priority and NCM timer behavior (managed component absent from worktree); actual lwIP tcpip task priority in this build (IDF default 18); `LWIP` TCP window/MSS settings; DERP path was not measured (direct UDP path only).
 - Percentages in R1 are estimates from loop arithmetic; E1/E2 are designed to confirm them in one flash each.
 - Another worker restructures microlink tasks on a different branch; line numbers refer to origin/overhaul/multi-tailnet at the time of reading and the design is expressed against shared net_io / derp / wg_mgr tasks of ADR 0013.
+
+## On-board results (coordinator, 2026-10-05)
+
+| Experiment | Result | Verdict |
+|---|---|---|
+| Wi-Fi power save off (`WIFI_PS_NONE`) | TCP 0.94 up / 0.52 down / 0.94 Mbit/s, unchanged | Not the throughput limiter. Still a candidate for the RTT tail |
+| `route_queue` 4 → 32 | TCP unchanged (~1.0 Mbit/s); UDP 3 Mbit/s offered at `-l 1200` loses 59% | Queue depth alone is not the limiter |
+| #1: outbound cap and `jit_pending` 4 → 16, `vTaskDelay(1)`, `FREERTOS_HZ=1000` | TCP up 1.14 Mbit/s (+20%), UDP 1.50 Mbit/s; heap minimum 6.4 KB; **chip temperature 62–65 °C** (was 32–46) | Minor factor. Polling has a thermal cost, so prefer event-driven wakeups |
+| #5: per-task CPU during iperf (diagnostics build, 1 kHz tick) | IDLE0 51.0%, IDLE1 46.4%; `ml_wg_mgr` 32.9%; **`usb_routes` 32.0%**; `ipc1` 12.7%; `wifi` 7.8%; `ml_net_io` 6.6%; `ml_derp_tx` 3.5%; `tiT` 3.4%; TinyUSB 2.1% | **Not CPU-bound.** `usb_routes` costs about 1.5 ms per packet at ~1 Mbit/s, more than all of WireGuard. High `ipc1` suggests cross-core IPC on the per-packet path, possibly flash/cache operations (flash-directory or alias lookups) |
+
+**Revised priority for PR-B:**
+
+1. Profile and remove the per-packet cost in `usb_routes`: flash/directory access, linear scans, checksums.
+2. Raise the forwarding path's priority and pin it to a core.
+3. Event-driven wakeups instead of a faster tick.
+4. The shared packet pool.
