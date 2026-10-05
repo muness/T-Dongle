@@ -18,6 +18,8 @@
 #include "microlink.h"
 #include "ml_config_httpd.h"
 #include "ml_published_name.h"
+#include "ml_derp_cert.h"
+#include "ml_derp_tls.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -448,6 +450,7 @@ typedef struct {
     uint16_t stun_port;     /* 0 = default 3478 */
     uint16_t derp_port;     /* 0 = default 443 */
     bool stun_only;         /* true if node only serves STUN, not DERP */
+    ml_derp_cert_t cert;    /* how to authenticate the TLS server: from DERPNode.CertName */
 } ml_derp_node_t;
 
 typedef struct {
@@ -491,6 +494,8 @@ typedef struct {
     bool connected;
     volatile bool rx_parked;        /* reader sets true when NOT touching the ssl context */
     uint64_t last_recv_ms;          /* For keepalive watchdog */
+    uint32_t tls_verify_failures;   /* handshakes refused because the server did not authenticate */
+    uint32_t tls_deferred;          /* connects postponed until the wall clock is set */
 } ml_derp_conn_t;
 
 /* ============================================================================

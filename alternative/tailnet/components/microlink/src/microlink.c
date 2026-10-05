@@ -738,6 +738,8 @@ esp_err_t microlink_get_diag(const microlink_t *ml, microlink_diag_t *out) {
     out->rc_coord_transport = ml->rc_coord_transport;
     out->rc_derp_rx_wd      = ml->rc_derp_rx_wd;
     out->rc_derp_retry      = ml->rc_derp_retry;
+    out->derp_tls_verify_failures = ml->derp.tls_verify_failures;
+    out->derp_tls_deferred  = ml->derp.tls_deferred;
     /* First 16 hex chars of the WG public key (= 8 bytes). Enough to
      * eyeball-match against `headscale nodes list` output. */
     for (int i = 0; i < 8; i++) {

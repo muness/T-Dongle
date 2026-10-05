@@ -286,6 +286,8 @@ typedef struct {
     uint32_t rc_coord_transport;  /* established coord session died (transport) */
     uint32_t rc_derp_rx_wd;       /* DERP RX-liveness watchdog fired */
     uint32_t rc_derp_retry;       /* failed DERP connect attempts (backoff ladder) */
+    uint32_t derp_tls_verify_failures; /* DERP handshakes refused: server certificate not authenticated */
+    uint32_t derp_tls_deferred;   /* DERP connects postponed until the wall clock is set */
 } microlink_diag_t;
 
 esp_err_t microlink_get_diag(const microlink_t *ml, microlink_diag_t *out);

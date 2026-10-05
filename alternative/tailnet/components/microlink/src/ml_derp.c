@@ -28,11 +28,18 @@
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
 #include "nacl_box.h"
+#include "esp_crt_bundle.h"
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 
 static const char *TAG = "ml_derp";
+
+/* Trust anchors: the ESP-IDF certificate bundle (Mozilla roots, flash resident). */
+/* Public in the library, not declared by esp_crt_bundle.h: the callback that
+ * esp_crt_bundle_attach() installs and that ml_derp_tls.c chains to. */
+extern int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int depth, uint32_t *flags);
+static int derp_trust_attach(void *conf) { return esp_crt_bundle_attach(conf) == ESP_OK ? 0 : -1; }
 
 /* Timeout for DERP connection handshake operations */
 #define DERP_CONNECT_TIMEOUT_MS  10000
@@ -677,6 +684,10 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
     const char *derp_host = ML_DERP_HOST;
     int derp_port = ML_DERP_PORT;
     bool region_in_map = false;
+    ml_derp_cert_t derp_cert = { .kind = ML_DERP_CERT_HOSTNAME };
+    /* The map is rewritten by the control task at any time; take a private
+     * copy of the name the TLS policy is judged against. */
+    char host_copy[sizeof(ml->derp_regions[0].nodes[0].hostname)];
 
     if (ml->derp_region_count > 0 && ml->derp_home_region > 0) {
         for (int i = 0; i < ml->derp_region_count; i++) {
@@ -685,8 +696,10 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
                  * This ensures we connect to the same node as most peers. */
                 for (int attempt = 0; attempt < ml->derp_regions[i].node_count; attempt++) {
                     if (!ml->derp_regions[i].nodes[attempt].stun_only &&
-                        ml->derp_regions[i].nodes[attempt].hostname[0]) {
+                        ml->derp_regions[i].nodes[attempt].hostname[0] &&
+                        ml->derp_regions[i].nodes[attempt].cert.kind != ML_DERP_CERT_INVALID) {
                         derp_host = ml->derp_regions[i].nodes[attempt].hostname;
+                        derp_cert = ml->derp_regions[i].nodes[attempt].cert;
                         if (ml->derp_regions[i].nodes[attempt].derp_port > 0) {
                             derp_port = ml->derp_regions[i].nodes[attempt].derp_port;
                         }
@@ -709,8 +722,10 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         for (int i = 0; i < ml->derp_region_count && !region_in_map; i++) {
             for (int j = 0; j < ml->derp_regions[i].node_count; j++) {
                 if (!ml->derp_regions[i].nodes[j].stun_only &&
-                    ml->derp_regions[i].nodes[j].hostname[0]) {
+                    ml->derp_regions[i].nodes[j].hostname[0] &&
+                    ml->derp_regions[i].nodes[j].cert.kind != ML_DERP_CERT_INVALID) {
                     derp_host = ml->derp_regions[i].nodes[j].hostname;
+                    derp_cert = ml->derp_regions[i].nodes[j].cert;
                     if (ml->derp_regions[i].nodes[j].derp_port > 0) {
                         derp_port = ml->derp_regions[i].nodes[j].derp_port;
                     }
@@ -722,6 +737,19 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
                 }
             }
         }
+    }
+
+    strlcpy(host_copy, derp_host, sizeof(host_copy));
+    derp_host = host_copy;
+
+    /* Certificates cannot be judged before the wall clock is set (SNTP): a
+     * handshake now would fail on "not yet valid" and burn a TLS attempt's
+     * memory and time. Report it as its own reason and let the ladder retry. */
+    if (!ml_derp_clock_valid()) {
+        ESP_LOGW(TAG, "DERP connect to %s deferred: clock not set yet, cannot verify the server certificate",
+                 derp_host);
+        ml->derp.tls_deferred++;
+        return ESP_ERR_INVALID_STATE;
     }
 
     int64_t t_derp_start = esp_timer_get_time();
@@ -783,7 +811,18 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
                                  MBEDTLS_SSL_IS_CLIENT,
                                  MBEDTLS_SSL_TRANSPORT_STREAM,
                                  MBEDTLS_SSL_PRESET_DEFAULT);
-    mbedtls_ssl_conf_authmode(&ml->derp.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+    /* The server must prove it is the DERP node named in the map (see
+     * ml_derp_tls.h). A configuration failure means no connection at all. */
+    ml_derp_verify_t verify;
+    static const ml_derp_trust_t trust = { .attach = derp_trust_attach, .trust = esp_crt_verify_callback };
+    int cfg_ret = ml_derp_tls_configure(&ml->derp.ssl_conf, &verify, &derp_cert, derp_host, &trust);
+    if (cfg_ret != 0) {
+        char why[160];
+        ml_derp_tls_describe(NULL, cfg_ret, NULL, why, sizeof(why));
+        ESP_LOGE(TAG, "DERP TLS verification setup failed for %s: %s", derp_host, why);
+        ml->derp.tls_verify_failures++;
+        goto fail_tls;
+    }
     mbedtls_ssl_conf_rng(&ml->derp.ssl_conf, mbedtls_ctr_drbg_random, &ml->derp.ctr_drbg);
     mbedtls_ssl_conf_read_timeout(&ml->derp.ssl_conf, DERP_CONNECT_TIMEOUT_MS);
 
@@ -808,11 +847,20 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
             continue;
         }
-        char err_buf[128];
-        mbedtls_strerror(ret, err_buf, sizeof(err_buf));
-        ESP_LOGE(TAG, "TLS handshake failed: %s", err_buf);
+        char why[200];
+        ml_derp_tls_describe(&ml->derp.ssl, ret, &verify, why, sizeof(why));
+        if (ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED || verify.verdict_flags) {
+            ESP_LOGE(TAG, "DERP %s failed certificate verification (%s): %s", derp_host,
+                     derp_cert.kind == ML_DERP_CERT_PIN ? "pinned" :
+                     derp_cert.kind == ML_DERP_CERT_NAME ? "CertName" : "HostName", why);
+            ml->derp.tls_verify_failures++;
+        } else {
+            ESP_LOGE(TAG, "TLS handshake to %s failed: %s", derp_host, why);
+        }
+        ml_derp_tls_finish(&ml->derp.ssl_conf);
         goto fail_tls;
     }
+    ml_derp_tls_finish(&ml->derp.ssl_conf); /* `verify` is about to go out of scope */
 
     int64_t t_derp_tls = esp_timer_get_time();
     ESP_LOGI(TAG, "[TIMING] DERP TLS handshake: %lld ms", (t_derp_tls - t_derp_tcp) / 1000);

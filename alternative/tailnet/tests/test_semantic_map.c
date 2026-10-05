@@ -290,6 +290,33 @@ int main(void) {
     assert(m.vpn_ip == 0x64030405 && strstr(dns_text(&m.self_dns_name), ".ts.net") &&
            m.derp_region_count == 4 && m.derp_regions[3].region_id == 4 &&
            !allocations);
+    /* DERPNode.CertName survives projection and is interpreted: default, name, pin, and
+     * the unusable forms that must mark the node unconnectable instead of falling back. */
+    reset();
+    m = (microlink_t){.derp_region_default = 4};
+    assert(feed(&m, "{\"DERPMap\":{\"Regions\":{\"4\":{\"RegionID\":4,\"Nodes\":["
+                    "{\"HostName\":\"derp4a\",\"CertName\":\"front.example\"},"
+                    "{\"HostName\":\"10.0.0.1\",\"CertName\":\"sha256-raw:"
+                    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\"}]}}}}"));
+    assert(m.derp_region_count == 1 && m.derp_regions[0].node_count == 2);
+    assert(m.derp_regions[0].nodes[0].cert.kind == ML_DERP_CERT_NAME &&
+           !strcmp(m.derp_regions[0].nodes[0].cert.v.name, "front.example"));
+    assert(m.derp_regions[0].nodes[1].cert.kind == ML_DERP_CERT_PIN &&
+           m.derp_regions[0].nodes[1].cert.v.sha256[31] == 0xff);
+    reset();
+    m = (microlink_t){.derp_region_default = 4};
+    assert(feed(&m, "{\"DERPMap\":{\"Regions\":{\"4\":{\"RegionID\":4,\"Nodes\":["
+                    "{\"HostName\":\"derp4a\",\"CertName\":\"sha256-raw:abcd\"},"
+                    "{\"HostName\":\"derp4b\",\"CertName\":7,\"InsecureForTests\":true}]}}}}"));
+    assert(m.derp_regions[0].nodes[0].cert.kind == ML_DERP_CERT_INVALID);          /* bad pin */
+    assert(m.derp_regions[0].nodes[1].cert.kind == ML_DERP_CERT_INVALID);          /* not a string */
+    reset();
+    m = (microlink_t){.derp_region_default = 4};
+    assert(feed(&m, "{\"DERPMap\":{\"Regions\":{\"4\":{\"RegionID\":4,\"Nodes\":["
+                    "{\"HostName\":\"derp4a\",\"InsecureForTests\":true},"
+                    "{\"HostName\":\"derp4b\",\"CertName\":\"derp4b\"}]}}}}"));
+    assert(m.derp_regions[0].nodes[0].cert.kind == ML_DERP_CERT_HOSTNAME);         /* InsecureForTests is not honoured */
+    assert(m.derp_regions[0].nodes[1].cert.kind == ML_DERP_CERT_HOSTNAME);
     reset();
     m = (microlink_t){.vpn_ip = 123};
     assert(!feed(&m, "{\"PeersChanged\":[{\"ID\":1}],\"Node\":{\"Addresses\":["

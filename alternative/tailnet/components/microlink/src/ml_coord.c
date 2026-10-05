@@ -1813,6 +1813,18 @@ static void decode_derp_regions(ml_derp_region_t *out, uint8_t *count, uint16_t 
                 cJSON *so = cJSON_GetObjectItem(node_obj, "STUNOnly");
                 if (so && cJSON_IsTrue(so)) n->stun_only = true;
 
+                /* CertName selects how the DERP TLS server is authenticated.
+                 * Unusable (malformed, or too long to keep whole) marks the node
+                 * unconnectable instead of silently falling back to HostName. */
+                cJSON *cn = cJSON_GetObjectItem(node_obj, "CertName");
+                const char *cert_name = (cn && cJSON_IsString(cn)) ? cn->valuestring : NULL;
+                bool host_whole = hn && hn->valuestring && strlen(hn->valuestring) < sizeof(n->hostname);
+                if (!host_whole || (cn && !cert_name)) {
+                    n->cert.kind = ML_DERP_CERT_INVALID;
+                } else {
+                    ml_derp_cert_parse(n->hostname, cert_name, &n->cert);
+                }
+
                 r->node_count++;
             }
         }
