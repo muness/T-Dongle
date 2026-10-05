@@ -62,14 +62,14 @@ static const char *ml_derp_link_state_name(ml_derp_link_state_t s) { return s ==
 static TaskHandle_t ml_rt_task_handle(ml_rt_task_t t) { return 1 + t; }
 typedef struct {size_t required, shared_runtime, member_start, member_growth, member_steady, negotiation, recovery, largest_block;} ml_adm_budget_t;
 static ml_adm_budget_t admission_budget(void) { return (ml_adm_budget_t){90000, 23000, 30000, 5000, 35000, 16000, 16384, 24000}; }
-#define ML_ADM_PEER_SLOTS 4
+#define ML_ADM_PEER_SLOTS 2
 static size_t ml_wg_slot_bytes(void) { return 904; }
 typedef struct {int holder_unused; unsigned phase; uint32_t held_ms, waiting, grants, timeouts, lease_expired, stale_dropped, refused_full, max_wait_ms, max_hold_ms; uintptr_t holder;} ml_neg_status_t;
 typedef struct {bool running; unsigned members; uint32_t starts, stops, attach_failures, detach_failures, stack_bytes[3], stack_free[3], passes[3], max_service_ms[3], slow_services[3], detach_timeouts[3]; ml_neg_status_t negotiation;} ml_rt_status_t;
 static void ml_rt_status(ml_rt_status_t *o) { memset(o, 0, sizeof(*o)); o->running = true; o->members = 1; o->stack_free[0] = 4000; o->stack_free[1] = UINT32_MAX; }
 static const char *ml_neg_phase_name(unsigned p) { return "derp"; }
-typedef struct {uint32_t capacity, used, peak, refused_full, refused_nomem, evictions_own, evictions_other, rejected, refused_largest, largest_low, slot_bytes, device_bytes;} ml_wg_pool_status_t;
-static void ml_wg_pool_status(ml_wg_pool_status_t *o) { *o = (ml_wg_pool_status_t){12, 3, 5, 0, 0, 1, 2, 0, 1, 20480, 904, 228}; }
+typedef struct {uint32_t capacity, used, peak, refused_full, refused_nomem, evictions_own, evictions_other, rejected, refused_largest, refused_heap, largest_low, slot_bytes, device_bytes;} ml_wg_pool_status_t;
+static void ml_wg_pool_status(ml_wg_pool_status_t *o) { *o = (ml_wg_pool_status_t){12, 3, 5, 0, 0, 1, 2, 0, 1, 4, 20480, 904, 228}; }
 typedef struct {unsigned users, seedings, failures; unsigned long bytes; unsigned bytes_resident;} ml_rng_stats_t;
 static void ml_rng_stats(ml_rng_stats_t *o) { memset(o, 0, sizeof(*o)); o->users = 1; o->bytes_resident = 500; }
 typedef struct membership {
@@ -271,6 +271,7 @@ int main(void) {
                cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(rt, "tasks"), "derp"), "stack_free")));
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "evictions_other")->valueint == 2);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "refused_largest")->valueint == 1);
+        assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "refused_heap")->valueint == 4);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "largest_low")->valueint == 20480);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "negotiation"), "holder"));
     }

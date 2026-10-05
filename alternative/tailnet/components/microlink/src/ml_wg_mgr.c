@@ -421,8 +421,16 @@ static void wg_stage_sink(unsigned stage, uint32_t cycles) {
 #endif
 
 /* Peer slots of the global pool: ledger-tagged to the `wg` owner (see peer_pool_reserve). */
-static struct { uint32_t refused_largest; uint32_t largest_low; } slot_guard = { .largest_low = UINT32_MAX };
+static struct { uint32_t refused_largest; uint32_t refused_heap; uint32_t largest_low; unsigned live; } slot_guard = { .largest_low = UINT32_MAX };
 static void *wg_pool_alloc(size_t bytes) {
+    /* Slots beyond the guaranteed ML_ADM_PEER_SLOTS are elastic heap: they keep the recovery reserve and one negotiation peak free
+     * (ml_adm_slot_heap_ok). A refusal is a rejected activation, like the largest-block one below. Under the core lock (add_peer). */
+    if (!ml_adm_slot_heap_ok(slot_guard.live, heap_caps_get_free_size(MALLOC_CAP_INTERNAL), bytes)) {
+        slot_guard.refused_heap++;
+        ESP_LOGW(TAG, "WG peer slot refused: %u resident, free heap %u B would leave less than the reserve", slot_guard.live,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        return NULL;
+    }
     /* On demand, because a static pool would pin 12 slots for ever (ml_admission.h, ml_adm_slot_alloc_ok), but never the
      * allocation that takes the largest free block under what the DERP TLS record buffer needs. Called under the core
      * lock from add_peer, a handful of times per hour: two heap walks are affordable there. */
@@ -438,9 +446,10 @@ static void *wg_pool_alloc(size_t bytes) {
         free(block);
         return NULL;
     }
+    slot_guard.live++;
     return tdongle_heap_tag(TDONGLE_OWNER_WG, block);
 }
-static void wg_pool_free(void *block) { tdongle_heap_free(TDONGLE_OWNER_WG, block); }
+static void wg_pool_free(void *block) { if (slot_guard.live) slot_guard.live--; tdongle_heap_free(TDONGLE_OWNER_WG, block); }
 
 /* Every hold of the lwIP core lock by this task is timed into the diagnostics ledger by call site (tdongle_lock_hold,
  * diagnostics builds only; `memory locks`). The budget the shared task works to is ~1 ms per hold: the cryptography runs
@@ -1178,6 +1187,7 @@ void ml_wg_pool_status(ml_wg_pool_status_t *out) {
     out->evictions_other = pool_policy_stats.evictions_other;
     out->rejected = pool_policy_stats.refused;
     out->refused_largest = slot_guard.refused_largest;
+    out->refused_heap = slot_guard.refused_heap;
     out->largest_low = slot_guard.largest_low;
     out->slot_bytes = (uint32_t)sizeof(struct wireguard_peer);
     out->device_bytes = (uint32_t)sizeof(struct wireguard_device);
@@ -1374,7 +1384,7 @@ unsigned ml_wg_pass_work_take(void) { unsigned n = g_pass_work; g_pass_work = 0;
 
 esp_err_t ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *data,size_t len) {
     if(!ml || !data || !len || len>1400 || ml->state!=ML_STATE_CONNECTED)return ESP_ERR_INVALID_STATE;
-    /* Pending packets are not charged to admission beyond the typical two (ml_admission.h): the rest comes from free heap
+    /* Pending packets are not charged to admission at all (ml_admission.h, elastic): they come from free heap
      * above the recovery reserve, and is refused here when it would not. */
     if(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)<ML_ADM_RECOVERY_BYTES+WIREGUARDIF_DATA_ALLOC(len)+sizeof(ml_egress_meta_t)+sizeof(struct pbuf)+64)return ESP_ERR_NO_MEM;
     unsigned old=__atomic_fetch_add(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);

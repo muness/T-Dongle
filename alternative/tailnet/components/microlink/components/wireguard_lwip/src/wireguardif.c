@@ -674,7 +674,10 @@ wg_inner_verdict_t wireguardif_inner_check(const struct wireguard_peer *peer, bo
         for (int x = 0; x < WIREGUARD_MAX_SRC_IPS && !allowed; x++) allowed = aip_match_v4(&peer->allowed_source_ips[x], src);
         if (!allowed) return WG_INNER_ALLOWED_IP;
         const size_t total = ((size_t)b[2] << 8) | b[3];
-        if (total < 20 || total > n) return WG_INNER_BAD_LENGTH;    // Total Length: not shorter than the header, not longer than the data
+        const size_t ihl = (size_t)(b[0] & 0x0f) * 4;
+        // Total Length: not shorter than the header, not longer than the data; IHL: a whole header (>= 5 words) that fits inside the
+        // packet (options are read by whoever consumes the packet, so this is the bound they may rely on)
+        if (total < 20 || total > n || ihl < 20 || ihl > total) return WG_INNER_BAD_LENGTH;
         *ip_len = total;
         return WG_INNER_OK;
     }

@@ -939,6 +939,7 @@ typedef struct {
     uint32_t capacity, used, peak, refused_full, refused_nomem;
     uint32_t evictions_own, evictions_other, rejected;
     uint32_t refused_largest;   /* slots refused because they would have taken the largest free block under the TLS floor */
+    uint32_t refused_heap;      /* slots beyond the guaranteed ones refused for the recovery reserve / negotiation peak (ml_adm_slot_heap_ok) */
     uint32_t largest_low;       /* smallest largest-free-block seen right after a slot allocation (UINT32_MAX: none yet) */
     uint32_t slot_bytes, device_bytes;
 } ml_wg_pool_status_t;

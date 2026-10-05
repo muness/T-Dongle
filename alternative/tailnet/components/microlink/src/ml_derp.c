@@ -592,7 +592,7 @@ static void op_deliver(void *user, const uint8_t *src_pubkey, uint8_t *data, siz
     if (type != PKT_DISCO) {
         ML_RX_STAT(derp_rx_wg);
         /* The same byte and heap bound as the direct path (ml_wg_rx_budget.h): relayed datagrams wait in the same heap. */
-        ml_wgrx_verdict_t admit = ml_wgrx_admit(&ml_wgrx_budget, len, heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        ml_wgrx_verdict_t admit = ml_wgrx_admit_gated(&ml_wgrx_budget, len, heap_caps_get_free_size(MALLOC_CAP_INTERNAL), ml_wgrx_join_busy);
         if (admit != ML_WGRX_OK) {
             if (admit == ML_WGRX_BYTES) ML_RX_STAT(q_wg_bytes); else ML_RX_STAT(q_wg_heap);
             tdongle_memory_drop(TDONGLE_DROP_DERP_RX_FULL);

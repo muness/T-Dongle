@@ -298,6 +298,14 @@ static void t_v4_length_and_allowed(void) {
     ip4_packet(b, PEER_V4, 65, 64); assert(check(b, 64, false, &len) == WG_INNER_BAD_LENGTH);
     ip4_packet(b, PEER_V4, 19, 64); assert(check(b, 64, false, &len) == WG_INNER_BAD_LENGTH);             /* shorter than its own header */
     ip4_packet(b, PEER_V4, 0, 64); assert(check(b, 64, false, &len) == WG_INNER_BAD_LENGTH);
+    /* IHL: fewer than 5 words, or a header longer than the packet, is a bad length (the router relies on both bounds) */
+    for (unsigned ihl = 0; ihl < 16; ihl++) {
+        ip4_packet(b, PEER_V4, 60, 60); b[0] = (uint8_t)(0x40 | ihl);
+        assert(check(b, 60, false, &len) == (ihl >= 5 ? WG_INNER_OK : WG_INNER_BAD_LENGTH));
+        ip4_packet(b, PEER_V4, 24, 60); b[0] = (uint8_t)(0x40 | ihl);   /* Total Length 24: a header of more than 6 words does not fit */
+        assert(check(b, 60, false, &len) == (ihl >= 5 && ihl <= 6 ? WG_INNER_OK : WG_INNER_BAD_LENGTH));
+    }
+    ip4_packet(b, OTHER_V4, 60, 60); b[0] = 0x40; assert(check(b, 60, false, &len) == WG_INNER_ALLOWED_IP);   /* impersonation outranks IHL */
     ip4_packet(b, OTHER_V4, 60, 60); assert(check(b, 60, false, &len) == WG_INNER_ALLOWED_IP);
     ip4_packet(b, OTHER_V4, 9999, 60); assert(check(b, 60, false, &len) == WG_INNER_ALLOWED_IP);          /* impersonation outranks the length */
     for (size_t n = 0; n < 20; n++) { ip4_packet(b, PEER_V4, 60, 64); assert(check(b, n, false, &len) == (n ? WG_INNER_BAD_IP : WG_INNER_BAD_IP)); }
@@ -314,7 +322,7 @@ static void t_fuzz(void) {
         case 0: b[0] = 0x45; memcpy(b + 12, PEER_V4, 4); break;
         case 1: b[0] = 0x60; memcpy(b + 8, PEER_V6, 15); b[23] = (uint8_t)rand(); break;
         case 2: b[0] = 0x60; memcpy(b + 8, PEER_V6, 16); break;
-        case 3: b[0] = (uint8_t)(0x40 | (rand() & 0x0f)); break;
+        case 3: b[0] = (uint8_t)(0x40 | (rand() & 0x0f)); if (rand() & 1) memcpy(b + 12, PEER_V4, 4); break;
         default: break;
         }
         if (rand() & 1) { b[4] = 0; b[5] = (uint8_t)(rand() % 64); }
@@ -328,7 +336,8 @@ static void t_fuzz(void) {
             else if ((exact[0] >> 4) == 4) {
                 if (n < 20) want = WG_INNER_BAD_IP;
                 else if (memcmp(exact + 12, PEER_V4, 4)) want = WG_INNER_ALLOWED_IP;
-                else { size_t total = ((size_t)exact[2] << 8) | exact[3]; want = (total < 20 || total > n) ? WG_INNER_BAD_LENGTH : WG_INNER_OK; if (want == WG_INNER_OK) assert(len == total); }
+                else { size_t total = ((size_t)exact[2] << 8) | exact[3], ihl = (size_t)(exact[0] & 15) * 4;
+                       want = (total < 20 || total > n || ihl < 20 || ihl > total) ? WG_INNER_BAD_LENGTH : WG_INNER_OK; if (want == WG_INNER_OK) assert(len == total); }
             } else if ((exact[0] >> 4) == 6) {
                 if (n < 40) want = WG_INNER_BAD_IP;
                 else if (!model_match(PEER_V6, 120, exact + 8)) want = WG_INNER_ALLOWED_IP6;
