@@ -42,17 +42,15 @@
 #define ML_ADM_OTHER_BYTES      5600    /* 68,436 measured - itemised (stacks 31,232 + context 9,728 + WireGuard 7,952 +
                                            TCBs/queues 3,256 + TLS 1,336 + lwIP 9,300 = 62,804): peer directory, map
                                            and packet owners that are live at steady state */
-#define ML_ADM_NEG_PEAK_BYTES   11500   /* one join's transient: the DERP TLS handshake with certificate verification
+#define ML_ADM_NEG_PEAK_BYTES   13500   /* one join's transient: the DERP TLS handshake with certificate verification
                                            peaked at 17.3 KB against 1.3 KB live, 15,964 B above steady, when the presented
                                            cross-signed ISRG Root X2 was verified through ISRG Root X1 (RSA-4096). The trust
-                                           anchor match (ml_derp_tls.c, docs/adr/0021) skips that verification: 5.8 KB less on
-                                           the host, estimated 4.5 KB on the board (the RSA integers are the same size, the
-                                           hardware MPI shortens the work, not the memory; 4.5 KB is the 58 % RSA share of
-                                           the board's measured extra, the safe end of the 4.5 to 5.8 KB range):
-                                           15,964 - 4,500 = 11,464, rounded up. ESTIMATE until the board's `members` derp
-                                           phase peak is read (docs/adr/0021 "On-board verification"); raise it if that is
-                                           higher. The 24,000 B largest block and the 17,408 B TLS floor below are record
-                                           buffers, which the match does not change. */
+                                           anchor match (ml_derp_tls.c, docs/adr/0021) skips that verification. BOARD, 2026-10-05
+                                           (diagnostics build of PR #36, real join): DERP-phase TLS owner peak 14,476 B against
+                                           17,256 B before, a saving of 2,780 B (the host measured 5,824 B; the board's value
+                                           governs). 15,964 - 2,780 = 13,184 B, rounded up with a little headroom to 13,500.
+                                           The 24,000 B largest block and the 17,408 B TLS floor below are record buffers,
+                                           which the match does not change. */
 #define ML_ADM_RECOVERY_BYTES   16384   /* kept free for HTTP/control recovery (the v120 panic was at 7,464 B free) */
 #define ML_ADM_LARGEST_BLOCK    24000   /* steady largest block measured 24,576 B; the TLS record buffer is ~16.7 KB */
 #define ML_ADM_PEER_SLOTS       2       /* resident WireGuard peers GUARANTEED per membership (the pool holds 12 in all); slots beyond

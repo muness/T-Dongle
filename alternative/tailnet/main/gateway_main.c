@@ -65,7 +65,7 @@ _Static_assert(GATEWAY_USB_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_BYTES <= 32 * 10
 _Static_assert(GATEWAY_USB_TX_FLOOR_FREE >= ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES,
                "growth must leave one negotiation peak and the recovery reserve");
 _Static_assert(GATEWAY_USB_TX_FLOOR_LARGEST >= ML_ADM_LARGEST_BLOCK, "growth must keep the admission largest-block floor");
-_Static_assert(GATEWAY_USB_TX_FLOOR_FREE == ML_WG_RX_JOIN_FLOOR_FREE && GATEWAY_USB_TX_FLOOR_FREE == 16384 + 11500,
+_Static_assert(GATEWAY_USB_TX_FLOOR_FREE == ML_WG_RX_JOIN_FLOOR_FREE && GATEWAY_USB_TX_FLOOR_FREE == 16384 + 13500,
                "the elastic buffers (USB ring growth, WireGuard receive queue during a join) leave the same recovery reserve and negotiation peak");
 _Static_assert(3 * (GATEWAY_USB_TX_MAX_FRAMES * TINYUSB_NET_TX_SLAB_BYTES / 875) <= GATEWAY_USB_TX_RECLAIM_WAIT_MS,
                "reclaim must wait long enough to drain a full ring three times over at USB speed");

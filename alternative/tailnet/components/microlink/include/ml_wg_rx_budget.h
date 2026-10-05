@@ -38,7 +38,7 @@
 #define ML_WG_RX_FLOOR_FREE  ML_ADM_RECOVERY_BYTES
 /* While a join is in progress (the negotiation token is held) the floor is the one the USB transmit ring obeys (gateway_main.c,
  * GATEWAY_USB_TX_FLOOR_FREE): recovery reserve plus one negotiation peak. The queue is ELASTIC memory: it exists only while datagrams
- * wait, and it must not be what takes the heap a DERP TLS handshake needs (11,500 B above steady, ml_admission.h). Outside a join
+ * wait, and it must not be what takes the heap a DERP TLS handshake needs (13,500 B above steady, ml_admission.h). Outside a join
  * the recovery reserve is the only floor, as before. */
 #define ML_WG_RX_JOIN_FLOOR_FREE (ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES)
 #define ML_WG_RX_OVERHEAD    16u      /* allocator header and rounding, charged per datagram */

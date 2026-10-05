@@ -69,7 +69,7 @@ static void t_join_gate(void) {
     ml_wgrx_budget_t c = {0};
     assert(ml_wgrx_admit(&c, len, mid) == ML_WGRX_OK);
     /* the arithmetic: the join floor is the USB ring's (recovery + one negotiation peak) */
-    assert(ML_WG_RX_JOIN_FLOOR_FREE == 16384 + 11500);
+    assert(ML_WG_RX_JOIN_FLOOR_FREE == 16384 + 13500);
     /* queued bytes are readable for admission (reclaimable) */
     assert(ml_wgrx_queued(&c) == cost);
     printf("  join gate: floor %d B normally, %d B while a join runs\n", ML_WG_RX_FLOOR_FREE, ML_WG_RX_JOIN_FLOOR_FREE);

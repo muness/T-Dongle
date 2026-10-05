@@ -14,7 +14,7 @@ int main(void) {
     /* The shared tasks are charged once: the first membership pays for them, later ones do not. */
     assert(first.shared_runtime == 23040 + 3 * 340 && next.shared_runtime == 0);
     assert(first.required - next.required == first.shared_runtime);
-    assert(first.shared_runtime == 24060 && first.member_steady == 20992 + 18664 + 0 && first.required == 94400);
+    assert(first.shared_runtime == 24060 && first.member_steady == 20992 + 18664 + 0 && first.required == 96400);
     /* One negotiation peak and one recovery reserve, however many memberships there are. */
     assert(first.negotiation == ML_ADM_NEG_PEAK_BYTES && next.negotiation == first.negotiation);
     assert(next.member_steady == next.member_start + next.member_growth);
@@ -22,8 +22,8 @@ int main(void) {
     assert(next.member_growth == 236 + ML_ADM_PEER_SLOTS * 1096 + ML_ADM_TLS_LIVE_BYTES + ML_ADM_LWIP_BYTES + ML_ADM_OTHER_BYTES);
     assert(next.required == next.member_steady + ML_ADM_NEG_PEAK_BYTES + 16384 + 2800 && next.router == 2800);
     /* The negotiation peak is the handshake WITHOUT the RSA-4096 cross-signature check (ml_derp_tls.c trust anchor match):
-     * the board's 15,964 B above steady less the estimated 4,500 B. The coord stack is held by the rule in microlink_internal.h. */
-    assert(ML_ADM_NEG_PEAK_BYTES == 11500 && 15964 - 4500 <= ML_ADM_NEG_PEAK_BYTES);
+     * the board's 15,964 B above steady less the 2,780 B the board measured (not the host's 5,824 B). The coord stack is held by the rule in microlink_internal.h. */
+    assert(ML_ADM_NEG_PEAK_BYTES == 13500 && 15964 - 2780 <= ML_ADM_NEG_PEAK_BYTES);
     /* Decisions: budget first, then the contiguous block. */
     assert(ml_adm_decide(&next, next.required, 24000) == ML_ADM_OK);
     assert(ml_adm_decide(&next, next.required - 1, 99999) == ML_ADM_REFUSED_BUDGET);
@@ -64,13 +64,13 @@ int main(void) {
     printf("margin: first membership needs %zu B (was %zu); at 107,000 B free %zd B (was %zd), at 102,000 B %zd B (was %zd); net of the %zd B of run statics %zd B\n",
            first.required, old_required, margin, boot - (ssize_t)old_required, margin_low, boot_low - (ssize_t)old_required, statics, margin - statics);
     /* Elastic floors: the recovery reserve for everything, one negotiation peak more for what persists or must not starve a join. */
-    assert(ml_adm_elastic_floor(false) == 16384 && ml_adm_elastic_floor(true) == 16384 + 11500 && ml_adm_elastic_floor(true) == 27884);
+    assert(ml_adm_elastic_floor(false) == 16384 && ml_adm_elastic_floor(true) == 16384 + 13500 && ml_adm_elastic_floor(true) == 29884);
     /* Peer slots: the guaranteed ones keep the recovery reserve, the others a negotiation peak as well. */
     const size_t slot = 1096;
     assert(ML_ADM_PEER_SLOTS == 2);
     assert(ml_adm_slot_heap_ok(0, 16384 + slot, slot) && !ml_adm_slot_heap_ok(0, 16384 + slot - 1, slot));
     assert(ml_adm_slot_heap_ok(1, 16384 + slot, slot) && !ml_adm_slot_heap_ok(1, 16384 + slot - 1, slot));
-    assert(!ml_adm_slot_heap_ok(2, 16384 + slot, slot) && ml_adm_slot_heap_ok(2, (16384 + 11500) + slot, slot) && !ml_adm_slot_heap_ok(2, (16384 + 11500) + slot - 1, slot));
+    assert(!ml_adm_slot_heap_ok(2, 16384 + slot, slot) && ml_adm_slot_heap_ok(2, (16384 + 13500) + slot, slot) && !ml_adm_slot_heap_ok(2, (16384 + 13500) + slot - 1, slot));
     /* How many slots a first membership can actually hold beyond the guaranteed ones, from the free heap that is left after it has
      * started (boot free less the steady cost of the model above, with the guaranteed slots resident): at 107,000 B and at 102,000 B. */
     for (int b = 0; b < 2; b++) {
