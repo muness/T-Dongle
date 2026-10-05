@@ -125,6 +125,17 @@ extern "C" {
 /* Tailscale control plane */
 #define ML_CTRL_HOST            "controlplane.tailscale.com"
 #define ML_CTRL_PORT            443
+
+/* Who vouches for the control server's Noise key (see ml_coord.c). */
+#define ML_CTRL_KEY_NONE            0 /* nothing established yet */
+#define ML_CTRL_KEY_PINNED_BUILTIN  1 /* Tailscale SaaS key compiled into ml_noise.c */
+#define ML_CTRL_KEY_PINNED_CONFIG   2 /* ctrl_noise_key from the configuration */
+#define ML_CTRL_KEY_TLS_VERIFIED    3 /* fetched over https, certificate verified */
+#define ML_CTRL_KEY_PLAINTEXT       4 /* fetched over http: NOT authenticated */
+#define CTRL_KEY_PINNED_BUILTIN ML_CTRL_KEY_PINNED_BUILTIN
+#define CTRL_KEY_PINNED_CONFIG  ML_CTRL_KEY_PINNED_CONFIG
+#define CTRL_KEY_TLS_VERIFIED   ML_CTRL_KEY_TLS_VERIFIED
+#define CTRL_KEY_PLAINTEXT      ML_CTRL_KEY_PLAINTEXT
 #define ML_CTRL_PROTOCOL_VER    131
 
 /* Hostinfo.IPNVersion is supplied per-device via microlink_config_t.ipn_version
@@ -794,6 +805,7 @@ struct microlink_s {
      * server key. */
     uint8_t ctrl_noise_pubkey[32];
     bool ctrl_noise_pubkey_valid;
+    uint8_t ctrl_key_auth;           /* ML_CTRL_KEY_*: who vouches for the key above */
 
     /* Subnet routes to advertise on register (Hostinfo.RoutableIPs).
      * Newline-separated CIDR string copied from microlink_config_t.advertise_routes.

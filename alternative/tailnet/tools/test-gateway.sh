@@ -156,3 +156,16 @@ cc -std=gnu11 -DCONFIG_MBEDTLS_CERTIFICATE_BUNDLE_MAX_CERTS=200 -fsanitize=addre
   tests/test_derp_tls.c components/microlink/src/ml_derp_tls.c components/microlink/src/ml_derp_cert.c "$IDF_PATH/components/mbedtls/esp_crt_bundle/esp_crt_bundle.c" \
   "$derp_tls_lib/libmbedtls_derp.a" -o build-host/test_derp_tls
 build-host/test_derp_tls build-host/derp-pki
+
+# Control-plane Noise key: who vouches for it (real parse/fetch core of ml_coord.c, mock transport).
+python - <<'PYKEY'
+from pathlib import Path
+s=Path('components/microlink/src/ml_coord.c').read_text()
+a=s.index('/* Parse "[http[s]://]host[:port]" into bare host');b=s.index('/* --- end of the key-fetch core')
+Path('build-host/key_fetch.inc').write_text(s[a:b])
+h=Path('components/microlink/include/microlink_internal.h').read_text()
+a=h.index('#define ML_CTRL_KEY_NONE');b=h.index('#define CTRL_KEY_PLAINTEXT');b=h.index('\n',b)
+Path('build-host/ctrl_key_defs.inc').write_text(h[a:b]+'\n')
+PYKEY
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_control_key.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_control_key
+build-host/test_control_key

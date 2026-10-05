@@ -172,17 +172,39 @@ static int hex_to_bytes(const char *hex, uint8_t *bytes, size_t max_len) {
 }
 
 /* ============================================================================
- * Control-plane URL parsing + Noise server key fetch (Headscale / custom)
+ * Control-plane URL parsing + Noise server key (who vouches for the key)
  *
- * Custom control planes (Headscale / Ionscale / dev coordinators) are set via
- * login_server as "host", "host:port", "http://host[:port]" or
- * "https://host[:port]".  The Tailscale SaaS default needs neither parsing
- * (bare compiled-in host, port 80) nor a key fetch (hardcoded server key).
+ * The ts2021 Noise handshake authenticates the control server by its static
+ * public key, so whoever supplies that key decides who the device talks to. A
+ * wrong key is a full control-plane impersonation (it receives the node key,
+ * auth key and every MapRequest). Tailscale's client gets the key with
+ * GET <control URL>/key over the control URL's own scheme, https by default,
+ * verified against the system roots (control/controlclient loadServerPubKeys).
+ * The sources here, strongest first:
+ *
+ *   CTRL_KEY_PINNED_BUILTIN  Tailscale SaaS (no login_server): the key compiled
+ *                            into ml_noise.c. Noise authenticates the server
+ *                            against it, nothing is fetched. (The same value
+ *                            https://controlplane.tailscale.com/key returns.)
+ *   CTRL_KEY_PINNED_CONFIG   microlink_config_t.ctrl_noise_key: an operator
+ *                            supplied key; any scheme, nothing is fetched.
+ *   CTRL_KEY_TLS_VERIFIED    https:// login_server: fetched over TLS with the
+ *                            certificate chain and host name verified against
+ *                            the ESP-IDF bundle. A failed verification fails
+ *                            the fetch; there is no fallback to plain HTTP.
+ *   CTRL_KEY_PLAINTEXT       http:// login_server: fetched in the clear, as
+ *                            Tailscale does for an explicit http:// URL. Anyone
+ *                            on the path can substitute their own key, so this
+ *                            is only for a trusted LAN or a pinned key, and it
+ *                            is logged and reported (ctrl_key_auth).
+ *
+ * A login_server with no scheme is https://, Tailscale's default; plain HTTP
+ * has to be asked for with http://.
  * ========================================================================== */
 
 /* Parse "[http[s]://]host[:port]" into bare host and decimal port string.
- * Default port is "80" for http:// / bare hosts and "443" for https://.
- * If use_tls_out is non-NULL it is set to true iff the scheme is https://.
+ * No scheme means https (secure by default): port 443 and *use_tls_out true.
+ * "http://" is plain HTTP, port 80. An explicit ":port" overrides the default.
  * Returns 0 on success, -1 on error. */
 static int parse_host_port(const char *in,
                            char *host_out, size_t host_sz,
@@ -190,22 +212,18 @@ static int parse_host_port(const char *in,
                            bool *use_tls_out) {
     if (!in || !host_out || !port_out || host_sz == 0 || port_sz == 0) return -1;
 
-    /* Reset the TLS flag up front so the outcome never depends on the
-     * caller's prior state (a stale true from an earlier https:// parse). */
-    if (use_tls_out) *use_tls_out = false;
-
+    bool tls = true;
+    const char *default_port = "443";
     const char *p = in;
-    const char *default_port = "80";
 
-    /* Strip scheme */
     if (strncasecmp(p, "http://", 7) == 0) {
         p += 7;
+        tls = false;
+        default_port = "80";
     } else if (strncasecmp(p, "https://", 8) == 0) {
-        if (use_tls_out) *use_tls_out = true;
         p += 8;
-        /* Default port for https is 443; explicit ":port" in the URL overrides. */
-        default_port = "443";
     }
+    if (use_tls_out) *use_tls_out = tls;
 
     /* Find ':' for port separator, stop at '/' (path) or end */
     const char *colon = NULL;
@@ -282,6 +300,12 @@ static int parse_pubkey_response(const char *resp, uint8_t pubkey_out[32]) {
         return -1;
     }
     body += 4;
+    /* Only a 200 carries a key; an error page must not be mined for one. */
+    if (strncmp(resp, "HTTP/1.", 7) != 0 || resp[7] < '0' || resp[7] > '1' || resp[8] != ' ' ||
+        strncmp(resp + 9, "200", 3) != 0) {
+        ESP_LOGE(TAG, "fetch_server_pubkey: server did not answer 200 (%.12s)", resp);
+        return -1;
+    }
 
     /* Handle chunked transfer encoding: skip the first hex length line. */
     if (strstr(resp, "Transfer-Encoding: chunked") ||
@@ -324,173 +348,166 @@ static int parse_pubkey_response(const char *resp, uint8_t pubkey_out[32]) {
     return 0;
 }
 
-/* Open a short-lived connection to host:port (plain TCP or TLS per
- * ml->use_tls), GET /key?v=<ML_CTRL_PROTOCOL_VER>, parse the JSON body, extract publicKey,
- * hex-decode into ml->ctrl_noise_pubkey.  Returns 0 on success, -1 on any
- * failure.  Closes its own socket / destroys its own transient TLS handle. */
-static int fetch_server_pubkey(microlink_t *ml, const char *host, const char *port) {
-    /* ------------------------------------------------------------------ */
-    /* TLS branch: use esp_tls for a short-lived, transient connection.    */
-    /* The handle is local — never stored in ml.                           */
-    /* ------------------------------------------------------------------ */
-    if (ml->use_tls) {
-        ESP_LOGI(TAG, "Fetching Noise server pubkey from https://%s:%s/key?v=%d", host, port,
-                 ML_CTRL_PROTOCOL_VER);
+/* One short-lived connection for the key request. open() returns NULL when the
+ * connection or, for TLS, the certificate verification fails. */
+typedef struct {
+    void *(*open)(microlink_t *ml, const char *host, const char *port);
+    int (*write)(void *conn, const uint8_t *data, size_t length);   /* bytes written, <0 on error */
+    int (*read)(void *conn, uint8_t *buffer, size_t capacity);      /* bytes read, 0 at end, <0 on error */
+    void (*close)(void *conn);
+} ctrl_key_transport_t;
 
-        const esp_tls_cfg_t cfg = {
-            .crt_bundle_attach = esp_crt_bundle_attach,
-            .timeout_ms        = 10000,
-            .non_block         = false,
-        };
-        esp_tls_t *tls = esp_tls_init();
-        if (!tls) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: esp_tls_init failed");
-            return -1;
-        }
-        int port_i = atoi(port);
-        int rc_tls = esp_tls_conn_new_sync(host, (int)strlen(host), port_i, &cfg, tls);
-        if (rc_tls != 1) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: TLS handshake failed (rc=%d)", rc_tls);
-            esp_tls_conn_destroy(tls);
-            return -1;
-        }
+/* The /key response is ~400 bytes with headers; Tailscale caps it at 64 KiB. */
+#define CTRL_KEY_REQUEST_MAX 256
+#define CTRL_KEY_RESPONSE_MAX 1536
 
-        /* Build the HTTP GET request; use ctrl_host_hdr for the Host header
-         * (matches what the coord connection uses), falling back to host. */
-        const char *host_hdr = (ml->ctrl_host_hdr[0]) ? ml->ctrl_host_hdr : host;
-        char req[256];
-        /* The capability version on /key must be the same one every other
-         * request carries (ML_CTRL_PROTOCOL_VER) -- tailscaled sends its
-         * CurrentCapabilityVersion here too. It was a hardcoded 88 (Tailscale
-         * 1.62) while the MapRequest already said 131; Headscale >= 0.29
-         * drops the minimum supported version above 88 and answers
-         * "unsupported client version" (HTTP 400), so registration died at
-         * the very first step. SaaS accepted both. */
-        int req_len = snprintf(req, sizeof(req),
-            "GET /key?v=%d HTTP/1.1\r\n"
-            "Host: %s\r\n"
-            "User-Agent: microlink\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            ML_CTRL_PROTOCOL_VER, host_hdr);
-        if (req_len <= 0 || req_len >= (int)sizeof(req)) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: request snprintf overflow");
-            esp_tls_conn_destroy(tls);
-            return -1;
-        }
-
-        if ((ssize_t)esp_tls_conn_write(tls, req, req_len) != (ssize_t)req_len) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: TLS write failed");
-            esp_tls_conn_destroy(tls);
-            return -1;
-        }
-
-        /* Drain the full response (server closes after body). */
-        char resp[2048];
-        int total = 0;
-        while (total < (int)sizeof(resp) - 1) {
-            ssize_t n = esp_tls_conn_read(tls, (unsigned char *)resp + total,
-                                          sizeof(resp) - 1 - total);
-            if (n <= 0) break;
-            total += (int)n;
-        }
-        esp_tls_conn_destroy(tls);
-
-        if (total <= 0) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: empty TLS response");
-            return -1;
-        }
-        resp[total] = '\0';
-
-        if (parse_pubkey_response(resp, ml->ctrl_noise_pubkey) != 0) {
-            return -1;
-        }
-        ml->ctrl_noise_pubkey_valid = true;
-        ESP_LOGI(TAG, "Fetched Noise server pubkey (TLS): %02x%02x%02x%02x...%02x%02x",
-                 ml->ctrl_noise_pubkey[0], ml->ctrl_noise_pubkey[1],
-                 ml->ctrl_noise_pubkey[2], ml->ctrl_noise_pubkey[3],
-                 ml->ctrl_noise_pubkey[30], ml->ctrl_noise_pubkey[31]);
-        return 0;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Plain-HTTP branch.                                                  */
-    /* ------------------------------------------------------------------ */
-    int sock = -1;
-    struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
-    struct addrinfo *res = NULL;
-    int rc = -1;
-
-    ESP_LOGI(TAG, "Fetching Noise server pubkey from http://%s:%s/key?v=%d", host, port,
-             ML_CTRL_PROTOCOL_VER);
-
-    if (ml_getaddrinfo(host, port, &hints, &res) != 0 || !res) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: DNS resolve failed for %s", host);
-        goto out;
-    }
-
-    sock = ml_socket(res->ai_family, SOCK_STREAM, IPPROTO_TCP);
-    if (sock < 0) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: socket() failed");
-        goto out;
-    }
-
-    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
-    ml_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    ml_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
-    /* Keep the key fetch off the exit-node tunnel, like the coord socket. */
-    ml_bind_sock_to_upstream(ml, sock);
-
-    if (ml_connect(sock, res->ai_addr, res->ai_addrlen) < 0) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: connect() failed: errno=%d", errno);
-        goto out;
-    }
-
-    char req[256];
-    int req_len = snprintf(req, sizeof(req),
+/* GET /key?v=<ML_CTRL_PROTOCOL_VER> over `transport`, cache the key in ml.
+ * The connection (and, for TLS, its whole session state) is closed before the
+ * response is parsed and before this returns: nothing of it is alive when the
+ * Noise handshake starts. The key is stored only after a complete, well
+ * formed 200 response. Returns 0 on success. */
+static int ctrl_key_fetch(microlink_t *ml, const ctrl_key_transport_t *transport,
+                          const char *host, const char *port) {
+    char request[CTRL_KEY_REQUEST_MAX];
+    /* The capability version on /key must be the same one every other request
+     * carries (ML_CTRL_PROTOCOL_VER): Headscale >= 0.29 refuses a stale one with
+     * HTTP 400, which killed registration at the first step. */
+    int request_length = snprintf(request, sizeof(request),
         "GET /key?v=%d HTTP/1.1\r\n"
         "Host: %s\r\n"
         "User-Agent: microlink\r\n"
         "Connection: close\r\n"
         "\r\n",
-        ML_CTRL_PROTOCOL_VER, (ml->ctrl_host_hdr[0]) ? ml->ctrl_host_hdr : host);
-    if (req_len <= 0 || req_len >= (int)sizeof(req)) goto out;
-
-    if (ml_send(sock, (uint8_t *)req, req_len, 0) != req_len) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: send failed");
+        ML_CTRL_PROTOCOL_VER, ml->ctrl_host_hdr[0] ? ml->ctrl_host_hdr : host);
+    if (request_length <= 0 || request_length >= (int)sizeof(request)) {
+        ESP_LOGE(TAG, "control key: request does not fit");
+        return -1;
+    }
+    char *response = coord_alloc(CTRL_KEY_RESPONSE_MAX + 1);
+    if (!response) {
+        ESP_LOGE(TAG, "control key: out of memory for the response");
+        return -1;
+    }
+    int result = -1;
+    void *connection = transport->open(ml, host, port);
+    if (!connection) {
+        ESP_LOGE(TAG, "control key: cannot %s %s:%s",
+                 ml->use_tls ? "establish a verified TLS connection to" : "connect to", host, port);
         goto out;
     }
-
-    /* Read full response (headers + body).  Response is small (~200 bytes). */
-    char resp[2048];
     int total = 0;
-    while (total < (int)sizeof(resp) - 1) {
-        int n = ml_recv(sock, (uint8_t *)resp + total, sizeof(resp) - 1 - total, 0);
+    if (transport->write(connection, (const uint8_t *)request, (size_t)request_length) != request_length) {
+        ESP_LOGE(TAG, "control key: request not sent");
+        transport->close(connection);
+        goto out;
+    }
+    while (total < CTRL_KEY_RESPONSE_MAX) {
+        int n = transport->read(connection, (uint8_t *)response + total, (size_t)(CTRL_KEY_RESPONSE_MAX - total));
         if (n <= 0) break;
         total += n;
     }
-    if (total <= 0) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: empty HTTP response");
+    transport->close(connection); /* before parsing: no TLS state outlives the request */
+    if (total <= 0 || total >= CTRL_KEY_RESPONSE_MAX) {
+        if (total <= 0)
+            ESP_LOGE(TAG, "control key: empty response");
+        else
+            ESP_LOGE(TAG, "control key: response larger than %d bytes", CTRL_KEY_RESPONSE_MAX);
         goto out;
     }
-    resp[total] = '\0';
-
-    if (parse_pubkey_response(resp, ml->ctrl_noise_pubkey) != 0) {
+    response[total] = '\0';
+    uint8_t key[32];
+    if (parse_pubkey_response(response, key) != 0)
         goto out;
-    }
+    memcpy(ml->ctrl_noise_pubkey, key, sizeof(key));
     ml->ctrl_noise_pubkey_valid = true;
-    ESP_LOGI(TAG, "Fetched Noise server pubkey: %02x%02x%02x%02x...%02x%02x",
-             ml->ctrl_noise_pubkey[0], ml->ctrl_noise_pubkey[1],
-             ml->ctrl_noise_pubkey[2], ml->ctrl_noise_pubkey[3],
-             ml->ctrl_noise_pubkey[30], ml->ctrl_noise_pubkey[31]);
-    rc = 0;
-
+    result = 0;
 out:
-    if (sock >= 0) ml_close_sock(sock);
-    if (res) ml_freeaddrinfo(res);
-    return rc;
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, response);
+    return result;
 }
+
+/* Make ml->ctrl_noise_pubkey usable and record who vouches for it, before any
+ * control connection is opened (so the key fetch's TLS session never coexists
+ * with the control connection's). *key_out is the key for ml_noise_init, or
+ * NULL for the built-in Tailscale key. Returns 0, or -1: do not connect. */
+static int ctrl_key_ensure(microlink_t *ml, const ctrl_key_transport_t *tls_transport,
+                           const ctrl_key_transport_t *plain_transport, const uint8_t **key_out) {
+    *key_out = NULL;
+    if (!ml->ctrl_host[0]) {
+        ml->ctrl_key_auth = CTRL_KEY_PINNED_BUILTIN;
+        return 0;
+    }
+    if (!ml->ctrl_noise_pubkey_valid) {
+        const ctrl_key_transport_t *transport = ml->use_tls ? tls_transport : plain_transport;
+        ESP_LOGI(TAG, "Fetching control server Noise key from %s://%s:%s/key",
+                 ml->use_tls ? "https" : "http", ml->ctrl_host_parsed, ml->ctrl_port_str);
+        if (ctrl_key_fetch(ml, transport, ml->ctrl_host_parsed, ml->ctrl_port_str) != 0) {
+            ESP_LOGE(TAG, "Failed to fetch the Noise key from %s", ml->ctrl_host_parsed);
+            return -1;
+        }
+        ml->ctrl_key_auth = ml->use_tls ? CTRL_KEY_TLS_VERIFIED : CTRL_KEY_PLAINTEXT;
+        if (ml->ctrl_key_auth == CTRL_KEY_PLAINTEXT)
+            ESP_LOGW(TAG, "Control server key for %s was fetched over plain HTTP and is NOT authenticated: "
+                          "anyone on the network path can impersonate the control server. Use https:// "
+                          "or set ctrl_noise_key.", ml->ctrl_host_parsed);
+    }
+    *key_out = ml->ctrl_noise_pubkey;
+    return 0;
+}
+/* --- end of the key-fetch core (the host tests compile everything above) --- */
+
+/* Production transports. TLS: esp_tls with the certificate bundle, hostname
+ * checked, VERIFY_REQUIRED (esp-tls sets both whenever crt_bundle_attach is
+ * given); the handle lives only between open() and close(). */
+static void *key_tls_open(microlink_t *ml, const char *host, const char *port) {
+    (void)ml;
+    const esp_tls_cfg_t cfg = {
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms        = 10000,
+        .non_block         = false,
+    };
+    esp_tls_t *tls = esp_tls_init();
+    if (!tls) return NULL;
+    if (esp_tls_conn_new_sync(host, (int)strlen(host), atoi(port), &cfg, tls) != 1) {
+        esp_tls_conn_destroy(tls);
+        return NULL;
+    }
+    return tls;
+}
+static int key_tls_write(void *conn, const uint8_t *data, size_t length) {
+    return (int)esp_tls_conn_write(conn, data, length);
+}
+static int key_tls_read(void *conn, uint8_t *buffer, size_t capacity) {
+    return (int)esp_tls_conn_read(conn, buffer, capacity);
+}
+static void key_tls_close(void *conn) { esp_tls_conn_destroy(conn); }
+static const ctrl_key_transport_t key_tls_transport = {key_tls_open, key_tls_write, key_tls_read, key_tls_close};
+
+/* Plain HTTP: only reached for an explicit http:// login_server. */
+static void *key_plain_open(microlink_t *ml, const char *host, const char *port) {
+    struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
+    struct addrinfo *res = NULL;
+    if (ml_getaddrinfo(host, port, &hints, &res) != 0 || !res) return NULL;
+    int sock = ml_socket(res->ai_family, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) { ml_freeaddrinfo(res); return NULL; }
+    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+    ml_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ml_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    /* Keep the key fetch off the exit-node tunnel, like the coord socket. */
+    ml_bind_sock_to_upstream(ml, sock);
+    int rc = ml_connect(sock, res->ai_addr, res->ai_addrlen);
+    ml_freeaddrinfo(res);
+    if (rc < 0) { ml_close_sock(sock); return NULL; }
+    return (void *)(intptr_t)(sock + 1); /* 0 would read as NULL */
+}
+static int key_plain_write(void *conn, const uint8_t *data, size_t length) {
+    return (int)ml_send((int)(intptr_t)conn - 1, (uint8_t *)data, length, 0);
+}
+static int key_plain_read(void *conn, uint8_t *buffer, size_t capacity) {
+    return (int)ml_recv((int)(intptr_t)conn - 1, buffer, capacity, 0);
+}
+static void key_plain_close(void *conn) { ml_close_sock((int)(intptr_t)conn - 1); }
+static const ctrl_key_transport_t key_plain_transport = {key_plain_open, key_plain_write, key_plain_read, key_plain_close};
 
 /* ============================================================================
  * TLS-aware connection helpers for the coord connection
@@ -750,6 +767,15 @@ static int do_tcp_connect(microlink_t *ml) {
                  ml->ctrl_host_parsed, ml->ctrl_port_str);
     }
 
+    /* Who vouches for the control server's Noise key, settled before any
+     * control connection exists: the key fetch (its own TLS session for an
+     * https:// server) is finished and released before the control TLS
+     * connection below is opened, so the two never coexist in RAM. A custom
+     * server whose key cannot be established is not connected to. */
+    const uint8_t *unused_key;
+    if (ctrl_key_ensure(ml, &key_tls_transport, &key_plain_transport, &unused_key) != 0)
+        return -1;
+
     /* ====== TLS branch ====================================================
      * When the login server URL used https://, skip raw TCP and do a full
      * TLS handshake using the ESP-IDF bundled CA roots (public CAs only —
@@ -862,20 +888,15 @@ static int do_noise_handshake(microlink_t *ml, ml_noise_state_t *noise) {
     ml->control_stage = 2; ml->h2_debug[0] = 0;
     int64_t t_noise_start = esp_timer_get_time();
 
-    /* For custom control planes (Headscale / Ionscale / dev coordinators),
-     * each instance generates its own Noise keypair, so the hardcoded
-     * Tailscale SaaS server pubkey in ml_noise_init would always fail the
-     * ChaCha20-Poly1305 machine-key decrypt.  Fetch the real server pubkey
-     * from /key?v=<ML_CTRL_PROTOCOL_VER> here, once, and cache it on ml.  (ctrl_host_parsed /
-     * ctrl_port_str were filled by do_tcp_connect just before this state.) */
+    /* The server's Noise key was settled by ctrl_key_ensure() in do_tcp_connect:
+     * NULL selects the built-in Tailscale SaaS key; a custom control plane
+     * (Headscale / Ionscale / dev coordinators generates its own key) uses the
+     * pinned or authenticated-fetched one. Never guess a key for a custom host. */
     const uint8_t *server_pubkey = NULL;
     if (ml->ctrl_host[0]) {
         if (!ml->ctrl_noise_pubkey_valid) {
-            if (fetch_server_pubkey(ml, ml->ctrl_host_parsed, ml->ctrl_port_str) != 0) {
-                ESP_LOGE(TAG, "Failed to fetch server Noise pubkey from %s",
-                         ml->ctrl_host_parsed);
-                return -1;
-            }
+            ESP_LOGE(TAG, "No authenticated Noise key for %s", ml->ctrl_host_parsed);
+            return -1;
         }
         server_pubkey = ml->ctrl_noise_pubkey;
     }

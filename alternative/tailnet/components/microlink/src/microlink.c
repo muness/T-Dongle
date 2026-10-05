@@ -121,6 +121,23 @@ esp_err_t microlink_factory_reset(void) {
  * Public API
  * ========================================================================== */
 
+/* "mkey:<64 hex>" or "<64 hex>" -> 32 bytes. */
+static bool ml_parse_noise_key(const char *text, uint8_t out[32]) {
+    if (strncmp(text, "mkey:", 5) == 0) text += 5;
+    if (strlen(text) != 64) return false;
+    for (int i = 0; i < 32; i++) {
+        int v[2];
+        for (int j = 0; j < 2; j++) {
+            char c = text[2 * i + j];
+            v[j] = (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 :
+                   (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+            if (v[j] < 0) return false;
+        }
+        out[i] = (uint8_t)(v[0] << 4 | v[1]);
+    }
+    return true;
+}
+
 microlink_t *microlink_init(const microlink_config_t *config) {
     if (!config || !config->auth_key) {
         ESP_LOGE(TAG, "Invalid config: auth_key required");
@@ -150,6 +167,19 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     if (ml->config.max_peers == 0) ml->config.max_peers = ML_MAX_PEERS;
     if (ml->config.max_peers > ML_MAX_PEERS) ml->config.max_peers = ML_MAX_PEERS;
     ml->config.enable_derp = true;  /* Always need DERP for relay */
+
+    /* An operator supplied control-server key pins it for any scheme. A key
+     * that does not parse is refused rather than ignored: ignoring it would
+     * quietly turn a pinned deployment into an unauthenticated key fetch. */
+    if (config->ctrl_noise_key && config->ctrl_noise_key[0]) {
+        if (!ml_parse_noise_key(config->ctrl_noise_key, ml->ctrl_noise_pubkey)) {
+            ESP_LOGE(TAG, "ctrl_noise_key must be 64 hex digits, optionally prefixed mkey:");
+            tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml); return NULL;
+        }
+        ml->ctrl_noise_pubkey_valid = true;
+        ml->ctrl_key_auth = ML_CTRL_KEY_PINNED_CONFIG;
+    }
+    ml->config.ctrl_noise_key = NULL; /* the caller's string is not retained */
 
     /* Seed derp_region_default from config so MapRequest.PreferredDERP and
      * the GUI marker have a value before the first MapResponse arrives. */
@@ -740,6 +770,7 @@ esp_err_t microlink_get_diag(const microlink_t *ml, microlink_diag_t *out) {
     out->rc_derp_retry      = ml->rc_derp_retry;
     out->derp_tls_verify_failures = ml->derp.tls_verify_failures;
     out->derp_tls_deferred  = ml->derp.tls_deferred;
+    out->ctrl_key_auth      = ml->ctrl_key_auth;
     /* First 16 hex chars of the WG public key (= 8 bytes). Enough to
      * eyeball-match against `headscale nodes list` output. */
     for (int i = 0; i < 8; i++) {

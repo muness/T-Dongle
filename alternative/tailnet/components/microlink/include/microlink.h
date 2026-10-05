@@ -61,10 +61,26 @@ typedef struct {
 
     /* Custom control plane host (NULL or empty = Tailscale SaaS at
      * controlplane.tailscale.com). Set to a Headscale/Ionscale URL for
-     * self-hosted coordinators. Accepted forms: "host", "host:port",
-     * "http://host", "http://host:port". https:// is rejected.
+     * self-hosted coordinators. Accepted forms: "https://host[:port]",
+     * "http://host[:port]", and a bare "host[:port]", which means https://
+     * (Tailscale's default; port 443 unless given).
+     *
+     * The control server is authenticated by its Noise public key, which is
+     * obtained as follows: with https:// it is fetched over TLS and the
+     * certificate is verified against the ESP-IDF bundle (a failed verification
+     * fails the connection, never falls back); with ctrl_noise_key it is the
+     * key you supply and nothing is fetched; with http:// it is fetched in the
+     * clear, as Tailscale does for an http:// URL, and is NOT authenticated
+     * (anyone on the path can impersonate the server) - use it only on a
+     * trusted network, or together with ctrl_noise_key.
      * Internally clipped to 63 chars (see ml->ctrl_host[64]). */
     const char *ctrl_host;
+
+    /* The custom control server's Noise public key as 64 hex digits, optionally
+     * prefixed "mkey:" (the "publicKey" field of GET <login server>/key). When
+     * set, nothing is fetched and the key is trusted for any scheme. Ignored
+     * for Tailscale SaaS, whose key is built in. NULL/empty = unset. */
+    const char *ctrl_noise_key;
 
     /* Routes the node advertises to the tailnet (Tailscale's
      * --advertise-routes equivalent). Newline-separated CIDR list, e.g.
@@ -288,6 +304,7 @@ typedef struct {
     uint32_t rc_derp_retry;       /* failed DERP connect attempts (backoff ladder) */
     uint32_t derp_tls_verify_failures; /* DERP handshakes refused: server certificate not authenticated */
     uint32_t derp_tls_deferred;   /* DERP connects postponed until the wall clock is set */
+    uint8_t  ctrl_key_auth;       /* ML_CTRL_KEY_*: how the control server's Noise key was vouched for */
 } microlink_diag_t;
 
 esp_err_t microlink_get_diag(const microlink_t *ml, microlink_diag_t *out);
