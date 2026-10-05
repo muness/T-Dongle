@@ -9,6 +9,7 @@ bool gateway_boot_recovery(void){return false;}
 #include <string.h>
 #include "../main/socket_budget.h"
 #include "../components/microlink/include/ml_published_name.h"
+#include "../main/clock_sync.h"
 #define CONFIG_LWIP_MAX_SOCKETS 20
 gateway_socket_stats gateway_sockets_snapshot(void) {return (gateway_socket_stats){.open=10,.peak=12,.last_errno=23,.failures=1};}
 static int esp_reset_reason(void) {return 1;}
@@ -32,6 +33,8 @@ typedef struct {
 typedef struct {
     char h2_debug[49]; unsigned control_stage;
     uint32_t map_h2_error, map_h2_last_stream;
+    struct {uint32_t tls_verify_failures, tls_deferred;} derp;
+    uint8_t ctrl_key_auth;
     unsigned peer_generation,state, vpn_ip;
     void *wg_netif;
     bool key_expired, stop_incomplete;
@@ -64,6 +67,9 @@ static membership_t *members;
 static int members_lock, held, takes;
 static bool busy, grow, release_source, fail_allocation;
 static bool online = true, route_storage_ok = true;
+static gw_clock_t sntp_clock;
+static bool test_clock_valid = true;
+static bool ml_derp_clock_valid(void) { return test_clock_valid; }
 static int xSemaphoreTake(int lock, int ticks) {
     assert(!held && ticks <= 20);
     takes++;
@@ -189,6 +195,7 @@ static void setup(void) {
     strcpy(c->peers[0].hostname, "server.ts.net");
     c->peers[0].vpn_ip = 0x64020304;
     c->net_io_task = 1;
+    c->derp.tls_verify_failures=2;c->derp.tls_deferred=3;c->ctrl_key_auth=3;
 }
 static void cleanup(void) {
     while (members) {
@@ -218,7 +225,28 @@ int main(void) {
     assert(cJSON_GetObjectItem(diagnostics,"h2_last_stream")->valueint==7);
     assert(cJSON_GetObjectItem(root,"sockets_open")->valueint==10);
     assert(cJSON_GetObjectItem(root,"socket_limit")->valueint==20);
+    assert(cJSON_GetObjectItem(m,"derp_tls_verify_failures")->valueint==2);
+    assert(cJSON_GetObjectItem(m,"derp_tls_deferred")->valueint==3);
+    assert(cJSON_GetObjectItem(m,"control_key_auth")->valueint==3);
+    cJSON *clock=cJSON_GetObjectItem(root,"clock");
+    assert(!strcmp(cJSON_GetObjectItem(clock,"state")->valuestring,"synced"));
+    assert(cJSON_IsTrue(cJSON_GetObjectItem(clock,"valid")));
     cJSON_Delete(root);
+    /* A clock that never arrives is visible: state, restarts, server and the next retry. */
+    cleanup();setup();
+    test_clock_valid=false;online=true;
+    sntp_clock=(gw_clock_t){0};
+    gw_clock_poll(&sntp_clock,1000,false,true);
+    assert(gw_clock_poll(&sntp_clock,1000+GW_CLOCK_FIRST_RETRY_MS,false,true)==GW_CLOCK_RESTART);
+    r=(httpd_req_t){0};assert(status(&r)==0);
+    root=cJSON_Parse(r.output);assert(root);
+    clock=cJSON_GetObjectItem(root,"clock");
+    assert(!strcmp(cJSON_GetObjectItem(clock,"state")->valuestring,"failing"));
+    assert(!cJSON_IsTrue(cJSON_GetObjectItem(clock,"valid")));
+    assert(cJSON_GetObjectItem(clock,"sntp_restarts")->valueint==1);
+    assert(cJSON_GetObjectItem(clock,"retry_in_ms")->valueint==2*GW_CLOCK_FIRST_RETRY_MS);
+    assert(!strcmp(cJSON_GetObjectItem(clock,"server")->valuestring,"time.cloudflare.com"));
+    cJSON_Delete(root);test_clock_valid=true;cleanup();
     setup();
     r = (httpd_req_t){.fail = true};
     assert(status(&r) < 0 && !held && r.chunks == 0);

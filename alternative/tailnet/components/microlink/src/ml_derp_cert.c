@@ -31,7 +31,7 @@ bool ml_derp_name_plausible(const char *s, size_t n) {
     if (!n || n >= ML_DERP_CERT_NAME_MAX) return false;
     for (size_t i = 0; i < n; i++) {
         unsigned char c = (unsigned char)s[i];
-        if (!(isalnum(c) || c == '.' || c == '-' || c == '_' || c == '*' || c == ':'))
+        if (!(isalnum(c) || c == '.' || c == '-' || c == '_' || c == ':')) /* no '*': Go's VerifyHostname refuses a wildcard host name */
             return false;
     }
     return true;

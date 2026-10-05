@@ -169,3 +169,14 @@ Path('build-host/ctrl_key_defs.inc').write_text(h[a:b]+'\n')
 PYKEY
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_control_key.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_control_key
 build-host/test_control_key
+
+# SNTP supervision and DERP pacing: a missing clock is retried, visible, and gates nothing else.
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I . tests/test_clock_sync.c -o build-host/test_clock_sync
+build-host/test_clock_sync
+
+# cJSON depth: the same limit the firmware build sets (CMakeLists.txt). No sanitizer here:
+# it inflates frames and this test measures the parser's stack.
+CJSON_LIMIT=$(sed -n 's/^set(TDONGLE_CJSON_NESTING_LIMIT \([0-9][0-9]*\)).*/\1/p' ../../CMakeLists.txt)
+[[ -n "$CJSON_LIMIT" ]] || { echo 'TDONGLE_CJSON_NESTING_LIMIT not found in CMakeLists.txt' >&2; exit 1; }
+cc $TD_INC -std=c11 -O1 -g -DCJSON_NESTING_LIMIT="$CJSON_LIMIT" -I "$IDF_PATH/components/json/cJSON" tests/test_json_depth.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_json_depth
+build-host/test_json_depth

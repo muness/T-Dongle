@@ -438,6 +438,18 @@ static int ctrl_key_ensure(microlink_t *ml, const ctrl_key_transport_t *tls_tran
         return 0;
     }
     if (!ml->ctrl_noise_pubkey_valid) {
+        /* A certificate cannot be judged before SNTP has set the clock. Say so and
+         * let the reconnect backoff try again, rather than burn a TLS session on
+         * a handshake that must fail with a misleading "certificate not yet valid".
+         * Nothing else waits: only this https:// server's key (the SaaS key is
+         * built in, an http:// server and a pinned key need no certificate). */
+        if (ml->use_tls && !ml_derp_clock_valid()) {
+            ESP_LOGW(TAG, "Control key for %s waits for the wall clock (SNTP): its certificate cannot be verified yet",
+                     ml->ctrl_host_parsed);
+            snprintf(ml->transport_error, sizeof(ml->transport_error), "Waiting for the clock (SNTP) to verify %.24s",
+                     ml->ctrl_host_parsed);
+            return -1;
+        }
         const ctrl_key_transport_t *transport = ml->use_tls ? tls_transport : plain_transport;
         ESP_LOGI(TAG, "Fetching control server Noise key from %s://%s:%s/key",
                  ml->use_tls ? "https" : "http", ml->ctrl_host_parsed, ml->ctrl_port_str);
@@ -2483,10 +2495,17 @@ void ml_coord_task(void *arg) {
                 if (!ml->derp.connected) {
                     /* Signal DERP I/O task to connect (connection now owned by I/O task) */
                     xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
-                    /* Wait for DERP to connect (up to 15s) before continuing */
-                    ESP_LOGI(TAG, "Waiting for DERP I/O task to connect...");
-                    xEventGroupWaitBits(ml->events, ML_EVT_DERP_CONNECTED,
-                                        pdFALSE, pdTRUE, pdMS_TO_TICKS(15000));
+                    /* Wait for DERP to connect (up to 15s) before continuing -- unless
+                     * the wall clock is not set: DERP will not even try until SNTP has
+                     * run (certificates cannot be judged), and the control plane must not
+                     * sit out the wait for it. The relay connects when the clock arrives. */
+                    if (ml_derp_clock_valid()) {
+                        ESP_LOGI(TAG, "Waiting for DERP I/O task to connect...");
+                        xEventGroupWaitBits(ml->events, ML_EVT_DERP_CONNECTED,
+                                            pdFALSE, pdTRUE, pdMS_TO_TICKS(15000));
+                    } else {
+                        ESP_LOGW(TAG, "Wall clock not set yet: not waiting for DERP; continuing");
+                    }
                 }
 
                 /* Start streaming long-poll for incremental updates */

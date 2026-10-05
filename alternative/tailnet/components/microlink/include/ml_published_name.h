@@ -70,6 +70,7 @@ static inline bool ml_published_name_set(ml_published_name_t *name,
  * Returns false, with out set to "", when no consistent copy was obtained;
  * callers treat that as "name unknown right now" and ask again later. */
 #define ML_PUBLISHED_NAME_ATTEMPTS 16
+#define ML_PUBLISHED_NAME_SPINS 512 /* ~10 us of loads per wait for a running writer */
 static inline bool ml_published_name_get(const ml_published_name_t *name,
                                          char *out, size_t cap,
                                          size_t *length) {
@@ -80,8 +81,15 @@ static inline bool ml_published_name_get(const ml_published_name_t *name,
     char copy[ML_PUBLISHED_NAME_MAX];
     for (unsigned attempt = 0; attempt < ML_PUBLISHED_NAME_ATTEMPTS; attempt++) {
         uint32_t before = __atomic_load_n(&name->seq, __ATOMIC_ACQUIRE);
+        /* The writer's window is ~130 byte stores (about a microsecond); a reader
+         * on the other core would burn all its attempts inside it if it merely
+         * re-read the counter once per attempt. Wait it out, briefly. A counter
+         * still odd after ML_PUBLISHED_NAME_SPINS loads means the writer is not
+         * running (preempted by this very task, or killed): give up at once. */
+        for (unsigned spin = 0; (before & 1) && spin < ML_PUBLISHED_NAME_SPINS; spin++)
+            before = __atomic_load_n(&name->seq, __ATOMIC_ACQUIRE);
         if (before & 1)
-            continue;
+            break;
         for (size_t i = 0; i < ML_PUBLISHED_NAME_MAX; i++)
             copy[i] = __atomic_load_n(&name->text[i], __ATOMIC_RELAXED);
         __atomic_thread_fence(__ATOMIC_ACQUIRE);

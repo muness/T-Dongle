@@ -19,6 +19,7 @@
 #include "lcd.h"
 #include "lcd_view.h"
 #include "socket_budget.h"
+#include "clock_sync.h"
 #include "esp_system.h"
 #include "lwip/inet.h"
 #include "lwip/tcpip.h"
@@ -39,6 +40,8 @@ static void usb_event(tinyusb_event_t *event, void *arg) {
     }
 }
 static bool online;
+/* SNTP supervision: written by the manager task, read (word sized fields) by /status and the console. */
+static gw_clock_t sntp_clock;
 static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
 bool gateway_tailnet_mode(void){return runtime_mode==TDONGLE_TAILNET_GATEWAY;}
 static volatile bool wifi_scan_pauses_reconnect;
@@ -359,6 +362,14 @@ static void manager(void *arg) {
         tdongle_temperature_sample();
         tdongle_memory_note(TDONGLE_MEMORY_OP_TICK,0,0);
         wifi_maintain();
+        /* Before and outside members_lock: the clock never waits on a membership. */
+        if (gw_clock_poll(&sntp_clock, esp_timer_get_time() / 1000, ml_derp_clock_valid(), online) == GW_CLOCK_RESTART) {
+            ESP_LOGW("clock", "no time yet from SNTP: retrying with %s (restart %lu)",
+                     gw_clock_server_name[sntp_clock.server], (unsigned long)sntp_clock.restarts);
+            esp_sntp_stop();
+            esp_sntp_setservername(0, gw_clock_server_name[sntp_clock.server]);
+            esp_sntp_init();
+        }
         if (last_online != online) {
             gateway_diag_membership(0, GATEWAY_DIAG_UPSTREAM, online);
             last_online = online;
@@ -657,6 +668,8 @@ typedef struct {
     bool enabled, has_client, routing_ready;
     char label[24], error[64], dns[128], login[384], protocol_error[64], h2_debug[49];
     unsigned control_stage;
+    uint32_t derp_tls_failures, derp_tls_deferred;
+    unsigned control_key_auth;
     uint32_t diagnostics[21], stack_free[5];
     unsigned peers, directory_count, peer_offset, page_start;
     uint32_t jit[5];
@@ -737,6 +750,7 @@ static esp_err_t status(httpd_req_t *req) {
                 c->last_error[0] ? c->last_error : c->transport_error,
                 sizeof(v->protocol_error));
         strlcpy(v->h2_debug,c->h2_debug,sizeof(v->h2_debug));v->control_stage=c->control_stage;
+        v->derp_tls_failures=c->derp.tls_verify_failures;v->derp_tls_deferred=c->derp.tls_deferred;v->control_key_auth=c->ctrl_key_auth;
         v->diagnostics[0] = c->map_attempts;
         v->diagnostics[1] = c->map_failures;
         v->diagnostics[2] = c->map_error;
@@ -827,6 +841,15 @@ static esp_err_t status(httpd_req_t *req) {
     NUM("socket_last_at_ms", sockets.last_at_ms);
     NUM("reset_reason", esp_reset_reason());
     BOOL("wifi", online);
+    {   /* The wall clock gates DERP (certificate validity): a clock that never arrives must be visible. */
+        bool clock_valid=ml_derp_clock_valid();
+        jw_raw(w,"\"clock\":{");
+        STR("state",gw_clock_state(&sntp_clock,clock_valid,online));
+        BOOL("valid",clock_valid);NUM("sntp_restarts",sntp_clock.restarts);
+        NUM("retry_in_ms",sntp_clock.retry_in_ms);
+        jw_key(w,"server");jw_string(w,gw_clock_server_name[sntp_clock.server%GW_CLOCK_SERVERS]);
+        jw_raw(w,"},");
+    }
     jw_raw(w,"\"saved_wifi\":[");
     for(unsigned i=0;i<saved_count;i++){if(i)jw_char(w,',');jw_string(w,saved_ssids[i]);}
     jw_raw(w,"],");
@@ -889,6 +912,8 @@ static esp_err_t status(httpd_req_t *req) {
             STR("protocol_error", v->protocol_error);
             STR("h2_debug", v->h2_debug);
             NUM("control_stage", v->control_stage);
+            NUM("derp_tls_verify_failures",v->derp_tls_failures);NUM("derp_tls_deferred",v->derp_tls_deferred);
+            NUM("control_key_auth",v->control_key_auth);
             NUM("jit_hits",v->jit[0]);NUM("jit_misses",v->jit[1]);NUM("jit_evictions",v->jit[2]);
             NUM("jit_rejected",v->jit[3]);NUM("jit_dropped",v->jit[4]);
             NUM("directory_records",v->directory_count);
@@ -1221,7 +1246,7 @@ static esp_err_t start_wifi(void) {
     wifi_rescan=true;
     if(!gateway_tailnet_mode())return ESP_OK;
     esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-    esp_sntp_setservername(0,"pool.ntp.org");esp_sntp_init();
+    esp_sntp_setservername(0,gw_clock_server_name[0]);esp_sntp_init();
     return ESP_OK;
 }
 static esp_err_t start_dns(void) {

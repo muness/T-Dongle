@@ -28,6 +28,7 @@
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
 #include "nacl_box.h"
+#include "ml_derp_pace.h"
 #include "esp_crt_bundle.h"
 #include <string.h>
 #include <errno.h>
@@ -524,8 +525,8 @@ void ml_derp_tx_task(void *arg) {
      * has ever been requested — from then on a disconnected relay is a fault
      * to recover from, not an idle state to park in. */
     bool derp_wanted = false;
-    uint64_t derp_next_retry_ms = 0;
-    uint32_t derp_backoff_ms = ML_DERP_RETRY_MIN_MS;
+    ml_derp_pace_t derp_pace = {0};
+    ml_derp_pace_reset(&derp_pace, ML_DERP_RETRY_MIN_MS);
 
     while (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) {
         loop_count++;
@@ -571,7 +572,7 @@ void ml_derp_tx_task(void *arg) {
                 xEventGroupClearBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
                 derp_wanted = true;
                 /* Retry up to 3 times with 2s backoff */
-                for (int attempt = 0; attempt < 3 && !ml->derp.connected; attempt++) {
+                for (int attempt = 0; attempt < 3 && !ml->derp.connected && ml_derp_clock_valid(); attempt++) {
                     if (attempt > 0) {
                         ESP_LOGW(TAG, "DERP connect retry %d/3 in 2s...", attempt + 1);
                         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -598,7 +599,7 @@ void ml_derp_tx_task(void *arg) {
                  * (1s+3×2s ≈ 7s outage → 200ms+3×500ms) so a transient flap
                  * costs sub-second, not multi-second, of dropped relay traffic. */
                 vTaskDelay(pdMS_TO_TICKS(200));
-                for (int attempt = 0; attempt < 3 && !ml->derp.connected; attempt++) {
+                for (int attempt = 0; attempt < 3 && !ml->derp.connected && ml_derp_clock_valid(); attempt++) {
                     if (attempt > 0) {
                         ESP_LOGW(TAG, "DERP reconnect retry %d/3 in 500ms...", attempt + 1);
                         vTaskDelay(pdMS_TO_TICKS(500));
@@ -624,23 +625,23 @@ void ml_derp_tx_task(void *arg) {
              * on exponential backoff (cap matches the coord reconnect
              * policy's never-give-up shape). */
             if (derp_wanted) {
-                uint64_t now = ml_get_time_ms();
-                if (derp_next_retry_ms == 0) {
-                    derp_next_retry_ms = now + derp_backoff_ms;
-                } else if (now >= derp_next_retry_ms) {
+                uint32_t deferrals = derp_pace.deferrals;
+                /* A wall clock that is not set yet holds the connect back
+                 * without counting as a relay failure (ml_derp_pace.h). */
+                if (ml_derp_pace_due(&derp_pace, ml_get_time_ms(), ml_derp_clock_valid(),
+                                     ML_DERP_RETRY_MIN_MS)) {
                     ESP_LOGW(TAG, "DERP down — retrying connect (backoff %lus)",
-                             (unsigned long)(derp_backoff_ms / 1000));
+                             (unsigned long)(derp_pace.backoff_ms / 1000));
                     if (ml_derp_connect(ml) == ESP_OK) {
                         connected_since_ms = ml_get_time_ms();
                         verbose_phase = true;
                     } else {
                         ml->rc_derp_retry++;
-                        derp_backoff_ms *= 2;
-                        if (derp_backoff_ms > ML_DERP_RETRY_MAX_MS) {
-                            derp_backoff_ms = ML_DERP_RETRY_MAX_MS;
-                        }
-                        derp_next_retry_ms = ml_get_time_ms() + derp_backoff_ms;
+                        ml_derp_pace_failed(&derp_pace, ml_get_time_ms(), ML_DERP_RETRY_MAX_MS);
                     }
+                } else if (derp_pace.deferrals != deferrals) {
+                    ml->derp.tls_deferred++;
+                    ESP_LOGW(TAG, "DERP connect held back: wall clock not set (SNTP), certificates cannot be verified");
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -648,8 +649,7 @@ void ml_derp_tx_task(void *arg) {
         }
 
         /* Connected: reset the retry ladder so the next outage starts fresh. */
-        derp_backoff_ms = ML_DERP_RETRY_MIN_MS;
-        derp_next_retry_ms = 0;
+        ml_derp_pace_reset(&derp_pace, ML_DERP_RETRY_MIN_MS);
 
         /* #33: RX-liveness watchdog. last_recv_ms advances on every received
          * frame (server keepalives arrive every ~15-60s), so prolonged
@@ -832,7 +832,14 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         ESP_LOGE(TAG, "mbedtls_ssl_setup failed (out of memory?)");
         goto fail_tls;
     }
-    mbedtls_ssl_set_hostname(&ml->derp.ssl, derp_host);
+    /* SNI is the HostName, except for an IP literal: Go's crypto/tls (Tailscale's
+     * client) sends none for one, and RFC 6066 forbids literal addresses. The
+     * name the certificate must carry is checked by ml_derp_tls.c either way. */
+    {
+        uint32_t literal[4];
+        if (mbedtls_x509_crt_parse_cn_inet_pton(derp_host, literal) == 0)
+            mbedtls_ssl_set_hostname(&ml->derp.ssl, derp_host);
+    }
     /* Store socket fd BEFORE setting bio.
      * Use custom BIO callbacks that route through ml_read_sock/ml_write_sock,
      * which transparently support both lwIP and AT socket backends.

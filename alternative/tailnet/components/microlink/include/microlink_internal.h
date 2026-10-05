@@ -131,9 +131,16 @@ extern "C" {
 #define ML_MAX_ENDPOINTS        8
 #define ML_MAX_PACKET_SIZE      1500
 /* Largest payload accepted in one DERP frame after the 32-byte source key of a
- * RecvPacket (and the cap for every other post-handshake frame). A WireGuard
- * packet over a 1280-byte tailnet MTU is about 1.3 KB; this leaves headroom. */
+ * RecvPacket (and the cap for every other post-handshake frame). The DERP frame
+ * header (type byte + 4 length bytes, derp.go frameHeaderLen) is not part of the
+ * length field, and a RecvPacket's 32-byte source key is subtracted before this
+ * cap applies. The largest WireGuard data message is a tunnel packet of up to
+ * ML_MAX_PACKET_SIZE bytes padded to 16 plus 16 bytes of header and 16 of tag:
+ * 1,500 -> 1,504 + 32 = 1,536 <= 1,564. Our netif MTU is 1,420 (1,456 on the
+ * wire) and Tailscale's default 1,280 (1,312); handshake messages are < 150. */
 #define ML_DERP_MAX_FRAME       (ML_MAX_PACKET_SIZE + 64)
+_Static_assert(ML_DERP_MAX_FRAME >= ((ML_MAX_PACKET_SIZE + 15) / 16) * 16 + 32,
+               "a maximum-size WireGuard data message must fit one DERP frame");
 
 /* DERP */
 /* 2026-05-28: tried region 26 (Nuremberg, = tailscale-105's home DERP) to kill

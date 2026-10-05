@@ -21,7 +21,10 @@ typedef struct {
     char ctrl_host[64], ctrl_host_parsed[64], ctrl_port_str[8], ctrl_host_hdr[72];
     bool use_tls, ctrl_noise_pubkey_valid;
     uint8_t ctrl_noise_pubkey[32], ctrl_key_auth;
+    char transport_error[64];
 } microlink_t;
+static bool test_clock_valid = true;
+static bool ml_derp_clock_valid(void) { return test_clock_valid; }
 #include "ctrl_key_defs.inc"
 static unsigned allocations, live;
 static void *coord_alloc(size_t n) { allocations++; void *p = malloc(n); if (p) live++; return p; }
@@ -135,6 +138,26 @@ int main(void) {
     assert(!live);                                           /* response buffer released */
     /* Cached: a reconnect does not fetch again. */
     assert(!ensure(&secure, &key) && tls_mock.opens == 1);
+    /* No wall clock yet: an https:// key is not fetched (its certificate cannot be judged), the
+     * reason is reported, and no TLS session is opened; the key arrives once SNTP has run. */
+    reset_mocks();
+    microlink_t early = make("https://hs.example.com");
+    tls_mock.response = GOOD;
+    test_clock_valid = false;
+    assert(ensure(&early, &key) != 0 && !tls_mock.opens && !early.ctrl_noise_pubkey_valid && strstr(early.transport_error, "SNTP"));
+    test_clock_valid = true;
+    assert(!ensure(&early, &key) && tls_mock.opens == 1 && early.ctrl_key_auth == CTRL_KEY_TLS_VERIFIED);
+    /* The clock gates only that fetch: SaaS (built-in key), a pinned key and an http:// server do not wait. */
+    test_clock_valid = false;
+    reset_mocks();
+    assert(!ensure(&saas, &key) && key == NULL);
+    microlink_t lan = make("http://hs.lan");
+    plain_mock.response = GOOD;
+    assert(!ensure(&lan, &key) && lan.ctrl_key_auth == CTRL_KEY_PLAINTEXT);
+    microlink_t pin_https = make("https://hs.example.com");
+    memcpy(pin_https.ctrl_noise_pubkey, KEY, 32); pin_https.ctrl_noise_pubkey_valid = true; pin_https.ctrl_key_auth = CTRL_KEY_PINNED_CONFIG;
+    assert(!ensure(&pin_https, &key) && !tls_mock.opens);
+    test_clock_valid = true;
     /* Bare host is the same as https, with a non-default port in Host. */
     reset_mocks();
     microlink_t bare = make("hs.example.com:8443"); tls_mock.response = GOOD;
