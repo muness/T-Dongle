@@ -65,7 +65,7 @@ Rules, each enforced in the helper or by where the calls sit:
 | Wi-Fi to USB | Wi-Fi driver receive | `wifi`, core 0 | idle clock until the hook below has run once |
 | | lwIP input, `gateway_host_input`, UDP demux | `tcpip`, core 0 | raised by the hook (activity hold) |
 | | select wake, socket read, classify | `ml_net_io` | its own lock from the drain; the wake itself is covered by the activity hold |
-| | ChaCha20-Poly1305 decrypt, NAT rewrite, `gateway_tunnel_input` to the USB ring | `ml_wg_mgr` (under the tcpip core lock) | `ml_wg_mgr` lock |
+| | ChaCha20-Poly1305 decrypt, NAT rewrite, `gateway_tunnel_input` to the USB ring | `ml_wg_mgr` (the decrypt and the router's checks and rewrite with the tcpip core lock released, the USB output under it: ADR 0020) | `ml_wg_mgr` lock |
 | | USB IN transfer | TinyUSB task (other PR) | activity hold |
 | USB to Wi-Fi | USB OUT receive | TinyUSB task | idle clock for the first packet after a quiet spell only |
 | | hook: queue to `usb_routes` | `tcpip` | raised by the hook |
