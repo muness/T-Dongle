@@ -24,6 +24,9 @@ cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I main tests/test_
 build-host/test_usb_rx_budget
 python3 tools/test-tcp-window.py
 python3 tools/test-heap-budget.py
+# main/wifi_pins.inc against stand-ins for the IDF and lwIP calls: install order, RX hook lifetime, exactly-once release.
+cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra -Werror -I tests/host_pins -I components/microlink/include -I main tests/test_wifi_pins_hooks.c -o build-host/test_wifi_pins_hooks
+build-host/test_wifi_pins_hooks
 python3 tools/usb_drain_model.py --check
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
 build-host/test_router

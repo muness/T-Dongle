@@ -215,7 +215,7 @@ static struct {atomic_uint dropped_heap;} usb_rx_budget={.dropped_heap=3};
 #define GATEWAY_WIFI_BAND_TOTAL 5
 #define GATEWAY_WIFI_TX_BAND_MAX 4
 #define GATEWAY_WIFI_RX_BAND_MAX 4
-static bool wifi_pins_installed=true, wifi_pins_tx_done_ok=true;
+static bool wifi_pins_installed=true, wifi_pins_tx_done_ok=true, wifi_pins_rx_hooked=true;
 static struct {
     atomic_uint tx_high_water, tx_charged, tx_done, tx_aborted, tx_flushed, tx_stale, tx_unmatched, tx_band, tx_elastic,
         tx_refused_pool, tx_refused_heap, rx_high_water, rx_band, rx_elastic, rx_released, rx_unmatched, rx_dropped;
@@ -288,7 +288,7 @@ int main(void) {
     }
     {   /* Wi-Fi pin budget (ADR 0022 amendment 2): additive object, the counters that say whether tx-done can be trusted */
         cJSON *wp = cJSON_GetObjectItem(root, "wifi_pins");
-        assert(wp && cJSON_IsTrue(cJSON_GetObjectItem(wp, "installed")) && cJSON_IsTrue(cJSON_GetObjectItem(wp, "tx_done_cb")));
+        assert(wp && cJSON_IsTrue(cJSON_GetObjectItem(wp, "installed")) && cJSON_IsTrue(cJSON_GetObjectItem(wp, "tx_done_cb")) && cJSON_IsTrue(cJSON_GetObjectItem(wp, "rx_hooked")));
         assert(cJSON_GetObjectItem(wp, "tx_pool")->valueint == 16 && cJSON_GetObjectItem(wp, "band_total")->valueint == 5 &&
                cJSON_GetObjectItem(wp, "tx_band_max")->valueint == 4 && cJSON_GetObjectItem(wp, "rx_band_max")->valueint == 4);
         assert(cJSON_GetObjectItem(wp, "tx_inflight")->valueint == 2 && cJSON_GetObjectItem(wp, "tx_high_water")->valueint == 9 &&

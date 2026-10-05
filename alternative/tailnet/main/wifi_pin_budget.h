@@ -38,18 +38,26 @@
  * lmacStopTransmit, pp_deattach; read from libpp.a, see ADR 0022 amendment 2). So a charge is also released by
  *   - the submitter, when esp_wifi_internal_tx() reports failure (no buffer exists then: abort),
  *   - the STA link going down or coming up (flush: the driver cleared its queues), and
- *   - a lease: a charge older than GW_WTX_LEASE_MS is presumed gone (stale, counted). No frame waits in the driver for a second:
- *     at 1 Mbit/s a full frame is 12 ms of air time, 16 buffers 200 ms, 7 retries a few hundred ms.
- * Missing a callback therefore costs a credit for at most the lease (never a leak, never a refusal that does not end), and an extra
+ *   - a lease: a charge older than GW_WTX_LEASE_MS (3 s) is presumed gone (stale, counted). At 1 Mbit/s a full frame is 12 ms of air
+ *     time; 16 queued frames with 7 retries each can take 1.4 s, and an off-channel scan dwell adds to that, hence 3 s, not 1.
+ * Missing a callback therefore costs a credit until the flow pauses for a lease (never a permanent leak: an idle or throttled link
+ * heals; but under steady traffic a systematically missing callback is not repaired, see GW_WTX_LEASE_MS), and an extra
  * callback (a management frame completing) can release one credit early, which admits one more frame than counted for a moment:
  * both are bounded by the pool and visible in the counters (`tx_stale`, `tx_unmatched`) so the board decides whether the callback
  * can be trusted more. Release is exactly once per charge by construction: only the FIFO's head or tail is ever removed, under one lock.
  *
  * lwIP behaviour. A refused TX frame returns ESP_ERR_NO_MEM, which wlanif maps to ERR_MEM. For TCP that is the best answer there
- * is: tcp_output_segment() returns the error without consuming the segment, the segment stays on the unsent queue (no loss, no
- * congestion window cut, no retransmission counted) and goes out with the next ACK or write. Dropping instead (returning ERR_OK)
+ * is: tcp_output_segment() returns the error without consuming the segment, the segment stays on the unsent queue (no loss inferred,
+ * no congestion window cut, no retransmission counted) and goes out when tcp_output next runs: on the next ACK or segment from the peer
+ * (tcp_input ends in tcp_output) or the next write. A refusal happens with frames in flight (the band is full of them), so an ACK
+ * normally comes first. If none does (the refusal was by heap with nothing in flight), the retransmission timer that
+ * tcp_output_segment() armed BEFORE the failed send fires, and tcp_slowtmr treats "unsent but nothing unacked" as a failed send:
+ * rto back-off, ssthresh halved, cwnd one MSS. tcp_txnow() would retry sooner but nothing calls it. So: no cut in the usual case, the
+ * ordinary RTO reaction (not worse than loss) when the heap itself is the reason. Dropping instead (returning ERR_OK)
  * made lwIP believe the segment was sent: it waits for an ACK that cannot come, then retransmits and halves the window. UDP
- * (WireGuard) sees ENOBUFS from sendto, which wg_mgr counts as an egress drop, the same loss as before.
+ * (WireGuard, the forwarded traffic) gets ERR_MEM from udp_sendto up through wireguardif_tx_commit; gateway_send_packet discards
+ * the result and frees the packet: a silent loss for the inner flow (its own TCP reacts), counted only here (tx_refused_pool,
+ * tx_refused_heap), the same loss as before.
  *
  * Locking. The TX FIFO is touched from the lwIP/tcpip context (submit), the pp task (done) and the event task (flush): one critical
  * section (portMUX on the target, a mutex on the host), a few instructions. RX is lock free (one atomic counter).
@@ -91,8 +99,14 @@ typedef pthread_mutex_t gw_wp_lock_t;
 #define GATEWAY_WIFI_BAND_TOTAL 5u
 #define GATEWAY_WIFI_RX_BAND_MAX 4u
 #define GATEWAY_WIFI_TX_BAND_MAX 4u
-/* A charge older than this was dropped by the driver without a tx-done (see above). */
-#define GW_WTX_LEASE_MS 1000u
+/* A charge older than this was dropped by the driver without a tx-done (see above). It is the LAST fallback (link events flush the queues
+ * the driver clears), so it is long: expiring a charge whose buffer is still queued admits a replacement above the count, and a stall
+ * (an off-channel scan dwell, a channel switch, a low-priority access category behind a busy one, 16 queued frames each retried at
+ * 1 Mbit/s: ~85 ms a frame, 1.4 s for the lot) must not read as loss. The price of a longer lease is only how long a really missed
+ * done keeps one credit: a missed done leaves the surplus charge at the TAIL of the FIFO while traffic flows (dones pop the head), so
+ * it expires only when the flow slows below pool/lease frames a second; at 3 s that is ~5 frames/s (~64 kbit/s) before a leak of
+ * the whole pool heals itself, which is the floor of what a systematically missing callback costs. `tx_stale` says if that happens. */
+#define GW_WTX_LEASE_MS 3000u
 /* What a TX buffer costs beyond the frame: the driver's descriptor, the 802.11 QoS and LLC headers, the allocator header. Capped at
  * the full-frame cost the budget is sized with (ML_HB_PIN_BUF_BYTES). */
 #define GW_WTX_OVERHEAD 192u

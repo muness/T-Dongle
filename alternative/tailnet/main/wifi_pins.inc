@@ -92,13 +92,16 @@ static err_t wifi_pins_input(struct pbuf *p, struct netif *netif) {
     return wifi_pins_orig_input(p, netif);
 }
 
-/* After esp_netif_create_default_wifi_sta(), before esp_wifi_init(): nothing is in flight, so the hooks go in without a lock. Failure
- * leaves IDF's own handlers in place (the budget is then off and the status says so). */
+/* After esp_netif_create_default_wifi_sta(), before esp_wifi_init(): nothing is in flight, so the TX hooks go in without a lock. Failure
+ * leaves IDF's own handlers in place (the budget is then off and the status says so). The RX hook is NOT installed here: the lwIP netif
+ * behind `sta` does not exist yet (esp_netif_new() only allocates it zeroed; netif_add(), which sets netif->input = tcpip_input, runs in
+ * esp_netif_start_api() on WIFI_EVENT_STA_START), so lwip->input is NULL now. wifi_pins_hook_rx() does it once the netif is added. */
+static esp_netif_t *wifi_pins_sta;
+static volatile bool wifi_pins_rx_hooked;
 static void wifi_pins_install(esp_netif_t *sta) {
     esp_netif_iodriver_handle h = esp_netif_get_io_driver(sta);
-    struct netif *lwip = esp_netif_get_netif_impl(sta);
-    if (!h || !lwip || !lwip->input) {
-        ESP_LOGW("wifi", "pin budget not installed: STA netif has no driver handle or input");
+    if (!h) {
+        ESP_LOGW("wifi", "pin budget not installed: STA netif has no driver handle");
         return;
     }
     esp_netif_driver_ifconfig_t driver = {.handle = h,
@@ -109,11 +112,25 @@ static void wifi_pins_install(esp_netif_t *sta) {
         ESP_LOGW("wifi", "pin budget not installed: esp_netif_set_driver_config failed");
         return;
     }
-#if GATEWAY_WIFI_RX_GATE
-    wifi_pins_orig_input = lwip->input;
-    lwip->input = wifi_pins_input;
-#endif
+    wifi_pins_sta = sta;
     wifi_pins_installed = true;
+}
+/* Put the RX gate in front of the STA netif's input. netif_add() sets netif->input every time the netif is (re)added (every
+ * esp_netif_start, so again after an esp_wifi_stop/start), which silently removes the hook: this is idempotent and runs on every link
+ * event and on got-IP, all after the netif exists and before the first frame of a new link (the RX callback is registered by IDF's own
+ * connect handler). A frame that entered before the hook was in place carries the original free function and is passed through uncounted. */
+static void wifi_pins_hook_rx(void) {
+#if GATEWAY_WIFI_RX_GATE
+    if (!wifi_pins_installed || !wifi_pins_sta) return;
+    struct netif *lwip = esp_netif_get_netif_impl(wifi_pins_sta);
+    if (!lwip || !lwip->input || lwip->input == wifi_pins_input) {
+        wifi_pins_rx_hooked = lwip && lwip->input == wifi_pins_input;
+        return;
+    }
+    wifi_pins_orig_input = lwip->input;     /* before the swap: wifi_pins_input reads it */
+    lwip->input = wifi_pins_input;
+    wifi_pins_rx_hooked = true;
+#endif
 }
 /* After esp_wifi_start() (the API wants Wi-Fi running). */
 static void wifi_pins_start(void) {
@@ -124,5 +141,7 @@ static void wifi_pins_start(void) {
 }
 /* The driver clears its queues when the link drops or comes up, without completing the frames in them. */
 static void wifi_pins_link_changed(void) {
-    if (wifi_pins_installed) (void)gw_wtx_flush(&wifi_pins);
+    if (!wifi_pins_installed) return;
+    wifi_pins_hook_rx();
+    (void)gw_wtx_flush(&wifi_pins);
 }

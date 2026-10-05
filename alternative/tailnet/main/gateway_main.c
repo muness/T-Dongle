@@ -568,6 +568,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && !gateway_tailnet_mode()){online=true;tdongle_l2_link(true);}
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
         online = true;
+        if(gateway_tailnet_mode())wifi_pins_hook_rx();
     }
 }
 static esp_err_t json_reply(httpd_req_t *req, cJSON *j) {
@@ -1036,7 +1037,7 @@ static esp_err_t status(httpd_req_t *req) {
     {   /* ADR 0022 amendment 2: Wi-Fi driver buffers pinned by the data path, counted where they start. tx_stale and tx_unmatched say
          * whether the driver's tx-done callback can be trusted (both ~0); tx_refused_* and rx_dropped are the price of the floor. */
         jw_raw(w, "\"wifi_pins\":{");
-        BOOL("installed", wifi_pins_installed);BOOL("tx_done_cb", wifi_pins_tx_done_ok);
+        BOOL("installed", wifi_pins_installed);BOOL("tx_done_cb", wifi_pins_tx_done_ok);BOOL("rx_hooked", wifi_pins_rx_hooked);
         NUM("tx_pool", GATEWAY_WIFI_TX_POOL);NUM("band_total", GATEWAY_WIFI_BAND_TOTAL);NUM("tx_band_max", GATEWAY_WIFI_TX_BAND_MAX);NUM("rx_band_max", GATEWAY_WIFI_RX_BAND_MAX);
         NUM("tx_inflight", wifi_pins_tx_outstanding());NUM("tx_high_water", atomic_load(&wifi_pins.tx_high_water));
         NUM("tx_charged", atomic_load(&wifi_pins.tx_charged));NUM("tx_done", atomic_load(&wifi_pins.tx_done));
