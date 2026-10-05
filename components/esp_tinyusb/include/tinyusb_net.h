@@ -112,15 +112,20 @@ typedef struct {
     uint32_t dropped_invalid;    /*!< length outside 14..1518 */
     uint32_t flushed_link_down;  /*!< queued frames discarded when USB went away */
     uint32_t ntb_blocked;        /*!< times a drain stopped with every NTB in flight */
+    uint32_t xfer_events;        /*!< IN transfer completions that drained the ring (no polling) */
+    uint32_t worker_stack_free;  /*!< worker stack high-water mark, bytes never used */
 } tinyusb_net_tx_stats_t;
 
 /**
  * @brief Allocate the transmit ring and start its worker task (once, after tinyusb_net_init)
  *
  * The ring is an alternative to tinyusb_net_send_sync() for callers that hold a lock and must
- * never wait. It costs ring_bytes of heap plus the worker's stack; send_sync users pay nothing.
+ * never wait. It costs ring_bytes of heap plus the worker (1,536 B stack and a 340 B TCB);
+ * send_sync users pay nothing. The transmit-complete event that keeps it draining is a
+ * linker wrap of netd_xfer_cb (CMakeLists.txt).
  *
- * @param[in] ring_bytes  capacity, at least two maximum frames
+ * @param[in] ring_bytes  capacity, at least 2 * 1524 + 4 (two maximum frames); n * 1524 + 4
+ *                        holds n maximum frames at any position
  * @param[in] priority    worker task priority
  * @return ESP_OK, ESP_ERR_NO_MEM, ESP_ERR_INVALID_ARG
  */

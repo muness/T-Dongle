@@ -29,10 +29,13 @@ typedef esp_err_t (*tusb_net_rx_cb_t)(void*,uint16_t,void*);
 typedef void (*tusb_net_free_tx_cb_t)(void*,void*);
 typedef void (*tusb_net_init_cb_t)(void*);
 typedef struct {tusb_net_rx_cb_t on_recv_callback;tusb_net_free_tx_cb_t free_tx_buffer;tusb_net_init_cb_t on_init_callback;void *user_context;uint8_t mac_addr[6];} tinyusb_net_config_t;
-typedef struct {uint32_t ring_bytes,high_water_bytes,enqueued_frames,enqueued_bytes,sent_frames,sent_bytes,dropped_full,dropped_link_down,dropped_invalid,flushed_link_down,ntb_blocked;} tinyusb_net_tx_stats_t;
+typedef struct {uint32_t ring_bytes,high_water_bytes,enqueued_frames,enqueued_bytes,sent_frames,sent_bytes,dropped_full,dropped_link_down,dropped_invalid,flushed_link_down,ntb_blocked,xfer_events,worker_stack_free;} tinyusb_net_tx_stats_t;
+typedef int xfer_result_t;
 static int schedule, allow_tx=1, free_count;
+static _Atomic int notify_count;
+static int real_xfer_calls;
 /* Ring tests: producer context must never wait (it models the lwIP core lock holder). */
-static int in_producer, usb_ready=1, ntb_credit=-1, notify_count, last_notify_wait, task_create_fail, task_created, task_stack, task_prio;
+static int in_producer, usb_ready=1, ntb_credit=-1, last_notify_wait, task_create_fail, task_created, task_stack, task_prio;
 static void (*xmit_hook)(const uint8_t*,uint16_t);
 static void (*deferred[8])(void*);static void *args[8];static int pending;
 static void run_deferred(void){while(pending){void(*f)(void*)=deferred[0];void *arg=args[0];pending--;memmove(deferred,deferred+1,pending*sizeof(*deferred));memmove(args,args+1,pending*sizeof(*args));f(arg);}}
@@ -47,12 +50,14 @@ static void xEventGroupClearBits(EventGroupHandle_t e,int b){*e&=~b;}
 static int xEventGroupWaitBits(EventGroupHandle_t e,int b,int clear,int all,int timeout){assert(!in_producer);(void)all;(void)timeout;if(schedule==0)run_deferred();int ret=*e&b;if(clear)*e&=~b;return ret;}
 static void usbd_defer_func(void(*f)(void*),void *a,bool isr){assert(!in_producer);(void)isr;assert(pending<8);deferred[pending]=f;args[pending++]=a;}
 static bool tud_ready(void){return usb_ready;}
-static bool tud_network_can_xmit(uint16_t n){return allow_tx && n<=1514 && ntb_credit!=0;}
+static bool tud_network_can_xmit(uint16_t n){return allow_tx && n<=1518 && ntb_credit!=0;}
 uint16_t tud_network_xmit_cb(uint8_t*,void*,uint16_t);
-static void tud_network_xmit(void *ref,uint16_t n){uint8_t dest[1514];uint16_t got=tud_network_xmit_cb(dest,ref,n);assert(got==n);if(xmit_hook)xmit_hook(dest,n);if(ntb_credit>0)ntb_credit--;}
+static void tud_network_xmit(void *ref,uint16_t n){uint8_t dest[1518];uint16_t got=tud_network_xmit_cb(dest,ref,n);assert(got==n);if(xmit_hook)xmit_hook(dest,n);if(ntb_credit>0)ntb_credit--;}
 static void tud_network_recv_renew(void){}
 static uint8_t tusb_get_mac_string_id(void){return 6;}
 static void tinyusb_descriptors_set_string(const char *s,uint8_t id){(void)s;(void)id;}
 static int xTaskCreate(void(*f)(void*),const char *n,int stack,void *a,unsigned prio,TaskHandle_t *h){(void)f;(void)n;(void)a;if(task_create_fail)return 0;task_created++;task_stack=stack;task_prio=(int)prio;*h=(TaskHandle_t)&task_created;return pdPASS;}
 static int xTaskNotifyGive(TaskHandle_t h){assert(h);notify_count++;return pdPASS;}
 static int ulTaskNotifyTake(int clear,int wait){assert(clear==pdTRUE);assert(!in_producer);last_notify_wait=wait;int n=notify_count;notify_count=0;return n;}
+static uint32_t uxTaskGetStackHighWaterMark(TaskHandle_t h){(void)h;return 777;}
+bool __real_netd_xfer_cb(uint8_t rhport,uint8_t ep,xfer_result_t r,uint32_t n){(void)rhport;(void)ep;(void)r;(void)n;real_xfer_calls++;return true;}

@@ -45,7 +45,8 @@ assert attribution["synthetic"] == 28672 + 3 * 336 + 1234 and attribution["unatt
 assert attribution["n2"] == {"lp_acc_capacity": 65536, "lp_acc_allocated": False, "h2_window_advertised": 65536, "h2_acc_live_max": 0,
                              "gateway_plain_static": 20496, "gateway_json_static": 16384}, attribution["n2"]
 assert lwip["tcp_wnd"] == 5760 and lwip["pbuf_pool_size"] == 16
-assert usb["tx_ring_bytes"] == 6144 and usb["tx_high_water"] == 4212 and usb["tx_dropped_full"] == 7 and usb["tx_ntb_blocked"] == 4
+assert usb["tx_ring_bytes"] == 4576 and usb["tx_high_water"] == 4212 and usb["tx_dropped_full"] == 7 and usb["tx_ntb_blocked"] == 4
+assert usb["tx_xfer_events"] == 55 and usb["tx_worker_stack_free"] == 900
 assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 12 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
 members = sections["members"]

@@ -207,6 +207,8 @@ static void report_usb(jw_writer *w) {
     report_field(w, "tx_dropped_invalid", tx.dropped_invalid);
     report_field(w, "tx_flushed_link_down", tx.flushed_link_down);
     report_field(w, "tx_ntb_blocked", tx.ntb_blocked);
+    report_field(w, "tx_xfer_events", tx.xfer_events);
+    report_field(w, "tx_worker_stack_free", tx.worker_stack_free);
     report_field(w, "tx_ntb_count", CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT);
     report_field(w, "rx_inflight_max", GATEWAY_USB_RX_INFLIGHT_MAX);
     report_field(w, "rx_inflight", atomic_load(&usb_rx_budget.inflight));

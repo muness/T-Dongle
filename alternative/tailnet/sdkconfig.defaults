@@ -15,7 +15,10 @@ CONFIG_TINYUSB_NET_MODE_NCM=y
 CONFIG_TINYUSB_CDC_ENABLED=y
 CONFIG_TINYUSB_CDC_COUNT=1
 CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT=2
-CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE=6400
+# 3,200 B (esp_tinyusb's default; two full frames per NTB) instead of 6,400: the 6.4 KB saved pays
+# for the transmit ring and its worker so the boot heap, and with it the membership admission
+# margin, does not shrink. The ring now absorbs bursts that the larger NTBs used to. ADR 0015.
+CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE=3200
 CONFIG_ESP_CONSOLE_NONE=y
 CONFIG_LWIP_IP_FORWARD=y
 CONFIG_LWIP_IPV4_NAPT=y
@@ -27,7 +30,7 @@ CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=8192
 # per-socket window option and window scaling needs SPIRAM), so it is sized for the DERP relay
 # sockets, the only ones that ever need more than 2-3 segments in flight, and bounded by what
 # the Wi-Fi RX pool can pin. The receive mailbox must be WND/MSS + 2. tools/test-tcp-window.py
-# and main/tcp_window_budget.h reject inconsistent values. See docs/adr/0014-data-plane-io.md.
+# and main/tcp_window_budget.h reject inconsistent values. See docs/adr/0015-data-plane-io.md.
 CONFIG_LWIP_TCP_WND_DEFAULT=11520
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=10

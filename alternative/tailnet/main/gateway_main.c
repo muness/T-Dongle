@@ -29,11 +29,20 @@
 #include "tinyusb_net.h"
 #include "usb_rx_budget.h"
 #include "tcp_window_budget.h"
-/* Tunnel-to-USB transmit ring (heap, allocated once at USB start). 6 KB holds four full frames;
- * raise it only if the "usb" memory report shows dropped_full with high_water at ring_bytes. */
+/* Tunnel-to-USB transmit ring (heap, allocated once at USB start): three full frames, 3 x 1524 + 4.
+ * It is paid for by shrinking the two IN NTBs from 6,400 to 3,200 B (sdkconfig.defaults), so the
+ * boot heap does not go down. Raise it only if the "usb" memory report shows tx_dropped_full with
+ * tx_high_water at tx_ring_bytes. Sizing: docs/adr/0015-data-plane-io.md. */
 #ifndef GATEWAY_USB_TX_RING_BYTES
-#define GATEWAY_USB_TX_RING_BYTES 6144
+#define GATEWAY_USB_TX_RING_BYTES (3 * 1524 + 4)
 #endif
+/* Boot-heap neutrality (ADR 0015): before the ring the IN NTBs held 2 x 6,400 B. The ring, its
+ * worker stack (1,536) and TCB (340) must fit in what the smaller NTBs gave back, plus 512 B. */
+_Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT * CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE +
+               GATEWAY_USB_TX_RING_BYTES + 1536 + 340 <= 2 * 6400 + 512,
+               "USB transmit buffering grew past the admission-margin budget");
+_Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE >= 2 * (1518 + 4) + 64, "an IN NTB must hold two frames");
+_Static_assert(GATEWAY_USB_TX_RING_BYTES >= 3 * 1524 + 4, "transmit ring must hold three full frames");
 #define GATEWAY_USB_TX_PRIORITY 5  /* with the original bridge's usb_tx worker, below tcpip and Wi-Fi */
 #include <ctype.h>
 #include <strings.h>
@@ -409,7 +418,7 @@ static void manager(void *arg) {
 }
 /* Runs in the lwIP core-lock holder (tcpip task, WireGuard manager): it must never wait.
  * The frame is copied into the USB transmit ring and a worker hands it to TinyUSB; a full ring
- * drops the frame (counted), which TCP treats as loss. See docs/adr/0014-data-plane-io.md. */
+ * drops the frame (counted), which TCP treats as loss. See docs/adr/0015-data-plane-io.md. */
 static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
     if (len > UINT16_MAX)
         return ESP_ERR_INVALID_SIZE;
