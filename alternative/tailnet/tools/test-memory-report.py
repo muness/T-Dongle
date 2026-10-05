@@ -39,15 +39,17 @@ assert list(heap["owners"]) == ["other", "tls", "control", "map", "peer", "wg", 
 assert heap["owners"]["packet"]["live"] == 1500 and heap["owners"]["map"]["peak"] == 900 and heap["owners"]["packet"]["allocs"] == 1
 assert heap["guard_floor"] == 12288 and heap["ledger_bytes"] > 0 and heap["drops"]["derp_tx_full"] == 1
 assert heap["queue_depth"] == {"derp_tx": 8, "disco_rx": 8, "wg_rx": 8, "stun_rx": 4}
-assert attribution["tagged"] == 2400 and attribution["members"][0]["id"] == 7 and attribution["members"][0]["tasks"] == 3
-assert attribution["members"][0]["stacks"] == 6144 + 10240 + 12288 and attribution["members"][0]["stack_free"] == [1000, 2000, 3000, None]
-assert attribution["synthetic"] == 28672 + 3 * 336 + 1234 and attribution["unattributed"] == 300000 - 60000 - 2400 - attribution["synthetic"]
+assert attribution["tagged"] == 2400 and attribution["members"][0]["id"] == 7 and attribution["members"][0]["tasks"] == 1
+# A membership keeps ONE task (control); net_io, derp and wg_mgr exist once, counted under shared_runtime.
+assert attribution["members"][0]["stacks"] == 8704 and attribution["members"][0]["stack_free"] == [1000, 2000, 3000, 4000]
+assert attribution["shared_runtime"] == {"tasks": 3, "stacks": 7168 + 7680 + 8192, "tcbs": 3 * 336}, attribution["shared_runtime"]
+assert attribution["synthetic"] == (7168 + 7680 + 8192 + 3 * 336) + (8704 + 336 + 1234) and attribution["unattributed"] == 300000 - 60000 - 2400 - attribution["synthetic"]
 assert attribution["n2"] == {"lp_acc_capacity": 65536, "lp_acc_allocated": False, "h2_window_advertised": 65536, "h2_acc_live_max": 0,
                              "gateway_plain_static": 20496, "gateway_json_static": 16384}, attribution["n2"]
 assert lwip["tcp_wnd"] == 5760 and lwip["pbuf_pool_size"] == 16
 assert usb["tx_ring_bytes"] == 4576 and usb["tx_high_water"] == 4212 and usb["tx_dropped_full"] == 7 and usb["tx_ntb_blocked"] == 4
 assert usb["tx_xfer_events"] == 55 and usb["tx_worker_stack_free"] == 900
-assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 12 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
+assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 22 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
 members = sections["members"]
 phases = reports("members", "phases")
@@ -57,6 +59,14 @@ assert phases[0]["phases"]["control"]["peak"][6] == 1500 and phases[0]["phases"]
 admission = reports("members", "admission")[0]
 assert admission["override"] is True and len(admission["attempts"]) == 6
 assert [a["verdict"] for a in admission["attempts"]] == ["refused_budget", "refused_largest", "refused_sockets", "override", "refused_floor", "start_failed"], admission
+
+locks = reports("memory locks", "locks")[0]
+assert locks["bucket_limits_us"] == [100, 250, 500, 1000, 2000, 5000, 10000, 30000]
+assert locks["sites"]["wg_periodic"]["count"] == 2 and locks["sites"]["wg_periodic"]["max_us"] == 42000 and locks["sites"]["wg_periodic"]["over_1ms"] == 1
+assert locks["sites"]["wg_periodic"]["buckets"] == [0, 0, 0, 1, 0, 0, 0, 0, 1] and locks["sites"]["wg_other"]["count"] == 0
+route = reports("route", "route")[0]
+assert route["forwarded_out"] == 0 and route["alias_miss"] == 9 and route["queue_full"] == 30 and route["queue_depth"] == 16 and route["flow_slots"] == 64, route
+assert len([k for k in route if k not in ("schema", "kind")]) == 19 + 4, route
 
 bench = reports("memory bench", "bench")[0]
 assert bench["rounds"] == 256 and bench["chacha20poly1305_ns_per_packet"] == 2000000 and bench["cipher_ceiling_kbit_s"] == 1400 * 8 * 1000000 // 2000000
@@ -70,4 +80,4 @@ for command, lines in sections.items():
     for item in lines:
         if isinstance(item, dict):
             assert len(json.dumps(item, separators=(",", ":"))) < 1800, (command, item["kind"])  # bounded, fits the console queue in a few chunks
-print("Serial reports: heap, attribution, lwip, usb, phases, admission, bench and guard parse as bounded one-line JSON.")
+print("Serial reports: heap, attribution, lwip, usb, route, phases, admission, bench and guard parse as bounded one-line JSON.")

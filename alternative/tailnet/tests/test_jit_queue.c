@@ -19,7 +19,12 @@
 #define PBUF_IP 0
 #define PBUF_RAM 0
 #define GATEWAY_WG_CALL(x) (x)
+#define GATEWAY_WG_SITE(site,x) (x)
+#define TDONGLE_LOCK_WG_OUTPUT 3
 typedef int esp_err_t;
+#define ML_JIT_PENDING 8
+#define ML_RT_TASK_WG_MGR 2
+static unsigned wakes;static void ml_rt_wake(int t){assert(t==ML_RT_TASK_WG_MGR);wakes++;}
 typedef struct {uint32_t network;uint8_t prefix_len;} microlink_route_t;
 #include "semantic_types.inc"
 typedef struct {uint32_t addr;} ip4_addr_t;
@@ -27,14 +32,18 @@ struct pbuf {size_t len;uint8_t data[1400];};
 struct netif {int (*output)(struct netif *,struct pbuf *,const ip4_addr_t *);};
 typedef struct {
     unsigned state,jit_packet_count,jit_dropped;int peer_update_queue;
-    struct {ml_peer_update_t *packet;uint64_t expires;} jit_pending[4];
+    struct {ml_peer_update_t *packet;uint64_t expires;} jit_pending[ML_JIT_PENDING];
     struct {uint64_t jit_used_ms;} peers[8];
     struct netif *wg_netif;
 } microlink_t;
 static bool reject,up,known=true;static unsigned queued,sends;static uint64_t now;
-static ml_peer_update_t *queue[4];
+#define MALLOC_CAP_INTERNAL 1
+#define ML_ADM_RECOVERY_BYTES 16384
+static size_t free_heap=1u<<20;
+static size_t heap_caps_get_free_size(int caps){(void)caps;return free_heap;}
+static ml_peer_update_t *queue[ML_JIT_PENDING];
 static int xQueueSend(int q,void *packet,int wait) {
-    if(reject)return 0;assert(queued<4);queue[queued++]=*(ml_peer_update_t **)packet;return 1;
+    if(reject)return 0;assert(queued<ML_JIT_PENDING);queue[queued++]=*(ml_peer_update_t **)packet;return 1;
 }
 static uint64_t ml_get_time_ms(void){return now;}
 static int find_peer_by_ip(microlink_t *m,uint32_t ip){return known?0:-1;}
@@ -46,13 +55,15 @@ static int output(struct netif *n,struct pbuf *p,const ip4_addr_t *ip){assert(p-
 #include "jit_queue.inc"
 int main(void) {
     struct netif net={output};microlink_t m={.state=4,.wg_netif=&net};
-    for(unsigned i=0;i<4;i++)assert(ml_gateway_queue_packet(&m,0x64400001,(const uint8_t *)"data",4)==0);
-    assert(m.jit_packet_count==4);assert(ml_gateway_queue_packet(&m,0x64400001,(const uint8_t *)"data",4)==ESP_ERR_NO_MEM);
-    for(unsigned i=0;i<4;i++)m.jit_pending[i].packet=queue[i],m.jit_pending[i].expires=5000;
-    directory_flush_packets(&m);assert(!sends && m.jit_packet_count==4);
-    up=true;now=100;directory_flush_packets(&m);assert(sends==4 && !m.jit_packet_count);
+    for(unsigned i=0;i<ML_JIT_PENDING;i++)assert(ml_gateway_queue_packet(&m,0x64400001,(const uint8_t *)"data",4)==0);
+    assert(m.jit_packet_count==ML_JIT_PENDING && wakes==ML_JIT_PENDING);   /* every enqueue wakes the manager */assert(ml_gateway_queue_packet(&m,0x64400001,(const uint8_t *)"data",4)==ESP_ERR_NO_MEM);
+    for(unsigned i=0;i<ML_JIT_PENDING;i++)m.jit_pending[i].packet=queue[i],m.jit_pending[i].expires=5000;
+    directory_flush_packets(&m);assert(!sends && m.jit_packet_count==ML_JIT_PENDING);
+    up=true;now=100;directory_flush_packets(&m);assert(sends==ML_JIT_PENDING && !m.jit_packet_count);
     queued=0;reject=true;assert(ml_gateway_queue_packet(&m,1,(const uint8_t *)"data",4)==ESP_ERR_NO_MEM);assert(!m.jit_packet_count);
+    free_heap=ML_ADM_RECOVERY_BYTES+100;assert(ml_gateway_queue_packet(&m,1,(const uint8_t *)"data",4)==ESP_ERR_NO_MEM && !m.jit_packet_count);   /* never below the recovery reserve */
+    free_heap=1u<<20;
     reject=false;assert(!ml_gateway_queue_packet(&m,0x64400001,(const uint8_t *)"data",4));m.jit_pending[0].packet=queue[0];m.jit_pending[0].expires=101;
-    now=102;directory_flush_packets(&m);assert(!m.jit_packet_count && m.jit_dropped==1 && sends==4);
-    puts("JIT packet queue: four-packet cap, retained until handshake, rejection cleanup and timeout passed");
+    now=102;directory_flush_packets(&m);assert(!m.jit_packet_count && m.jit_dropped==1 && sends==ML_JIT_PENDING);
+    puts("JIT packet queue: per-membership cap, retained until handshake, rejection cleanup and timeout passed");
 }

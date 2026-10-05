@@ -101,3 +101,62 @@ E10 (MSS/MTU). Capture on host: `tcpdump -ni <usb iface> -s 0 tcp` during iperf;
 2. Raise the forwarding path's priority and pin it to a core.
 3. Event-driven wakeups instead of a faster tick.
 4. The shared packet pool.
+
+## Router hot path (PR-C): what the 1.5 ms was, and what replaced it
+
+Branch `overhaul/p2-router-hotpath`; decision record in [ADR 0014](../adr/0014-router-hot-path.md). Host numbers come from `tools/bench-router.sh` and `tests/bench_components.c` (-O2, an Apple-silicon host under heavy load: use ratios, not absolutes; the ESP32-S3 at 160 MHz does the same work roughly 50 to 100 times slower).
+
+### Itemised per-packet cost of the old `usb_routes` path
+
+| Step (old) | Cost | Now |
+|---|---|---|
+| **`ml_directory_alias_find` on a RAM-cache miss: `fopen` + sequential `fread` of the FAT alias file, cache disabled on both cores, result not cached, repeated for every packet of the flow** | **about 1.4 ms on the board (inferred: 1.5 ms measured per packet minus about 0.1 ms of compute); this is the `ipc1` 12.7%** | none: dropped once, filled in the background, preloaded at boot |
+| alias scan, 64 entries | host 30 to 42 ns | hash lookup 2 ns (first packet of a flow only) |
+| flow scan, 64 entries, atomic load per entry | host 26 to 33 ns | hash chain + touch 5 ns; reply is one indexed read, 3 ns |
+| full IPv4 + TCP/UDP checksum over the payload | host 90 to 118 ns (1400 B) | RFC 1624 incremental, 11 to 13 ns, independent of length |
+| `malloc` + copy + `free` of the packet | host 40 to 48 ns plus heap lock and fragmentation | copy into a static buffer, 20 to 26 ns, no heap |
+| `members_lock` try-lock | free, but drops the packet whenever any task holds the lock | not taken on the forwarding path |
+| `ml_gateway_queue_packet` (`calloc` + copy + queue) | unchanged | unchanged: the PR-B seam (`route_emit_tunnel`) |
+
+Whole path through the same harness (host ns net of the harness itself, old to new): USB to tunnel 238 to 112 (20 B payload) and 307 to 172 (1360 B), tunnel to USB 86 to 61 and 128 to 93, so 1.2 to 2.1 times on compute. The compute was never the problem: about 20 to 40 microseconds per packet on the board before, 10 to 20 after (extrapolated). The reduction in `usb_routes` CPU comes from removing the flash access.
+
+Why a raw address hit flash on every packet: `gateway_alias` fills a 64-entry rolling RAM table only when something resolves the peer (DNS answer, peer list). An address used directly after a reboot, or any peer beyond the 64 most recent, was not in it. `gateway_process_host_input` then read the file and, unlike `gateway_alias`, did not store the result. 198.18.0.86 is alias number 85, beyond the 64-entry table.
+
+### Other findings
+
+- `members_lock` try-lock: any task holding it (a 10 ms display poll, a DNS lookup up to 50 ms, a membership start up to 1 s) made `usb_routes` and tunnel input drop packets. Now forwarding is lock-free with respect to it.
+- `>1400 B` rule: dropping every oversized packet silently is wrong for DF traffic (path-MTU discovery never learns). It is now an ICMP fragmentation-needed reply for DF, a counted drop otherwise. For UDP without DF, fragmentation by the host would produce fragments the router rejects, so only a smaller datagram helps (`-l 1372` or less).
+- `wg_mgr` still has its own limits (4 packets per membership in `jit_pending`, one flush per loop; R1 above). They are outside this PR. The new counter `tunnel_reject` shows how often `ml_gateway_queue_packet` refuses a packet, so the next bottleneck is visible.
+
+### Results (host)
+
+`test-gateway.sh`: 24 seeds of the differential test emit about 30,000 packets and compare them byte for byte against the old router, together with the full flow table after every event; five deliberate mutations (ownership check removed, port checksum update removed, membership state ignored, idle timer ignored, flow clearing on suspend removed) are each caught. `test_router_hotpath` performs 30,000 round trips with zero flash calls. TSan runs a stop/destroy/start loop against concurrent forwarding; removing the RCU wait makes it fail.
+
+### On-board verification plan
+
+Build `alternative/tailnet/tools/build-diagnostics.sh` from this branch and, for the baseline, the same script at `f1fd51f` (the diagnostics image has the 1 kHz tick and the `route` serial command added here). Use the method of experiment #5 for per-task CPU (run-time stats over the 12 s run), the same tailnet, and the same peer.
+
+1. Serial: `memory` and `route` before the run (note `router_ingress` and all `route` counters).
+2. Server on 100.106.216.83: `iperf3 -s`. Host side, bound to the USB address:
+   - TCP up: `iperf3 -c 198.18.0.86 -B 192.168.77.2 -t 12 -i 2`
+   - TCP down: the same with `-R`
+   - UDP up: `iperf3 -c 198.18.0.86 -B 192.168.77.2 -u -b 3M -l 1200 -t 12`
+   - UDP down: the same with `-R`
+3. During each run capture per-task CPU. After each run read `route` and `memory` again.
+4. Cold start: reboot, then immediately run the TCP-up test against the raw address without any DNS lookup. `alias_miss` should be 0 (preload) or 1 with `alias_fill` 1 (record older than the 64 most recent), and the first connect may take one retransmission.
+5. Oversize: `ping -D -s 1400 198.18.0.86` on macOS (`ping -M do -s 1400` on Linux) should answer `frag needed ... mtu=1400` and increment `oversize_icmp`; `-s 1372` should pass. `iperf3 -u -b 3M -l 1448` (no DF) is expected to be dropped and counted in `oversize_drop`, not forwarded.
+6. Lifecycle: during the UDP run disable and re-enable the membership three times from the setup page. Expect no reset and traffic to resume (this exercises `gateway_suspend` waiting for in-flight packets).
+
+Expectations at the same offered load as the baseline:
+
+| Metric | Baseline (board) | Expected | Fail if |
+|---|---|---|---|
+| `usb_routes` CPU | 32% at about 1 Mbit/s, 1.5 ms per packet | below 3%, under 100 microseconds per packet (CPU% divided by packets per second) | above 6.4% (less than 5 times lower) |
+| `ipc1` CPU | 12.7% | below 2% | still above 5%: look for another flash reader (`ml_directory_find` in `ml_wg_mgr.c` `process_peer_updates` for a peer that is not active, DNS, `/status`) |
+| `router_ingress` drops (TCP 1 Mbit/s) | non-zero | 0 | non-zero with `queue_full` high: raise `ROUTE_QUEUE_DEPTH` |
+| `route` counters | n/a | `alias_miss` 0 to 1, `flow_full` 0, `no_member` 0, `member_down` 0, `tx_fail` 0 | any of these growing during steady traffic |
+| TCP retransmits per 10 s | 53 to 137 | clearly lower; throughput limited next by `tunnel_reject` (wg_mgr 4-packet cap) | |
+| UDP `-l 1200 -b 3M` loss | 59% | lower; remaining loss should match `tunnel_reject` | |
+| heap minimum free | 6.4 KB (with 4-deep queue) | within 3 KB of baseline (code +3.6 KB flash, static RAM +2.8 KB) | below the guard floor |
+
+IDLE0/IDLE1 should rise as `usb_routes` and `ipc1` fall; if throughput also rises the other tasks scale with it, so compare CPU per packet rather than CPU percent.

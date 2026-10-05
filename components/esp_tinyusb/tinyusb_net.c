@@ -355,7 +355,7 @@ static void tx_worker(void *arg)
     }
 }
 
-esp_err_t tinyusb_net_tx_ring_start(size_t ring_bytes, unsigned priority)
+esp_err_t tinyusb_net_tx_ring_start(size_t ring_bytes, unsigned priority, int core)
 {
     ESP_RETURN_ON_FALSE(ring_bytes >= 2 * TX_REC_MAX + 4, ESP_ERR_INVALID_ARG, TAG,
                         "TX ring must hold two frames");
@@ -368,7 +368,7 @@ esp_err_t tinyusb_net_tx_ring_start(size_t ring_bytes, unsigned priority)
     uint8_t *buf = malloc(ring_bytes);
     ESP_RETURN_ON_FALSE(buf, ESP_ERR_NO_MEM, TAG, "Failed to allocate TX ring");
     TaskHandle_t worker = NULL;
-    if (xTaskCreate(tx_worker, "usb_txq", TX_WORKER_STACK, NULL, priority, &worker) != pdPASS) {
+    if (xTaskCreatePinnedToCore(tx_worker, "usb_txq", TX_WORKER_STACK, NULL, priority, &worker, core) != pdPASS) {
         free(buf);
         return ESP_ERR_NO_MEM;
     }

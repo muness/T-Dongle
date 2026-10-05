@@ -15,6 +15,9 @@
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "gateway.h"
+#include "ml_runtime.h"
+#include "ml_admission.h"
+#include "route_table.h"
 #include "boot_health.h"
 #include "lcd.h"
 #include "lcd_view.h"
@@ -43,7 +46,6 @@ _Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT * CONFIG_TINYUSB_NCM_IN_NTB
                "USB transmit buffering grew past the admission-margin budget");
 _Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE >= 2 * (1518 + 4) + 64, "an IN NTB must hold two frames");
 _Static_assert(GATEWAY_USB_TX_RING_BYTES >= 3 * 1524 + 4, "transmit ring must hold three full frames");
-#define GATEWAY_USB_TX_PRIORITY 5  /* with the original bridge's usb_tx worker, below tcpip and Wi-Fi */
 #include <ctype.h>
 #include <strings.h>
 #include <time.h>
@@ -237,10 +239,23 @@ static bool stop_member(membership_t *m) {
     m->client = NULL;
     return true;
 }
-/* Account for the allocations requested by microlink_init/start, plus
- * allocator/task bookkeeping, deferred WG/TLS allocations (40,000 bytes), and
- * 16 KiB retained for HTTP/control recovery.
- * Shared registration/map byte buffers are static, not charged per member. */
+/* Admission (ADR 0013, N1.2). What it costs to add one more membership is derived from the sizes the compiler
+ * knows and the constants measured on the board (ml_admission.h): the shared tasks' stacks are charged to the first
+ * membership only, a membership's own start allocations and steady growth are charged to each, and exactly ONE
+ * negotiation peak is reserved however many memberships there are, because negotiations are serialised by the
+ * token (ml_negotiation.h). Shared registration/map byte buffers are static, not charged per member. The decision
+ * inputs are all in /status. */
+_Static_assert(GATEWAY_USB_RX_INFLIGHT_MAX >= ROUTE_QUEUE_DEPTH + ROUTE_HOLD_SLOTS + 4, "USB receive slots must leave room beyond what the router can hold");
+_Static_assert(ROUTE_HEAP_RESERVE == ML_ADM_RECOVERY_BYTES, "the router queue must stop at the same recovery reserve admission keeps");
+_Static_assert(GATEWAY_TASK_USB_ROUTES_CORE == ML_TASK_WG_MGR_CORE && GATEWAY_TASK_USB_ROUTES_PRIO > ML_TASK_WG_MGR_PRIO &&
+               ML_TASK_WG_MGR_PRIO > ML_TASK_COORD_PRIO && ML_TASK_COORD_CORE == ML_TASK_WG_MGR_CORE,
+               "core 1: usb_routes > wg_mgr > coord");
+_Static_assert(ML_TASK_NET_IO_CORE == ML_TASK_DERP_TX_CORE && ML_TASK_NET_IO_PRIO > ML_TASK_DERP_TX_PRIO,
+               "core 0: net_io > derp");
+_Static_assert(GATEWAY_TASK_USB_TX_CORE == TINYUSB_DEFAULT_TASK_AFFINITY && GATEWAY_TASK_USB_TX_CORE == ML_TASK_WG_MGR_CORE &&
+               GATEWAY_TASK_USB_TX_PRIO > TINYUSB_DEFAULT_TASK_PRIO && GATEWAY_TASK_USB_TX_PRIO > ML_TASK_COORD_PRIO &&
+               GATEWAY_TASK_USB_TX_PRIO < ML_TASK_WG_MGR_PRIO,
+               "core 1: usb_routes > wg_mgr > usb_txq > TinyUSB and coord");
 static size_t member_queue_bytes(void) {
     return ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
            (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH +
@@ -248,12 +263,23 @@ static size_t member_queue_bytes(void) {
            ML_COORD_CMD_QUEUE_DEPTH * sizeof(ml_coord_cmd_t) +
            ML_PEER_UPDATE_QUEUE_DEPTH * sizeof(ml_peer_update_t *) + 6 * sizeof(StaticQueue_t);
 }
-static size_t member_start_budget(void) {
-    size_t tasks = ML_TASK_NET_IO_STACK + ML_TASK_DERP_TX_STACK +
-                   ML_TASK_COORD_STACK + ML_TASK_WG_MGR_STACK;
-    return sizeof(microlink_t) + tasks + member_queue_bytes() +
-           4 * sizeof(StaticTask_t) + 2048 + 16384 + 40000;
+static ml_adm_budget_t admission_budget(void) {
+    ml_adm_sizes_t sizes = {
+        .context = sizeof(microlink_t),
+        .coord_stack = ML_TASK_COORD_STACK,
+        .task_tcb = sizeof(StaticTask_t),
+        .queues = member_queue_bytes(),
+        .wg_device = ml_wg_device_bytes(),
+        .wg_slot = ml_wg_slot_bytes(),
+        .shared_stacks = ML_RT_SHARED_STACK_BYTES,
+        .shared_tasks = ML_RT_TASK_COUNT,
+        .route_queue_min = ROUTE_QUEUE_BYTES_MIN,
+    };
+    ml_adm_budget_t budget;
+    ml_adm_budget(&sizes, ml_rt_start_bytes() == 0, &budget);   /* 0: the shared tasks are already running */
+    return budget;
 }
+static size_t member_start_budget(void) { return admission_budget().required; }
 #ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
 static void admission_note(const membership_t *m, tdongle_admit_verdict verdict, size_t free_now,
                            size_t largest, unsigned active, const gateway_socket_stats *sockets) {
@@ -281,6 +307,7 @@ static void admission_failed(membership_t *m) {
 #define admission_override(m, free_now) false
 #define admission_failed(m) ((void)0)
 #endif
+static bool start_member_holding_token(membership_t *m);
 static void start_member(membership_t *m) {
     if (!gateway_tailnet_mode() || !m->enabled || m->client || !online)
         return;
@@ -291,6 +318,26 @@ static void start_member(membership_t *m) {
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 1);
         return;
     }
+    /* Start, Noise, registration, the initial map and the DERP TLS handshake are one negotiation at a time across
+     * all memberships (ml_negotiation.h). The token is taken BEFORE the heap is measured: another membership's
+     * negotiation moves free memory by its peak, so a reading taken beside it would lie. A busy token is a
+     * retryable refusal, not a failure: the manager comes back in ten seconds. It is released on every path out
+     * of here; the membership's control task takes it again for its own negotiation. */
+    ml_neg_t *neg = ml_rt_negotiation();
+    const uintptr_t key = ml_neg_key(m->id, ML_NEG_PHASE_START);
+    if (!ml_neg_acquire(neg, key, ML_NEG_PRIO_START, ML_NEG_PHASE_START, 1500)) {
+        strlcpy(m->error, "Waiting for another membership to finish joining", sizeof(m->error));
+        gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 4);
+        return;
+    }
+    /* Handed over, not released and re-acquired: on success the control task (same phase-A key) already holds the token
+     * and keeps it through its negotiation states, so no other membership can start in the gap between microlink_start
+     * and the control task's first request. Every path that did not start a control task releases here, and
+     * microlink_stop releases the key again as a backstop. */
+    if (!start_member_holding_token(m))
+        ml_neg_release(neg, key);
+}
+static bool start_member_holding_token(membership_t *m) {
     /* Reserve for parsed JSON, networking and recovery HTTP. Shared receive
      * buffers are static. Runtime peak sufficiency needs board qualification. */
     size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -299,21 +346,23 @@ static void start_member(membership_t *m) {
     for (membership_t *other = members; other; other = other->next)
         if (other->client) active++;
     gateway_socket_stats sockets = gateway_sockets_snapshot();
-    bool within_budget = free_now >= member_start_budget() && largest >= 24000;
+    ml_adm_budget_t budget = admission_budget();
+    ml_adm_verdict_t verdict = ml_adm_decide(&budget, free_now, largest);
+    bool within_budget = verdict == ML_ADM_OK;
     if (!within_budget && !admission_override(m, free_now)) {
         strlcpy(m->error, "Not enough free memory to activate this membership",
                 sizeof(m->error));
-        admission_note(m, free_now < member_start_budget() ? TDONGLE_ADMIT_REFUSED_BUDGET
+        admission_note(m, verdict == ML_ADM_REFUSED_BUDGET ? TDONGLE_ADMIT_REFUSED_BUDGET
                                                            : TDONGLE_ADMIT_REFUSED_LARGEST,
                        free_now, largest, active, &sockets);
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 2);
-        return;
+        return false;
     }
     if (!gateway_socket_admit(CONFIG_LWIP_MAX_SOCKETS, active, sockets.open)) {
         strlcpy(m->error, "Socket capacity reserved for USB setup and DNS", sizeof(m->error));
         admission_note(m, TDONGLE_ADMIT_REFUSED_SOCKETS, free_now, largest, active, &sockets);
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 3);
-        return;
+        return false;
     }
     admission_note(m, within_budget ? TDONGLE_ADMIT_OK : TDONGLE_ADMIT_OVERRIDE, free_now, largest,
                    active, &sockets);
@@ -336,7 +385,7 @@ static void start_member(membership_t *m) {
                        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), active, &sockets);
         admission_failed(m);
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_FAILED, 1);
-        return;
+        return false;
     }
     esp_err_t err = microlink_start(m->client);
     m->start_heap_after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -348,13 +397,14 @@ static void start_member(membership_t *m) {
         if (!stop_member(m)) {
             m->enabled = false;
             save_members();
-            return;
+            return false;
         }
         snprintf(m->error, sizeof(m->error), "Start failed: %s",
                  esp_err_to_name(err));
-        return;
+        return false;
     }
     m->error[0] = 0;
+    return true;   /* started: the control task now owns the token (same key) */
 }
 bool gateway_display_state(lcd_state *s) {
     s->bridge=!gateway_tailnet_mode();
@@ -685,6 +735,7 @@ static esp_err_t home(httpd_req_t *req) {
                            setup_html_end - setup_html_start);
 }
 #include "json_writer.inc"
+#include "runtime_status.inc"
 #ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
 #include "memory_diagnostics.inc"
 #endif
@@ -695,6 +746,7 @@ typedef struct {
     char label[24], error[64], dns[128], login[384], protocol_error[64], h2_debug[49];
     unsigned control_stage;
     uint32_t derp_tls_failures, derp_tls_deferred;
+    uint32_t derp_state, derp_stats[6];   /* link state; frames rx/tx, record timeouts, write stalls, drops, connects */
     unsigned control_key_auth;
     uint32_t diagnostics[21], stack_free[5];
     unsigned peers, directory_count, peer_offset, page_start;
@@ -777,6 +829,10 @@ static esp_err_t status(httpd_req_t *req) {
                 sizeof(v->protocol_error));
         strlcpy(v->h2_debug,c->h2_debug,sizeof(v->h2_debug));v->control_stage=c->control_stage;
         v->derp_tls_failures=c->derp.tls_verify_failures;v->derp_tls_deferred=c->derp.tls_deferred;v->control_key_auth=c->ctrl_key_auth;
+        v->derp_state=c->derp.link.state;
+        v->derp_stats[0]=c->derp.link.stats.frames_rx;v->derp_stats[1]=c->derp.link.stats.frames_tx;
+        v->derp_stats[2]=c->derp.link.stats.rx_timeouts;v->derp_stats[3]=c->derp.link.stats.tx_stalls;
+        v->derp_stats[4]=c->derp.link.stats.alloc_drops;v->derp_stats[5]=c->derp.link.stats.connects;
         v->diagnostics[0] = c->map_attempts;
         v->diagnostics[1] = c->map_failures;
         v->diagnostics[2] = c->map_error;
@@ -796,9 +852,14 @@ static esp_err_t status(httpd_req_t *req) {
         v->diagnostics[16]=c->read_expected;v->diagnostics[17]=c->read_received;
         v->diagnostics[18]=c->read_elapsed_ms;v->diagnostics[19]=c->read_errno;
         v->diagnostics[20]=(uint32_t)c->read_tls_result;
-        TaskHandle_t tasks[5] = {c->net_io_task, c->derp_tx_task,
-                                 c->derp_rx_task, c->coord_task,
-                                 c->wg_mgr_task};
+        /* net_io, derp_tx and wg_mgr are the shared tasks (the same headroom for every membership, see
+         * shared_runtime.tasks); derp_rx has not existed since the I/O tasks were merged; coord is this one's. */
+        bool shared = c->rt_attached;
+        const TaskHandle_t none = (TaskHandle_t)0;
+        TaskHandle_t tasks[5] = {shared ? ml_rt_task_handle(ML_RT_TASK_NET_IO) : none,
+                                 shared ? ml_rt_task_handle(ML_RT_TASK_DERP) : none,
+                                 none, c->coord_task,
+                                 shared ? ml_rt_task_handle(ML_RT_TASK_WG_MGR) : none};
         for (unsigned t = 0; t < 5; t++) {
             v->stack_free[t]=UINT32_MAX;
             if (tasks[t] && !c->stop_incomplete)
@@ -856,6 +917,7 @@ static esp_err_t status(httpd_req_t *req) {
     BOOL("recovery", gateway_boot_recovery());
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
+    status_shared_runtime(w);
     gateway_socket_stats sockets = gateway_sockets_snapshot();
     NUM("socket_limit", CONFIG_LWIP_MAX_SOCKETS);
     NUM("socket_recovery_reserve", GATEWAY_SOCKET_RECOVERY);
@@ -939,6 +1001,9 @@ static esp_err_t status(httpd_req_t *req) {
             STR("h2_debug", v->h2_debug);
             NUM("control_stage", v->control_stage);
             NUM("derp_tls_verify_failures",v->derp_tls_failures);NUM("derp_tls_deferred",v->derp_tls_deferred);
+            jw_raw(w,"\"derp_link\":{");STR("state",ml_derp_link_state_name((ml_derp_link_state_t)v->derp_state));
+            NUM("frames_rx",v->derp_stats[0]);NUM("frames_tx",v->derp_stats[1]);NUM("record_timeouts",v->derp_stats[2]);
+            NUM("write_stalls",v->derp_stats[3]);NUM("alloc_drops",v->derp_stats[4]);jw_key(w,"connects");jw_number(w,v->derp_stats[5]);jw_raw(w,"},");
             NUM("control_key_auth",v->control_key_auth);
             NUM("jit_hits",v->jit[0]);NUM("jit_misses",v->jit[1]);NUM("jit_evictions",v->jit[2]);
             NUM("jit_rejected",v->jit[3]);NUM("jit_dropped",v->jit[4]);
@@ -1162,7 +1227,7 @@ static esp_err_t start_usb(void) {
     if(gateway_tailnet_mode()){uint8_t device[6];gateway_usb_macs(identity_mac,device,net.mac_addr);}
     else memcpy(net.mac_addr, identity_mac, 6);
     result=tinyusb_net_init(&net);
-    if(result==ESP_OK && gateway_tailnet_mode())result=tinyusb_net_tx_ring_start(GATEWAY_USB_TX_RING_BYTES,GATEWAY_USB_TX_PRIORITY);
+    if(result==ESP_OK && gateway_tailnet_mode())result=tinyusb_net_tx_ring_start(GATEWAY_USB_TX_RING_BYTES,GATEWAY_TASK_USB_TX_PRIO,GATEWAY_TASK_USB_TX_CORE);
     extern esp_err_t gateway_console_start(void);
     esp_err_t console=gateway_console_start();
     return console!=ESP_OK?console:result;

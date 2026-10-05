@@ -11,7 +11,12 @@
 
 #define GATEWAY_USB_RX_FRAME_MIN 14u
 #define GATEWAY_USB_RX_FRAME_MAX 1518u   /* 1500 MTU + Ethernet header + VLAN tag */
-#define GATEWAY_USB_RX_INFLIGHT_MAX 12u  /* 12 x 1.5 KB = 18 KB worst case, transient */
+/* Frames the router can hold at once (ROUTE_QUEUE_DEPTH 16 + ROUTE_HOLD_SLOTS 2: the router queues the lwIP pbuf that wraps the
+ * usb_rx copy, so each queued packet keeps its slot until usb_routes frees it) plus 4 for everything else on the interface (DHCP,
+ * DNS, ARP, setup HTTP): a flooded router can never take every slot and starve recovery traffic. gateway_main.c asserts it.
+ * Heap: the router's own byte budget (rt_queue_budget: free heap above the 16,384 B recovery reserve, at most 16 KB, floor two
+ * packets) already bounds the bytes it holds, so the slots add at most the 4 spare frames (6 KB) beyond it, and only in a flood. */
+#define GATEWAY_USB_RX_INFLIGHT_MAX 22u
 
 typedef struct {
     atomic_uint inflight;

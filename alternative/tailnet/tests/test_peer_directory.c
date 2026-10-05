@@ -18,6 +18,9 @@ typedef struct {uint32_t network;uint8_t prefix_len;} microlink_route_t;
 typedef struct microlink_s microlink_t;
 #include "ml_directory.h"
 struct microlink_s {uint8_t wg_public_key[32];ml_directory_t directory;};
+typedef struct {unsigned n;uint32_t last;bool ordered;} alias_walk;
+static void alias_count(void *context,const ml_directory_alias_t *record) {
+    alias_walk *w=context;if(record->alias<=w->last && w->n<1000)w->ordered=false;w->last=record->alias;w->n++;}
 static int fail_write_after=-1;
 static size_t checked_write(const void *p,size_t size,size_t count,FILE *f) {
     if(fail_write_after==0)return 0;
@@ -79,5 +82,9 @@ int main(void) {
     FILE *tail=fopen(ROOT "/aliases","ab");assert(tail);fputc(1,tail);fclose(tail);
     alias=(ml_directory_alias_t){2,1000,0xc6130001};assert(ml_directory_alias_save(&alias));
     assert(ml_directory_alias_find(0,0,alias.alias,&alias));assert(alias.id==2);
+    /* The boot-time scan visits every valid record in file order and skips a torn or corrupt one. */
+    alias_walk walk={0,0,true};
+    assert(ml_directory_alias_scan(alias_count,&walk));assert(walk.n==1001 && walk.ordered && walk.last==0xc6130001);
+    unlink(ROOT "/aliases");assert(!ml_directory_alias_scan(alias_count,&walk)); /* no file: false, nothing visited */
     printf("peer directory: 1000 records, isolation, abort, delta/rotation, reboot and torn generation passed; record=%zu bytes\n",sizeof(p));
 }

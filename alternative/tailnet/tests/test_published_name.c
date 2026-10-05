@@ -3,6 +3,7 @@
  * -fsanitize=address,undefined and again with -fsanitize=thread. */
 #include "../components/microlink/include/ml_published_name.h"
 #include <assert.h>
+#include <sched.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -35,25 +36,44 @@ static ml_published_name_t shared;
 static atomic_bool stop;
 static unsigned writes;
 
+/* The checks must not depend on how the scheduler treats a loaded machine. A
+ * time-boxed run asserting "at least N reads" failed when the test shared the
+ * host with a build: readers legitimately give up (bounded retries) whenever the
+ * writer is descheduled mid-write, and a thread that was not scheduled for most
+ * of a second counted few reads. So the work is counted, not timed: the writer
+ * performs a fixed number of writes, and each reader keeps going until it has
+ * obtained a fixed number of consistent copies (it can always get one once the
+ * writer is idle). The time limit below only bounds a hang; it is never a pass
+ * criterion. Torn copies are the only way to fail. */
+#define STRESS_WRITES 40000u
+#define STRESS_READS_PER_READER 2000u
+#define STRESS_HANG_LIMIT_S 120
+
 static void *writer(void *arg) {
     (void)arg;
     char name[ML_PUBLISHED_NAME_MAX];
-    for (unsigned k = 0; !atomic_load(&stop); k++) {
+    for (unsigned k = 0; k < STRESS_WRITES; k++) {
         make_name(k, name);
         assert(ml_published_name_set(&shared, name));
         writes++;
+        if (k % 64 == 0)
+            sched_yield(); /* let readers in even on one core */
     }
+    atomic_store(&stop, true);
     return NULL;
 }
 typedef struct { unsigned reads, misses; } reader_result;
 static void *reader(void *arg) {
     reader_result *r = arg;
     char out[ML_PUBLISHED_NAME_MAX];
-    while (!atomic_load(&stop)) {
+    time_t start = time(NULL);
+    while (!atomic_load(&stop) || r->reads < STRESS_READS_PER_READER) {
+        assert(time(NULL) - start < STRESS_HANG_LIMIT_S); /* a hang, not a slow machine */
         size_t length;
         if (!ml_published_name_get(&shared, out, sizeof(out), &length)) {
             assert(out[0] == 0 && length == 0);
             r->misses++;
+            sched_yield();
             continue;
         }
         assert(length == strlen(out));
@@ -68,12 +88,10 @@ static void stress(void) {
     pthread_t w, readers[3];
     reader_result results[3] = {{0}};
     atomic_store(&stop, false);
+    writes = 0;
     pthread_create(&w, NULL, writer, NULL);
     for (int i = 0; i < 3; i++)
         pthread_create(&readers[i], NULL, reader, &results[i]);
-    struct timespec pause = {.tv_sec = 1};
-    nanosleep(&pause, NULL);
-    atomic_store(&stop, true);
     pthread_join(w, NULL);
     unsigned reads = 0, misses = 0;
     for (int i = 0; i < 3; i++) {
@@ -81,7 +99,8 @@ static void stress(void) {
         reads += results[i].reads;
         misses += results[i].misses;
     }
-    assert(writes > 1000 && reads > 1000);
+    assert(writes == STRESS_WRITES && reads >= 3 * STRESS_READS_PER_READER);
+    assert(!(shared.seq & 1)); /* the writer left the counter stable */
     printf("  stress: %u writes, %u consistent reads, %u bounded-retry misses, 0 torn\n",
            writes, reads, misses);
 }

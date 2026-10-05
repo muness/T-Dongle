@@ -49,7 +49,7 @@ static void *consumer(void *arg) {
 int main(void) {
     tinyusb_net_config_t cfg = {0};
     assert(tinyusb_net_init(&cfg) == ESP_OK);
-    assert(tinyusb_net_tx_ring_start(CAP, 5) == ESP_OK);
+    assert(tinyusb_net_tx_ring_start(CAP, 5, 0) == ESP_OK);
     xmit_hook = observe;
     pthread_t p, c;
     pthread_create(&c, NULL, consumer, NULL);

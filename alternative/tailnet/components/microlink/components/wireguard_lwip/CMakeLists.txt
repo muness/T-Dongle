@@ -16,6 +16,7 @@ endif()
 idf_component_register(
     SRCS
         "src/wireguard.c"
+        "src/wireguard_pool.c"
         "src/wireguardif.c"
         "src/crypto.c"
         "src/wireguard-platform-esp32.c"

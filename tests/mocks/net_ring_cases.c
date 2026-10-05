@@ -42,15 +42,15 @@ static void test_lifecycle(void) {
     tinyusb_net_tx_stats_t st;
     uint8_t f[100] = {0};
     assert(tinyusb_net_tx_ring_send(f, 100) == ESP_ERR_INVALID_STATE);   /* not started */
-    assert(tinyusb_net_tx_ring_start(2000, 5) == ESP_ERR_INVALID_ARG);   /* below two frames */
-    assert(tinyusb_net_tx_ring_start(2 * 1524, 5) == ESP_ERR_INVALID_ARG);  /* two frames and no spare word */
+    assert(tinyusb_net_tx_ring_start(2000, 5, 0) == ESP_ERR_INVALID_ARG);   /* below two frames */
+    assert(tinyusb_net_tx_ring_start(2 * 1524, 5, 0) == ESP_ERR_INVALID_ARG);  /* two frames and no spare word */
     task_create_fail = 1;
-    assert(tinyusb_net_tx_ring_start(CAP, 5) == ESP_ERR_NO_MEM && s_tx.buf == NULL);
+    assert(tinyusb_net_tx_ring_start(CAP, 5, 0) == ESP_ERR_NO_MEM && s_tx.buf == NULL);
     task_create_fail = 0;
-    assert(tinyusb_net_tx_ring_start(CAP, 5) == ESP_OK && task_created == 1 && task_prio == 5);
+    assert(tinyusb_net_tx_ring_start(CAP, 5, 0) == ESP_OK && task_created == 1 && task_prio == 5 && task_core == 0);
     assert(task_stack == 1536);
-    assert(tinyusb_net_tx_ring_start(CAP, 5) == ESP_OK && task_created == 1);   /* idempotent */
-    assert(tinyusb_net_tx_ring_start(CAP + 4096, 5) == ESP_ERR_INVALID_STATE);
+    assert(tinyusb_net_tx_ring_start(CAP, 5, 0) == ESP_OK && task_created == 1);   /* idempotent */
+    assert(tinyusb_net_tx_ring_start(CAP + 4096, 5, 0) == ESP_ERR_INVALID_STATE);
     assert(tinyusb_net_tx_ring_send(NULL, 100) == ESP_ERR_INVALID_ARG);
     assert(tinyusb_net_tx_ring_send(f, 13) == ESP_ERR_INVALID_ARG);
     assert(tinyusb_net_tx_ring_send(f, 1519) == ESP_ERR_INVALID_ARG);
@@ -64,7 +64,7 @@ static void test_lifecycle(void) {
     assert(tinyusb_net_tx_ring_send(f, 100) == ESP_ERR_INVALID_STATE);
     tinyusb_net_config_t cfg = {.free_tx_buffer = released_ring};
     assert(tinyusb_net_init(&cfg) == ESP_OK);            /* deinit cleared the callbacks */
-    assert(tinyusb_net_tx_ring_start(CAP, 5) == ESP_OK);
+    assert(tinyusb_net_tx_ring_start(CAP, 5, 0) == ESP_OK);
     s_tx.gen = 0; s_tx.down_seen = false;
 }
 
@@ -175,7 +175,7 @@ static void test_xfer_complete_event(void) {
     in_complete();
     assert(real_xfer_calls == calls + 1 && s_tx.xfer_events == before);
     tinyusb_net_config_t cfg = {.free_tx_buffer = released_ring};
-    assert(tinyusb_net_init(&cfg) == ESP_OK && tinyusb_net_tx_ring_start(CAP, 5) == ESP_OK);
+    assert(tinyusb_net_init(&cfg) == ESP_OK && tinyusb_net_tx_ring_start(CAP, 5, 0) == ESP_OK);
 }
 
 static void test_flush_on_link_loss(void) {

@@ -15,6 +15,8 @@ typedef struct {uint32_t ring_bytes,high_water_bytes,enqueued_frames,enqueued_by
 static void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *s) { *s = (tinyusb_net_tx_stats_t){4576, 4212, 90, 120000, 80, 100000, 7, 1, 2, 3, 4, 55, 900}; }
 static gateway_usb_rx_budget usb_rx_budget;
 #define GATEWAY_VERSION "0.0.0-test"
+#include "route_table.h"
+uint32_t gateway_route_stat(unsigned which) { return which * 3; }
 #define CONFIG_LWIP_MAX_SOCKETS 20
 #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
 #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
@@ -22,9 +24,9 @@ static gateway_usb_rx_budget usb_rx_budget;
 #define CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM 16
 #define CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM 16
 #define CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE 1
-#define ML_TASK_NET_IO_STACK 6144
-#define ML_TASK_DERP_TX_STACK 10240
-#define ML_TASK_COORD_STACK 12288
+#define ML_TASK_NET_IO_STACK 7168
+#define ML_TASK_DERP_TX_STACK 7680
+#define ML_TASK_COORD_STACK 8704
 #define ML_TASK_WG_MGR_STACK 8192
 #define ML_JSON_BUFFER_SIZE 65536
 #define ML_H2_BUFFER_SIZE 65536
@@ -36,7 +38,15 @@ static gateway_usb_rx_budget usb_rx_budget;
 typedef void *TaskHandle_t;
 typedef void *SemaphoreHandle_t;
 typedef struct { char opaque[336]; } StaticTask_t;
-typedef struct { TaskHandle_t net_io_task, derp_tx_task, coord_task, wg_mgr_task; bool stop_incomplete; size_t h2_acc_len; uint8_t *lp_acc; } microlink_t;
+typedef struct { TaskHandle_t coord_task; bool rt_attached, stop_incomplete; size_t h2_acc_len; uint8_t *lp_acc; } microlink_t;
+/* The shared runtime: three tasks whose handles are 1000 (net_io), 2000 (derp) and 4000 (wg_mgr) in this test. */
+typedef enum { ML_RT_TASK_NET_IO, ML_RT_TASK_DERP, ML_RT_TASK_WG_MGR, ML_RT_TASK_COUNT } ml_rt_task_t;
+typedef struct { bool running; uint32_t stack_bytes[ML_RT_TASK_COUNT]; } ml_rt_status_t;
+static void *ml_rt_task_handle(ml_rt_task_t t) { static const uintptr_t h[] = {1000, 2000, 4000}; return (void *)h[t]; }
+static void ml_rt_status(ml_rt_status_t *out) {
+    out->running = true;
+    out->stack_bytes[0] = ML_TASK_NET_IO_STACK; out->stack_bytes[1] = ML_TASK_DERP_TX_STACK; out->stack_bytes[2] = ML_TASK_WG_MGR_STACK;
+}
 typedef struct membership { struct membership *next; uint32_t id; microlink_t *client; } membership_t;
 static membership_t *members;
 static SemaphoreHandle_t members_lock;
@@ -58,7 +68,7 @@ static void *tracked(size_t size) { void *p = malloc(size); for (unsigned i = 0;
 #include "json_writer.inc"
 #include "memory_diagnostics.inc"
 int main(void) {
-    microlink_t client = {(void *)1000, (void *)2000, (void *)3000, NULL};
+    microlink_t client = {(void *)3000, true, false, 0, NULL};
     membership_t second = {NULL, 9, NULL}, first = {&second, 7, &client};
     members = &first;
     tdongle_heap_tag(TDONGLE_OWNER_PACKET, tracked(1500));
@@ -71,7 +81,8 @@ int main(void) {
         tdongle_memory_admission_note(&r);
     }
     tdongle_memory_drop(TDONGLE_DROP_DERP_TX_FULL);
-    const char *commands[] = {"memory", "members", "memory bench", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
+    tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 700);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 42000);
+    const char *commands[] = {"memory", "route", "members", "memory bench", "memory locks", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));

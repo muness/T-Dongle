@@ -202,6 +202,7 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
                                  __ATOMIC_RELEASE);
                 return false;
             }
+            ml_rt_wake(ML_RT_TASK_WG_MGR);   /* the peer owner applies it now, not at its next poll */
             batch->header.action = ML_PEER_BATCH;
             batch->count = count;
             batch->authoritative = s->authoritative;
@@ -243,8 +244,10 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
     if (s->derp_present) {
         ml->derp_region_count = s->region_count;
         memcpy(ml->derp_regions, s->regions, sizeof(s->regions));
-        if (activate_derp_regions(ml) && !ml->derp.connected)
+        if (activate_derp_regions(ml) && !ml->derp.connected) {
             xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
+            ml_rt_wake(ML_RT_TASK_DERP);
+        }
     }
     return true;
 }

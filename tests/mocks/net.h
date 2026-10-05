@@ -56,7 +56,8 @@ static void tud_network_xmit(void *ref,uint16_t n){uint8_t dest[1518];uint16_t g
 static void tud_network_recv_renew(void){}
 static uint8_t tusb_get_mac_string_id(void){return 6;}
 static void tinyusb_descriptors_set_string(const char *s,uint8_t id){(void)s;(void)id;}
-static int xTaskCreate(void(*f)(void*),const char *n,int stack,void *a,unsigned prio,TaskHandle_t *h){(void)f;(void)n;(void)a;if(task_create_fail)return 0;task_created++;task_stack=stack;task_prio=(int)prio;*h=(TaskHandle_t)&task_created;return pdPASS;}
+static int task_core;
+static int xTaskCreatePinnedToCore(void(*f)(void*),const char *n,int stack,void *a,unsigned prio,TaskHandle_t *h,int core){task_core=core;(void)f;(void)n;(void)a;if(task_create_fail)return 0;task_created++;task_stack=stack;task_prio=(int)prio;*h=(TaskHandle_t)&task_created;return pdPASS;}
 static int xTaskNotifyGive(TaskHandle_t h){assert(h);notify_count++;return pdPASS;}
 static int ulTaskNotifyTake(int clear,int wait){assert(clear==pdTRUE);assert(!in_producer);last_notify_wait=wait;int n=notify_count;notify_count=0;return n;}
 static uint32_t uxTaskGetStackHighWaterMark(TaskHandle_t h){(void)h;return 777;}

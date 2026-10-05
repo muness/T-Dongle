@@ -140,6 +140,9 @@ static uint64_t ticks;
 static uint64_t ml_get_time_ms(void) { return ticks++; }
 static void vTaskDelay(unsigned ms) { ticks += ms; }
 static void xEventGroupSetBits(int events, int bit) {}
+enum { ML_RT_TASK_NET_IO, ML_RT_TASK_DERP, ML_RT_TASK_WG_MGR };
+static unsigned wake_calls;
+static void ml_rt_wake(int task) { (void)task; wake_calls++; }   /* event driven: producers wake the shared tasks */
 static bool activate_derp_regions(microlink_t *ml) {
     return ml->derp_region_count > 0;
 }

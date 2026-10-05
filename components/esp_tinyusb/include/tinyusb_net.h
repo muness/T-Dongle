@@ -127,9 +127,10 @@ typedef struct {
  * @param[in] ring_bytes  capacity, at least 2 * 1524 + 4 (two maximum frames); n * 1524 + 4
  *                        holds n maximum frames at any position
  * @param[in] priority    worker task priority
+ * @param[in] core        core to pin the worker to (tskNO_AFFINITY for none)
  * @return ESP_OK, ESP_ERR_NO_MEM, ESP_ERR_INVALID_ARG
  */
-esp_err_t tinyusb_net_tx_ring_start(size_t ring_bytes, unsigned priority);
+esp_err_t tinyusb_net_tx_ring_start(size_t ring_bytes, unsigned priority, int core);
 
 /**
  * @brief Queue a frame for transmission without blocking

@@ -26,6 +26,13 @@ typedef enum {TDONGLE_PHASE_START,TDONGLE_PHASE_CONTROL,TDONGLE_PHASE_NOISE,TDON
 /* Where the data path discards a packet because a bounded queue is full. */
 typedef enum {TDONGLE_DROP_DERP_TX_EVICT,TDONGLE_DROP_DERP_TX_FULL,TDONGLE_DROP_DERP_RX_FULL,TDONGLE_DROP_NET_DISCO_FULL,TDONGLE_DROP_NET_WG_FULL,TDONGLE_DROP_NET_STUN_FULL,TDONGLE_DROP_ROUTER_INGRESS,TDONGLE_DROP_COUNT} tdongle_drop;
 
+/* How long the lwIP core lock (LOCK_TCPIP_CORE) is held, by call site. Diagnostics builds only: a histogram per site, so a
+ * board run shows whether any single hold exceeds the ~1 ms budget the shared wg_mgr task works to. */
+typedef enum {TDONGLE_LOCK_WG_OTHER,TDONGLE_LOCK_WG_PERIODIC,TDONGLE_LOCK_WG_COMMIT,TDONGLE_LOCK_WG_OUTPUT,TDONGLE_LOCK_WG_PEER,TDONGLE_LOCK_SITE_COUNT} tdongle_lock_site;
+enum {TDONGLE_LOCK_BUCKETS=9}; /* hold < 100, 250, 500, 1000, 2000, 5000, 10000, 30000 us, then >= 30000 */
+static const uint32_t tdongle_lock_bucket_limit_us[TDONGLE_LOCK_BUCKETS-1]={100,250,500,1000,2000,5000,10000,30000};
+typedef struct {uint32_t count,max_us,over_1ms,bucket[TDONGLE_LOCK_BUCKETS];uint64_t total_us;} tdongle_lock_stats;
+
 #ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
 enum {TDONGLE_MEMORY_MEMBERS=3,TDONGLE_MEMORY_ADMISSIONS=6};
 typedef struct {uint32_t live,peak,allocs,frees,failed,denied;} tdongle_owner_stats;
@@ -38,6 +45,10 @@ typedef struct {uint32_t member_id,attempt;tdongle_phase_record phase[TDONGLE_PH
 typedef enum {TDONGLE_ADMIT_OK,TDONGLE_ADMIT_REFUSED_BUDGET,TDONGLE_ADMIT_REFUSED_LARGEST,TDONGLE_ADMIT_REFUSED_SOCKETS,TDONGLE_ADMIT_OVERRIDE,TDONGLE_ADMIT_REFUSED_FLOOR,TDONGLE_ADMIT_START_FAILED} tdongle_admit_verdict;
 typedef struct {uint32_t uptime_ms,member_id,free_bytes,largest_bytes,budget_bytes,sockets_open,sockets_limit,active,verdict;} tdongle_admission_record;
 
+/* Record that the core lock was held for `us` microseconds at `site`. Lock-free. */
+void tdongle_lock_hold(tdongle_lock_site site,uint32_t us);
+tdongle_lock_stats tdongle_lock_stats_get(tdongle_lock_site site);
+int64_t tdongle_lock_clock(void);
 /* Account a block that was just allocated; NULL when the guard floor refused it (the block is freed). */
 void *tdongle_heap_note_alloc(tdongle_owner owner,void *block);
 /* Account a block allocated by code we do not control (wireguardif_init); never refused. */
@@ -67,6 +78,8 @@ static inline void *tdongle_heap_tag(tdongle_owner owner,void *block){return tdo
 static inline void tdongle_heap_free(tdongle_owner owner,void *block){tdongle_heap_note_free(owner,block);free(block);}
 static inline void tdongle_heap_forget(tdongle_owner owner,void *block){tdongle_heap_note_free(owner,block);}
 #else
+static inline void tdongle_lock_hold(tdongle_lock_site site,uint32_t us){(void)site;(void)us;}
+static inline int64_t tdongle_lock_clock(void){return 0;}
 static inline void *tdongle_heap_tag(tdongle_owner owner,void *block){(void)owner;return block;}
 static inline void tdongle_heap_free(tdongle_owner owner,void *block){(void)owner;free(block);}
 static inline void tdongle_heap_adopt(tdongle_owner owner,void *block){(void)owner;(void)block;}
