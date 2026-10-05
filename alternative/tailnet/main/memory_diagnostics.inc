@@ -3,6 +3,7 @@
  * gateway_main.c after json_writer.inc. */
 #include "lwip/opt.h"
 #include "route_table.h"
+#include "tdongle_wgperf.h"
 extern void mgmt_write(const char *s);
 static const char *const owner_names[TDONGLE_OWNER_COUNT] = {"other", "tls", "control", "map", "peer", "wg", "packet", "context"};
 static const char *const phase_names[TDONGLE_PHASE_COUNT] = {"start", "control", "noise", "register", "map", "derp", "steady"};
@@ -418,6 +419,67 @@ static void report_cpu(jw_writer *w) {
     report_end(w);
     free(tasks);
 }
+/* wg_mgr packet-path accounting (components/tdongle_runtime/include/tdongle_wgperf.h). Stages are [count,total,max] in the
+ * unit named in "units"; "elapsed_ms" is the time since the last `wgperf reset`, so totals divide into rates. */
+extern bool ml_wg_log_bench(unsigned rounds, uint32_t *cycles_per_line);
+static void report_wgperf(jw_writer *w) {
+    static const char *const names[TDONGLE_WGPERF_STAGE_COUNT] = {
+#define X(name, unit) #name,
+        TDONGLE_WGPERF_STAGES(X)
+#undef X
+    };
+    static const char *const units[TDONGLE_WGPERF_STAGE_COUNT] = {
+#define X(name, unit) unit,
+        TDONGLE_WGPERF_STAGES(X)
+#undef X
+    };
+    static const char *const counters[TDONGLE_WGPERF_COUNTER_COUNT] = {
+#define X(name) #name,
+        TDONGLE_WGPERF_COUNTERS(X)
+#undef X
+    };
+    tdongle_pm_status_t pm;
+    tdongle_pm_status(&pm);
+    report_begin(w, "wgperf");
+    report_field(w, "cpu_mhz", pm.cpu_mhz);
+    report_field(w, "elapsed_ms", (uint32_t)((uint32_t)esp_timer_get_time() - atomic_load(&tdongle_wgperf.since_us)) / 1000);
+    jw_raw(w, ",\"stages\":{");
+    for (unsigned i = 0; i < TDONGLE_WGPERF_STAGE_COUNT; i++) {
+        tdongle_wgperf_sample s = tdongle_wgperf_get(&tdongle_wgperf, i);
+        if (i) jw_char(w, ',');
+        jw_key(w, names[i]);
+        jw_char(w, '[');
+        jw_number(w, s.count);
+        jw_char(w, ',');
+        jw_number(w, s.total);
+        jw_char(w, ',');
+        jw_number(w, s.max);
+        jw_char(w, ']');
+    }
+    jw_raw(w, "},\"units\":[");
+    for (unsigned i = 0; i < TDONGLE_WGPERF_STAGE_COUNT; i++) {
+        if (i) jw_char(w, ',');
+        jw_string(w, units[i]);
+    }
+    jw_raw(w, "],\"counters\":{");
+    for (unsigned i = 0; i < TDONGLE_WGPERF_COUNTER_COUNT; i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, counters[i]);
+        jw_number(w, tdongle_wgperf_counter_get(&tdongle_wgperf, i));
+    }
+    jw_char(w, '}');
+    report_end(w);
+}
+/* What one per-packet log line cost, measured on the board: the formatting and vprintf path of ESP_LOGI as configured. */
+static void report_logbench(jw_writer *w) {
+    uint32_t per_line = 0;
+    bool ok = ml_wg_log_bench(200, &per_line);
+    report_begin(w, "logbench");
+    report_field(w, "rounds", 200);
+    report_field(w, "ok", ok);
+    report_field(w, "cycles_per_line", per_line);
+    report_end(w);
+}
 bool gateway_memory_command(const char *line) {
     jw_writer w = {.sink = memory_sink};
     if (!strcmp(line, "memory")) {
@@ -427,6 +489,14 @@ bool gateway_memory_command(const char *line) {
         report_usb(&w);
     } else if (!strcmp(line, "cpu")) {
         report_cpu(&w);
+    } else if (!strcmp(line, "wgperf")) {
+        report_wgperf(&w);
+    } else if (!strcmp(line, "wgperf reset")) {
+        tdongle_wgperf_reset_now();
+        report_begin(&w, "wgperf_reset");
+        report_end(&w);
+    } else if (!strcmp(line, "wgperf logbench")) {
+        report_logbench(&w);
     } else if (!strcmp(line, "route")) {
         report_router(&w);
     } else if (!strcmp(line, "members")) {

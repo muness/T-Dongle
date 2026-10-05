@@ -2,6 +2,7 @@
  * per-membership join-phase capture and admission record. Nothing here allocates;
  * all state is static and every critical section is a few stores. */
 #include "tdongle_memory.h"
+#include "tdongle_wgperf.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -148,3 +149,6 @@ tdongle_admission_record tdongle_memory_admission_get(unsigned offset){
  portEXIT_CRITICAL(&diag_lock);
  return r;
 }
+/* wg_mgr packet-path stage accounting (serial `wgperf`, tdongle_wgperf.h). Static, allocation-free. */
+tdongle_wgperf_t tdongle_wgperf;
+void tdongle_wgperf_reset_now(void){tdongle_wgperf_reset(&tdongle_wgperf,(uint32_t)esp_timer_get_time());}
