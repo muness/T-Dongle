@@ -42,3 +42,14 @@ Capacity becomes statistical with bounded drops. A join may wait behind another 
 
 - Slicing check fails (a stalled member blocks the others), or the marginal cost per membership measured on the board after stage 1 exceeds 35 KB: revisit, with Rust as the alternative.
 - Any reset under `-P 8` load: stop.
+
+## Amendment 2026-10-05: crypto is not the throughput bottleneck
+
+An on-board cycle-accurate benchmark (PR #28, `crypto bench`, 160 MHz, interrupts masked) measured ChaCha20-Poly1305 seal of 1,400 B at:
+
+- legacy: ~89k cycles (~0.56 ms)
+- new implementation: 62,596 cycles (0.39 ms), a cipher-only ceiling of ~28 Mbit/s
+
+IRAM placement had no effect. The 2.95 ms per packet from PR #25's `memory bench` was a measurement artifact, not cipher cost.
+
+D4 stays merged as a 30% cipher improvement. The ~1 Mbit/s tailnet throughput and the 47–74 ms LAN disco RTT point to forwarding-path latency and queue drops (the 4-deep route queue, `router_ingress` drops). PR-B now targets that.
