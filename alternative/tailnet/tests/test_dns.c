@@ -21,10 +21,10 @@ static unsigned ticks;static unsigned xTaskGetTickCount(void){return ticks;}
 typedef int esp_err_t;
 typedef void *TaskHandle_t;
 typedef struct {char hostname[64];uint32_t vpn_ip;} ml_peer_update_t;
-typedef struct {int state;struct {bool session_valid;unsigned count,generation;} directory;} client_t;
+typedef struct {int state;struct {bool session_valid;unsigned count,generation;} directory;char self_dns_name[128];const char *const *records;} client_t;
 typedef struct membership {struct membership *next;client_t *client;uint32_t id;char label[24];} membership_t;
 static membership_t *members;static int members_lock;
-static int lock_ok=1;static int xSemaphoreTake(int lock,int wait){return lock_ok;}
+static int lock_ok=1,lock_takes;static int xSemaphoreTake(int lock,int wait){lock_takes++;return lock_ok;}
 static void xSemaphoreGive(int lock){}
 static int reads,closes,sends,forwards,live,fail_at;static size_t task_stack;
 static void *task_arg;static void (*task_fn)(void *);static jmp_buf finished;
@@ -55,8 +55,8 @@ static int send_packet(int fd,const void *p,size_t n,int flags){forwards++;retur
 static bool upstream_ready=false;
 static int receive_packet(int fd,void *p,size_t n,int flags){if(!upstream_ready)return -1;assert(n==1500);memcpy(p,upstream_reply,upstream_reply_size);upstream_ready=false;return upstream_reply_size;}
 static int directory_reads;static bool directory_ok=true,change_generation=false;static const char *record_name="server.example.ts.net";
-static bool ml_directory_at(client_t *c,unsigned i,ml_peer_update_t *out){directory_reads++;if(!directory_ok)return false;if(change_generation)c->directory.generation++;strcpy(out->hostname,record_name);out->vpn_ip=0x64400001;return true;}
-static uint32_t gateway_alias(uint32_t id,uint32_t peer){assert(id==1 && peer==0x64400001);return 0xc6120003;}
+static bool ml_directory_at(client_t *c,unsigned i,ml_peer_update_t *out){directory_reads++;if(!directory_ok)return false;if(change_generation)c->directory.generation++;strcpy(out->hostname,c->records?c->records[i]:record_name);out->vpn_ip=0x64400001+i;return true;}
+static unsigned alias_calls;static uint32_t gateway_alias(uint32_t id,uint32_t peer){alias_calls++;assert(id>=1 && id<=3);return 0xc6120002+(id-1)*0x100+(peer&0xff);}
 #define calloc allocate
 #define free release
 #define xTaskCreate create_task
@@ -77,13 +77,15 @@ static void question(const char *name){
     for(const char *s=name;*s;){const char *dot=strchr(s,'.');size_t len=dot?(size_t)(dot-s):strlen(s);query[n++]=len;memcpy(query+n,s,len);n+=len;s+=len;if(*s)s++;}
     query[n++]=0;query[n++]=0;query[n++]=1;query[n++]=0;query[n++]=1;query_size=n;
 }
+#define SYNC() gateway_dns_domains_refresh()
+static void w_reset(dns_workspace *w){w->upstream_sock=-1;for(unsigned i=0;i<4;i++)w->pending[i].active=false;}
 static void run(void){reads=sends=forwards=0;response_size=0;if(!setjmp(finished))task_fn(task_arg);}
 int main(void){
     for(fail_at=1;fail_at<=5;fail_at++){closes=0;assert(gateway_dns_start()!=0);assert(live==0);assert(closes==(fail_at>=3));}
     fail_at=0;assert(gateway_dns_start()==0 && live==1 && task_stack==4096);assert(gateway_dns_stack_free()==3000);
     question("example.com");run();assert(forwards==1);((dns_workspace *)task_arg)->upstream_sock=-1;((dns_workspace *)task_arg)->pending[0].active=false;
-    client_t client={.state=4,.directory={.session_valid=true,.count=1}};
-    membership_t member={.client=&client,.id=1,.label="work"};members=&member;
+    client_t client={.state=4,.directory={.session_valid=true,.count=1},.self_dns_name="dongle.example.ts.net."};
+    membership_t member={.client=&client,.id=1,.label="work"};members=&member;SYNC();
     question("server.work.tailnet");run();assert(sends==1 && forwards==0 && response[7]==1 && response_size==query_size+16);
     assert(!memcmp(response+response_size-4,"\xc6\x12\x00\x03",4));
     directory_reads=0;question("server.work.tailnet");run();assert(response[7]==1 && directory_reads==0);
@@ -104,6 +106,117 @@ int main(void){
     question("missing.work.tailnet");run();assert(sends==1 && (response[3]&15)==3 && forwards==0);
     for(size_t n=0;n<12;n++){query_size=n;run();assert(!sends && !forwards);}
     question("server.work.tailnet");query[12]=255;run();assert(!sends && !forwards);
+
+    /* MagicDNS names: the names /status displays resolve like the qualified form. */
+    {
+    dns_workspace *wk=task_arg;
+    const char *const peers_a[]={"server.example.ts.net","alpha.example.ts.net","beta.example.ts.net","server.other.ts.net"};
+    client_t second={.state=4,.directory={.session_valid=true,.count=1},.self_dns_name="gw.corp.ts.net",.records=(const char *const[]){"server.corp.ts.net"}};
+    membership_t other={.client=&second,.id=2,.label="home"};member.next=&other;SYNC();
+    client.records=peers_a;client.directory.count=4;client.directory.generation++;
+    #define EXPECT_ALIAS(n,a) do{question(n);run();assert(sends==1&&forwards==0&&(response[3]&15)==0&&response[7]==1&&!memcmp(response+response_size-4,(a),4));}while(0)
+    #define EXPECT_RCODE(n,rc) do{question(n);run();assert(sends==1&&forwards==0&&(response[3]&15)==(rc)&&response[7]==0);}while(0)
+    #define EXPECT_UPSTREAM(n) do{question(n);run();assert(sends==0&&forwards==1);w_reset(wk);}while(0)
+    EXPECT_ALIAS("alpha.work.tailnet","\xc6\x12\x00\x04");
+    EXPECT_ALIAS("alpha.example.ts.net","\xc6\x12\x00\x04");
+    /* Two peers share a first label: the qualified form is ambiguous, MagicDNS names are exact. */
+    EXPECT_RCODE("server.work.tailnet",3);
+    EXPECT_ALIAS("server.example.ts.net","\xc6\x12\x00\x03");
+    EXPECT_ALIAS("SERVER.Example.TS.net","\xc6\x12\x00\x03");
+    EXPECT_ALIAS("alpha.example.ts.net","\xc6\x12\x00\x04");
+    EXPECT_ALIAS("beta.example.ts.net","\xc6\x12\x00\x05");
+    /* Same first label in another peer's domain never matches this peer. */
+    EXPECT_UPSTREAM("server.other.ts.net");
+    EXPECT_UPSTREAM("alpha.other.ts.net");
+    EXPECT_RCODE("gamma.example.ts.net",3);
+    EXPECT_RCODE("a.alpha.example.ts.net",3);
+    /* The second membership's domain resolves to its own alias (membership 2). */
+    EXPECT_ALIAS("server.corp.ts.net","\xc6\x12\x01\x03");
+    /* Cached lookups answer without reading the directory. */
+    directory_reads=0;question("alpha.example.ts.net");run();assert(response[7]==1 && directory_reads==0);
+    /* Domain apex, bare domain and the first label alone are not peers. */
+    EXPECT_UPSTREAM("example.ts.net");EXPECT_UPSTREAM("ts.net");EXPECT_UPSTREAM("server");
+    EXPECT_UPSTREAM("server.example.ts.net.evil.com");EXPECT_UPSTREAM("xexample.ts.net");EXPECT_UPSTREAM("server.xexample.ts.net");
+    EXPECT_UPSTREAM("example.com");
+    /* AAAA is NODATA, also for names that do not exist. */
+    question("server.example.ts.net");query[query_size-3]=28;run();assert((response[3]&15)==0 && response[7]==0 && sends==1);
+    question("nobody.example.ts.net");query[query_size-3]=28;run();assert((response[3]&15)==0 && response[7]==0 && sends==1);
+    /* Disconnected membership: temporary failure, never NXDOMAIN or upstream. */
+    client.directory.generation++;client.state=0;EXPECT_RCODE("server.example.ts.net",2);EXPECT_RCODE("server.work.tailnet",2);
+    EXPECT_ALIAS("server.corp.ts.net","\xc6\x12\x01\x03");client.state=4;
+    client.directory.session_valid=false;EXPECT_RCODE("server.example.ts.net",2);client.directory.session_valid=true;
+    /* Generation change while scanning is temporary. */
+    client.directory.generation++;change_generation=true;EXPECT_RCODE("alpha.example.ts.net",2);change_generation=false;
+    lock_ok=0;EXPECT_RCODE("server.work.tailnet",2);EXPECT_UPSTREAM("example.com");lock_ok=1;
+    directory_ok=false;client.directory.generation++;EXPECT_RCODE("server.example.ts.net",2);directory_ok=true;
+    /* A connected client without a DNS name yet owns no MagicDNS domain. */
+    client.self_dns_name[0]=0;SYNC();client.directory.generation++;EXPECT_UPSTREAM("server.example.ts.net");
+    strcpy(client.self_dns_name,"dongle");SYNC();EXPECT_UPSTREAM("server.example.ts.net");
+    strcpy(client.self_dns_name,"dongle.example.ts.net");SYNC();EXPECT_ALIAS("server.example.ts.net","\xc6\x12\x00\x03");
+    /* Duplicate domain across memberships is ambiguous even when only one has the peer. */
+    strcpy(second.self_dns_name,"other.example.ts.net.");SYNC();
+    EXPECT_RCODE("server.example.ts.net",3);EXPECT_RCODE("alpha.example.ts.net",3);
+    unsigned before=alias_calls;EXPECT_RCODE("server.example.ts.net",3);assert(alias_calls==before);
+    EXPECT_ALIAS("alpha.work.tailnet","\xc6\x12\x00\x04");
+    second.state=0;EXPECT_RCODE("server.example.ts.net",3);second.state=4;
+    strcpy(second.self_dns_name,"gw.corp.ts.net");SYNC();
+    /* Short hostnames (NVS-cached peers) are completed with the membership's domain. */
+    {const char *const short_names[]={"cached"};client.records=short_names;client.directory.count=1;client.directory.generation++;
+     EXPECT_ALIAS("cached.example.ts.net","\xc6\x12\x00\x03");EXPECT_ALIAS("cached.work.tailnet","\xc6\x12\x00\x03");}
+    client.records=peers_a;client.directory.count=4;client.directory.generation++;
+    /* Long, malformed and label-edge names stay bounded. */
+    {char longname[300];memset(longname,'a',63);longname[63]=0;strcat(longname,".example.ts.net");EXPECT_RCODE(longname,3);
+     memset(longname,'b',63);longname[63]='.';memset(longname+64,'c',63);longname[127]='.';memset(longname+128,'d',63);longname[191]='.';memset(longname+192,'e',50);strcpy(longname+242,".example.ts.net");
+     question(longname);run();assert(sends==0 && forwards==0);}
+    question("server.example.ts.net");query[12]=255;run();assert(!sends && !forwards);
+    question("server.example.ts.net");query_size-=3;run();assert(!sends && !forwards);
+    question("server.example.ts.net");query[query_size-1]=3;run();assert(sends==1 && (response[3]&15)==3);
+    member.next=NULL;SYNC();client.records=NULL;client.directory.count=1;client.directory.generation++;
+    EXPECT_UPSTREAM("server.corp.ts.net");
+    /* Ordinary names never take members_lock; only names inside a domain do. */
+    {
+    member.next=&other;SYNC();client.records=peers_a;client.directory.count=4;client.directory.generation++;
+    lock_takes=0;
+    EXPECT_UPSTREAM("example.com");EXPECT_UPSTREAM("server");EXPECT_UPSTREAM("server.other.ts.net");
+    EXPECT_UPSTREAM("example.ts.net");EXPECT_UPSTREAM("xexample.ts.net");
+    question("example.com");query[query_size-3]=28;run();assert(forwards==1);w_reset(wk);
+    assert(lock_takes==0);
+    EXPECT_ALIAS("alpha.example.ts.net","\xc6\x12\x00\x04");assert(lock_takes==1);
+    /* AAAA inside a domain is NODATA without the lock as well. */
+    lock_takes=0;question("alpha.example.ts.net");query[query_size-3]=28;run();assert(response[7]==0 && (response[3]&15)==0 && lock_takes==0);
+    /* A busy lock is a temporary failure for names inside a known domain, never a forward. */
+    lock_ok=0;lock_takes=0;
+    EXPECT_RCODE("alpha.example.ts.net",2);EXPECT_RCODE("server.corp.ts.net",2);EXPECT_RCODE("alpha.work.tailnet",2);
+    EXPECT_UPSTREAM("example.com");EXPECT_UPSTREAM("server.other.ts.net");
+    lock_ok=1;
+    /* The snapshot follows membership changes and domain renames. */
+    strcpy(second.self_dns_name,"gw.moved.ts.net");SYNC();
+    lock_takes=0;EXPECT_UPSTREAM("server.corp.ts.net");assert(lock_takes==0);
+    lock_takes=0;EXPECT_RCODE("server.moved.ts.net",3);assert(lock_takes==1);
+    member.next=NULL;SYNC();
+    lock_takes=0;EXPECT_UPSTREAM("server.moved.ts.net");assert(lock_takes==0);
+    lock_ok=0;EXPECT_UPSTREAM("server.moved.ts.net");lock_ok=1;
+    member.next=&other;strcpy(second.self_dns_name,"gw.corp.ts.net");SYNC();
+    EXPECT_ALIAS("server.corp.ts.net","\xc6\x12\x01\x03");
+    /* A stale snapshot (domain gone, not yet republished) falls back to upstream, not NXDOMAIN. */
+    second.self_dns_name[0]=0;lock_takes=0;EXPECT_UPSTREAM("server.corp.ts.net");assert(lock_takes==1);
+    strcpy(second.self_dns_name,"gw.corp.ts.net");SYNC();
+    /* An odd sequence (writer mid-update) is unusable: the lock decides, ordinary names still pass. */
+    dns_domains.seq++;lock_takes=0;
+    EXPECT_ALIAS("server.corp.ts.net","\xc6\x12\x01\x03");assert(lock_takes==1);
+    EXPECT_UPSTREAM("example.com");assert(lock_takes==2);
+    dns_domains.seq++;
+    /* More memberships than slots: absence of a domain proves nothing. */
+    {membership_t extra[DNS_DOMAINS+1];client_t clients[DNS_DOMAINS+1];membership_t *tail=&other;
+     for(unsigned i=0;i<DNS_DOMAINS+1;i++){memset(&extra[i],0,sizeof(extra[i]));clients[i]=(client_t){.state=4,.directory={.session_valid=true}};
+      snprintf(clients[i].self_dns_name,sizeof(clients[i].self_dns_name),"x.z%u.ts.net",i);extra[i].client=&clients[i];extra[i].id=3;strcpy(extra[i].label,"e");tail->next=&extra[i];tail=&extra[i];}
+     SYNC();assert(dns_domains.overflow && dns_domains.count==DNS_DOMAINS);
+     EXPECT_RCODE("a.z6.ts.net",3);
+     EXPECT_RCODE("a.z0.ts.net",3);
+     other.next=NULL;SYNC();assert(!dns_domains.overflow);}
+    member.next=NULL;SYNC();client.records=NULL;client.directory.count=1;client.directory.generation++;
+    }
+    }
     question("example.com");dns_workspace *w=task_arg;w->upstream_sock=8;
     for(unsigned i=0;i<4;i++){w->pending[i].active=true;w->pending[i].started=0;}
     run();assert((response[3]&15)==2 && forwards==0);
