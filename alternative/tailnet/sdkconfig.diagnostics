@@ -3,3 +3,12 @@
 CONFIG_TDONGLE_MEMORY_DIAGNOSTICS=y
 CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE=y
 CONFIG_TDONGLE_MEMORY_GUARD_FLOOR_BYTES=12288
+
+# Per-task CPU profile (serial "cpu", tools/cpu_profile.py). Diagnostics only: the trace facility costs about
+# 13 KB of boot heap, which the release image cannot spare.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+
+# lwIP counters for the serial "wifistats" report (link/etharp/ip/icmp/udp/tcp drops and errors, heap and memp pool
+# failures). Diagnostics only: the release image keeps LWIP_STATS off.
+CONFIG_LWIP_STATS=y

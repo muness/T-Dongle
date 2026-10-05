@@ -7,6 +7,7 @@
  */
 
 #include "microlink_internal.h"
+#include "ml_wg_rx_budget.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -597,7 +598,7 @@ void microlink_destroy(microlink_t *ml) {
      * ML_JSON_BUFFER_SIZE) were never released here before: every
      * stop/start cycle lost ~650 KB on the reference router. */
     ml_directory_abort(ml);
-    for(unsigned i=0;i<ML_JIT_PENDING;i++)tdongle_heap_free(TDONGLE_OWNER_WG, ml->jit_pending[i].packet);
+    for(unsigned i=0;i<ML_JIT_PENDING;i++)if(ml->jit_pending[i].packet)pbuf_free(ml->jit_pending[i].packet);
     /* The DERP link was closed and its TLS state released by ml_rt_detach() (under the DERP task's lock); the
      * packets still queued for it are freed with the queues below. */
     if (ml->h2_acc) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0; }
@@ -624,15 +625,18 @@ void microlink_destroy(microlink_t *ml) {
         QueueHandle_t rxq[] = { ml->disco_rx_queue, ml->wg_rx_queue, ml->stun_rx_queue };
         for (size_t i = 0; i < sizeof(rxq) / sizeof(rxq[0]); i++) {
             if (!rxq[i]) continue;
-            while (xQueueReceive(rxq[i], &pkt, 0) == pdTRUE) tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt.data);
+            while (xQueueReceive(rxq[i], &pkt, 0) == pdTRUE) {
+                if (rxq[i] == ml->wg_rx_queue) ml_wgrx_release(pkt.len);   /* ml_wg_rx_budget.h: the bytes no longer wait */
+                tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt.data);
+            }
         }
         ml_derp_tx_item_t tx;
         if (ml->derp_tx_queue) {
             while (xQueueReceive(ml->derp_tx_queue, &tx, 0) == pdTRUE) tdongle_heap_free(TDONGLE_OWNER_PACKET, tx.data);
         }
-        ml_peer_update_t *upd;
+        void *upd;
         if (ml->peer_update_queue) {
-            while (xQueueReceive(ml->peer_update_queue, &upd, 0) == pdTRUE) tdongle_heap_free(ml_peer_update_owner(upd), upd);
+            while (xQueueReceive(ml->peer_update_queue, &upd, 0) == pdTRUE) ml_pu_free_entry(upd);
         }
     }
 

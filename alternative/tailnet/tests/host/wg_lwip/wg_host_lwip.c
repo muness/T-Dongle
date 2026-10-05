@@ -1,29 +1,68 @@
 /* In-memory fakes for the lwIP calls made by wireguardif.c; see wg_host_lwip.h. */
 #include "wg_host_lwip.h"
+#include <assert.h>
 
 const ip_addr_t ip_addr_any = { 0 };
 
 const char *ipaddr_ntoa(const ip_addr_t *a) {
     static char buf[16];
-    snprintf(buf, sizeof(buf), "%u.%u.%u.%u", a->addr & 0xff, (a->addr >> 8) & 0xff, (a->addr >> 16) & 0xff, a->addr >> 24);
+#ifdef WG_HOST_IPV6
+    if (a->type == IPADDR_TYPE_V6) return "v6";
+    u32_t v = a->u_addr.ip4.addr;
+#else
+    u32_t v = a->addr;
+#endif
+    snprintf(buf, sizeof(buf), "%u.%u.%u.%u", v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff, v >> 24);
     return buf;
 }
 
+int wg_host_pbuf_fail;
+int wg_host_pbuf_live;
+unsigned long wg_host_pbuf_allocs, wg_host_copied_bytes;
 struct pbuf *pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type) {
     (void)layer; (void)type;
+    if (wg_host_pbuf_fail) return NULL;
     struct pbuf *p = calloc(1, sizeof(*p));
     if (!p) return NULL;
-    p->payload = calloc(1, length ? length : 1);
+    p->base = p->payload = calloc(1, length ? length : 1);
     if (!p->payload) { free(p); return NULL; }
     p->tot_len = p->len = length;
+    wg_host_pbuf_live++;
+    wg_host_pbuf_allocs++;
     return p;
 }
-u8_t pbuf_free(struct pbuf *p) { if (p) { free(p->payload); free(p); } return 1; }
-err_t pbuf_take(struct pbuf *p, const void *data, u16_t len) { if (len > p->tot_len) return ERR_MEM; memcpy(p->payload, data, len); return ERR_OK; }
+struct pbuf *pbuf_alloced_custom(pbuf_layer layer, u16_t length, pbuf_type type, struct pbuf_custom *pc, void *payload_mem, u16_t payload_mem_len) {
+    (void)layer; (void)type; (void)payload_mem_len;
+    memset(pc, 0, sizeof(*pc));
+    pc->pbuf.payload = pc->pbuf.base = payload_mem;
+    pc->pbuf.tot_len = pc->pbuf.len = length;
+    pc->pbuf.flags = PBUF_FLAG_IS_CUSTOM;
+    wg_host_pbuf_live++;
+    return &pc->pbuf;
+}
+u8_t pbuf_free(struct pbuf *p) {
+    if (!p) return 0;
+    wg_host_pbuf_live--;
+    if (p->flags & PBUF_FLAG_IS_CUSTOM) { ((struct pbuf_custom *)p)->custom_free_function(p); return 1; }
+    free(p->base); free(p);
+    return 1;
+}
+u8_t pbuf_remove_header(struct pbuf *p, size_t n) {
+    if (n > p->len) return 1;
+    p->payload = (u8_t *)p->payload + n; p->len = (u16_t)(p->len - n); p->tot_len = (u16_t)(p->tot_len - n);
+    return 0;
+}
+void pbuf_realloc(struct pbuf *p, u16_t new_len) {
+    if (new_len >= p->tot_len) return;
+    assert(!p->next);   /* single-segment pbufs only: that is all the receive path makes */
+    p->len = p->tot_len = new_len;
+}
+err_t pbuf_take(struct pbuf *p, const void *data, u16_t len) { if (len > p->tot_len) return ERR_MEM; memcpy(p->payload, data, len); wg_host_copied_bytes += len; return ERR_OK; }
 u16_t pbuf_copy_partial(const struct pbuf *p, void *dst, u16_t len, u16_t off) {
     if (off >= p->tot_len) return 0;
     if (len > p->tot_len - off) len = (u16_t)(p->tot_len - off);
     memcpy(dst, (const u8_t *)p->payload + off, len);
+    wg_host_copied_bytes += len;
     return len;
 }
 u8_t pbuf_get_at(const struct pbuf *p, u16_t off) { return off < p->tot_len ? ((const u8_t *)p->payload)[off] : 0; }

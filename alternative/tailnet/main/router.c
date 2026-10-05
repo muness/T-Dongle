@@ -1,5 +1,6 @@
 #include <stdatomic.h>
 #include "route_table.h"
+#include "tdongle_wgperf.h"
 #ifdef GATEWAY_HOST_TEST
 #include "router_stubs.h"
 #else
@@ -12,6 +13,7 @@
 #include "lwip/inet.h"
 #include "lwip/tcpip.h"
 #include "ml_directory.h"
+#include "tdongle_pm.h"
 #endif
 /* USB <-> tunnel router.
  *
@@ -27,7 +29,17 @@
  * (gateway_suspend / gateway_forget) unpublish the membership, wait for readers
  * to drain, and only then does the caller destroy the client. */
 
+/* The core lock: the one step of the tunnel-to-USB path that needs it is the USB netif's output (etharp_output reads and refreshes
+ * the ARP table, which only the tcpip core lock protects). Host tests count acquisitions (router_stubs.h). */
+#ifdef GATEWAY_HOST_TEST
+#define ROUTE_CORE_LOCK() router_stub_core_lock()
+#define ROUTE_CORE_UNLOCK() router_stub_core_unlock()
+#else
+#define ROUTE_CORE_LOCK() LOCK_TCPIP_CORE()
+#define ROUTE_CORE_UNLOCK() UNLOCK_TCPIP_CORE()
+#endif
 #define ROUTE_MEMBERS 16
+#define GATEWAY_TUNNEL_BATCH_MAX 16 /* packets of one gateway_tunnel_input_batch call handled between two core-lock acquisitions */
 #define ROUTE_FILL_SPACING_US 20000
 #define ROUTE_REFRESH_SPACING_US 100000
 #define ROUTE_ICMP_SPACING_US 50000
@@ -92,6 +104,9 @@ typedef struct {
     unsigned generation, length;
 } route_item;
 static void route_task(void *context);
+/* CPU-frequency-max lock for usb_routes (ADR 0016). Held while packets, held packets or an alias fill are being
+ * worked and released before every blocking wait; only route_task begins or ends it. */
+static tdongle_pm_burst_t route_pm;
 static bool alias_reserve(uint32_t *index) {
     uint32_t next = 64;
     esp_err_t err = nvs_get_u32(route_store, "next_alias", &next);
@@ -384,11 +399,14 @@ static int route_emit_tunnel(membership_t *m, uint32_t peer, const uint8_t *b, s
 #endif
     return result;
 }
-static void route_emit_usb(struct pbuf *packet, uint32_t host) {
+static bool route_emit_usb(struct pbuf *packet, uint32_t host) {
     ip4_addr_t ip = {.addr = htonl(host)};
     struct netif *usb = esp_netif_get_netif_impl(usb_interface);
-    if (!usb || usb->output(usb, packet, &ip) != ERR_OK)
+    if (!usb || usb->output(usb, packet, &ip) != ERR_OK) {
         rt_stat(RT_STAT_TX_FAIL);
+        return false;
+    }
+    return true;
 }
 
 /* ---- USB -> tunnel ------------------------------------------------------------- */
@@ -554,15 +572,11 @@ static void route_oversize(struct pbuf *p, uint32_t dest) {
     memcpy(r + 28, q, quote);
     wr16(r + 22, finish(sum(r + 20, 8 + quote, 0)));
     pbuf_take(reply, r, total);
-#ifndef GATEWAY_HOST_TEST
     /* netif->output is etharp_output: not thread safe without the core lock, and
      * this runs on usb_routes, not on tcpip or under gateway_tunnel_input's lock. */
-    LOCK_TCPIP_CORE();
-#endif
+    ROUTE_CORE_LOCK();
     route_emit_usb(reply, host);
-#ifndef GATEWAY_HOST_TEST
-    UNLOCK_TCPIP_CORE();
-#endif
+    ROUTE_CORE_UNLOCK();
     pbuf_free(reply);
     rt_stat(RT_STAT_OVERSIZE_ICMP);
 }
@@ -615,45 +629,103 @@ static int gateway_process_host_input(struct pbuf *p, struct netif *input) {
 /* ---- tunnel -> USB ------------------------------------------------------------- */
 /* WireGuard already authenticated its sender and checked AllowedIPs. Accept
  * only exact replies to a USB-origin flow belonging to this same membership.
- * The reply is built once, directly into the pbuf that goes to USB. */
+ * The reply is built once, directly into the pbuf that goes to USB.
+ *
+ * Batch form (the wg_mgr task hands over everything one wake decrypted, in arrival order, WITHOUT the core lock): validation,
+ * the flow lookup and the NAT rewrite touch only the packet and the router's own lock-free or portMUX-protected state, so they run
+ * with the core lock released; the lock is taken ONCE, after the membership is unpinned, for the output of the whole batch. The
+ * order of the frames to the host is the order of the input, which is what keeps one peer's packets in order.
+ *
+ * Contract per packet (lwIP's input contract): result ERR_OK = consumed, the callee frees it; an error = still the caller's. */
+void gateway_tunnel_input_batch(struct pbuf **in, unsigned count, struct netif *wg, err_t *result) {
+    while (count) {
+        const unsigned chunk = count < GATEWAY_TUNNEL_BATCH_MAX ? count : GATEWAY_TUNNEL_BATCH_MAX;
+        struct pbuf *emit[GATEWAY_TUNNEL_BATCH_MAX];
+        uint32_t emit_host[GATEWAY_TUNNEL_BATCH_MAX];
+        unsigned emitting = 0;
+        unsigned token = 0;
+        bool pinned = false;
+        int64_t now = 0;
+        WGPERF_T(t);
+        for (unsigned i = 0; i < chunk; i++) {
+            struct pbuf *p = in[i];
+            uint8_t first[20];
+            result[i] = ERR_OK;
+            /* The decryptor passes authenticated WireGuard padding with the IP packet unless it trimmed it (wireguardif does now).
+             * Use the inner IPv4 length without relaxing USB-side packet validation. */
+            if (p->tot_len < 20 || pbuf_copy_partial(p, first, 20, 0) != 20 || first[0] >> 4 != 4 || rd16(first + 2) > p->tot_len || rd16(first + 2) < 20) {
+                rt_stat(RT_STAT_TUNNEL_MALFORMED);
+                pbuf_free(p);
+                continue;
+            }
+            size_t n = rd16(first + 2);
+            struct pbuf *out = pbuf_alloc(PBUF_IP, n, PBUF_RAM);
+            if (!out) {
+                /* lwIP's input contract: on an error return the CALLER still owns p and frees it (wireguardif does). Freeing it here
+                 * as well was a double free the first time the heap ran out under load. */
+                rt_stat(RT_STAT_TUNNEL_NOMEM);
+                result[i] = ERR_MEM;
+                continue;
+            }
+            uint8_t *b = out->payload;
+            pbuf_copy_partial(p, b, n, 0);
+            pbuf_free(p);
+            unsigned h;
+            if (!valid(b, n, &h) || !clamp_mss(b, n, h)) {
+                rt_stat(RT_STAT_BAD_PACKET);
+                pbuf_free(out);
+                continue;
+            }
+            if (!pinned) {
+                now = esp_timer_get_time();
+                token = rt_rcu_enter(&rcu);
+                pinned = true;
+            }
+            membership_t *m = member_by_wg(wg);
+            microlink_t *client = m ? m->client : NULL;
+            rt_flow_t f;
+            rt_flow_in_result why = RT_FLOW_IN_OK;
+            if (!client) {
+                rt_stat(RT_STAT_REPLY_NO_MEMBER);
+                rt_stat(RT_STAT_REPLY_NOMATCH);
+            } else if (client->vpn_ip != rd32(b + 16)) {
+                rt_stat(RT_STAT_REPLY_NOT_US);
+                rt_stat(RT_STAT_REPLY_NOMATCH);
+            } else if ((why = rt_flow_in_why(&rt, m->id, rd32(b + 12), rd16(b + h), rd16(b + h + 2), b[9], atomic_load(&usb_generation), now, &f)) != RT_FLOW_IN_OK) {
+                static const unsigned reason[] = {0, RT_STAT_REPLY_FLOW_RANGE, RT_STAT_REPLY_NO_FLOW, RT_STAT_REPLY_GENERATION, RT_STAT_REPLY_OWNER, RT_STAT_REPLY_IDLE};
+                rt_stat(reason[why]);
+                rt_stat(RT_STAT_REPLY_NOMATCH);
+            } else {
+                nat_rewrite(b, h, f.alias, f.host, 2, f.local);
+                emit[emitting] = out;
+                emit_host[emitting++] = f.host;
+                continue;
+            }
+            pbuf_free(out);
+        }
+        if (pinned)
+            rt_rcu_exit(&rcu, token);   /* the membership is not needed to send: unpin before waiting for the core lock */
+        WGPERF_LAP(t, rt_check);
+        if (emitting) {
+            ROUTE_CORE_LOCK();
+            WGPERF_LAP(t, rt_lock_wait);
+            for (unsigned j = 0; j < emitting; j++)
+                if (route_emit_usb(emit[j], emit_host[j])) /* a frame the USB netif refused is tx_fail, not forwarded */
+                    rt_stat(RT_STAT_FORWARDED_IN);
+            ROUTE_CORE_UNLOCK();
+            WGPERF_LAP(t, rt_emit);
+            for (unsigned j = 0; j < emitting; j++)
+                pbuf_free(emit[j]);
+        }
+        in += chunk;
+        result += chunk;
+        count -= chunk;
+    }
+}
 err_t gateway_tunnel_input(struct pbuf *p, struct netif *wg) {
-    uint8_t first[20];
-    /* The decryptor passes authenticated WireGuard padding with the IP packet.
-     * Normally lwIP trims it; our custom input bypasses that path. Use the
-     * inner IPv4 length without relaxing USB-side packet validation. */
-    if (p->tot_len < 20 || pbuf_copy_partial(p, first, 20, 0) != 20 || first[0] >> 4 != 4 || rd16(first + 2) > p->tot_len || rd16(first + 2) < 20) {
-        pbuf_free(p);
-        return ERR_OK;
-    }
-    size_t n = rd16(first + 2);
-    struct pbuf *out = pbuf_alloc(PBUF_IP, n, PBUF_RAM);
-    if (!out) {
-        pbuf_free(p);
-        return ERR_MEM;
-    }
-    uint8_t *b = out->payload;
-    pbuf_copy_partial(p, b, n, 0);
-    pbuf_free(p);
-    unsigned h;
-    if (!valid(b, n, &h) || !clamp_mss(b, n, h))
-        rt_stat(RT_STAT_BAD_PACKET);
-    else {
-        int64_t now = esp_timer_get_time();
-        unsigned token = rt_rcu_enter(&rcu);
-        membership_t *m = member_by_wg(wg);
-        microlink_t *client = m ? m->client : NULL;
-        rt_flow_t f;
-        if (client && client->vpn_ip == rd32(b + 16) &&
-            rt_flow_in(&rt, m->id, rd32(b + 12), rd16(b + h), rd16(b + h + 2), b[9], atomic_load(&usb_generation), now, &f)) {
-            nat_rewrite(b, h, f.alias, f.host, 2, f.local);
-            route_emit_usb(out, f.host);
-            rt_stat(RT_STAT_FORWARDED_IN);
-        } else
-            rt_stat(RT_STAT_REPLY_NOMATCH);
-        rt_rcu_exit(&rcu, token);
-    }
-    pbuf_free(out);
-    return ERR_OK;
+    err_t result;
+    gateway_tunnel_input_batch(&p, 1, wg, &result);
+    return result;
 }
 
 #ifndef GATEWAY_HOST_TEST
@@ -688,6 +760,7 @@ bool gateway_routes_init(void) {
     /* Core 1 with the shared wg_mgr, one level above it (7): forwarding must
      * not wait behind a handshake, and it costs well under 5% of a core. Wi-Fi,
      * tcpip and net_io stay on core 0. */
+    tdongle_pm_burst_register(&route_pm, "usb_routes");
     if (xTaskCreatePinnedToCore(route_task, "usb_routes", 4096, NULL, GATEWAY_TASK_USB_ROUTES_PRIO, NULL, GATEWAY_TASK_USB_ROUTES_CORE) != pdPASS) {
         vQueueDelete(route_queue);
         route_queue = NULL;
@@ -699,14 +772,18 @@ static void route_task(void *context) {
     route_item item;
     unsigned burst = 0;
     int64_t last_budget_us = 0;
+    bool busy = false; /* route_pm is held across iterations while the queue stays non-empty */
     for (;;) {
         int64_t now = esp_timer_get_time();
         if (now - last_budget_us >= 20000) {
             last_budget_us = now;
             atomic_store(&route_budget, rt_queue_budget(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
         }
-        if (hold_count)
+        if (hold_count) {
+            tdongle_pm_burst_begin(&route_pm);
             hold_service(now);
+            tdongle_pm_burst_end(&route_pm);
+        }
         /* Sleep until a packet arrives. With a miss pending, sleep only until the
          * next fill is due, and fill when the queue is empty. Held packets bound
          * the sleep by their expiry so they are never stranded. */
@@ -714,8 +791,10 @@ static void route_task(void *context) {
         if (fill_pending() && !uxQueueMessagesWaiting(route_queue)) {
             int64_t due = last_fill_us + ROUTE_FILL_SPACING_US;
             if (now >= due) {
+                tdongle_pm_burst_begin(&route_pm);
                 alias_fill_run(now);
                 hold_service(esp_timer_get_time());
+                tdongle_pm_burst_end(&route_pm);
                 continue;
             }
             wait = pdMS_TO_TICKS((due - now + 999) / 1000);
@@ -729,8 +808,18 @@ static void route_task(void *context) {
             if (limit < wait)
                 wait = limit;
         }
+        /* About to sleep with nothing queued: the CPU may scale down. With packets queued the receive below
+         * returns at once and the lock stays held from one packet to the next. */
+        if (busy && !uxQueueMessagesWaiting(route_queue)) {
+            tdongle_pm_burst_end(&route_pm);
+            busy = false;
+        }
         if (xQueueReceive(route_queue, &item, wait) != pdTRUE)
             continue;
+        if (!busy) {
+            tdongle_pm_burst_begin(&route_pm);
+            busy = true;
+        }
         atomic_fetch_sub(&route_queued_bytes, item.length);
         if (item.generation != atomic_load(&usb_generation))
             pbuf_free(item.packet);
@@ -744,6 +833,8 @@ static void route_task(void *context) {
             burst = 0;
         else if (++burst >= ROUTE_BURST_PACKETS) {
             burst = 0;
+            tdongle_pm_burst_end(&route_pm); /* the one-tick sleep is idle time for the lower priorities too */
+            busy = false;
             vTaskDelay(1);
         }
     }
@@ -751,6 +842,10 @@ static void route_task(void *context) {
 #endif
 int gateway_host_input(struct pbuf *p,struct netif *input) {
 #ifndef GATEWAY_HOST_TEST
+    /* Every IP packet that reaches this core passes here, in the tcpip task: Wi-Fi to USB, USB to Wi-Fi, NAT-only
+     * and tunnel. Wi-Fi, USB and tcpip hold no lock of their own, so this is where the clock is raised for them
+     * (ADR 0016). Link-layer broadcast and multicast is neighbours' chatter, not forwarding: it must not pin 240. */
+    if(!(p->flags&(PBUF_FLAG_LLBCAST|PBUF_FLAG_LLMCAST)))tdongle_pm_note_activity();
     uint8_t first[20];
     if(usb_interface && input==esp_netif_get_netif_impl(usb_interface) &&
        pbuf_copy_partial(p,first,20,0)==20 && (rd32(first+16)&0xfffe0000)==0xc6120000) {

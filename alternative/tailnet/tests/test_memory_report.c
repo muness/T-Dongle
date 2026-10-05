@@ -11,14 +11,27 @@
 #include "ml_gateway_limits.h"
 #include "usb_rx_budget.h"
 #define CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT 2
-typedef struct {uint32_t ring_bytes,high_water_bytes,enqueued_frames,enqueued_bytes,sent_frames,sent_bytes,dropped_full,dropped_link_down,dropped_invalid,flushed_link_down,ntb_blocked,xfer_events,worker_stack_free;} tinyusb_net_tx_stats_t;
-static void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *s) { *s = (tinyusb_net_tx_stats_t){4576, 4212, 90, 120000, 80, 100000, 7, 1, 2, 3, 4, 55, 900}; }
+/* The real struct: a field added to the firmware's stats must be filled in here, not silently dropped. */
+typedef uint32_t TickType_t;
+#define tinyusb_net_tx_ring_stats real_tinyusb_net_tx_ring_stats   /* the header's declaration; the test supplies its own */
+#include "../../../components/esp_tinyusb/include/tinyusb_net.h"
+#undef tinyusb_net_tx_ring_stats
+static void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *s) {
+    *s = (tinyusb_net_tx_stats_t){
+        .ring_bytes = 9144, .base_bytes = 4572, .max_bytes = 35052, .elastic_held_bytes = 6096, .chunks = 2,
+        .high_water_bytes = 4212, .high_water_slabs = 9, .enqueued_frames = 90, .enqueued_bytes = 120000, .sent_frames = 80,
+        .sent_bytes = 100000, .dropped_full = 7, .dropped_link_down = 1, .dropped_invalid = 2, .flushed_link_down = 3,
+        .ntb_blocked = 4, .xfer_events = 55, .worker_stack_free = 900, .grow_events = 11, .shrink_events = 12,
+        .reclaim_events = 13, .reclaimed_chunks = 14, .grow_denied_gate = 15, .grow_denied_heap = 16,
+        .grow_denied_largest = 17, .grow_denied_nomem = 18, .grow_raced = 19, .pm_acquired = 20, .pm_released = 19, .pm_held = 1};
+}
 static gateway_usb_rx_budget usb_rx_budget;
 #define GATEWAY_VERSION "0.0.0-test"
 #include "route_table.h"
 uint32_t gateway_route_stat(unsigned which) { return which * 3; }
 #define CONFIG_LWIP_MAX_SOCKETS 20
 #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+#define CONFIG_LWIP_UDP_RECVMBOX_SIZE 10
 #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
 #define CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM 6
 #define CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM 16
@@ -62,10 +75,46 @@ size_t heap_caps_get_minimum_free_size(unsigned c) { return 31000; }
 size_t heap_caps_get_largest_free_block(unsigned c) { return 24576; }
 size_t heap_caps_get_total_size(unsigned c) { return 300000; }
 size_t heap_caps_get_allocated_size(void *p) { for (unsigned i = 0; i < 16; i++) if (sizes[i].block == p) return sizes[i].size; return 0; }
+bool ml_wg_log_bench(unsigned rounds, uint32_t *c) { *c = 31000; return rounds == 200; }
 bool ml_wg_crypto_bench(size_t len, unsigned rounds, uint32_t *aead_ns, uint32_t *copy_ns) { *aead_ns = 2000000; *copy_ns = 20000; return true; }
 void mgmt_write(const char *s) { fputs(s, stdout); }
 static void *tracked(size_t size) { void *p = malloc(size); for (unsigned i = 0; i < 16; i++) if (!sizes[i].block) { sizes[i] = (typeof(sizes[0])){p, size}; break; } return p; }
+/* `cpu`: the FreeRTOS task table (trace facility), pinned to fixed values. */
+#include "tdongle_pm_burst.h"
+typedef struct {bool scaling;int configure_error;uint32_t max_mhz,min_mhz,cpu_mhz,lock_create_failures;unsigned bursts;tdongle_pm_burst_stats_t burst[8];} tdongle_pm_status_t;
+static void tdongle_pm_status(tdongle_pm_status_t *o) { memset(o, 0, sizeof(*o)); o->cpu_mhz = 240; }
+#define portNUM_PROCESSORS 2
+typedef unsigned UBaseType_t;
+typedef int BaseType_t;
+typedef struct { TaskHandle_t xHandle; const char *pcTaskName; uint32_t ulRunTimeCounter; UBaseType_t uxCurrentPriority; uint32_t usStackHighWaterMark; } TaskStatus_t;
+static UBaseType_t task_count = 3;
+static UBaseType_t uxTaskGetNumberOfTasks(void) { return task_count; }
+static UBaseType_t uxTaskGetSystemState(TaskStatus_t *t, UBaseType_t n, uint32_t *total) {
+    static const char *const names[] = {"IDLE0", "ml_wg_mgr", "tiT"};
+    for (UBaseType_t i = 0; i < 3; i++) t[i] = (TaskStatus_t){(TaskHandle_t)(uintptr_t)(i + 1), names[i], 1000 * (i + 1), 5 + i, 700 + i};
+    *total = 4294967295u;
+    return 3;
+}
+static BaseType_t xTaskGetCoreID(TaskHandle_t h) { return (uintptr_t)h == 3 ? 0x7fffffff : (int)((uintptr_t)h - 1); }
+/* The inbound counters the `inbound` report reads: the real definitions live in ml_net_io.c / wireguard.c and lwIP. */
+#include "lwip/stats.h"
+#include "ml_rx_stats.h"
+#include "wireguard_stats.h"
+ml_rx_stats_t ml_rx_stats;
+wireguard_rx_stats_t wireguard_rx_stats;
+#include "wireguard_replay.h"
+unsigned ml_wg_rx_stat_count(void) { return WG_RXS_COUNT; }          /* ml_wg_mgr.c in the firmware */
+uint32_t ml_wg_rx_stat(unsigned which) { return wireguard_rx_stat_get(which); }
+const char *ml_wg_rx_stat_name(unsigned which) { return wireguard_rx_stat_name(which); }
+unsigned ml_wg_replay_window(void) { return WIREGUARD_REPLAY_WINDOW_SIZE; }
+unsigned ml_wg_rx_batch_size(void) { return 8; }
+#include "ml_wg_rx_budget.h"
+ml_wgrx_budget_t ml_wgrx_budget = {.bytes = 4096, .peak = 11000};
+static int wifi_current = 1;   /* slot 2 selected and pinned: the report shows the user's choice */
+#include "wifi_policy.h"
+static wifi_pin wifi_pinned = {1, 0, 0};
 #include "json_writer.inc"
+#include "wifi_link.inc"
 #include "memory_diagnostics.inc"
 int main(void) {
     microlink_t client = {(void *)3000, true, false, 0, NULL};
@@ -81,12 +130,55 @@ int main(void) {
         tdongle_memory_admission_note(&r);
     }
     tdongle_memory_drop(TDONGLE_DROP_DERP_TX_FULL);
+    tdongle_wgperf_reset_now();
+    tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_lock_wait, 100);tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_lock_wait, 250);
+    tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_pass, 0xffffffffu);tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_pass, 5);
+    tdongle_wgperf_count(&tdongle_wgperf, TDONGLE_WGPERF_C_passes, 2);
+    for (unsigned i = 0; i < ML_RXS_COUNT; i++) ml_rx_stat_add((ml_rx_stat_t)i, 100 + i);
+    ml_rx_stat_burst(13);
+    for (unsigned i = 0; i < WG_RXS_COUNT; i++) for (unsigned k = 0; k < 200 + i; k++) wireguard_rx_stat_add((wireguard_rx_stat_t)i);
+    lwip_stats.udp.recv = 5000; lwip_stats.udp.drop = 1; lwip_stats.udp.memerr = 2; lwip_stats.udp.err = 3;
     tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 700);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 42000);
-    const char *commands[] = {"memory", "route", "members", "memory bench", "memory locks", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
+    const char *commands[] = {"memory", "route", "inbound", "members", "memory bench", "memory locks", "wgperf", "wgperf logbench", "wgperf reset", "wgperf", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));
     }
+    /* Wi-Fi link and lwIP counters: a 16-bit counter near its wrap, a pool with failed allocations, then a reset. */
+    host_wifi_ap = (wifi_ap_record_t){.primary = 6, .second = WIFI_SECOND_CHAN_ABOVE, .rssi = -70, .phy_11b = 1, .phy_11g = 1, .phy_11n = 1, .bandwidth = WIFI_BW_HT40,
+                                      .bssid = {1, 2, 3, 4, 5, 6}, .ssid = "do-not-print"};
+    host_wifi_avg_rssi = -64; host_wifi_phy = WIFI_PHY_MODE_HT40; host_wifi_bw = WIFI_BW_HT40; host_wifi_ps = WIFI_PS_NONE; host_wifi_power = 78;
+    wifi_link_note_connect(&wifi_link_stats);
+    wifi_link_note_disconnect(&wifi_link_stats, WIFI_REASON_BEACON_TIMEOUT, -88, 4242);
+    wifi_link_note_connect(&wifi_link_stats);
+    wifi_link_note_disconnect(&wifi_link_stats, 8, -50, 5000);
+#if LWIP_STATS
+    lwip_stats.link = (struct stats_proto){.xmit = 10, .recv = 65535, .drop = 3, .memerr = 2, .err = 1};
+    lwip_stats.tcp = (struct stats_proto){.recv = 500, .drop = 7, .cachehit = 9};
+    lwip_stats.mem = (struct stats_mem){.name = "HEAP", .err = 4, .avail = 100, .used = 40, .max = 60, .illegal = 1};
+    static struct stats_mem pbuf = {.name = "PBUF", .avail = 16, .used = 2, .max = 9, .err = 5}, pool = {.name = "PBUF_POOL", .avail = 16, .used = 1, .max = 16, .err = 11}, nameless = {.avail = 1};
+    lwip_stats.memp[MEMP_PBUF] = &pbuf; lwip_stats.memp[MEMP_PBUF_POOL] = &pool; lwip_stats.memp[MEMP_TCP_SEG] = &nameless;
+#endif
+    puts("#> wifistats_before");
+    printf("#handled %d\n", gateway_memory_command("wifistats"));
+    puts("#> wifistats_dump");
+    printf("#handled %d\n", gateway_memory_command("wifistats dump"));
+    puts("#> wifistats_reset");
+    printf("#handled %d\n", gateway_memory_command("wifistats reset"));
+    puts("#> wifistats_after");
+    gateway_memory_command("wifistats");
+    puts("#> wifistats_unknown_arg");
+    printf("#handled %d\n", gateway_memory_command("wifistats nonsense"));
+    host_wifi_associated = false;
+    puts("#> wifistats_down");
+    gateway_memory_command("wifistats");
+    host_wifi_associated = true; host_wifi_fail_rssi = host_wifi_fail_phy = host_wifi_fail_bw = host_wifi_fail_ps = host_wifi_fail_power = true;
+    puts("#> wifistats_partial");
+    gateway_memory_command("wifistats");
+    printf("#dumps %u\n", host_wifi_dumps);
+    task_count = 40;   /* more tasks than the report's table: it must say so, not print an empty list silently */
+    puts("#> cpu_many");
+    gateway_memory_command("cpu");
     members_busy = true;
     puts("#> busy");
     gateway_memory_command("memory");

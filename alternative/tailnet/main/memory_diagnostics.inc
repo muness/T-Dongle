@@ -1,8 +1,16 @@
 /* Serial memory diagnostics (CONFIG_TDONGLE_MEMORY_DIAGNOSTICS). Each report is one JSON line:
- * bounded, allocation-free and free of keys, auth keys, URLs and names. Included by
+ * bounded and free of keys, auth keys, URLs and names. Included by
  * gateway_main.c after json_writer.inc. */
 #include "lwip/opt.h"
 #include "route_table.h"
+#include "tdongle_wgperf.h"
+#include "ml_rx_stats.h"
+#include "ml_net_io_drain.h"
+#include "ml_wg_rx_budget.h"
+#include "wifi_stats.h"
+#if LWIP_STATS
+#include "lwip/stats.h"
+#endif
 extern void mgmt_write(const char *s);
 static const char *const owner_names[TDONGLE_OWNER_COUNT] = {"other", "tls", "control", "map", "peer", "wg", "packet", "context"};
 static const char *const phase_names[TDONGLE_PHASE_COUNT] = {"start", "control", "noise", "register", "map", "derp", "steady"};
@@ -209,20 +217,178 @@ static void report_lwip(jw_writer *w) {
     report_field(w, "memp_tcp_seg", MEMP_NUM_TCP_SEG);
     report_field(w, "max_sockets", CONFIG_LWIP_MAX_SOCKETS);
     report_field(w, "tcp_recvmbox", CONFIG_LWIP_TCP_RECVMBOX_SIZE);
+    report_field(w, "udp_recvmbox", CONFIG_LWIP_UDP_RECVMBOX_SIZE);
     report_field(w, "tcpip_recvmbox", CONFIG_LWIP_TCPIP_RECVMBOX_SIZE);
     report_field(w, "wifi_static_rx", CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM);
     report_field(w, "wifi_dynamic_rx", CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM);
     report_field(w, "wifi_dynamic_tx", CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM);
     report_end(w);
 }
-/* USB data path: transmit ring (tunnel to host) and receive budget (host to lwIP). Drops here are
- * backpressure, not faults; tune GATEWAY_USB_TX_RING_BYTES from dropped_full vs high_water. */
+/* Wi-Fi / lwIP drop evidence (`wifistats`). Raw cumulative counters, one JSON line each; the coordinator reads twice
+ * (before and after an iperf run) and diffs. lwIP's counters are STAT_COUNTER wide (16 bits unless LWIP_STATS_LARGE):
+ * diff modulo 2^counter_bits. ESP-IDF v5.5.5 exposes NO Wi-Fi driver RX/TX error counters through a public API;
+ * esp_wifi_statis_dump() only prints text to the ROM console, which this image has switched off (CONFIG_ESP_CONSOLE_NONE),
+ * so the driver-side picture is the link state (RSSI/PHY) and the disconnect counters, plus lwIP and its pools below. */
+static void wifi_emit(void *context, const char *line) { memory_sink(context, line, strlen(line)); }
+static uint32_t wifi_report_uptime_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+static void report_wifi_link(jw_writer *w) {
+    wifi_link_info link = wifi_link_read();
+    char body[WIFI_LINK_JSON_MAX];
+    report_begin(w, "wifi_link");
+    report_field(w, "uptime_ms", wifi_report_uptime_ms());
+    jw_char(w, ',');
+    jw_key(w, "driver_counters");
+    jw_string(w, "not_exposed");
+    if (wifi_link_json(body, sizeof(body), &link, &wifi_link_stats)) {
+        jw_char(w, ',');
+        jw_key(w, "link");
+        jw_raw(w, body);
+    }
+    report_end(w);
+}
+static void report_wifi_lwip(jw_writer *w) {
+    uint32_t up = wifi_report_uptime_ms();
+    report_begin(w, "lwip_stats");
+    report_field(w, "uptime_ms", up);
+#if LWIP_STATS
+    report_field(w, "enabled", 1);
+    report_field(w, "counter_bits", sizeof(STAT_COUNTER) * 8);
+    report_end(w);
+    unsigned bits = sizeof(STAT_COUNTER) * 8;
+    ws_proto p;
+#define WS_PROTO(macro, field, label) do { if (macro) { WS_PROTO_FROM(p, lwip_stats.field); ws_emit_proto(wifi_emit, NULL, label, bits, up, &p); } } while (0)
+#if LINK_STATS
+    WS_PROTO(1, link, "link");
+#endif
+#if ETHARP_STATS
+    WS_PROTO(1, etharp, "etharp");
+#endif
+#if IP_STATS
+    WS_PROTO(1, ip, "ip");
+#endif
+#if ICMP_STATS
+    WS_PROTO(1, icmp, "icmp");
+#endif
+#if UDP_STATS
+    WS_PROTO(1, udp, "udp");
+#endif
+#if TCP_STATS
+    WS_PROTO(1, tcp, "tcp");
+#endif
+#undef WS_PROTO
+#if MEM_STATS || MEMP_STATS
+    ws_pool pool;
+#endif
+#if MEM_STATS
+    WS_POOL_FROM(pool, lwip_stats.mem);
+    ws_emit_pool(wifi_emit, NULL, "MEM", up, &pool);
+#endif
+#if MEMP_STATS
+    for (int i = 0; i < MEMP_MAX; i++) {
+        const struct stats_mem *m = lwip_stats.memp[i];
+        if (!m) continue;
+        char fallback[12];
+        const char *name = fallback;
+        snprintf(fallback, sizeof(fallback), "memp%d", i);
+#if LWIP_STATS_DISPLAY
+        if (m->name) name = m->name;
+#endif
+        WS_POOL_FROM(pool, *m);
+        ws_emit_pool(wifi_emit, NULL, name, up, &pool);
+    }
+#endif
+#else
+    report_field(w, "enabled", 0);
+    report_end(w);
+#endif
+}
+/* Zero the counters so the next reading starts from nothing. lwIP updates its counters without a lock, so an
+ * increment landing during the reset can be lost: acceptable for a drop hunt, and the caller diffs anyway. */
+static bool wifi_stats_reset(void) {
+    wifi_link_stats = (wifi_link_events){0};
+    bool lwip_reset = false;
+#if LWIP_STATS
+#if LINK_STATS
+    memset(&lwip_stats.link, 0, sizeof(lwip_stats.link));
+#endif
+#if ETHARP_STATS
+    memset(&lwip_stats.etharp, 0, sizeof(lwip_stats.etharp));
+#endif
+#if IP_STATS
+    memset(&lwip_stats.ip, 0, sizeof(lwip_stats.ip));
+#endif
+#if ICMP_STATS
+    memset(&lwip_stats.icmp, 0, sizeof(lwip_stats.icmp));
+#endif
+#if UDP_STATS
+    memset(&lwip_stats.udp, 0, sizeof(lwip_stats.udp));
+#endif
+#if TCP_STATS
+    memset(&lwip_stats.tcp, 0, sizeof(lwip_stats.tcp));
+#endif
+#if MEM_STATS
+    lwip_stats.mem.err = 0;
+    lwip_stats.mem.illegal = 0;
+    lwip_stats.mem.max = lwip_stats.mem.used;
+#endif
+#if MEMP_STATS
+    for (int i = 0; i < MEMP_MAX; i++)
+        if (lwip_stats.memp[i]) {
+            lwip_stats.memp[i]->err = 0;
+            lwip_stats.memp[i]->illegal = 0;
+            lwip_stats.memp[i]->max = lwip_stats.memp[i]->used;
+        }
+#endif
+    lwip_reset = true;
+#endif
+    return lwip_reset;
+}
+static void report_wifi_reset(jw_writer *w) {
+    bool lwip_reset = wifi_stats_reset();
+    report_begin(w, "wifi_stats_reset");
+    report_field(w, "uptime_ms", wifi_report_uptime_ms());
+    report_field(w, "events_reset", 1);
+    report_field(w, "lwip_reset", lwip_reset);
+    report_end(w);
+}
+/* The driver's own text dump. Prints to the ROM console, not here: kept for boards where one is attached. */
+static void report_wifi_dump(jw_writer *w) {
+    esp_err_t result = esp_wifi_statis_dump(WIFI_STATIS_ALL);
+    report_begin(w, "wifi_driver_dump");
+    report_field(w, "uptime_ms", wifi_report_uptime_ms());
+    report_field(w, "esp_err", (uint32_t)result);
+    jw_char(w, ',');
+    jw_key(w, "output");
+    jw_string(w, "rom_console_not_this_port");
+    report_end(w);
+}
+/* USB data path: elastic transmit ring (tunnel to host) and receive budget (host to lwIP). Drops here are
+ * backpressure, not faults. tx_ring_bytes is the capacity NOW (permanent plus live elastic chunks); tune the cap
+ * (GATEWAY_USB_TX_MAX_CHUNKS) from tx_dropped_full against tx_high_water_slabs, and read tx_grow_denied_* when it
+ * does not grow. tx_reclaim_events counts the times admission or a negotiation took the elastic memory back. */
 static void report_usb(jw_writer *w) {
     tinyusb_net_tx_stats_t tx;
     tinyusb_net_tx_ring_stats(&tx);
     report_begin(w, "usb");
     report_field(w, "tx_ring_bytes", tx.ring_bytes);
+    report_field(w, "tx_ring_base_bytes", tx.base_bytes);
+    report_field(w, "tx_ring_max_bytes", tx.max_bytes);
+    report_field(w, "tx_elastic_held_bytes", tx.elastic_held_bytes);
+    report_field(w, "tx_elastic_chunks", tx.chunks);
+    report_field(w, "tx_grow_events", tx.grow_events);
+    report_field(w, "tx_shrink_events", tx.shrink_events);
+    report_field(w, "tx_reclaim_events", tx.reclaim_events);
+    report_field(w, "tx_reclaimed_chunks", tx.reclaimed_chunks);
+    report_field(w, "tx_grow_denied_gate", tx.grow_denied_gate);
+    report_field(w, "tx_grow_denied_heap", tx.grow_denied_heap);
+    report_field(w, "tx_grow_denied_largest", tx.grow_denied_largest);
+    report_field(w, "tx_grow_denied_nomem", tx.grow_denied_nomem);
+    report_field(w, "tx_grow_raced", tx.grow_raced);
     report_field(w, "tx_high_water", tx.high_water_bytes);
+    report_field(w, "tx_high_water_slabs", tx.high_water_slabs);
+    report_field(w, "tx_pm_acquired", tx.pm_acquired);
+    report_field(w, "tx_pm_released", tx.pm_released);
+    report_field(w, "tx_pm_held", tx.pm_held);
     report_field(w, "tx_enqueued", tx.enqueued_frames);
     report_field(w, "tx_enqueued_bytes", tx.enqueued_bytes);
     report_field(w, "tx_sent", tx.sent_frames);
@@ -373,6 +539,164 @@ static void report_bench(jw_writer *w) {
     }
     report_end(w);
 }
+/* `cpu`: one JSON line with the raw, cumulative FreeRTOS run-time counters of every task, so two snapshots around a
+ * transfer give each task's share (tools/cpu_profile.py). Needs CONFIG_FREERTOS_USE_TRACE_FACILITY and
+ * CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS, which only sdkconfig.diagnostics sets. `total` is the counter's total
+ * across both cores (percent of ONE core = task delta / (total delta / 2)); it wraps at 2^32 counts. */
+#define CPU_REPORT_TASKS 32
+static void report_cpu(jw_writer *w) {
+    TaskStatus_t *tasks = malloc(CPU_REPORT_TASKS * sizeof(*tasks));
+    if (!tasks) {
+        mgmt_write("ERR no memory for the task table\r\n");
+        return;
+    }
+    uint32_t total = 0;
+    UBaseType_t existing = uxTaskGetNumberOfTasks();
+    /* uxTaskGetSystemState returns 0 and fills nothing when the array is too small: say so rather than print an
+     * empty list. */
+    UBaseType_t n = existing <= CPU_REPORT_TASKS ? uxTaskGetSystemState(tasks, CPU_REPORT_TASKS, &total) : 0;
+    tdongle_pm_status_t pm;
+    tdongle_pm_status(&pm);
+    report_begin(w, "cpu");
+    report_field(w, "uptime_ms", esp_timer_get_time() / 1000);
+    report_field(w, "cpu_mhz", pm.cpu_mhz);
+    report_field(w, "total", total);
+    report_field(w, "cores", portNUM_PROCESSORS);
+    report_field(w, "tasks_listed", n);
+    report_field(w, "tasks_existing", existing);
+    jw_raw(w, ",\"tasks\":[");
+    for (UBaseType_t i = 0; i < n; i++) {
+        if (i) jw_char(w, ',');
+        jw_raw(w, "{\"name\":");
+        jw_string(w, tasks[i].pcTaskName);
+        report_field(w, "runtime", tasks[i].ulRunTimeCounter);
+        report_field(w, "priority", tasks[i].uxCurrentPriority);
+        /* core: 0 or 1, or -1 (unpinned) */
+        jw_char(w, ',');
+        jw_key(w, "core");
+        BaseType_t core = xTaskGetCoreID(tasks[i].xHandle);
+        if (core >= 0 && core < portNUM_PROCESSORS) jw_number(w, (uint32_t)core);
+        else jw_raw(w, "-1");
+        report_field(w, "stack_free", tasks[i].usStackHighWaterMark);
+        jw_char(w, '}');
+    }
+    jw_char(w, ']');
+    report_end(w);
+    free(tasks);
+}
+/* Every place an inbound datagram can be lost between the Wi-Fi interface and the USB host, as cumulative counters (never
+ * reset: diff two samples). Layers, in order (docs/adr/0019-inbound-loss.md has the reconciliation):
+ *   lwip   lwIP's own UDP counters. udp_recv counts a datagram BEFORE the socket mailbox, which drops silently when full, so
+ *          udp_recv - ml.udp_rx (net_io's reads) is the mailbox loss to date (DNS and other sockets add a little);
+ *   ml     net_io -> queues -> wg_mgr: ml_rx_stats.h;  wg  wireguardif receive path: wireguard_stats.h;
+ *   route  tunnel -> USB (the `route` report has the rest): reply_* reasons, tunnel_*, usb_tx, usb_tx_err. */
+static void report_inbound(jw_writer *w) {
+    report_begin(w, "inbound");
+    report_field(w, "udp_recvmbox", CONFIG_LWIP_UDP_RECVMBOX_SIZE);
+    report_field(w, "drain_cap", ML_NET_IO_DRAIN_CAP);
+    report_field(w, "wg_rx_queue_depth", ML_WG_RX_QUEUE_DEPTH);
+    report_field(w, "wg_rx_queue_bytes", ML_WG_RX_QUEUE_BYTES);             /* the cap (ml_wg_rx_budget.h), shared by every membership */
+    report_field(w, "wg_rx_bytes_queued", atomic_load_explicit(&ml_wgrx_budget.bytes, memory_order_relaxed));   /* gauge: waiting now */
+    report_field(w, "wg_rx_bytes_peak", atomic_load_explicit(&ml_wgrx_budget.peak, memory_order_relaxed));      /* high-water since boot */
+    report_field(w, "wg_rx_batch", ml_wg_rx_batch_size());
+    report_field(w, "replay_window", ml_wg_replay_window());
+#if LWIP_STATS && UDP_STATS
+    /* lwIP's counters are STAT_COUNTER wide (16 bits unless LWIP_STATS_LARGE) and wrap: the accounting script diffs modulo 2^counter_bits. */
+    report_field(w, "counter_bits", sizeof(STAT_COUNTER) * 8);
+    jw_raw(w, ",\"lwip\":{\"udp_recv\":");
+    jw_number(w, lwip_stats.udp.recv);
+    report_field(w, "udp_drop", lwip_stats.udp.drop);
+    report_field(w, "udp_memerr", lwip_stats.udp.memerr);
+    report_field(w, "udp_err", lwip_stats.udp.err);
+    jw_char(w, '}');
+#endif
+    jw_raw(w, ",\"ml\":{");
+    for (unsigned i = 0; i < ML_RXS_COUNT; i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, ml_rx_stat_name(i));
+        jw_number(w, ml_rx_stat_get(i));
+    }
+    jw_raw(w, ",\"drain_burst_max\":");
+    jw_number(w, atomic_load_explicit(&ml_rx_stats.drain_burst_max, memory_order_relaxed));
+    jw_raw(w, "},\"wg\":{");
+    for (unsigned i = 0; i < ml_wg_rx_stat_count(); i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, ml_wg_rx_stat_name(i));
+        jw_number(w, ml_wg_rx_stat(i));
+    }
+    jw_raw(w, "},\"route\":{");
+    static const unsigned reasons[] = {RT_STAT_TUNNEL_MALFORMED, RT_STAT_TUNNEL_NOMEM, RT_STAT_BAD_PACKET, RT_STAT_REPLY_NO_MEMBER, RT_STAT_REPLY_NOT_US,
+                                       RT_STAT_REPLY_FLOW_RANGE, RT_STAT_REPLY_NO_FLOW, RT_STAT_REPLY_GENERATION, RT_STAT_REPLY_OWNER, RT_STAT_REPLY_IDLE,
+                                       RT_STAT_FORWARDED_IN, RT_STAT_USB_TX, RT_STAT_USB_TX_ERR, RT_STAT_TX_FAIL};
+    for (unsigned i = 0; i < sizeof(reasons) / sizeof(reasons[0]); i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, rt_stat_name(reasons[i]));
+        jw_number(w, gateway_route_stat(reasons[i]));
+    }
+    jw_char(w, '}');
+    report_end(w);
+}
+/* wg_mgr packet-path accounting (components/tdongle_runtime/include/tdongle_wgperf.h). Stages are [count,total,max] in the
+ * unit named in "units"; "elapsed_ms" is the time since the last `wgperf reset`, so totals divide into rates. */
+extern bool ml_wg_log_bench(unsigned rounds, uint32_t *cycles_per_line);
+static void report_wgperf(jw_writer *w) {
+    static const char *const names[TDONGLE_WGPERF_STAGE_COUNT] = {
+#define X(name, unit) #name,
+        TDONGLE_WGPERF_STAGES(X)
+#undef X
+    };
+    static const char *const units[TDONGLE_WGPERF_STAGE_COUNT] = {
+#define X(name, unit) unit,
+        TDONGLE_WGPERF_STAGES(X)
+#undef X
+    };
+    static const char *const counters[TDONGLE_WGPERF_COUNTER_COUNT] = {
+#define X(name) #name,
+        TDONGLE_WGPERF_COUNTERS(X)
+#undef X
+    };
+    tdongle_pm_status_t pm;
+    tdongle_pm_status(&pm);
+    report_begin(w, "wgperf");
+    report_field(w, "cpu_mhz", pm.cpu_mhz);
+    report_field(w, "elapsed_ms", (uint32_t)((uint32_t)esp_timer_get_time() - atomic_load(&tdongle_wgperf.since_us)) / 1000);
+    jw_raw(w, ",\"stages\":{");
+    for (unsigned i = 0; i < TDONGLE_WGPERF_STAGE_COUNT; i++) {
+        tdongle_wgperf_sample s = tdongle_wgperf_get(&tdongle_wgperf, i);
+        if (i) jw_char(w, ',');
+        jw_key(w, names[i]);
+        jw_char(w, '[');
+        jw_number(w, s.count);
+        jw_char(w, ',');
+        jw_number(w, s.total);
+        jw_char(w, ',');
+        jw_number(w, s.max);
+        jw_char(w, ']');
+    }
+    jw_raw(w, "},\"units\":[");
+    for (unsigned i = 0; i < TDONGLE_WGPERF_STAGE_COUNT; i++) {
+        if (i) jw_char(w, ',');
+        jw_string(w, units[i]);
+    }
+    jw_raw(w, "],\"counters\":{");
+    for (unsigned i = 0; i < TDONGLE_WGPERF_COUNTER_COUNT; i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, counters[i]);
+        jw_number(w, tdongle_wgperf_counter_get(&tdongle_wgperf, i));
+    }
+    jw_char(w, '}');
+    report_end(w);
+}
+/* What one per-packet log line cost, measured on the board: the formatting and vprintf path of ESP_LOGI as configured. */
+static void report_logbench(jw_writer *w) {
+    uint32_t per_line = 0;
+    bool ok = ml_wg_log_bench(200, &per_line);
+    report_begin(w, "logbench");
+    report_field(w, "rounds", 200);
+    report_field(w, "ok", ok);
+    report_field(w, "cycles_per_line", per_line);
+    report_end(w);
+}
 bool gateway_memory_command(const char *line) {
     jw_writer w = {.sink = memory_sink};
     if (!strcmp(line, "memory")) {
@@ -380,8 +704,27 @@ bool gateway_memory_command(const char *line) {
         report_attribution(&w);
         report_lwip(&w);
         report_usb(&w);
+    } else if (!strcmp(line, "wifistats")) {
+        report_wifi_link(&w);
+        report_wifi_lwip(&w);
+    } else if (!strcmp(line, "wifistats reset")) {
+        report_wifi_reset(&w);
+    } else if (!strcmp(line, "wifistats dump")) {
+        report_wifi_dump(&w);
+    } else if (!strcmp(line, "cpu")) {
+        report_cpu(&w);
+    } else if (!strcmp(line, "wgperf")) {
+        report_wgperf(&w);
+    } else if (!strcmp(line, "wgperf reset")) {
+        tdongle_wgperf_reset_now();
+        report_begin(&w, "wgperf_reset");
+        report_end(&w);
+    } else if (!strcmp(line, "wgperf logbench")) {
+        report_logbench(&w);
     } else if (!strcmp(line, "route")) {
         report_router(&w);
+    } else if (!strcmp(line, "inbound")) {
+        report_inbound(&w);
     } else if (!strcmp(line, "members")) {
         report_phases(&w);
         report_admission(&w);

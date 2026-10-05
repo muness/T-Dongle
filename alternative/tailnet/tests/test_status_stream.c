@@ -62,14 +62,14 @@ static const char *ml_derp_link_state_name(ml_derp_link_state_t s) { return s ==
 static TaskHandle_t ml_rt_task_handle(ml_rt_task_t t) { return 1 + t; }
 typedef struct {size_t required, shared_runtime, member_start, member_growth, member_steady, negotiation, recovery, largest_block;} ml_adm_budget_t;
 static ml_adm_budget_t admission_budget(void) { return (ml_adm_budget_t){90000, 23000, 30000, 5000, 35000, 16000, 16384, 24000}; }
-#define ML_ADM_PEER_SLOTS 4
+#define ML_ADM_PEER_SLOTS 2
 static size_t ml_wg_slot_bytes(void) { return 904; }
 typedef struct {int holder_unused; unsigned phase; uint32_t held_ms, waiting, grants, timeouts, lease_expired, stale_dropped, refused_full, max_wait_ms, max_hold_ms; uintptr_t holder;} ml_neg_status_t;
 typedef struct {bool running; unsigned members; uint32_t starts, stops, attach_failures, detach_failures, stack_bytes[3], stack_free[3], passes[3], max_service_ms[3], slow_services[3], detach_timeouts[3]; ml_neg_status_t negotiation;} ml_rt_status_t;
 static void ml_rt_status(ml_rt_status_t *o) { memset(o, 0, sizeof(*o)); o->running = true; o->members = 1; o->stack_free[0] = 4000; o->stack_free[1] = UINT32_MAX; }
 static const char *ml_neg_phase_name(unsigned p) { return "derp"; }
-typedef struct {uint32_t capacity, used, peak, refused_full, refused_nomem, evictions_own, evictions_other, rejected, refused_largest, largest_low, slot_bytes, device_bytes;} ml_wg_pool_status_t;
-static void ml_wg_pool_status(ml_wg_pool_status_t *o) { *o = (ml_wg_pool_status_t){12, 3, 5, 0, 0, 1, 2, 0, 1, 20480, 904, 228}; }
+typedef struct {uint32_t capacity, used, peak, refused_full, refused_nomem, evictions_own, evictions_other, rejected, refused_largest, refused_heap, largest_low, slot_bytes, device_bytes;} ml_wg_pool_status_t;
+static void ml_wg_pool_status(ml_wg_pool_status_t *o) { *o = (ml_wg_pool_status_t){12, 3, 5, 0, 0, 1, 2, 0, 1, 4, 20480, 904, 228}; }
 typedef struct {unsigned users, seedings, failures; unsigned long bytes; unsigned bytes_resident;} ml_rng_stats_t;
 static void ml_rng_stats(ml_rng_stats_t *o) { memset(o, 0, sizeof(*o)); o->users = 1; o->bytes_resident = 500; }
 typedef struct membership {
@@ -185,10 +185,24 @@ static struct {unsigned count;struct {char ssid[33];} profiles[8];} wifi_saved;
 #include "../../../components/tdongle_runtime/include/tdongle_mode.h"
 #include "../../../components/tdongle_runtime/include/tdongle_temperature.h"
 #include "tdongle_memory.h"
+#include "tdongle_pm_burst.h"
+typedef struct {bool scaling;int configure_error;uint32_t max_mhz,min_mhz,cpu_mhz,lock_create_failures;unsigned bursts;tdongle_pm_burst_stats_t burst[8];} tdongle_pm_status_t;
+static bool pm_scaling=true;
+static void tdongle_pm_status(tdongle_pm_status_t *o){memset(o,0,sizeof(*o));o->scaling=pm_scaling;o->configure_error=-1;o->cpu_mhz=pm_scaling?80:240;o->max_mhz=pm_scaling?240:0;o->min_mhz=pm_scaling?80:0;o->bursts=2;
+ o->burst[0]=(tdongle_pm_burst_stats_t){.name="ml_derp",.depth=0,.acquires=12,.releases=12,.held_us=3400,.max_depth=1};
+ o->burst[1]=(tdongle_pm_burst_stats_t){.name="usb_routes",.depth=1,.acquires=5,.releases=4,.held_us=900,.max_depth=2,.underflows=1,.forced_releases=2,.backend_failures=3,.isr_rejects=4};}
+static int wifi_ps_mode(void){return -1;}   /* not readable: must stay -1, not 4294967295 */
 void tdongle_memory_note(unsigned o,size_t n,int f){}
 static void gateway_dns_domains_refresh(void){}
 static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
-tdongle_temperature tdongle_temperature_snapshot(void){return (tdongle_temperature){.valid=true,.current_tenths=550,.peak_tenths=600,.sampled_at_ms=1000};}
+tdongle_temperature tdongle_temperature_snapshot(void){return (tdongle_temperature){.valid=true,.current_tenths=550,.peak_tenths=600,.sampled_at_ms=1000,.samples=7,.changed_at_ms=500,.age_ms=2500};}
+#include "../main/wifi_link.h"
+static wifi_link_events wifi_link_stats={.connects=2,.disconnects=1,.beacon_timeouts=1,.last_reason=200,.last_disconnect_rssi=-85,.last_disconnect_ms=777};
+static bool wifi_link_up=true;
+static wifi_link_info wifi_link_read(void){
+    if(!wifi_link_up)return (wifi_link_info){.phy=WIFI_LINK_PHY_UNKNOWN,.ps=WIFI_LINK_PS_UNKNOWN,.secondary=WIFI_LINK_SECOND_UNKNOWN};
+    return (wifi_link_info){.connected=true,.rssi_valid=true,.rssi=-61,.channel=11,.secondary=2,.phy=WIFI_LINK_PHY_HT40,.bw_cfg_mhz=40,.ap_bw_mhz=40,.ap_modes=WIFI_LINK_AP_B|WIFI_LINK_AP_G|WIFI_LINK_AP_N,.ps=0,.tx_power_valid=true,.tx_power_qdbm=80};
+}
 #include "status_stream.inc"
 #undef calloc
 #undef strlcpy
@@ -238,6 +252,15 @@ int main(void) {
                                "net_io")
                ->valueint == 101);
     assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(m, "derp_link"), "state")->valuestring, "ready"));
+    {   /* Wi-Fi link visibility is additive: new object, existing fields untouched, no BSSID/SSID in it. */
+        cJSON *wl = cJSON_GetObjectItem(root, "wifi_link");
+        assert(wl && cJSON_IsTrue(cJSON_GetObjectItem(wl, "connected")) && cJSON_GetObjectItem(wl, "rssi_dbm")->valueint == -61);
+        assert(cJSON_GetObjectItem(wl, "channel")->valueint == 11 && !strcmp(cJSON_GetObjectItem(wl, "secondary")->valuestring, "below"));
+        assert(!strcmp(cJSON_GetObjectItem(wl, "phy")->valuestring, "HT40") && !strcmp(cJSON_GetObjectItem(wl, "ap_modes")->valuestring, "bgn"));
+        assert(cJSON_GetObjectItem(wl, "beacon_timeouts")->valueint == 1 && cJSON_GetObjectItem(wl, "last_disconnect_reason")->valueint == 200);
+        assert(!cJSON_GetObjectItem(wl, "ssid") && !cJSON_GetObjectItem(wl, "bssid"));
+        assert(cJSON_IsBool(cJSON_GetObjectItem(root, "wifi")) && cJSON_GetObjectItem(root, "firmware") && cJSON_GetObjectItem(root, "saved_wifi"));
+    }
     {   /* the shared runtime's decision inputs and the pool are reported */
         cJSON *adm = cJSON_GetObjectItem(root, "admission");
         assert(adm && cJSON_GetObjectItem(adm, "required_bytes")->valueint == 90000 &&
@@ -248,8 +271,29 @@ int main(void) {
                cJSON_IsNull(cJSON_GetObjectItem(cJSON_GetObjectItem(cJSON_GetObjectItem(rt, "tasks"), "derp"), "stack_free")));
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "evictions_other")->valueint == 2);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "refused_largest")->valueint == 1);
+        assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "refused_heap")->valueint == 4);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "largest_low")->valueint == 20480);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "negotiation"), "holder"));
+    }
+    {   /* sensor liveness: the reading is re-sampled, so its age and sample count are reported */
+        cJSON *t = cJSON_GetObjectItem(root, "chip_temperature");
+        assert(cJSON_GetObjectItem(t, "current_tenths_c")->valueint == 550 && cJSON_GetObjectItem(t, "samples")->valueint == 7 &&
+               cJSON_GetObjectItem(t, "age_ms")->valueint == 2500 && cJSON_GetObjectItem(t, "changed_at_uptime_ms")->valueint == 500 &&
+               cJSON_GetObjectItem(t, "step_tenths_c")->valueint == 10);
+    }
+    {   /* power: clock, scaling, Wi-Fi power save and every lock's counters */
+        cJSON *p = cJSON_GetObjectItem(root, "power");
+        assert(cJSON_IsTrue(cJSON_GetObjectItem(p, "scaling")) && cJSON_GetObjectItem(p, "cpu_mhz")->valueint == 80 &&
+               cJSON_GetObjectItem(p, "max_mhz")->valueint == 240 && cJSON_GetObjectItem(p, "min_mhz")->valueint == 80 &&
+               cJSON_GetObjectItem(p, "wifi_ps")->valueint == -1 &&
+               cJSON_GetObjectItem(p, "configure_error")->valueint == -1);
+        cJSON *locks = cJSON_GetObjectItem(p, "locks");
+        assert(cJSON_GetArraySize(locks) == 2);
+        cJSON *d = cJSON_GetObjectItem(locks, "ml_derp"), *u = cJSON_GetObjectItem(locks, "usb_routes");
+        assert(cJSON_GetObjectItem(d, "acquires")->valueint == 12 && cJSON_GetObjectItem(d, "held_us")->valueint == 3400 &&
+               cJSON_GetObjectItem(u, "depth")->valueint == 1 && cJSON_GetObjectItem(u, "forced_releases")->valueint == 2 &&
+               cJSON_GetObjectItem(u, "backend_failures")->valueint == 3 && cJSON_GetObjectItem(u, "isr_rejects")->valueint == 4 &&
+               cJSON_GetObjectItem(u, "underflows")->valueint == 1);
     }
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(m, "peers")) == 1);
     cJSON *diagnostics=cJSON_GetObjectItem(m,"map_diagnostics");
@@ -309,5 +353,15 @@ int main(void) {
     root = cJSON_Parse(r.output);
     assert(root &&
            cJSON_GetArraySize(cJSON_GetObjectItem(root, "members")) == 0);
+    cJSON_Delete(root);
+    wifi_link_up = false;   /* not associated: the object is still there, says so, and carries no radio fields */
+    r = (httpd_req_t){0};
+    assert(status(&r) == 0);
+    root = cJSON_Parse(r.output);
+    {
+        cJSON *wl = cJSON_GetObjectItem(root, "wifi_link");
+        assert(wl && cJSON_IsFalse(cJSON_GetObjectItem(wl, "connected")) && !cJSON_GetObjectItem(wl, "rssi_dbm") && !cJSON_GetObjectItem(wl, "channel"));
+        assert(cJSON_GetObjectItem(wl, "disconnects")->valueint == 1 && cJSON_GetObjectItem(root, "firmware"));
+    }
     cJSON_Delete(root);
 }

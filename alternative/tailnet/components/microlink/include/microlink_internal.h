@@ -84,7 +84,7 @@ extern "C" {
  *            token poll, both shallower than the handshake chain.
  *   coord    map re-fetch and reconnect repeat the measured map path (the deepest one: DERP-map activation runs the
  *            netcheck on this task). The paths added since that capture, from GCC's frame sizes along the real call
- *            chains (docs/research/evidence/coord_stack_paths.py, docs/adr/0016): the JSON of the /key response
+ *            chains (docs/research/evidence/coord_stack_paths.py, docs/adr/0021): the JSON of the /key response
  *            (plain HTTP for an http:// login server: unauthenticated) and of the RegisterResponse is parsed by cJSON,
  *            which recurses on this stack; ml_coord.c bounds their nesting to 4 and 16 levels (the build's limit
  *            is 32) before parsing, so the worst of them is 5.7 KB with everything the frame sums cannot see added;
@@ -144,14 +144,16 @@ _Static_assert(ML_TASK_COORD_STACK % 512 == 0 && ML_TASK_COORD_STACK - 512 < 2 *
 #define ML_DERP_TX_QUEUE_DEPTH  8
 #define ML_DISCO_RX_QUEUE_DEPTH 8
 #endif
-/* WG RX 8->32 (2026-05-27): download-direction frames arrive in bursts via DERP;
- * depth 8 overflowed and silently dropped → TCP loss → exit-node throughput
- * collapse. ml_rx_packet_t is small (ptr+len+meta); 32 is ~1KB internal. */
+/* WG RX queue slots. The slots are only the COUNT bound (an ml_rx_packet_t is 48 B); what a queued datagram costs is the heap block
+ * it points to, and that is bounded in bytes across all memberships by ml_wg_rx_budget.h (ML_WG_RX_QUEUE_BYTES), which holds 9
+ * full-size datagrams or, with these slots, 12 small ones (ACKs). 8 -> 12 (ADR 0020): a burst that net_io moves out of the socket
+ * mailbox in one pass (up to 10, at most 16) must fit at once, and the old 8 slots lost 5 % of a 3 Mbit/s UDP stream. +192 B of
+ * queue storage per membership, charged by admission through member_queue_bytes. */
 #if ML_QUEUE_SWEEP
 #define ML_WG_RX_QUEUE_DEPTH    ML_QUEUE_SWEEP
 #define ML_STUN_RX_QUEUE_DEPTH  (ML_QUEUE_SWEEP < 4 ? ML_QUEUE_SWEEP : 4)
 #else
-#define ML_WG_RX_QUEUE_DEPTH    8
+#define ML_WG_RX_QUEUE_DEPTH    12
 #define ML_STUN_RX_QUEUE_DEPTH  4
 #endif
 #define ML_COORD_CMD_QUEUE_DEPTH 4
@@ -409,10 +411,16 @@ typedef struct {
     bool authoritative;
     ml_peer_update_t updates[];
 } ml_peer_batch_t;
-/* Peer-update queue entries are heap blocks of two kinds: map batches and queued host packets. */
-static inline tdongle_owner ml_peer_update_owner(const ml_peer_update_t *update) {
-    return update && update->action == ML_PEER_PACKET ? TDONGLE_OWNER_WG : TDONGLE_OWNER_PEER;
-}
+/* Peer-update queue entries are of two kinds: heap blocks (map batches, endpoint updates: ml_peer_update_t, owner PEER) and
+ * queued host packets, which are lwIP pbufs in the WireGuard transport layout (ml_wg_mgr.c, "Egress"). A pbuf pointer is
+ * 4-aligned, so bit 0 tells the two apart; a packet entry must never be dereferenced as an update or freed with free(). */
+struct pbuf;
+static inline bool ml_pu_is_packet(const void *entry) { return ((uintptr_t)entry & 1u) != 0; }
+static inline void *ml_pu_tag_packet(struct pbuf *packet) { return (void *)((uintptr_t)packet | 1u); }
+static inline struct pbuf *ml_pu_packet(const void *entry) { return (struct pbuf *)((uintptr_t)entry & ~(uintptr_t)1u); }
+static inline tdongle_owner ml_peer_update_owner(const ml_peer_update_t *update) { (void)update; return TDONGLE_OWNER_PEER; }
+/* Free an entry taken from the queue (stop path). */
+void ml_pu_free_entry(void *entry);
 
 /* ============================================================================
  * Peer State (owned exclusively by wg_mgr task)
@@ -691,7 +699,7 @@ struct microlink_s {
     QueueHandle_t stun_rx_queue;        /* net_io -> coord */
     QueueHandle_t coord_cmd_queue;      /* any -> coord */
     volatile uint32_t peer_generation; /* even = peer metadata stable, odd = owner applying updates */
-    struct { ml_peer_update_t *packet; uint64_t expires; } jit_pending[ML_JIT_PENDING];
+    struct { struct pbuf *packet; uint64_t expires; uint32_t vpn_ip; uint32_t seq; uint16_t len; } jit_pending[ML_JIT_PENDING];   /* prepared egress pbufs, see ml_wg_mgr.c */
     volatile unsigned jit_packet_count;
     uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
     uint32_t directory_applied;
@@ -946,6 +954,7 @@ typedef struct {
     uint32_t capacity, used, peak, refused_full, refused_nomem;
     uint32_t evictions_own, evictions_other, rejected;
     uint32_t refused_largest;   /* slots refused because they would have taken the largest free block under the TLS floor */
+    uint32_t refused_heap;      /* slots beyond the guaranteed ones refused for the recovery reserve / negotiation peak (ml_adm_slot_heap_ok) */
     uint32_t largest_low;       /* smallest largest-free-block seen right after a slot allocation (UINT32_MAX: none yet) */
     uint32_t slot_bytes, device_bytes;
 } ml_wg_pool_status_t;
@@ -956,8 +965,10 @@ size_t ml_wg_device_bytes(void);     /* sizeof(struct wireguard_device): a membe
 /* The shared wg_mgr task's scratch: one pass visits every membership, and the work windows below the
  * per-membership drains (#46) are bounded by the pass as a whole, so N memberships share what one used to have. */
 typedef struct { uint64_t pass_start_ms; uint32_t drain_ms; uint64_t next_due_ms; } ml_wg_pass_t;
-typedef struct { uint32_t wait_ms; } ml_derp_pass_t;   /* shortest wait any link asks for, UINT32_MAX = none */
+typedef struct { uint32_t wait_ms; bool active; } ml_derp_pass_t;   /* shortest wait any link asks for, UINT32_MAX = none */
 void ml_wg_pass_begin(ml_wg_pass_t *pass);
+/* Units of work the last pass did (packets moved, timers run); reset by the call. wg_mgr task only. */
+unsigned ml_wg_pass_work_take(void);
 void ml_wg_mgr_send_cmm(microlink_t *ml, uint32_t peer_vpn_ip);
 esp_err_t ml_wg_mgr_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip);
 bool ml_wg_mgr_peer_is_up(microlink_t *ml, uint32_t vpn_ip);

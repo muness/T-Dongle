@@ -13,6 +13,9 @@ for name in coord_read wifi_policy wifi_profiles; do
  cc $TD_INC -std=gnu11 -I build-host -fsanitize=address,undefined -g tests/test_${name}.c -o build-host/test_${name}
  build-host/test_${name}
 done
+# Wi-Fi link status text and lwIP counter lines (the driver reads and serial dispatch run in tools/test-memory-report.py).
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g tests/test_wifi_link.c -o build-host/test_wifi_link
+build-host/test_wifi_link
 # The USB wrapper is shared with the original bridge; test its real code too.
 (cd ../.. && TEST_CFLAGS="-fsanitize=address,undefined -g" python3 tools/test_net.py)
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g tests/test_usb_identity.c -o build-host/test_usb_identity
@@ -174,7 +177,7 @@ build-host/test_semantic_directory
 
 python - <<'PYJIT'
 from pathlib import Path
-s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate_idle(');b=s.index('/* The queue owns copies',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate_idle(');b=s.index('/* ----------------------------------------------------------------------------\n * Egress',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
 a=s.index('static bool wg_initiation_plausible(');b=s.index('#endif',a);Path('build-host/wg_initiation.inc').write_text(s[a:b])
 PYJIT
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_jit_directory.c -o build-host/test_jit_directory
@@ -186,9 +189,93 @@ build-host/test_inbound_trial
 
 python - <<'PYQUEUE'
 from pathlib import Path
-s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('esp_err_t ml_gateway_queue_packet(');b=s.index('#endif',a);Path('build-host/jit_queue.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('typedef struct { uint32_t vpn_ip, enq_us; uint16_t len; }');b=s.index('#endif',a);Path('build-host/jit_queue.inc').write_text(s[a:b])
 PYQUEUE
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_jit_queue.c -o build-host/test_jit_queue
+# Egress in the real wireguardif.c (lwIP fakes): the in-place sealed datagram equals the copying path's, byte for byte, with
+# the same counters, timestamps, rekey flags and results; and the idle-slice predicate.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_egress.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_egress
+build-host/test_wg_egress race
+# The same egress sequence with the seal outside a mutex standing for the core lock, against a thread rolling keypairs: TSan.
+cc -std=gnu11 -O1 -g -fsanitize=thread -fno-sanitize-recover=all -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_egress.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_egress_tsan
+build-host/test_wg_egress_tsan race
+build-host/test_wg_egress
+# Inbound loss (docs/adr/0019-inbound-loss.md). The replay window (32 -> 512 bits, RFC 6479 ring) against an exact reference model,
+# at the shipped size and at the neighbours (the code is size-generic; a wrong ring/window relation fails on some size).
+for bits in 512 64 128 2048 8192; do
+ cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -DWIREGUARD_REPLAY_RING_BITS=$bits -I $wg tests/test_wg_replay.c -o build-host/test_wg_replay_$bits
+ build-host/test_wg_replay_$bits 3000 | tail -$([[ $bits == 512 ]] && echo 12 || echo 1)
+done
+# Every inbound drop point of the real wireguardif.c counts exactly once; replay protection precedes endpoint/timer/keypair updates;
+# reordered arrival is accepted up to the window.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_counters.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_counters
+build-host/test_wg_rx_counters
+# net_io's drain loop (the cause of the silent UDP loss) and the counters' thread safety.
+cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -I components/microlink/include tests/test_net_io_drain.c -o build-host/test_net_io_drain
+build-host/test_net_io_drain
+cc -std=gnu11 -O1 -g -fsanitize=thread -pthread -I components/microlink/include -I $wg tests/test_rx_stats_threads.c -o build-host/test_rx_stats_threads
+build-host/test_rx_stats_threads
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -pthread -I components/microlink/include -I $wg tests/test_rx_stats_threads.c -o build-host/test_rx_stats_threads_asan
+build-host/test_rx_stats_threads_asan
+# Tunnel -> USB reject reasons, and the allocation-failure ownership rule.
+cc $RT_CC -fsanitize=address,undefined -fno-sanitize-recover=undefined tests/test_router_rx_reasons.c -o build-host/test_router_rx_reasons
+build-host/test_router_rx_reasons
+# Inbound pipeline (docs/adr/0020-inbound-pipeline.md).
+# Cryptokey routing for IPv4 AND IPv6 (WireGuard whitepaper 5.4.6) on the real wireguardif.c against the dual-stack lwIP fake: the
+# source must be in the peer's AllowedIPs of its own family, the IPv6 length is the Payload Length, unsupported IPv6 is counted.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -DWG_HOST_IPV6 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_ipv6_rx.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_ipv6_rx
+build-host/test_wg_ipv6_rx
+# The run: begin / in-place decrypt / complete / deliver for up to ML_WG_RX_BATCH datagrams per core-lock cycle, identical in every
+# observable to the one-datagram path (random traffic, both side by side), with the lock discipline asserted.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_batch.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_batch
+build-host/test_wg_rx_batch
+# ... and the decrypt with the lock released against a thread that rolls and destroys the keypairs meanwhile, under TSan.
+cc -std=gnu11 -O1 -g -fsanitize=thread -w -DWIREGUARD_CRYPTO_REFC=1 -pthread -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_batch.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_batch_tsan
+build-host/test_wg_rx_batch_tsan race
+# Router batch hand-off: identical to its packets one by one, the USB netif only under the core lock and the lock taken once per chunk,
+# ownership on every path.
+cc $RT_CC -fsanitize=address,undefined -fno-sanitize-recover=undefined tests/test_router_batch.c -o build-host/test_router_batch
+build-host/test_router_batch
+# wg_mgr's inbound drain: the real staging / flush / drain code of ml_wg_mgr.c (two ranges, extracted) on the real wireguardif.c.
+python - <<'PYCODE'
+from pathlib import Path
+w=Path('components/microlink/src/ml_wg_mgr.c').read_text()
+a=w.index('/* ----------------------------------------------------------------------------\n * Inbound runs (ADR 0020)')
+b=w.index('/* ============================================================================\n * SendCallMeMaybe',a)
+c=w.index("/* Drain one membership's wg_rx_queue in runs")
+d=w.index('static void member_service(',c)
+Path('build-host/wg_mgr_rx.inc').write_text(w[a:b]+w[c:d])
+PYCODE
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I build-host -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_mgr_rx.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_mgr_rx
+build-host/test_wg_mgr_rx
+# The byte and heap bound on datagrams waiting for wg_mgr: exact model, then four producers and a consumer under TSan.
+cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -pthread -I components/microlink/include tests/test_wg_rx_budget.c -o build-host/test_wg_rx_budget
+build-host/test_wg_rx_budget
+cc -std=c11 -O1 -g -fsanitize=thread -Wall -Wextra -pthread -I components/microlink/include tests/test_wg_rx_budget.c -o build-host/test_wg_rx_budget_tsan
+build-host/test_wg_rx_budget_tsan
+cc $TD_INC -std=c11 -Wall -Wextra -fsanitize=address,undefined -g tests/test_wg_idle.c -o build-host/test_wg_idle
+build-host/test_wg_idle
 build-host/test_jit_queue
 
 python tools/test-resilience.py

@@ -1,6 +1,8 @@
 #include "ml_runtime.h"
 #include "ml_rt_core.h"
 #include "esp_log.h"
+#include "tdongle_pm.h"
+#include "tdongle_wgperf.h"
 #include <string.h>
 
 /* The FreeRTOS half of the shared runtime. The part that has to be right (when the tasks start and stop, the order a
@@ -25,7 +27,21 @@ static struct {
  * it, a handle read just before the delete was a notify into a freed TCB. */
 static portMUX_TYPE rt_task_mux = portMUX_INITIALIZER_UNLOCKED;
 
+/* One CPU-frequency-max lock per shared task (ADR 0016): held for a processing pass, never across the wait for the
+ * next one. Each is begun and ended only by its own task, so a lock can never outlive the task (rt_task_exit closes
+ * whatever is open). The objects are static and outlive every restart of the tasks. */
+static tdongle_pm_burst_t pm_burst[ML_RT_TASK_COUNT];
+static const char *const pm_names[ML_RT_TASK_COUNT] = { "ml_net_io", "ml_derp", "ml_wg_mgr" };
+
+void ml_rt_burst_begin(ml_rt_task_t which) {
+    if (which < ML_RT_TASK_COUNT) tdongle_pm_burst_begin(&pm_burst[which]);
+}
+void ml_rt_burst_end(ml_rt_task_t which) {
+    if (which < ML_RT_TASK_COUNT) tdongle_pm_burst_end(&pm_burst[which]);
+}
+
 static void rt_task_exit(ml_rt_core_t *core, ml_rt_task_t which) {
+    tdongle_pm_burst_release_all(&pm_burst[which]);     /* a pass that unwound early must not leave the CPU pinned */
     portENTER_CRITICAL(&rt_task_mux);
     rt.task[which] = NULL;
     portEXIT_CRITICAL(&rt_task_mux);
@@ -65,9 +81,20 @@ static void wait_for_work(uint32_t wait_ms) {
 static void derp_task(void *arg) {
     ml_rt_core_t *core = arg;
     ESP_LOGI(TAG, "derp started (Core %d)", xPortGetCoreID());
+    bool hot = false;
     while (!ml_rt_core_should_stop(core)) {
         rt.derp_pass.wait_ms = UINT32_MAX;
+        rt.derp_pass.active = false;
         ml_mux_pass(&core->mux[ML_RT_TASK_DERP]);
+        /* The relay is polled every ML_DERP_POLL_MS whether or not it has anything to say, so bracketing every pass
+         * would take and drop the clock lock about a hundred times a second on an idle gateway. The lock follows
+         * activity instead: taken after a pass that moved a frame or ran a connect step, kept over the short poll
+         * wait that follows (at most ML_DERP_POLL_MS), dropped after the first pass that found nothing to do. A
+         * long wait never holds it. rt_task_exit closes it on every exit path. */
+        bool want = rt.derp_pass.active && rt.derp_pass.wait_ms <= ML_DERP_POLL_MS;
+        if (want && !hot) ml_rt_burst_begin(ML_RT_TASK_DERP);
+        else if (!want && hot) ml_rt_burst_end(ML_RT_TASK_DERP);
+        hot = want;
         wait_for_work(rt.derp_pass.wait_ms);
     }
     rt_task_exit(core, ML_RT_TASK_DERP);
@@ -82,7 +109,28 @@ static void wg_mgr_task(void *arg) {
     ESP_LOGI(TAG, "wg_mgr started (Core %d)", xPortGetCoreID());
     while (!ml_rt_core_should_stop(core)) {
         ml_wg_pass_begin(&rt.wg_pass);
+        WGPERF_T(tpm);
+        ml_rt_burst_begin(ML_RT_TASK_WG_MGR);
+        WGPERF_LAP(tpm, pm);
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+        uint32_t sent_before = tdongle_wgperf_counter_get(&tdongle_wgperf, TDONGLE_WGPERF_C_out_direct) +
+                               tdongle_wgperf_counter_get(&tdongle_wgperf, TDONGLE_WGPERF_C_out_flushed);
+#endif
+        WGPERF_T(tpass);
         ml_mux_pass(&core->mux[ML_RT_TASK_WG_MGR]);
+        WGPERF_CHARGE(tpass, pass);
+        WGPERF_COUNT(passes, 1);
+        if (ml_wg_pass_work_take() == 0) WGPERF_COUNT(passes_idle, 1);
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+        {
+            uint32_t sent = tdongle_wgperf_counter_get(&tdongle_wgperf, TDONGLE_WGPERF_C_out_direct) +
+                            tdongle_wgperf_counter_get(&tdongle_wgperf, TDONGLE_WGPERF_C_out_flushed) - sent_before;
+            if (sent) WGPERF_ADD(batch, sent);
+        }
+#endif
+        WGPERF_RESTART(tpm);
+        ml_rt_burst_end(ML_RT_TASK_WG_MGR);
+        WGPERF_LAP(tpm, pm);
         uint64_t now = ml_get_time_ms();
         wait_for_work(rt.wg_pass.next_due_ms > now ? (uint32_t)(rt.wg_pass.next_due_ms - now) : 0);
     }
@@ -126,6 +174,7 @@ static void rt_init(void) {
     int expected = 0;
     if (__atomic_compare_exchange_n(&rt.ready, &expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         ml_neg_init(&rt.neg, ml_get_time_ms, 0, 0, 0);
+        for (int i = 0; i < ML_RT_TASK_COUNT; i++) tdongle_pm_burst_register(&pm_burst[i], pm_names[i]);
         const ml_mux_ops_t *ops[ML_RT_CORE_TASKS] = { &net_io_ops, &ml_derp_mux_ops, &ml_wg_mux_ops };
         void *shared[ML_RT_CORE_TASKS] = { NULL, &rt.derp_pass, &rt.wg_pass };
         /* Attach in the order a packet travels; detach in the order that stops intake first, then the WireGuard

@@ -76,6 +76,10 @@ typedef struct {
     /* Statistics. */
     uint32_t grants, releases, timeouts, cancelled, lease_expired, stale_dropped, refused_full;
     uint32_t max_wait_ms, max_hold_ms;
+    /* Called, with the lock held, every time the token changes hands between "free" and "held" (a grant, a release,
+     * a lease expiry). It must not block or take another lock: the USB transmit buffer uses it to notify its worker. */
+    void (*observer)(void *ctx);
+    void *observer_ctx;
 } ml_neg_t;
 
 typedef struct {
@@ -106,5 +110,12 @@ bool ml_neg_acquire(ml_neg_t *n, uintptr_t key, ml_neg_prio_t prio, ml_neg_phase
 bool ml_neg_release(ml_neg_t *n, uintptr_t key);
 
 bool ml_neg_holds(ml_neg_t *n, uintptr_t key);
+
+/* True while any membership holds the token: a negotiation is (or may be) allocating its peak. Cheap; for gates that
+ * must not grow while a join is in progress (the elastic USB transmit buffer, ADR 0015). */
+bool ml_neg_busy(ml_neg_t *n);
+
+/* Register a callback for token state changes (see `observer`). One observer; NULL removes it. */
+void ml_neg_set_observer(ml_neg_t *n, void (*observer)(void *ctx), void *ctx);
 void ml_neg_status(ml_neg_t *n, ml_neg_status_t *out);
 const char *ml_neg_phase_name(ml_neg_phase_t p);

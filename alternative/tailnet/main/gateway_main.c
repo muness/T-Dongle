@@ -1,5 +1,6 @@
 #include "esp_log.h"
 #include "tdongle_temperature.h"
+#include "tdongle_pm.h"
 #include "tdongle_mode.h"
 #include "tdongle_mode_store.h"
 #include "tdongle_l2.h"
@@ -17,6 +18,7 @@
 #include "gateway.h"
 #include "ml_runtime.h"
 #include "ml_admission.h"
+#include "ml_wg_rx_budget.h"
 #include "route_table.h"
 #include "boot_health.h"
 #include "lcd.h"
@@ -32,20 +34,41 @@
 #include "tinyusb_net.h"
 #include "usb_rx_budget.h"
 #include "tcp_window_budget.h"
-/* Tunnel-to-USB transmit ring (heap, allocated once at USB start): three full frames, 3 x 1524 + 4.
- * It is paid for by shrinking the two IN NTBs from 6,400 to 3,200 B (sdkconfig.defaults), so the
- * boot heap does not go down. Raise it only if the "usb" memory report shows tx_dropped_full with
- * tx_high_water at tx_ring_bytes. Sizing: docs/adr/0015-data-plane-io.md. */
-#ifndef GATEWAY_USB_TX_RING_BYTES
-#define GATEWAY_USB_TX_RING_BYTES (3 * 1524 + 4)
-#endif
-/* Boot-heap neutrality (ADR 0015): before the ring the IN NTBs held 2 x 6,400 B. The ring, its
+/* Tunnel-to-USB transmit ring (ADR 0015). Three full frames are permanent (3 x 1524 B, allocated once at USB start,
+ * paid for by the two IN NTBs being 3,200 B rather than 6,400 B). On top of that the worker task adds elastic chunks
+ * of TINYUSB_NET_TX_CHUNK_SLABS frames, up to GATEWAY_USB_TX_MAX_CHUNKS, while a burst needs them, and gives them back
+ * when idle or when a membership is being admitted or negotiated (ml_negotiation.h). Cap: 3 + 10 x 2 = 23 frames, 35 KB.
+ * Why 23: a burst of B bytes arriving at the Wi-Fi rate (about 20 Mbit/s) against the USB full-speed drain (about 7 Mbit/s)
+ * leaves 65% of B queued, so C bytes of ring absorb B = C / 0.65: 23 frames = 35 KB absorb a 54 KB burst, about 38 TCP
+ * segments, and a full ring is 40 ms of USB time, below TCP's 200 ms minimum timeout. The three permanent frames absorbed
+ * 7 KB: the 180 drops in 15 s that motivated this. Tune from tx_dropped_full and tx_high_water_slabs. */
+#define GATEWAY_USB_TX_BASE_FRAMES 3u
+#define GATEWAY_USB_TX_MAX_CHUNKS 10u
+#define GATEWAY_USB_TX_MAX_FRAMES (GATEWAY_USB_TX_BASE_FRAMES + GATEWAY_USB_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_SLABS)
+/* Growth keeps free internal heap above one negotiation peak plus the recovery reserve, and the largest free block above
+ * the admission floor, before and after each chunk. Admission itself needs far more free heap than that (it reclaims
+ * the elastic part first), but these two are what a join already in progress and HTTP/control recovery cannot do without. */
+#define GATEWAY_USB_TX_FLOOR_FREE (ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES)
+#define GATEWAY_USB_TX_FLOOR_LARGEST ML_ADM_LARGEST_BLOCK
+#define GATEWAY_USB_TX_IDLE_MS 10000u
+/* Reclaim for admission waits for chunks that still hold frames: a full ring drains at 875 B/ms (7 Mbit/s). */
+#define GATEWAY_USB_TX_RECLAIM_WAIT_MS 150u
+/* Boot-heap neutrality (ADR 0015): before the ring the IN NTBs held 2 x 6,400 B. The permanent ring, its
  * worker stack (1,536) and TCB (340) must fit in what the smaller NTBs gave back, plus 512 B. */
 _Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT * CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE +
-               GATEWAY_USB_TX_RING_BYTES + 1536 + 340 <= 2 * 6400 + 512,
-               "USB transmit buffering grew past the admission-margin budget");
+               GATEWAY_USB_TX_BASE_FRAMES * TINYUSB_NET_TX_SLAB_BYTES + 1536 + 340 <= 2 * 6400 + 512,
+               "permanent USB transmit buffering grew past the admission-margin budget");
 _Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE >= 2 * (1518 + 4) + 64, "an IN NTB must hold two frames");
-_Static_assert(GATEWAY_USB_TX_RING_BYTES >= 3 * 1524 + 4, "transmit ring must hold three full frames");
+_Static_assert(GATEWAY_USB_TX_BASE_FRAMES >= 3, "the permanent ring must hold three full frames");
+_Static_assert(GATEWAY_USB_TX_MAX_FRAMES >= 16 && GATEWAY_USB_TX_MAX_FRAMES <= 24, "elastic cap: 16 to 24 frames (ADR 0015)");
+_Static_assert(GATEWAY_USB_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_BYTES <= 32 * 1024, "the elastic part must stay within 32 KB");
+_Static_assert(GATEWAY_USB_TX_FLOOR_FREE >= ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES,
+               "growth must leave one negotiation peak and the recovery reserve");
+_Static_assert(GATEWAY_USB_TX_FLOOR_LARGEST >= ML_ADM_LARGEST_BLOCK, "growth must keep the admission largest-block floor");
+_Static_assert(GATEWAY_USB_TX_FLOOR_FREE == ML_WG_RX_JOIN_FLOOR_FREE && GATEWAY_USB_TX_FLOOR_FREE == 16384 + 11500,
+               "the elastic buffers (USB ring growth, WireGuard receive queue during a join) leave the same recovery reserve and negotiation peak");
+_Static_assert(3 * (GATEWAY_USB_TX_MAX_FRAMES * TINYUSB_NET_TX_SLAB_BYTES / 875) <= GATEWAY_USB_TX_RECLAIM_WAIT_MS,
+               "reclaim must wait long enough to drain a full ring three times over at USB speed");
 #include <ctype.h>
 #include <strings.h>
 #include <time.h>
@@ -56,6 +79,7 @@ static void usb_event(tinyusb_event_t *event, void *arg) {
     if (event->id == TINYUSB_EVENT_DETACHED) {
         extern void gateway_usb_detach(void);
         gateway_usb_detach();
+        tinyusb_net_tx_ring_link_down();    /* frames queued for the host that left are stale: flush, release the PM lock */
     }
 }
 static bool online;
@@ -160,6 +184,7 @@ static wifi_config_t wifi_config;
 #include "core.h"
 #include "wifi_policy.h"
 #include "wifi_profiles.inc"
+#include "wifi_link.inc"
 #include "serial_setup.inc"
 
 extern const char setup_html_start[] asm("_binary_setup_html_start");
@@ -338,9 +363,15 @@ static void start_member(membership_t *m) {
         ml_neg_release(neg, key);
 }
 static bool start_member_holding_token(membership_t *m) {
+    /* The token is held, so the USB transmit buffer's gate is closed and it will not grow: give back the elastic chunks
+     * (waiting for those that still hold frames to drain) so the measurement below sees the heap admission is meant to see. */
+    tinyusb_net_tx_elastic_reclaim(GATEWAY_USB_TX_RECLAIM_WAIT_MS);
     /* Reserve for parsed JSON, networking and recovery HTTP. Shared receive
      * buffers are static. Runtime peak sufficiency needs board qualification. */
-    size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    /* The WireGuard receive queue is elastic memory like the transmit ring: datagrams that wait in it at this instant (at most
+     * ML_WG_RX_QUEUE_BYTES) are heap the next wg_mgr pass returns, and the token held here has already closed the queue's growth
+     * (ml_wgrx_admit_gated), so they are counted as free. Without this a burst in flight during a second join could refuse it. */
+    size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) + ml_wgrx_queued(&ml_wgrx_budget);
     size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     unsigned active = 0;
     for (membership_t *other = members; other; other = other->next)
@@ -469,10 +500,20 @@ static void manager(void *arg) {
 /* Runs in the lwIP core-lock holder (tcpip task, WireGuard manager): it must never wait.
  * The frame is copied into the USB transmit ring and a worker hands it to TinyUSB; a full ring
  * drops the frame (counted), which TCP treats as loss. See docs/adr/0015-data-plane-io.md. */
+/* The elastic transmit buffer's gate: growth is forbidden, and idle chunks are given back, while any membership holds the
+ * negotiation token (a join's allocation peak, and the admission measurement that precedes it). */
+static tdongle_pm_burst_t usb_tx_pm;
+static void usb_tx_pm_begin(void *ctx) { (void)ctx; tdongle_pm_burst_begin(&usb_tx_pm); }
+static void usb_tx_pm_end(void *ctx) { (void)ctx; tdongle_pm_burst_end(&usb_tx_pm); }
+static bool usb_tx_gate(void *ctx) { (void)ctx; return ml_neg_busy(ml_rt_negotiation()); }
+/* Token changed hands: wake the buffer's worker so it retires idle chunks now rather than at its next housekeeping. */
+static void usb_tx_negotiation_changed(void *ctx) { (void)ctx; tinyusb_net_tx_elastic_kick(); }
 static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
-    if (len > UINT16_MAX)
-        return ESP_ERR_INVALID_SIZE;
-    return tinyusb_net_tx_ring_send(buffer, (uint16_t)len);
+    rt_stat(RT_STAT_USB_TX);
+    esp_err_t result = len > UINT16_MAX ? ESP_ERR_INVALID_SIZE : tinyusb_net_tx_ring_send(buffer, (uint16_t)len);
+    if (result != ESP_OK)
+        rt_stat(RT_STAT_USB_TX_ERR);
+    return result;
 }
 /* Called only for tdongle_l2 (bridge mode) frames sent with tinyusb_net_send_sync. */
 static void usb_free_tx(void *buffer, void *ctx) { if(!gateway_tailnet_mode())tdongle_l2_release(buffer); }
@@ -503,11 +544,13 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
         wifi_rescan=true;
     if (base == WIFI_EVENT && event == WIFI_EVENT_STA_DISCONNECTED) {
         online = false;
+        wifi_link_event_disconnected((const wifi_event_sta_disconnected_t *)data);
         if(!gateway_tailnet_mode())tdongle_l2_link(false);
-        if(!wifi_scan_pauses_reconnect && wifi_current>=0)
+        if(!wifi_scan_pauses_reconnect && wifi_current>=0 && wifi_pinned.slot!=wifi_current)
             wifi_retry_after[wifi_current]=(uint32_t)(esp_timer_get_time()/1000)+60000;
         /* Worker rescans with backoff; never reconnect recursively here. */
     }
+    if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED)wifi_link_event_connected();
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && !gateway_tailnet_mode()){online=true;tdongle_l2_link(true);}
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
         online = true;
@@ -734,6 +777,11 @@ static esp_err_t home(httpd_req_t *req) {
     return httpd_resp_send(req, setup_html_start,
                            setup_html_end - setup_html_start);
 }
+/* The Wi-Fi power-save mode in force, for /status (set in start_wifi). -1: not readable. */
+static int wifi_ps_mode(void) {
+    wifi_ps_type_t t=WIFI_PS_MAX_MODEM;
+    return esp_wifi_get_ps(&t)==ESP_OK?(int)t:-1;
+}
 #include "json_writer.inc"
 #include "runtime_status.inc"
 #ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
@@ -913,11 +961,15 @@ static esp_err_t status(httpd_req_t *req) {
     tdongle_temperature temperature=tdongle_temperature_snapshot();
     jw_raw(w,"\"chip_temperature\":{");
     BOOL("valid",temperature.valid);NUM("current_tenths_c",temperature.current_tenths);NUM("peak_tenths_c",temperature.peak_tenths);NUM("sampled_at_uptime_ms",temperature.sampled_at_ms);
+    /* current is re-read every sample and moves in whole-degree steps; age_ms and samples show it is live. */
+    NUM("samples",temperature.samples);NUM("changed_at_uptime_ms",temperature.changed_at_ms);NUM("step_tenths_c",TDONGLE_TEMPERATURE_STEP_TENTHS);
+    jw_key(w,"age_ms");if(temperature.samples)jw_number(w,temperature.age_ms);else jw_raw(w,"null");jw_char(w,',');
     jw_key(w,"errors");jw_number(w,temperature.errors);jw_raw(w,"},");
     BOOL("recovery", gateway_boot_recovery());
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
     status_shared_runtime(w);
+    status_power(w);
     gateway_socket_stats sockets = gateway_sockets_snapshot();
     NUM("socket_limit", CONFIG_LWIP_MAX_SOCKETS);
     NUM("socket_recovery_reserve", GATEWAY_SOCKET_RECOVERY);
@@ -929,6 +981,15 @@ static esp_err_t status(httpd_req_t *req) {
     NUM("socket_last_at_ms", sockets.last_at_ms);
     NUM("reset_reason", esp_reset_reason());
     BOOL("wifi", online);
+    {   /* Additive: RSSI, channel, PHY and disconnect counters, with no BSSID or SSID. Omitted whole if it cannot fit. */
+        wifi_link_info link = wifi_link_read();
+        char link_json[WIFI_LINK_JSON_MAX];
+        if (wifi_link_json(link_json, sizeof(link_json), &link, &wifi_link_stats)) {
+            jw_key(w, "wifi_link");
+            jw_raw(w, link_json);
+            jw_char(w, ',');
+        }
+    }
     {   /* The wall clock gates DERP (certificate validity): a clock that never arrives must be visible. */
         bool clock_valid=ml_derp_clock_valid();
         jw_raw(w,"\"clock\":{");
@@ -1227,7 +1288,18 @@ static esp_err_t start_usb(void) {
     if(gateway_tailnet_mode()){uint8_t device[6];gateway_usb_macs(identity_mac,device,net.mac_addr);}
     else memcpy(net.mac_addr, identity_mac, 6);
     result=tinyusb_net_init(&net);
-    if(result==ESP_OK && gateway_tailnet_mode())result=tinyusb_net_tx_ring_start(GATEWAY_USB_TX_RING_BYTES,GATEWAY_TASK_USB_TX_PRIO,GATEWAY_TASK_USB_TX_CORE);
+    if(result==ESP_OK && gateway_tailnet_mode()){
+        const tinyusb_net_tx_config_t tx = {.base_frames = GATEWAY_USB_TX_BASE_FRAMES, .max_chunks = GATEWAY_USB_TX_MAX_CHUNKS,
+                                            .priority = GATEWAY_TASK_USB_TX_PRIO, .core = GATEWAY_TASK_USB_TX_CORE,
+                                            .floor_free = GATEWAY_USB_TX_FLOOR_FREE, .floor_largest = GATEWAY_USB_TX_FLOOR_LARGEST,
+                                            .idle_ms = GATEWAY_USB_TX_IDLE_MS, .gate = usb_tx_gate,
+                                            .pm_begin = usb_tx_pm_begin, .pm_end = usb_tx_pm_end};
+        tdongle_pm_burst_register(&usb_tx_pm, "usb_txq");   /* ADR 0016: one CPU-max hold mechanism, worker-only begin/end */
+        /* The shared runtime's state is built on first use; do that here, before the worker (1,536 B of stack) can ask the gate. */
+        ml_neg_t *neg=ml_rt_negotiation();
+        result=tinyusb_net_tx_ring_start(&tx);
+        if(result==ESP_OK)ml_neg_set_observer(neg,usb_tx_negotiation_changed,NULL);
+    }
     extern esp_err_t gateway_console_start(void);
     esp_err_t console=gateway_console_start();
     return console!=ESP_OK?console:result;
@@ -1323,6 +1395,15 @@ static esp_err_t start_routes(void) {
     extern bool gateway_routes_init(void);
     route_storage_ok=gateway_routes_init();return route_storage_ok?ESP_OK:ESP_FAIL;
 }
+/* No Wi-Fi modem sleep. The IDF default (WIFI_PS_MIN_MODEM) wakes for every DTIM beacon and parks frames at the
+ * access point between them: measured on the board 2026-10-05 it added about 80 ms to the median round trip (ping
+ * p50 126 ms against 48 ms with power save off) and changed throughput not at all. The original bridge does the
+ * same (main/bridge.c). It costs radio idle current, not CPU frequency: DFS and modem sleep are independent here
+ * (light sleep is off). Failure is not fatal: the link works, only slower to answer. */
+static void wifi_power_save_off(void) {
+    esp_err_t e=esp_wifi_set_ps(WIFI_PS_NONE);
+    if(e!=ESP_OK)ESP_LOGW("wifi","esp_wifi_set_ps(NONE) failed: %s; modem sleep stays on",esp_err_to_name(e));
+}
 static esp_err_t start_wifi(void) {
     if(gateway_tailnet_mode() && !esp_netif_create_default_wifi_sta())return ESP_ERR_NO_MEM;
     if(!gateway_tailnet_mode()){uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);START_TRY(tdongle_l2_start(mac));}
@@ -1334,6 +1415,7 @@ static esp_err_t start_wifi(void) {
     START_TRY(esp_wifi_set_mode(WIFI_MODE_STA));
     START_TRY(esp_wifi_set_config(WIFI_IF_STA,&wifi_config));
     START_TRY(esp_wifi_start());
+    wifi_power_save_off();
     wifi_ready=true;
     wifi_rescan=true;
     if(!gateway_tailnet_mode())return ESP_OK;
@@ -1365,6 +1447,10 @@ void app_main(void) {
     nvs_handle_t early;
     if(nvs_flash_init()==ESP_OK && nvs_open("tn_settings",NVS_READONLY,&early)==ESP_OK){tdongle_mode_load(early,&runtime_mode);nvs_close(early);}
 
+    /* Frequency scaling is for the tailnet gateway, whose forwarding tasks hold the CPU-max lock while they have
+     * work. The transparent bridge mode of this image forwards from Wi-Fi and USB callbacks that hold none, so it
+     * stays at the fixed boot frequency (240 MHz). A failure leaves the same fixed frequency. */
+    if(gateway_tailnet_mode())tdongle_pm_start();
     members_lock=xSemaphoreCreateMutexStatic(&members_mutex);
     wifi_scan_lock=xSemaphoreCreateMutexStatic(&scan_mutex);
     gateway_startup_sequence();

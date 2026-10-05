@@ -34,6 +34,12 @@ CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=8192
 CONFIG_LWIP_TCP_WND_DEFAULT=11520
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=10
+# UDP receive mailbox, per socket: 6 -> 10. lwIP frees a datagram it cannot post to a full mailbox without counting it
+# anywhere, which is where the silent ~7 % loss of tailnet UDP came from (docs/adr/0019-inbound-loss.md). The main fix is
+# that net_io now empties a ready socket (ml_net_io_drain.h); this only widens the burst that can arrive between two net_io
+# runs (net_io is priority 7 on the core of the Wi-Fi and tcpip tasks). 4 B per slot per UDP socket, but a queued datagram
+# pins its Wi-Fi RX buffer until net_io reads it, so it stays small: 10 of the 22 Wi-Fi RX buffers at the very worst.
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=10
 CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y
 CONFIG_MBEDTLS_CHACHAPOLY_C=y
@@ -78,4 +84,15 @@ CONFIG_FREERTOS_PLACE_FUNCTIONS_INTO_FLASH=y
 CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y
 CONFIG_SPI_FLASH_ROM_IMPL=y
 CONFIG_ESP_EVENT_POST_FROM_IRAM_ISR=n
-CONFIG_SPI_MASTER_ISR_IN_IRAM=n
+# The LCD's SPI master ISR stays in IRAM. With CONFIG_SPI_MASTER_ISR_IN_IRAM=n the board panicked
+# (LoadProhibited in spi_intr -> spi_bus_lock_bg_exit, spi_master.c:1099, 2026-10-05). Saves only
+# ~3.8 KB, so it is not worth the risk.
+
+# Power and latency (ADR 0016, owner-approved 2026-10-05). The CPU boots at 240 MHz and esp_pm_configure()
+# (components/tdongle_runtime/tdongle_pm.c) lets it scale between 240 and 80 MHz: the forwarding tasks hold a
+# CPU-max lock while they have work. Board evidence: fixed 240 against 160 MHz cut ping p90 205 -> 149 ms and max
+# 508 -> 222 ms, UDP +14%, TCP unchanged. 80 MHz is the floor (APB, UART, SPI LCD and the Wi-Fi driver's APB lock
+# need it). Light sleep stays off: no tickless idle, so USB stays enumerated and nothing sleeps the CPU.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=n

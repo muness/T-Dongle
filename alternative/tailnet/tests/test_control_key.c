@@ -284,6 +284,17 @@ int main(void) {
         assert(json_nesting_within("}}]]{", 5, 1) && !json_nesting_within("}}]]{{", 6, 1));
         /* Only the first `length` bytes are read. */
         assert(json_nesting_within("{{{{{{", 1, 1));
+        /* Real control-plane documents (Tailscale and Headscale shapes) are far inside the bounds: /key is one level, a
+         * RegisterResponse (User and Login objects, with the Logins list of newer servers as an array of objects) three. */
+        const char *key_doc = "{\"legacyPublicKey\":\"mkey:" KEYHEX "\",\"publicKey\":\"mkey:" KEYHEX "\"}";
+        assert(json_nesting_within(key_doc, strlen(key_doc), 1) && json_nesting_within(key_doc, strlen(key_doc), ML_JSON_DEPTH_KEY));
+        const char *reg_doc = "{\"User\":{\"ID\":1,\"LoginName\":\"a@b.c\",\"DisplayName\":\"A [B] {C} \\\"D\\\"\","
+            "\"ProfilePicURL\":\"\",\"Logins\":[{\"ID\":2,\"Provider\":\"google\",\"LoginName\":\"a@b.c\"}],\"Created\":\"2026-01-01T00:00:00Z\"},"
+            "\"Login\":{\"ID\":2,\"Provider\":\"google\",\"LoginName\":\"a@b.c\",\"DisplayName\":\"A\"},\"NodeKeyExpired\":false,"
+            "\"MachineAuthorized\":true,\"AuthURL\":\"\",\"NodeKeySignature\":null,\"Error\":\"\"}";
+        assert(json_nesting_within(reg_doc, strlen(reg_doc), 3) && !json_nesting_within(reg_doc, strlen(reg_doc), 2));
+        assert(json_nesting_within(reg_doc, strlen(reg_doc), ML_JSON_DEPTH_REGISTER));
+        { cJSON *r = cJSON_Parse(reg_doc); assert(r && cJSON_GetObjectItem(r, "MachineAuthorized")); cJSON_Delete(r); }
         /* Whatever the scan accepts, cJSON parses within the bound; whatever is deeper is refused before any allocation. */
         for (unsigned levels = 1; levels <= 40; levels++) {
             for (int objects = 0; objects < 2; objects++) {

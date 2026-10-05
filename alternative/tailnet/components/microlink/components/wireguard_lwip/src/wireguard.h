@@ -45,6 +45,7 @@
 
 // Platform-specific functions that need to be implemented per-platform
 #include "wireguard-platform.h"
+#include "wireguard_replay.h"
 #include "wireguard_pool.h"
 
 // tai64n contains 64-bit seconds and 32-bit nano offset (12 bytes)
@@ -88,7 +89,16 @@ typedef err_t (*wireguard_derp_output_fn)(const uint8_t *peer_public_key, const 
 // data: WireGuard packet to send
 // len: length of data
 // Returns: ERR_OK on success, error code on failure
+/* The same send, handing over the pbuf the datagram is in (contiguous, PBUF_TRANSPORT headroom) instead of a copy. */
+struct pbuf;
+typedef err_t (*wireguard_udp_output_pbuf_fn)(uint32_t dest_ip, uint16_t dest_port, struct pbuf *p, void *ctx);
+/* Batch hand-off of decrypted packets to the router (wireguardif_set_rx_batch). Called WITHOUT the lwIP core lock held by the
+ * wg_mgr task. For each p[i]: on result[i] == ERR_OK the callee consumed it, otherwise the caller still owns and frees it (lwIP's
+ * input contract). Packets are in arrival order and must be handled in that order. */
+typedef void (*wireguard_rx_batch_fn)(struct pbuf **p, unsigned n, struct netif *netif, err_t *result);
 typedef err_t (*wireguard_udp_output_fn)(uint32_t dest_ip, uint16_t dest_port, const uint8_t *data, size_t len, void *ctx);
+
+_Static_assert(REJECT_AFTER_MESSAGES == WIREGUARD_REPLAY_LIMIT, "the replay filter and the session limit must agree");
 
 struct wireguard_keypair {
     bool valid;
@@ -105,8 +115,7 @@ struct wireguard_keypair {
     uint32_t last_tx;
     uint32_t last_rx;
 
-    uint32_t replay_bitmap;
-    uint64_t replay_counter;
+    struct wireguard_replay replay;   // anti-replay window (wireguard_replay.h)
 
     uint32_t local_index; // This is the index we generated for our end
     uint32_t remote_index; // This is the index on the other end
@@ -224,9 +233,15 @@ struct wireguard_device {
     // UDP output callback for magicsock mode (external unified socket)
     wireguard_udp_output_fn udp_output_fn;
     void *udp_output_ctx;
+    wireguard_udp_output_pbuf_fn udp_output_pbuf_fn;   /* optional; preferred over udp_output_fn, same ctx */
 
     // Force all peer output through DERP relay (cellular mode)
     bool force_derp_output;
+
+    // Inbound delivery (wireguardif_rx_deliver): optional batch hand-off to the router, and whether an authenticated inner IPv6
+    // packet may be delivered at all (default no: the gateway rejects IPv6, README; AllowedIPs are enforced either way).
+    wireguard_rx_batch_fn rx_batch_fn;
+    bool rx_ipv6;
 
     bool valid;
 };
@@ -332,6 +347,7 @@ void keypair_destroy(struct wireguard_keypair *keypair);
 
 struct wireguard_keypair *get_peer_keypair_for_idx(struct wireguard_peer *peer, uint32_t idx);
 bool wireguard_check_replay(struct wireguard_keypair *keypair, uint64_t seq);
+wg_replay_verdict_t wireguard_check_replay_why(struct wireguard_keypair *keypair, uint64_t seq);
 
 uint8_t wireguard_get_message_type(const uint8_t *data, size_t len);
 
@@ -361,15 +377,32 @@ bool wireguard_initiation_commit(struct wireguard_device *device, struct wiregua
 /* A transport data message whose decryption runs outside the lwIP core lock (wireguardif_rx_begin / _complete). */
 struct wireguard_rx_job {
     struct pbuf *input;        /* the received packet; `src` points into it */
-    struct pbuf *pbuf;         /* the plaintext, filled by wireguard_rx_decrypt */
-    const uint8_t *src;
-    size_t src_len;
+    struct pbuf *pbuf;         /* the plaintext, filled by wireguard_rx_decrypt (NULL for an in-place job) */
+    const uint8_t *src;        /* the ciphertext and tag (past the 16 B header) */
+    size_t src_len;            /* ciphertext + 16 B tag */
+    uint8_t *dst;              /* where the plaintext goes: pbuf->payload, or `src` itself for an in-place job */
     uint32_t receiver;
     uint64_t nonce;
     uint8_t key[WIREGUARD_SESSION_KEY_LEN];
     bool ok;
+    bool inplace;              /* decrypted over `input` (wireguardif_rx_begin_ex with WIREGUARDIF_RX_INPLACE) */
+    struct pbuf *deliver;      /* wireguardif_rx_complete_deferred: the accepted plaintext, trimmed to its IP length, waiting for
+                                * wireguardif_rx_deliver. NULL when the datagram was dropped, was a keepalive, or was delivered. */
 };
 void wireguard_rx_decrypt(struct wireguard_rx_job *job);   /* needs no lock and touches no shared state */
+/* An outbound transport data message sealed outside the lwIP core lock (wireguardif_tx_begin / _commit). begin, under the
+ * lock, picks the keypair, writes the datagram header and reserves the nonce (sending_counter++); wireguard_tx_seal then
+ * encrypts the pbuf in place from a COPY of the key and touches no shared state; commit, under the lock again, re-finds the
+ * peer and sends. The pbuf stays owned by the caller throughout (nothing else can see it). */
+struct wireguard_tx_job {
+    struct pbuf *pbuf;         /* [16 B header][plaintext, zero padded][16 B tag space], contiguous */
+    size_t padded_len;
+    uint64_t nonce;
+    uint32_t remote_index;     /* identifies the keypair used, for the timestamp update in commit */
+    ip4_addr_t dest;           /* the tunnel address, to find the peer again */
+    uint8_t key[WIREGUARD_SESSION_KEY_LEN];
+};
+void wireguard_tx_seal(struct wireguard_tx_job *job);      /* needs no lock; writes only inside job->pbuf */
 
 bool wireguard_create_handshake_initiation(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_initiation *dst);
 bool wireguard_create_handshake_response(struct wireguard_device *device, struct wireguard_peer *peer, struct message_handshake_response *dst);

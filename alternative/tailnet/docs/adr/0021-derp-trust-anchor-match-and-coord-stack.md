@@ -1,4 +1,4 @@
-# ADR 0016: DERP trust-anchor match (no RSA-4096 on the handshake peak) and the coord stack rule
+# ADR 0021: DERP trust-anchor match (no RSA-4096 on the handshake peak) and the coord stack rule
 
 Status: accepted for on-board validation, 2026-10-05. Implements R2 and R3 of `docs/research/membership-bytes.md`. Host numbers are measured; board numbers are estimates until the coordinator reads the two counters under "On-board verification". Follows ADR 0013 (shared runtime, admission) and the DERP server authentication of PR #27 (`ml_derp_tls.h`).
 
@@ -85,6 +85,14 @@ The rule: **2 x 4,152 = 8,304 B** and **5,736 + 2,048 = 7,784 B**, so at least 8
 Without a bound the cJSON row would be 6,760 B and 6,760 + 2,048 = 8,808 B > 8,704 B: the build's nesting limit of 32 alone is too deep for this stack. `ml_coord.c` therefore refuses a `/key` body nested deeper than 4 levels and a RegisterResponse deeper than 16 (`json_nesting_within`, a string-aware scan that counts at least what cJSON would descend into; real documents are 1 and about 3 levels deep) before calling cJSON. Tested in `tests/test_control_key.c` (scan semantics, brackets inside strings, escapes, every depth from 1 to 40, the parser's rejection without allocation, a 1,400-level bomb through the whole fetch).
 
 Not changed: `ML_TASK_COORD_STACK` (so no admission arithmetic change from the stack), the TLS and plain paths use the same constant. If the board's `stack_free` for the coord task, after a join, a map update and a reconnect on the current build, shows a high-water at or below 3,072 B (so, free at least 5,632 B of 8,704 B), the stack can drop to 6,144 B by editing the two measured constants and the stack together; the asserts will say if the arithmetic no longer holds.
+
+## Merged with ADR 0020 (renumbered from 0016)
+
+This ADR was first written as 0016, which `0016-dfs-power-management.md` took; it is 0021 now. On the ADR 0015/0019/0020 base the first-membership requirement is shared runtime 24,060 + member start 20,992 + growth 18,664 + negotiation **11,500** + recovery 16,384 + router floor 2,800 = **94,400 B** (98,900 B with the 16,000 B peak). Margin at 107,000 B boot free: **12,600 B** (was 8,100 B); at 102,000 B: 7,600 B. A second membership needs 70,340 B.
+
+The elastic floors of ADR 0020 are defined as recovery reserve + one negotiation peak, so they fall with the peak: the USB ring growth floor, the WireGuard receive queue floor while a join runs and the floor for peer slots beyond the guaranteed two are **27,884 B** (were 32,384 B). That is the one place where the estimate matters twice: the floors, like `required`, assume a join needs 11,500 B above steady. If the board's DERP phase peak (check 1 below) is above 11,500 B, raise `ML_ADM_NEG_PEAK_BYTES` and everything derived follows (`gateway_main.c` and `test_wg_rx_budget.c` assert the 16,384 + 11,500 sum explicitly, so a change cannot go unnoticed). Until then the floors keep 4,500 B less headroom for a handshake than before: with the host-measured saving of 5,824 B that still leaves 1,324 B over the host peak.
+
+Security review notes (R2): the match requires equal subject DN bytes and equal SubjectPublicKeyInfo bytes, only on a certificate above the leaf that mbedTLS flagged with exactly NOT_TRUSTED (weak hash aside); a different key under a bundle subject, a bundle key under another subject, an expired or not-yet-valid anchor, an expired intermediate or leaf, a wrong host and a bundle without the anchor are all refused in `tests/test_derp_tls.c`. Go's `crypto/x509` treats a root the same way: the pool entry is chosen by subject and key identifier and only the child's signature is checked against its key, never the root's own signature. One difference, accepted: the anchor's basicConstraints and pathLen come from the presented copy, not the bundle entry, so someone able to forge a copy still needs the anchor's private key to sign anything below it; the bundle's roots carry no name constraints.
 
 ## On-board verification (coordinator)
 

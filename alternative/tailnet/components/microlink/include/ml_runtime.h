@@ -62,5 +62,11 @@ void ml_rt_wg_foreach_held(void (*fn)(microlink_t *ml, void *arg), void *arg);
  * after a successful enqueue; safe from any task, cheap, a no-op while the runtime is not running. */
 void ml_rt_wake(ml_rt_task_t which);
 
+/* Hold the CPU at its maximum frequency while `which` has work (ADR 0016). Nesting counts; end before any blocking
+ * wait. The shared loops bracket their own passes; net_io's select sits inside ml_net_io_pass, which brackets only
+ * the drain, so these are exported for it. Task context only. */
+void ml_rt_burst_begin(ml_rt_task_t which);
+void ml_rt_burst_end(ml_rt_task_t which);
+
 void ml_rt_status(ml_rt_status_t *out);
 TaskHandle_t ml_rt_task_handle(ml_rt_task_t which);

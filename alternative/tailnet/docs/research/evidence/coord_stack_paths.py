@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stack paths of the ml_coord task from GCC's own frame sizes (byte-recovery R3, docs/adr/0016).
+"""Stack paths of the ml_coord task from GCC's own frame sizes (byte-recovery R3, docs/adr/0021).
 
   idf.py -B build-stack -D IDF_TARGET=esp32s3 -D SDKCONFIG=$PWD/build-stack/sdkconfig \\
          -D CMAKE_C_FLAGS=-fcallgraph-info=su build

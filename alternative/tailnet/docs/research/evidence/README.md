@@ -7,7 +7,7 @@ Scratch programs used for the numbers in the three notes one level up. Not part 
 - `derp_chain_probe.go`: Go TLS 1.2 probe over `hosts.txt` (hostnames from `https://login.tailscale.com/derpmap/default`); prints suite, key types and issuers.
 - `derp_connect_timing.go`: TCP, TLS 1.2 and HTTP-upgrade timing to given DERP hosts.
 
-Added with the byte-recovery implementation (docs/adr/0016):
+Added with the byte-recovery implementation (docs/adr/0021):
 
 - `host_derp_anchor_live.c`: the same live check as `host_derp_verify_phases.c`, but through the shipped `ml_derp_tls.c` trust-anchor match (`ANCHOR=0` off, `ANCHOR=1` on). Build line in its header.
 - `derp_anchor_live_88_anchor0.txt`, `derp_anchor_live_88_anchor1.txt`: all 88 hostnames of the DERP map, before (peak 16,008 B) and after (10,184 B), 88 of 88 verified, 88 anchor matches.
