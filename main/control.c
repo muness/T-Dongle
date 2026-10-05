@@ -229,7 +229,29 @@ static void handle(char *line) {
                    "\"password\":\"password\",\"priority\":50}, display "
                    "BRIGHTNESS ROTATION DIM_SECONDS, setup, cancel, reset, "
                    "confirm-reset, reboot, bootloader, setup N (preselect slot N). Profiles validate by association "
-                   "before replacing saved data. No console echo.\r\n");
+                   "before replacing saved data. No console echo. Extensions: capabilities, preference, metadata JSON.\r\n");
+    else if (!strcmp(line, "capabilities"))
+        mgmt_write("capabilities schema=1 features=telemetry,metadata\r\n");
+    else if (!strcmp(line, "preference"))
+        console_printf("preferred=%d\r\n", cfg.p[cfg.preferred].ssid[0] ? cfg.preferred + 1 : 0);
+    else if (!strncmp(line, "metadata ", 9)) {
+        if (trial || in_setup) {
+            mgmt_write("ERR metadata unavailable during setup/trial\r\n");
+            return;
+        }
+        metadata_edit_t edit;
+        settings_t old = cfg;
+        if (!metadata_parse_json(line + 9, &edit) || !metadata_apply(&cfg, &edit)) {
+            mgmt_write("ERR metadata invalid or profile changed; refresh\r\n");
+            return;
+        }
+        if (!persist()) {
+            cfg = old;
+            mgmt_write("ERR metadata not saved\r\n");
+        } else
+            mgmt_write("OK metadata saved; association unchanged\r\n");
+        memset(&edit, 0, sizeof(edit));
+    }
     else if (!strcmp(line, "portal"))
         portal_trace_dump();
     else if (!strcmp(line, "status") || !strcmp(line, "show") || !strcmp(line, "diagnostics"))
