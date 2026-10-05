@@ -12,6 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import dongle_serial  # noqa: E402
 import memory_ladder  # noqa: E402
 import tailnet_throughput  # noqa: E402
+import cpu_profile  # noqa: E402
 
 OWNERS = ["other", "tls", "control", "map", "peer", "wg", "packet", "context"]
 
@@ -174,6 +175,41 @@ def test_throughput():
         assert e.code == 2
 
 
-for test in (test_console, test_capture, test_compare, test_throughput):
+def cpu(uptime, total, rows, mhz=240):
+    return {"schema": 1, "kind": "cpu", "uptime_ms": uptime, "cpu_mhz": mhz, "total": total, "cores": 2,
+            "tasks": [{"name": n, "runtime": r, "priority": 5, "core": c, "stack_free": 900} for n, c, r in rows]}
+
+
+def test_cpu_profile():
+    a = cpu(1000, 1_000_000, [("IDLE0", 0, 500_000), ("IDLE1", 1, 600_000), ("ml_wg_mgr", 1, 10_000)], 80)
+    # 10 s later: wg_mgr used 3.3 s, IDLE0 5.1 s; usb_routes appeared in between; the counter wrapped for IDLE1.
+    b = cpu(11000, 11_000_000, [("IDLE0", 0, 5_600_000), ("IDLE1", 1, (600_000 + 4_600_000) % (1 << 32)),
+                                ("ml_wg_mgr", 1, 3_310_000), ("usb_routes", 1, 3_200_000)])
+    r = cpu_profile.diff(a, b)
+    by = {t["name"]: t["percent_of_core"] for t in r["tasks"]}
+    assert abs(by["IDLE0"] - 51.0) < 1e-6 and abs(by["ml_wg_mgr"] - 33.0) < 1e-6 and abs(by["usb_routes"] - 32.0) < 1e-6
+    assert abs(by["IDLE1"] - 46.0) < 1e-6 and r["cpu_mhz"] == [80, 240] and r["tasks"][0]["name"] == "IDLE0"
+    assert abs(r["counter_per_wall"] - 1.0) < 1e-6 and abs(r["busy_percent_of_cores"] - 65.0) < 1e-6
+    wrapped = dict(b, total=(1 << 32) + 5)       # a 32-bit counter that wrapped between snapshots
+    assert cpu_profile.diff(dict(a, total=(1 << 32) - 5), wrapped)["counter_per_wall"] > 0
+    assert "ml_wg_mgr" in cpu_profile.render(r)
+    try:
+        cpu_profile.diff(b, a)
+        raise AssertionError("out of order snapshots accepted")
+    except ValueError:
+        pass
+    class Link:
+        def json_command(self, line): return {"cpu": [a]} if line == "cpu" else {}
+    assert cpu_profile.snapshot(Link())["uptime_ms"] == 1000
+    class Empty:
+        def json_command(self, line): return {}
+    try:
+        cpu_profile.snapshot(Empty())
+        raise AssertionError("empty cpu report accepted")
+    except dongle_serial.ConsoleError:
+        pass
+
+
+for test in (test_console, test_capture, test_compare, test_throughput, test_cpu_profile):
     test()
-print("Measurement scripts: serial framing, ladder capture/reset detection, marginal-cost compare, throughput statistics passed.")
+print("Measurement scripts: serial framing, ladder capture/reset detection, per-task CPU shares, marginal-cost compare, throughput statistics passed.")

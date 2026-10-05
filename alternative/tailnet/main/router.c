@@ -12,6 +12,7 @@
 #include "lwip/inet.h"
 #include "lwip/tcpip.h"
 #include "ml_directory.h"
+#include "tdongle_pm.h"
 #endif
 /* USB <-> tunnel router.
  *
@@ -92,6 +93,9 @@ typedef struct {
     unsigned generation, length;
 } route_item;
 static void route_task(void *context);
+/* CPU-frequency-max lock for usb_routes (ADR 0016). Held while packets, held packets or an alias fill are being
+ * worked and released before every blocking wait; only route_task begins or ends it. */
+static tdongle_pm_burst_t route_pm;
 static bool alias_reserve(uint32_t *index) {
     uint32_t next = 64;
     esp_err_t err = nvs_get_u32(route_store, "next_alias", &next);
@@ -688,6 +692,7 @@ bool gateway_routes_init(void) {
     /* Core 1 with the shared wg_mgr, one level above it (7): forwarding must
      * not wait behind a handshake, and it costs well under 5% of a core. Wi-Fi,
      * tcpip and net_io stay on core 0. */
+    tdongle_pm_burst_register(&route_pm, "usb_routes");
     if (xTaskCreatePinnedToCore(route_task, "usb_routes", 4096, NULL, GATEWAY_TASK_USB_ROUTES_PRIO, NULL, GATEWAY_TASK_USB_ROUTES_CORE) != pdPASS) {
         vQueueDelete(route_queue);
         route_queue = NULL;
@@ -699,14 +704,18 @@ static void route_task(void *context) {
     route_item item;
     unsigned burst = 0;
     int64_t last_budget_us = 0;
+    bool busy = false; /* route_pm is held across iterations while the queue stays non-empty */
     for (;;) {
         int64_t now = esp_timer_get_time();
         if (now - last_budget_us >= 20000) {
             last_budget_us = now;
             atomic_store(&route_budget, rt_queue_budget(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
         }
-        if (hold_count)
+        if (hold_count) {
+            tdongle_pm_burst_begin(&route_pm);
             hold_service(now);
+            tdongle_pm_burst_end(&route_pm);
+        }
         /* Sleep until a packet arrives. With a miss pending, sleep only until the
          * next fill is due, and fill when the queue is empty. Held packets bound
          * the sleep by their expiry so they are never stranded. */
@@ -714,8 +723,10 @@ static void route_task(void *context) {
         if (fill_pending() && !uxQueueMessagesWaiting(route_queue)) {
             int64_t due = last_fill_us + ROUTE_FILL_SPACING_US;
             if (now >= due) {
+                tdongle_pm_burst_begin(&route_pm);
                 alias_fill_run(now);
                 hold_service(esp_timer_get_time());
+                tdongle_pm_burst_end(&route_pm);
                 continue;
             }
             wait = pdMS_TO_TICKS((due - now + 999) / 1000);
@@ -729,8 +740,18 @@ static void route_task(void *context) {
             if (limit < wait)
                 wait = limit;
         }
+        /* About to sleep with nothing queued: the CPU may scale down. With packets queued the receive below
+         * returns at once and the lock stays held from one packet to the next. */
+        if (busy && !uxQueueMessagesWaiting(route_queue)) {
+            tdongle_pm_burst_end(&route_pm);
+            busy = false;
+        }
         if (xQueueReceive(route_queue, &item, wait) != pdTRUE)
             continue;
+        if (!busy) {
+            tdongle_pm_burst_begin(&route_pm);
+            busy = true;
+        }
         atomic_fetch_sub(&route_queued_bytes, item.length);
         if (item.generation != atomic_load(&usb_generation))
             pbuf_free(item.packet);
@@ -744,6 +765,8 @@ static void route_task(void *context) {
             burst = 0;
         else if (++burst >= ROUTE_BURST_PACKETS) {
             burst = 0;
+            tdongle_pm_burst_end(&route_pm); /* the one-tick sleep is idle time for the lower priorities too */
+            busy = false;
             vTaskDelay(1);
         }
     }
@@ -751,6 +774,10 @@ static void route_task(void *context) {
 #endif
 int gateway_host_input(struct pbuf *p,struct netif *input) {
 #ifndef GATEWAY_HOST_TEST
+    /* Every IP packet that reaches this core passes here, in the tcpip task: Wi-Fi to USB, USB to Wi-Fi, NAT-only
+     * and tunnel. Wi-Fi, USB and tcpip hold no lock of their own, so this is where the clock is raised for them
+     * (ADR 0016). Link-layer broadcast and multicast is neighbours' chatter, not forwarding: it must not pin 240. */
+    if(!(p->flags&(PBUF_FLAG_LLBCAST|PBUF_FLAG_LLMCAST)))tdongle_pm_note_activity();
     uint8_t first[20];
     if(usb_interface && input==esp_netif_get_netif_impl(usb_interface) &&
        pbuf_copy_partial(p,first,20,0)==20 && (rd32(first+16)&0xfffe0000)==0xc6120000) {

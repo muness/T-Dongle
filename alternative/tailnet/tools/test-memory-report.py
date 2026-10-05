@@ -64,6 +64,13 @@ locks = reports("memory locks", "locks")[0]
 assert locks["bucket_limits_us"] == [100, 250, 500, 1000, 2000, 5000, 10000, 30000]
 assert locks["sites"]["wg_periodic"]["count"] == 2 and locks["sites"]["wg_periodic"]["max_us"] == 42000 and locks["sites"]["wg_periodic"]["over_1ms"] == 1
 assert locks["sites"]["wg_periodic"]["buckets"] == [0, 0, 0, 1, 0, 0, 0, 0, 1] and locks["sites"]["wg_other"]["count"] == 0
+cpu = reports("cpu", "cpu")[0]
+assert cpu["cpu_mhz"] == 240 and cpu["total"] == 4294967295 and cpu["cores"] == 2 and cpu["tasks_listed"] == 3 and cpu["uptime_ms"] == 123456
+assert [(t["name"], t["runtime"], t["priority"], t["core"], t["stack_free"]) for t in cpu["tasks"]] == \
+    [("IDLE0", 1000, 5, 0, 700), ("ml_wg_mgr", 2000, 6, 1, 701), ("tiT", 3000, 7, -1, 702)], cpu["tasks"]
+assert cpu["tasks_existing"] == 3
+many = reports("cpu_many", "cpu")[0]
+assert many["tasks_existing"] == 40 and many["tasks_listed"] == 0 and many["tasks"] == [], many
 route = reports("route", "route")[0]
 assert route["forwarded_out"] == 0 and route["alias_miss"] == 9 and route["queue_full"] == 30 and route["queue_depth"] == 16 and route["flow_slots"] == 64, route
 assert len([k for k in route if k not in ("schema", "kind")]) == 19 + 4, route

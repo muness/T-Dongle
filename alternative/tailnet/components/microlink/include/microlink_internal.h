@@ -941,7 +941,7 @@ size_t ml_wg_device_bytes(void);     /* sizeof(struct wireguard_device): a membe
 /* The shared wg_mgr task's scratch: one pass visits every membership, and the work windows below the
  * per-membership drains (#46) are bounded by the pass as a whole, so N memberships share what one used to have. */
 typedef struct { uint64_t pass_start_ms; uint32_t drain_ms; uint64_t next_due_ms; } ml_wg_pass_t;
-typedef struct { uint32_t wait_ms; } ml_derp_pass_t;   /* shortest wait any link asks for, UINT32_MAX = none */
+typedef struct { uint32_t wait_ms; bool active; } ml_derp_pass_t;   /* shortest wait any link asks for, UINT32_MAX = none */
 void ml_wg_pass_begin(ml_wg_pass_t *pass);
 void ml_wg_mgr_send_cmm(microlink_t *ml, uint32_t peer_vpn_ip);
 esp_err_t ml_wg_mgr_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip);

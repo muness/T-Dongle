@@ -185,10 +185,17 @@ static struct {unsigned count;struct {char ssid[33];} profiles[8];} wifi_saved;
 #include "../../../components/tdongle_runtime/include/tdongle_mode.h"
 #include "../../../components/tdongle_runtime/include/tdongle_temperature.h"
 #include "tdongle_memory.h"
+#include "tdongle_pm_burst.h"
+typedef struct {bool scaling;int configure_error;uint32_t max_mhz,min_mhz,cpu_mhz,lock_create_failures;unsigned bursts;tdongle_pm_burst_stats_t burst[8];} tdongle_pm_status_t;
+static bool pm_scaling=true;
+static void tdongle_pm_status(tdongle_pm_status_t *o){memset(o,0,sizeof(*o));o->scaling=pm_scaling;o->configure_error=-1;o->cpu_mhz=pm_scaling?80:240;o->max_mhz=pm_scaling?240:0;o->min_mhz=pm_scaling?80:0;o->bursts=2;
+ o->burst[0]=(tdongle_pm_burst_stats_t){.name="ml_derp",.depth=0,.acquires=12,.releases=12,.held_us=3400,.max_depth=1};
+ o->burst[1]=(tdongle_pm_burst_stats_t){.name="usb_routes",.depth=1,.acquires=5,.releases=4,.held_us=900,.max_depth=2,.underflows=1,.forced_releases=2,.backend_failures=3,.isr_rejects=4};}
+static int wifi_ps_mode(void){return -1;}   /* not readable: must stay -1, not 4294967295 */
 void tdongle_memory_note(unsigned o,size_t n,int f){}
 static void gateway_dns_domains_refresh(void){}
 static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
-tdongle_temperature tdongle_temperature_snapshot(void){return (tdongle_temperature){.valid=true,.current_tenths=550,.peak_tenths=600,.sampled_at_ms=1000};}
+tdongle_temperature tdongle_temperature_snapshot(void){return (tdongle_temperature){.valid=true,.current_tenths=550,.peak_tenths=600,.sampled_at_ms=1000,.samples=7,.changed_at_ms=500,.age_ms=2500};}
 #include "status_stream.inc"
 #undef calloc
 #undef strlcpy
@@ -250,6 +257,26 @@ int main(void) {
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "refused_largest")->valueint == 1);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "wg_pool"), "largest_low")->valueint == 20480);
         assert(cJSON_GetObjectItem(cJSON_GetObjectItem(root, "negotiation"), "holder"));
+    }
+    {   /* sensor liveness: the reading is re-sampled, so its age and sample count are reported */
+        cJSON *t = cJSON_GetObjectItem(root, "chip_temperature");
+        assert(cJSON_GetObjectItem(t, "current_tenths_c")->valueint == 550 && cJSON_GetObjectItem(t, "samples")->valueint == 7 &&
+               cJSON_GetObjectItem(t, "age_ms")->valueint == 2500 && cJSON_GetObjectItem(t, "changed_at_uptime_ms")->valueint == 500 &&
+               cJSON_GetObjectItem(t, "step_tenths_c")->valueint == 10);
+    }
+    {   /* power: clock, scaling, Wi-Fi power save and every lock's counters */
+        cJSON *p = cJSON_GetObjectItem(root, "power");
+        assert(cJSON_IsTrue(cJSON_GetObjectItem(p, "scaling")) && cJSON_GetObjectItem(p, "cpu_mhz")->valueint == 80 &&
+               cJSON_GetObjectItem(p, "max_mhz")->valueint == 240 && cJSON_GetObjectItem(p, "min_mhz")->valueint == 80 &&
+               cJSON_GetObjectItem(p, "wifi_ps")->valueint == -1 &&
+               cJSON_GetObjectItem(p, "configure_error")->valueint == -1);
+        cJSON *locks = cJSON_GetObjectItem(p, "locks");
+        assert(cJSON_GetArraySize(locks) == 2);
+        cJSON *d = cJSON_GetObjectItem(locks, "ml_derp"), *u = cJSON_GetObjectItem(locks, "usb_routes");
+        assert(cJSON_GetObjectItem(d, "acquires")->valueint == 12 && cJSON_GetObjectItem(d, "held_us")->valueint == 3400 &&
+               cJSON_GetObjectItem(u, "depth")->valueint == 1 && cJSON_GetObjectItem(u, "forced_releases")->valueint == 2 &&
+               cJSON_GetObjectItem(u, "backend_failures")->valueint == 3 && cJSON_GetObjectItem(u, "isr_rejects")->valueint == 4 &&
+               cJSON_GetObjectItem(u, "underflows")->valueint == 1);
     }
     assert(cJSON_GetArraySize(cJSON_GetObjectItem(m, "peers")) == 1);
     cJSON *diagnostics=cJSON_GetObjectItem(m,"map_diagnostics");

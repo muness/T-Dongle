@@ -84,3 +84,42 @@ static void status_shared_runtime(jw_writer *w) {
     jw_raw(w, "},");
 #undef RNUM
 }
+
+/* /status: power. The clock the CPU runs at right now, whether scaling is on, the Wi-Fi power-save mode, and one
+ * entry per CPU-frequency-max lock (ADR 0016). `held_us` is the time the lock was held, wrapping every 71.6
+ * minutes: take two readings and divide the difference by the uptime difference for the duty cycle at 240 MHz.
+ * An idle gateway reads cpu_mhz 80 and a held_us that barely moves; under load cpu_mhz reads 240. */
+static void status_power(jw_writer *w) {
+#define PNUM(name, value) do { jw_key(w, name); jw_number(w, (uint32_t)(value)); jw_char(w, ','); } while (0)
+#define PSIGNED(name, value) do { long v_ = (long)(value); jw_key(w, name); if (v_ < 0) { jw_char(w, '-'); v_ = -v_; } jw_number(w, (uint32_t)v_); jw_char(w, ','); } while (0)
+    tdongle_pm_status_t pm;
+    tdongle_pm_status(&pm);
+    jw_raw(w, "\"power\":{");
+    jw_key(w, "scaling"); jw_bool(w, pm.scaling); jw_char(w, ',');
+    PNUM("cpu_mhz", pm.cpu_mhz);
+    PNUM("max_mhz", pm.max_mhz);
+    PNUM("min_mhz", pm.min_mhz);
+    PSIGNED("configure_error", pm.configure_error);
+    PNUM("lock_create_failures", pm.lock_create_failures);
+    PSIGNED("wifi_ps", wifi_ps_mode());
+    jw_raw(w, "\"locks\":{");
+    for (unsigned i = 0; i < pm.bursts; i++) {
+        const tdongle_pm_burst_stats_t *b = &pm.burst[i];
+        if (i) jw_char(w, ',');
+        jw_key(w, b->name);
+        jw_char(w, '{');
+        PNUM("depth", b->depth);
+        PNUM("acquires", b->acquires);
+        PNUM("releases", b->releases);
+        PNUM("held_us", b->held_us);
+        PNUM("max_depth", b->max_depth);
+        PNUM("underflows", b->underflows);
+        PNUM("forced_releases", b->forced_releases);
+        PNUM("backend_failures", b->backend_failures);
+        jw_key(w, "isr_rejects"); jw_number(w, b->isr_rejects);
+        jw_char(w, '}');
+    }
+    jw_raw(w, "}},");
+#undef PNUM
+#undef PSIGNED
+}

@@ -224,6 +224,9 @@ void ml_net_io_pass(ml_mux_t *mux, uint8_t *scratch) {
     consecutive_badf = 0;
     if (sel == 0) return;  /* Timeout */
 
+    /* Packets are waiting: run at full speed while they are read and classified, not while select sleeps. */
+    ml_rt_burst_begin(ML_RT_TASK_NET_IO);
     drain_t d = { .ready = &read_fds, .scratch = scratch };
     ml_mux_foreach(mux, drain_ready, &d);
+    ml_rt_burst_end(ML_RT_TASK_NET_IO);
 }

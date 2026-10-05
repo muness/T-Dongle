@@ -1,5 +1,6 @@
 #include "esp_log.h"
 #include "tdongle_temperature.h"
+#include "tdongle_pm.h"
 #include "tdongle_mode.h"
 #include "tdongle_mode_store.h"
 #include "tdongle_l2.h"
@@ -734,6 +735,11 @@ static esp_err_t home(httpd_req_t *req) {
     return httpd_resp_send(req, setup_html_start,
                            setup_html_end - setup_html_start);
 }
+/* The Wi-Fi power-save mode in force, for /status (set in start_wifi). -1: not readable. */
+static int wifi_ps_mode(void) {
+    wifi_ps_type_t t=WIFI_PS_MAX_MODEM;
+    return esp_wifi_get_ps(&t)==ESP_OK?(int)t:-1;
+}
 #include "json_writer.inc"
 #include "runtime_status.inc"
 #ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
@@ -913,11 +919,15 @@ static esp_err_t status(httpd_req_t *req) {
     tdongle_temperature temperature=tdongle_temperature_snapshot();
     jw_raw(w,"\"chip_temperature\":{");
     BOOL("valid",temperature.valid);NUM("current_tenths_c",temperature.current_tenths);NUM("peak_tenths_c",temperature.peak_tenths);NUM("sampled_at_uptime_ms",temperature.sampled_at_ms);
+    /* current is re-read every sample and moves in whole-degree steps; age_ms and samples show it is live. */
+    NUM("samples",temperature.samples);NUM("changed_at_uptime_ms",temperature.changed_at_ms);NUM("step_tenths_c",TDONGLE_TEMPERATURE_STEP_TENTHS);
+    jw_key(w,"age_ms");if(temperature.samples)jw_number(w,temperature.age_ms);else jw_raw(w,"null");jw_char(w,',');
     jw_key(w,"errors");jw_number(w,temperature.errors);jw_raw(w,"},");
     BOOL("recovery", gateway_boot_recovery());
     NUM("membership_start_budget", member_start_budget());
     NUM("membership_context_bytes", sizeof(microlink_t));
     status_shared_runtime(w);
+    status_power(w);
     gateway_socket_stats sockets = gateway_sockets_snapshot();
     NUM("socket_limit", CONFIG_LWIP_MAX_SOCKETS);
     NUM("socket_recovery_reserve", GATEWAY_SOCKET_RECOVERY);
@@ -1323,6 +1333,15 @@ static esp_err_t start_routes(void) {
     extern bool gateway_routes_init(void);
     route_storage_ok=gateway_routes_init();return route_storage_ok?ESP_OK:ESP_FAIL;
 }
+/* No Wi-Fi modem sleep. The IDF default (WIFI_PS_MIN_MODEM) wakes for every DTIM beacon and parks frames at the
+ * access point between them: measured on the board 2026-10-05 it added about 80 ms to the median round trip (ping
+ * p50 126 ms against 48 ms with power save off) and changed throughput not at all. The original bridge does the
+ * same (main/bridge.c). It costs radio idle current, not CPU frequency: DFS and modem sleep are independent here
+ * (light sleep is off). Failure is not fatal: the link works, only slower to answer. */
+static void wifi_power_save_off(void) {
+    esp_err_t e=esp_wifi_set_ps(WIFI_PS_NONE);
+    if(e!=ESP_OK)ESP_LOGW("wifi","esp_wifi_set_ps(NONE) failed: %s; modem sleep stays on",esp_err_to_name(e));
+}
 static esp_err_t start_wifi(void) {
     if(gateway_tailnet_mode() && !esp_netif_create_default_wifi_sta())return ESP_ERR_NO_MEM;
     if(!gateway_tailnet_mode()){uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);START_TRY(tdongle_l2_start(mac));}
@@ -1334,6 +1353,7 @@ static esp_err_t start_wifi(void) {
     START_TRY(esp_wifi_set_mode(WIFI_MODE_STA));
     START_TRY(esp_wifi_set_config(WIFI_IF_STA,&wifi_config));
     START_TRY(esp_wifi_start());
+    wifi_power_save_off();
     wifi_ready=true;
     wifi_rescan=true;
     if(!gateway_tailnet_mode())return ESP_OK;
@@ -1365,6 +1385,10 @@ void app_main(void) {
     nvs_handle_t early;
     if(nvs_flash_init()==ESP_OK && nvs_open("tn_settings",NVS_READONLY,&early)==ESP_OK){tdongle_mode_load(early,&runtime_mode);nvs_close(early);}
 
+    /* Frequency scaling is for the tailnet gateway, whose forwarding tasks hold the CPU-max lock while they have
+     * work. The transparent bridge mode of this image forwards from Wi-Fi and USB callbacks that hold none, so it
+     * stays at the fixed boot frequency (240 MHz). A failure leaves the same fixed frequency. */
+    if(gateway_tailnet_mode())tdongle_pm_start();
     members_lock=xSemaphoreCreateMutexStatic(&members_mutex);
     wifi_scan_lock=xSemaphoreCreateMutexStatic(&scan_mutex);
     gateway_startup_sequence();
