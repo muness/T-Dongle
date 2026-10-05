@@ -394,10 +394,16 @@ typedef struct {
     bool authoritative;
     ml_peer_update_t updates[];
 } ml_peer_batch_t;
-/* Peer-update queue entries are heap blocks of two kinds: map batches and queued host packets. */
-static inline tdongle_owner ml_peer_update_owner(const ml_peer_update_t *update) {
-    return update && update->action == ML_PEER_PACKET ? TDONGLE_OWNER_WG : TDONGLE_OWNER_PEER;
-}
+/* Peer-update queue entries are of two kinds: heap blocks (map batches, endpoint updates: ml_peer_update_t, owner PEER) and
+ * queued host packets, which are lwIP pbufs in the WireGuard transport layout (ml_wg_mgr.c, "Egress"). A pbuf pointer is
+ * 4-aligned, so bit 0 tells the two apart; a packet entry must never be dereferenced as an update or freed with free(). */
+struct pbuf;
+static inline bool ml_pu_is_packet(const void *entry) { return ((uintptr_t)entry & 1u) != 0; }
+static inline void *ml_pu_tag_packet(struct pbuf *packet) { return (void *)((uintptr_t)packet | 1u); }
+static inline struct pbuf *ml_pu_packet(const void *entry) { return (struct pbuf *)((uintptr_t)entry & ~(uintptr_t)1u); }
+static inline tdongle_owner ml_peer_update_owner(const ml_peer_update_t *update) { (void)update; return TDONGLE_OWNER_PEER; }
+/* Free an entry taken from the queue (stop path). */
+void ml_pu_free_entry(void *entry);
 
 /* ============================================================================
  * Peer State (owned exclusively by wg_mgr task)
@@ -676,7 +682,7 @@ struct microlink_s {
     QueueHandle_t stun_rx_queue;        /* net_io -> coord */
     QueueHandle_t coord_cmd_queue;      /* any -> coord */
     volatile uint32_t peer_generation; /* even = peer metadata stable, odd = owner applying updates */
-    struct { ml_peer_update_t *packet; uint64_t expires; } jit_pending[ML_JIT_PENDING];
+    struct { struct pbuf *packet; uint64_t expires; uint32_t vpn_ip; uint16_t len; } jit_pending[ML_JIT_PENDING];   /* prepared egress pbufs, see ml_wg_mgr.c */
     volatile unsigned jit_packet_count;
     uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
     uint32_t directory_applied;
@@ -943,6 +949,8 @@ size_t ml_wg_device_bytes(void);     /* sizeof(struct wireguard_device): a membe
 typedef struct { uint64_t pass_start_ms; uint32_t drain_ms; uint64_t next_due_ms; } ml_wg_pass_t;
 typedef struct { uint32_t wait_ms; bool active; } ml_derp_pass_t;   /* shortest wait any link asks for, UINT32_MAX = none */
 void ml_wg_pass_begin(ml_wg_pass_t *pass);
+/* Units of work the last pass did (packets moved, timers run); reset by the call. wg_mgr task only. */
+unsigned ml_wg_pass_work_take(void);
 void ml_wg_mgr_send_cmm(microlink_t *ml, uint32_t peer_vpn_ip);
 esp_err_t ml_wg_mgr_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip);
 bool ml_wg_mgr_peer_is_up(microlink_t *ml, uint32_t vpn_ip);

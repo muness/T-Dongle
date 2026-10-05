@@ -47,7 +47,8 @@
 #define TDONGLE_WGPERF_COUNTERS(X) \
     X(wakes)            /* producer wake-ups (ml_rt_wake after an enqueue) */ \
     X(passes)           /* wg_mgr passes */ \
-    X(passes_idle)      /* passes that found nothing to do (spurious wake or housekeeping only) */ \
+    X(passes_idle)      /* passes that did no work: a spurious wake-up or a timer that was not due for any membership */ \
+    X(passes_skipped)   /* membership slices that took the idle early exit (ml_wg_idle.h) */ \
     X(out_direct)       /* egress packets sent in the pass that dequeued them (session already up) */ \
     X(out_parked)       /* egress packets parked for a handshake */ \
     X(out_flushed)      /* parked packets sent after the handshake */ \

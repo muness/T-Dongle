@@ -174,7 +174,7 @@ build-host/test_semantic_directory
 
 python - <<'PYJIT'
 from pathlib import Path
-s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate_idle(');b=s.index('/* The queue owns copies',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate_idle(');b=s.index('/* ----------------------------------------------------------------------------\n * Egress',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
 a=s.index('static bool wg_initiation_plausible(');b=s.index('#endif',a);Path('build-host/wg_initiation.inc').write_text(s[a:b])
 PYJIT
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_jit_directory.c -o build-host/test_jit_directory
@@ -186,9 +186,18 @@ build-host/test_inbound_trial
 
 python - <<'PYQUEUE'
 from pathlib import Path
-s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('esp_err_t ml_gateway_queue_packet(');b=s.index('#endif',a);Path('build-host/jit_queue.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('typedef struct { uint32_t vpn_ip, enq_us; uint16_t len; }');b=s.index('#endif',a);Path('build-host/jit_queue.inc').write_text(s[a:b])
 PYQUEUE
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_jit_queue.c -o build-host/test_jit_queue
+# Egress in the real wireguardif.c (lwIP fakes): the in-place sealed datagram equals the copying path's, byte for byte, with
+# the same counters, timestamps, rekey flags and results; and the idle-slice predicate.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_egress.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_egress
+build-host/test_wg_egress
+cc $TD_INC -std=c11 -Wall -Wextra -fsanitize=address,undefined -g tests/test_wg_idle.c -o build-host/test_wg_idle
+build-host/test_wg_idle
 build-host/test_jit_queue
 
 python tools/test-resilience.py

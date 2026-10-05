@@ -205,6 +205,11 @@ static err_t wireguardif_peer_output(struct netif *netif, struct pbuf *q, struct
         path = device->force_derp_output ? "DERP-forced" : "DERP";
         WG_DEBUG("[WG_OUT] No direct endpoint or force_derp, checking DERP\n");
 
+        if (device->derp_output_fn && q->next == NULL) {
+            // One contiguous pbuf (every WireGuard datagram built here is): no linearising copy. The callback copies.
+            result = device->derp_output_fn(peer->public_key, (const uint8_t *)q->payload, q->tot_len, device->derp_output_ctx);
+            goto done;
+        }
         if (device->derp_output_fn) {
             // Linearize pbuf chain into contiguous buffer for DERP callback
             uint8_t *data = (uint8_t *)WG_OUT_ALLOC(q->tot_len);
@@ -224,6 +229,12 @@ static err_t wireguardif_peer_output(struct netif *netif, struct pbuf *q, struct
         goto done;
     }
 
+    // In magicsock mode the datagram goes straight from the pbuf to the UDP pcb: no linearising copy, no second buffer
+    if (device->udp_output_pbuf_fn && q->next == NULL) {
+        path = "magicsock";
+        result = device->udp_output_pbuf_fn(ip4_addr_get_u32(ip_2_ip4(&peer->ip)), peer->port, q, device->udp_output_ctx);
+        goto done;
+    }
     // In magicsock mode, use external UDP output callback
     if (device->udp_output_fn) {
         path = "magicsock";
@@ -301,16 +312,11 @@ static err_t wireguardif_device_output(struct wireguard_device *device, struct p
     return udp_sendto(device->udp_pcb, q, ipaddr, port);
 }
 
-static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, const ip4_addr_t *ipaddr, struct wireguard_peer *peer) {
-    // The LWIP IP layer wants to send an IP packet out over the interface - we need to encrypt and send it to the peer
-    struct message_transport_data *hdr;
-    struct pbuf *pbuf;
-    err_t result;
-    size_t unpadded_len;
-    size_t padded_len;
-    size_t header_len = 16;
-    uint8_t *dst;
-    uint32_t now;
+/* Which keypair may send now? NULL (with *result set to ERR_CONN) when none can. The side effects are those the single
+ * function had before it was split: an expired or exhausted keypair is destroyed, and traffic with no usable keys arms
+ * the lazy handshake (see below). Shared by the copying path (wireguardif_output_to_peer) and the in-place one
+ * (wireguardif_output_prepared), so both choose identically. */
+static struct wireguard_keypair *wireguardif_tx_keypair(struct wireguard_peer *peer, err_t *result) {
     struct wireguard_keypair *keypair = &peer->curr_keypair;
 
     // Note: We may not be able to use the current keypair if we haven't received data, may need to resort to using previous keypair
@@ -318,132 +324,128 @@ static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, con
         keypair = &peer->prev_keypair;
     }
 
-    // DEBUG: Log keypair state for TX
-    WG_DEBUG("[WG_TX_DEBUG] curr_keypair: valid=%d, initiator=%d, last_rx=%lu\n",
-           peer->curr_keypair.valid, peer->curr_keypair.initiator,
-           (unsigned long)peer->curr_keypair.last_rx);
-    WG_DEBUG("[WG_TX_DEBUG] prev_keypair: valid=%d, initiator=%d, last_rx=%lu\n",
-           peer->prev_keypair.valid, peer->prev_keypair.initiator,
-           (unsigned long)peer->prev_keypair.last_rx);
-    WG_DEBUG("[WG_TX_DEBUG] using keypair: valid=%d, initiator=%d, last_rx=%lu\n",
-           keypair->valid, keypair->initiator, (unsigned long)keypair->last_rx);
-
-
     if (keypair->valid && (keypair->initiator || keypair->last_rx != 0)) {
-        // More debug: check expiry
-        uint32_t now_ms = wireguard_sys_now();
-        uint32_t age_ms = now_ms - keypair->keypair_millis;
         bool expired = wireguard_expired(keypair->keypair_millis, REJECT_AFTER_TIME);
-        WG_DEBUG("[WG_TX_DEBUG] keypair_millis=%lu, now=%lu, age_ms=%lu, expired=%d, counter=%lu\n",
-               (unsigned long)keypair->keypair_millis, (unsigned long)now_ms,
-               (unsigned long)age_ms, expired, (unsigned long)keypair->sending_counter);
-
-        if (
-                !expired &&
-                (keypair->sending_counter < REJECT_AFTER_MESSAGES)
-        ) {
-
-            // Calculate the outgoing packet size - round up to next 16 bytes, add 16 bytes for header
-            if (q) {
-                // This is actual transport data
-                unpadded_len = q->tot_len;
-            } else {
-                // This is a keep-alive
-                unpadded_len = 0;
-            }
-            padded_len = (unpadded_len + 15) & 0xFFFFFFF0; // Round up to next 16 byte boundary
-
-            // The buffer needs to be allocated from "transport" pool to leave room for LwIP generated IP headers
-            // The IP packet consists of 16 byte header (struct message_transport_data), data padded upto 16 byte boundary + encrypted auth tag (16 bytes)
-            pbuf = pbuf_alloc(PBUF_TRANSPORT, header_len + padded_len + WIREGUARD_AUTHTAG_LEN, PBUF_RAM);
-            if (pbuf) {
-                // Note: allocating pbuf from RAM above guarantees that the pbuf is in one section and not chained
-                // - i.e payload points to the contiguous memory region
-                memset(pbuf->payload, 0, pbuf->tot_len);
-
-                hdr = (struct message_transport_data *)pbuf->payload;
-
-                hdr->type = MESSAGE_TRANSPORT_DATA;
-                hdr->receiver = keypair->remote_index;
-                // Alignment required... pbuf_alloc has probably aligned data, but want to be sure
-                U64TO8_LITTLE(hdr->counter, keypair->sending_counter);
-
-                // Copy the encrypted (padded) data to the output packet - chacha20poly1305_encrypt() can encrypt data in-place which avoids call to mem_malloc
-                dst = &hdr->enc_packet[0];
-                if ((padded_len > 0) && q) {
-                    // Note: before copying make sure we have inserted the IP header checksum
-                    // The IP header checksum (and other checksums in the IP packet - e.g. ICMP) need to be calculated by LWIP before calling
-                    // The Wireguard interface always needs checksums to be generated in software but the base netif may have some checksums generated by hardware
-
-                    // Copy pbuf to memory - handles case where pbuf is chained
-                    pbuf_copy_partial(q, dst, unpadded_len, 0);
-                }
-
-                // Then encrypt
-                wireguard_encrypt_packet(dst, dst, padded_len, keypair);
-
-                WG_DEBUG("[WG_TX] Sending encrypted DATA packet: %u bytes, remote_idx=%lu\n",
-                       (unsigned)pbuf->tot_len, (unsigned long)hdr->receiver);
-
-                result = wireguardif_peer_output(netif, pbuf, peer);
-                WG_DEBUG("[WG_TX] peer_output result=%d\n", result);
-
-
-                if (result == ERR_OK) {
-                    now = wireguard_sys_now();
-                    peer->last_tx = now;
-                    keypair->last_tx = now;
-                }
-
-                pbuf_free(pbuf);
-
-                // Check to see if we should rekey
-                if (keypair->sending_counter >= REKEY_AFTER_MESSAGES) {
-                    peer->send_handshake = true;
-                    WG_HSLOG("[WG_REKEY] peer=%02x%02x%02x%02x reason=counter "
-                           "counter=%lu ep=%s:%u",
-                           peer->public_key[0], peer->public_key[1],
-                           peer->public_key[2], peer->public_key[3],
-                           (unsigned long)keypair->sending_counter,
-                           ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip),
-                           peer->port);
-                } else if (keypair->initiator && wireguard_expired(keypair->keypair_millis, REKEY_AFTER_TIME)) {
-                    peer->send_handshake = true;
-                    WG_HSLOG("[WG_REKEY] peer=%02x%02x%02x%02x reason=initiator-timer "
-                           "age_ms=%lu counter=%lu ep=%s:%u",
-                           peer->public_key[0], peer->public_key[1],
-                           peer->public_key[2], peer->public_key[3],
-                           (unsigned long)(wireguard_sys_now() - keypair->keypair_millis),
-                           (unsigned long)keypair->sending_counter,
-                           ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip),
-                           peer->port);
-                }
-
-            } else {
-                // Failed to allocate memory
-                result = ERR_MEM;
-            }
-        } else {
-            // key has expired...
-            keypair_destroy(keypair);
-            result = ERR_CONN;
+        if (!expired && (keypair->sending_counter < REJECT_AFTER_MESSAGES)) {
+            return keypair;
         }
-    } else {
-        // No valid keys — trigger lazy handshake init for this peer.
-        // Outgoing traffic with no keypair is the wireguard-go SendStagedPackets
-        // trigger: arm `peer->active` so the periodic timer (5s-gated via
-        // should_send_initiation) starts sending handshake initiations.
-        // If we previously gave up after MAX_HANDSHAKE_ATTEMPTS, re-arm so
-        // new traffic gets another 18 attempts. Does NOT touch peer->ip —
-        // the configured endpoint / DERP path stays intact for active sessions.
-        if (!peer->active || peer->handshake_attempts >= MAX_HANDSHAKE_ATTEMPTS) {
-            peer->active = true;
-            peer->handshake_attempts = 0;
-            peer->last_initiation_tx = 0;  // bypass 5s gate for first attempt
-        }
-        result = ERR_CONN;
+        // key has expired...
+        keypair_destroy(keypair);
+        *result = ERR_CONN;
+        return NULL;
+    }
+    // No valid keys — trigger lazy handshake init for this peer.
+    // Outgoing traffic with no keypair is the wireguard-go SendStagedPackets
+    // trigger: arm `peer->active` so the periodic timer (5s-gated via
+    // should_send_initiation) starts sending handshake initiations.
+    // If we previously gave up after MAX_HANDSHAKE_ATTEMPTS, re-arm so
+    // new traffic gets another 18 attempts. Does NOT touch peer->ip —
+    // the configured endpoint / DERP path stays intact for active sessions.
+    if (!peer->active || peer->handshake_attempts >= MAX_HANDSHAKE_ATTEMPTS) {
+        peer->active = true;
+        peer->handshake_attempts = 0;
+        peer->last_initiation_tx = 0;  // bypass 5s gate for first attempt
+    }
+    *result = ERR_CONN;
+    return NULL;
+}
+
+/* Fill the transport header, encrypt in place and send. `pbuf` is one contiguous RAM pbuf laid out as
+ * [16-byte message_transport_data header][plaintext, zero padded to padded_len][16-byte tag space]. Does not free it. */
+static err_t wireguardif_tx_seal_send(struct netif *netif, struct wireguard_peer *peer, struct wireguard_keypair *keypair,
+                                      struct pbuf *pbuf, size_t padded_len) {
+    WGIF_T(t);
+    struct message_transport_data *hdr = (struct message_transport_data *)pbuf->payload;
+    hdr->type = MESSAGE_TRANSPORT_DATA;
+    hdr->reserved[0] = hdr->reserved[1] = hdr->reserved[2] = 0;
+    hdr->receiver = keypair->remote_index;
+    // Alignment required... pbuf_alloc has probably aligned data, but want to be sure
+    U64TO8_LITTLE(hdr->counter, keypair->sending_counter);
+
+    // Encrypt in place: chacha20poly1305_encrypt() takes the same buffer for input and output
+    uint8_t *dst = &hdr->enc_packet[0];
+    wireguard_encrypt_packet(dst, dst, padded_len, keypair);
+    WGIF_LAP(t, WGIF_STAGE_SEAL);
+
+    err_t result = wireguardif_peer_output(netif, pbuf, peer);
+    WGIF_LAP(t, WGIF_STAGE_UDP);
+
+    if (result == ERR_OK) {
+        uint32_t now = wireguard_sys_now();
+        peer->last_tx = now;
+        keypair->last_tx = now;
+    }
+
+    // Check to see if we should rekey
+    if (keypair->sending_counter >= REKEY_AFTER_MESSAGES) {
+        peer->send_handshake = true;
+        WG_HSLOG("[WG_REKEY] peer=%02x%02x%02x%02x reason=counter "
+               "counter=%lu ep=%s:%u",
+               peer->public_key[0], peer->public_key[1],
+               peer->public_key[2], peer->public_key[3],
+               (unsigned long)keypair->sending_counter,
+               ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip),
+               peer->port);
+    } else if (keypair->initiator && wireguard_expired(keypair->keypair_millis, REKEY_AFTER_TIME)) {
+        peer->send_handshake = true;
+        WG_HSLOG("[WG_REKEY] peer=%02x%02x%02x%02x reason=initiator-timer "
+               "age_ms=%lu counter=%lu ep=%s:%u",
+               peer->public_key[0], peer->public_key[1],
+               peer->public_key[2], peer->public_key[3],
+               (unsigned long)(wireguard_sys_now() - keypair->keypair_millis),
+               (unsigned long)keypair->sending_counter,
+               ip_addr_isany(&peer->ip) ? "DERP" : ipaddr_ntoa(&peer->ip),
+               peer->port);
     }
     return result;
+}
+
+static err_t wireguardif_output_to_peer(struct netif *netif, struct pbuf *q, const ip4_addr_t *ipaddr, struct wireguard_peer *peer) {
+    // The LWIP IP layer wants to send an IP packet out over the interface - we need to encrypt and send it to the peer
+    (void)ipaddr;
+    err_t result = ERR_CONN;
+    struct wireguard_keypair *keypair = wireguardif_tx_keypair(peer, &result);
+    if (!keypair) return result;
+
+    // Calculate the outgoing packet size - round up to next 16 bytes, add 16 bytes for header
+    size_t unpadded_len = q ? q->tot_len : 0;   // q == NULL is a keep-alive
+    size_t padded_len = WIREGUARDIF_DATA_PAD(unpadded_len);
+
+    // The buffer needs to be allocated from "transport" pool to leave room for LwIP generated IP headers
+    // The IP packet consists of 16 byte header (struct message_transport_data), data padded upto 16 byte boundary + encrypted auth tag (16 bytes)
+    struct pbuf *pbuf = pbuf_alloc(PBUF_TRANSPORT, WIREGUARDIF_DATA_HDR + padded_len + WIREGUARD_AUTHTAG_LEN, PBUF_RAM);
+    if (!pbuf) return ERR_MEM;   // Failed to allocate memory
+    // Note: allocating pbuf from RAM above guarantees that the pbuf is in one section and not chained
+    memset(pbuf->payload, 0, pbuf->tot_len);
+    if ((padded_len > 0) && q) {
+        // Note: before copying make sure we have inserted the IP header checksum
+        // The IP header checksum (and other checksums in the IP packet - e.g. ICMP) need to be calculated by LWIP before calling
+        // The Wireguard interface always needs checksums to be generated in software but the base netif may have some checksums generated by hardware
+        // Copy pbuf to memory - handles case where pbuf is chained
+        pbuf_copy_partial(q, (uint8_t *)pbuf->payload + WIREGUARDIF_DATA_HDR, unpadded_len, 0);
+    }
+    result = wireguardif_tx_seal_send(netif, peer, keypair, pbuf, padded_len);
+    pbuf_free(pbuf);
+    return result;
+}
+
+/* Egress without the copies: `wg` is a contiguous RAM pbuf the caller built in the transport layout
+ * ([16 B header space][plaintext of plain_len bytes, zero padded to a multiple of 16][16 B tag space], exactly
+ * WIREGUARDIF_DATA_ALLOC(plain_len) bytes), so it is encrypted where it lies and handed to the UDP path as it is.
+ * Same peer choice, keypair rules, counters, rekey flags and result codes as wireguardif_output(); the caller keeps
+ * the pbuf reference and frees it. Core lock held, as for any netif output. */
+err_t wireguardif_output_prepared(struct netif *netif, struct pbuf *wg, uint16_t plain_len, const ip4_addr_t *ipaddr) {
+    struct wireguard_device *device = (struct wireguard_device *)netif->state;
+    ip_addr_t addr;
+    ip_addr_copy_from_ip4(addr, *ipaddr);
+    WGIF_T(t);
+    struct wireguard_peer *peer = peer_lookup_by_allowed_ip(device, &addr);
+    WGIF_LAP(t, WGIF_STAGE_LOOKUP);
+    if (!peer) return ERR_RTE;
+    err_t result = ERR_CONN;
+    struct wireguard_keypair *keypair = wireguardif_tx_keypair(peer, &result);
+    if (!keypair) return result;
+    return wireguardif_tx_seal_send(netif, peer, keypair, wg, WIREGUARDIF_DATA_PAD(plain_len));
 }
 
 // This is used as the output function for the Wireguard netif
@@ -458,7 +460,9 @@ static err_t wireguardif_output(struct netif *netif, struct pbuf *q, const ip4_a
     WG_DEBUG("[WG_OUTPUT] Looking up peer for dest %s\n", ipaddr_ntoa(&addr));
 
 
+    WGIF_T(t);
     struct wireguard_peer *peer = peer_lookup_by_allowed_ip(device, &addr);
+    WGIF_LAP(t, WGIF_STAGE_LOOKUP);
     if (peer) {
         WG_DEBUG("[WG_OUTPUT] Found peer, peer_index=%d, valid=%d\n",
                (int)wireguard_peer_index(device, peer), peer->valid);
@@ -1776,6 +1780,17 @@ void wireguardif_set_udp_output(struct netif *netif, wireguard_udp_output_fn fn,
         WG_DEBUG("[WG] UDP output callback registered (magicsock mode)\n");
     }
 }
+
+void wireguardif_set_udp_output_pbuf(struct netif *netif, wireguard_udp_output_pbuf_fn fn) {
+    LWIP_ASSERT("netif != NULL", (netif != NULL));
+    LWIP_ASSERT("state != NULL", (netif->state != NULL));
+    struct wireguard_device *device = (struct wireguard_device *)netif->state;
+    if (device->valid) device->udp_output_pbuf_fn = fn;   /* shares udp_output_ctx with the copying callback */
+}
+
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+wireguardif_stage_fn wireguardif_stage_sink;
+#endif
 
 void wireguardif_force_derp_output(struct netif *netif, bool force) {
     LWIP_ASSERT("netif != NULL", (netif != NULL));

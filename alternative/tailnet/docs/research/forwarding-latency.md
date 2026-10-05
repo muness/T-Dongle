@@ -160,3 +160,7 @@ Expectations at the same offered load as the baseline:
 | heap minimum free | 6.4 KB (with 4-deep queue) | within 3 KB of baseline (code +3.6 KB flash, static RAM +2.8 KB) | below the guard floor |
 
 IDLE0/IDLE1 should rise as `usb_routes` and `ipc1` fall; if throughput also rises the other tasks scale with it, so compare CPU per packet rather than CPU percent.
+
+## wg_mgr packet path (PR-D): the 2.4 ms per packet
+
+Board, 240 MHz, TCP upload over a direct path: 1.64-1.65 Mbit/s in every build, ml_wg_mgr 61.4% of a core for about 3,900 packets in 15.8 s, so about 2.4 ms per packet against 0.26 ms of ChaCha20-Poly1305. Decision record and per-stage analysis: [ADR 0017](../adr/0017-wg-mgr-packet-path.md). Summary: each outbound packet did 6 heap allocations, 5 copies, 4 peer lookups, 2 formatted `ESP_LOGI` lines (the default log level is INFO and nothing filters it) and a pending-slot round trip; it now does one allocation, one copy, one lookup and no log line, and `wgperf` (diagnostics builds) accounts for every stage in cycles so the board can say what remains.

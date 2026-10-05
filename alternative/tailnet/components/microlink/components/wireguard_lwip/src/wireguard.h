@@ -88,6 +88,9 @@ typedef err_t (*wireguard_derp_output_fn)(const uint8_t *peer_public_key, const 
 // data: WireGuard packet to send
 // len: length of data
 // Returns: ERR_OK on success, error code on failure
+/* The same send, handing over the pbuf the datagram is in (contiguous, PBUF_TRANSPORT headroom) instead of a copy. */
+struct pbuf;
+typedef err_t (*wireguard_udp_output_pbuf_fn)(uint32_t dest_ip, uint16_t dest_port, struct pbuf *p, void *ctx);
 typedef err_t (*wireguard_udp_output_fn)(uint32_t dest_ip, uint16_t dest_port, const uint8_t *data, size_t len, void *ctx);
 
 struct wireguard_keypair {
@@ -224,6 +227,7 @@ struct wireguard_device {
     // UDP output callback for magicsock mode (external unified socket)
     wireguard_udp_output_fn udp_output_fn;
     void *udp_output_ctx;
+    wireguard_udp_output_pbuf_fn udp_output_pbuf_fn;   /* optional; preferred over udp_output_fn, same ctx */
 
     // Force all peer output through DERP relay (cellular mode)
     bool force_derp_output;
