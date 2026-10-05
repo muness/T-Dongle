@@ -33,20 +33,39 @@
 #include "tinyusb_net.h"
 #include "usb_rx_budget.h"
 #include "tcp_window_budget.h"
-/* Tunnel-to-USB transmit ring (heap, allocated once at USB start): three full frames, 3 x 1524 + 4.
- * It is paid for by shrinking the two IN NTBs from 6,400 to 3,200 B (sdkconfig.defaults), so the
- * boot heap does not go down. Raise it only if the "usb" memory report shows tx_dropped_full with
- * tx_high_water at tx_ring_bytes. Sizing: docs/adr/0015-data-plane-io.md. */
-#ifndef GATEWAY_USB_TX_RING_BYTES
-#define GATEWAY_USB_TX_RING_BYTES (3 * 1524 + 4)
-#endif
-/* Boot-heap neutrality (ADR 0015): before the ring the IN NTBs held 2 x 6,400 B. The ring, its
+/* Tunnel-to-USB transmit ring (ADR 0015). Three full frames are permanent (3 x 1524 B, allocated once at USB start,
+ * paid for by the two IN NTBs being 3,200 B rather than 6,400 B). On top of that the worker task adds elastic chunks
+ * of TINYUSB_NET_TX_CHUNK_SLABS frames, up to GATEWAY_USB_TX_MAX_CHUNKS, while a burst needs them, and gives them back
+ * when idle or when a membership is being admitted or negotiated (ml_negotiation.h). Cap: 3 + 10 x 2 = 23 frames, 35 KB.
+ * Why 23: a burst of B bytes arriving at the Wi-Fi rate (about 20 Mbit/s) against the USB full-speed drain (about 7 Mbit/s)
+ * leaves 65% of B queued, so C bytes of ring absorb B = C / 0.65: 23 frames = 35 KB absorb a 54 KB burst, about 38 TCP
+ * segments, and a full ring is 40 ms of USB time, below TCP's 200 ms minimum timeout. The three permanent frames absorbed
+ * 7 KB: the 180 drops in 15 s that motivated this. Tune from tx_dropped_full and tx_high_water_slabs. */
+#define GATEWAY_USB_TX_BASE_FRAMES 3u
+#define GATEWAY_USB_TX_MAX_CHUNKS 10u
+#define GATEWAY_USB_TX_MAX_FRAMES (GATEWAY_USB_TX_BASE_FRAMES + GATEWAY_USB_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_SLABS)
+/* Growth keeps free internal heap above one negotiation peak plus the recovery reserve, and the largest free block above
+ * the admission floor, before and after each chunk. Admission itself needs far more free heap than that (it reclaims
+ * the elastic part first), but these two are what a join already in progress and HTTP/control recovery cannot do without. */
+#define GATEWAY_USB_TX_FLOOR_FREE (ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES)
+#define GATEWAY_USB_TX_FLOOR_LARGEST ML_ADM_LARGEST_BLOCK
+#define GATEWAY_USB_TX_IDLE_MS 10000u
+/* Reclaim for admission waits for chunks that still hold frames: a full ring drains at 875 B/ms (7 Mbit/s). */
+#define GATEWAY_USB_TX_RECLAIM_WAIT_MS 150u
+/* Boot-heap neutrality (ADR 0015): before the ring the IN NTBs held 2 x 6,400 B. The permanent ring, its
  * worker stack (1,536) and TCB (340) must fit in what the smaller NTBs gave back, plus 512 B. */
 _Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT * CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE +
-               GATEWAY_USB_TX_RING_BYTES + 1536 + 340 <= 2 * 6400 + 512,
-               "USB transmit buffering grew past the admission-margin budget");
+               GATEWAY_USB_TX_BASE_FRAMES * TINYUSB_NET_TX_SLAB_BYTES + 1536 + 340 <= 2 * 6400 + 512,
+               "permanent USB transmit buffering grew past the admission-margin budget");
 _Static_assert(CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE >= 2 * (1518 + 4) + 64, "an IN NTB must hold two frames");
-_Static_assert(GATEWAY_USB_TX_RING_BYTES >= 3 * 1524 + 4, "transmit ring must hold three full frames");
+_Static_assert(GATEWAY_USB_TX_BASE_FRAMES >= 3, "the permanent ring must hold three full frames");
+_Static_assert(GATEWAY_USB_TX_MAX_FRAMES >= 16 && GATEWAY_USB_TX_MAX_FRAMES <= 24, "elastic cap: 16 to 24 frames (ADR 0015)");
+_Static_assert(GATEWAY_USB_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_BYTES <= 32 * 1024, "the elastic part must stay within 32 KB");
+_Static_assert(GATEWAY_USB_TX_FLOOR_FREE >= ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES,
+               "growth must leave one negotiation peak and the recovery reserve");
+_Static_assert(GATEWAY_USB_TX_FLOOR_LARGEST >= ML_ADM_LARGEST_BLOCK, "growth must keep the admission largest-block floor");
+_Static_assert(3 * (GATEWAY_USB_TX_MAX_FRAMES * TINYUSB_NET_TX_SLAB_BYTES / 875) <= GATEWAY_USB_TX_RECLAIM_WAIT_MS,
+               "reclaim must wait long enough to drain a full ring three times over at USB speed");
 #include <ctype.h>
 #include <strings.h>
 #include <time.h>
@@ -57,6 +76,7 @@ static void usb_event(tinyusb_event_t *event, void *arg) {
     if (event->id == TINYUSB_EVENT_DETACHED) {
         extern void gateway_usb_detach(void);
         gateway_usb_detach();
+        tinyusb_net_tx_ring_link_down();    /* frames queued for the host that left are stale: flush, release the PM lock */
     }
 }
 static bool online;
@@ -339,6 +359,9 @@ static void start_member(membership_t *m) {
         ml_neg_release(neg, key);
 }
 static bool start_member_holding_token(membership_t *m) {
+    /* The token is held, so the USB transmit buffer's gate is closed and it will not grow: give back the elastic chunks
+     * (waiting for those that still hold frames to drain) so the measurement below sees the heap admission is meant to see. */
+    tinyusb_net_tx_elastic_reclaim(GATEWAY_USB_TX_RECLAIM_WAIT_MS);
     /* Reserve for parsed JSON, networking and recovery HTTP. Shared receive
      * buffers are static. Runtime peak sufficiency needs board qualification. */
     size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -470,6 +493,14 @@ static void manager(void *arg) {
 /* Runs in the lwIP core-lock holder (tcpip task, WireGuard manager): it must never wait.
  * The frame is copied into the USB transmit ring and a worker hands it to TinyUSB; a full ring
  * drops the frame (counted), which TCP treats as loss. See docs/adr/0015-data-plane-io.md. */
+/* The elastic transmit buffer's gate: growth is forbidden, and idle chunks are given back, while any membership holds the
+ * negotiation token (a join's allocation peak, and the admission measurement that precedes it). */
+static tdongle_pm_burst_t usb_tx_pm;
+static void usb_tx_pm_begin(void *ctx) { (void)ctx; tdongle_pm_burst_begin(&usb_tx_pm); }
+static void usb_tx_pm_end(void *ctx) { (void)ctx; tdongle_pm_burst_end(&usb_tx_pm); }
+static bool usb_tx_gate(void *ctx) { (void)ctx; return ml_neg_busy(ml_rt_negotiation()); }
+/* Token changed hands: wake the buffer's worker so it retires idle chunks now rather than at its next housekeeping. */
+static void usb_tx_negotiation_changed(void *ctx) { (void)ctx; tinyusb_net_tx_elastic_kick(); }
 static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
     if (len > UINT16_MAX)
         return ESP_ERR_INVALID_SIZE;
@@ -1237,7 +1268,18 @@ static esp_err_t start_usb(void) {
     if(gateway_tailnet_mode()){uint8_t device[6];gateway_usb_macs(identity_mac,device,net.mac_addr);}
     else memcpy(net.mac_addr, identity_mac, 6);
     result=tinyusb_net_init(&net);
-    if(result==ESP_OK && gateway_tailnet_mode())result=tinyusb_net_tx_ring_start(GATEWAY_USB_TX_RING_BYTES,GATEWAY_TASK_USB_TX_PRIO,GATEWAY_TASK_USB_TX_CORE);
+    if(result==ESP_OK && gateway_tailnet_mode()){
+        const tinyusb_net_tx_config_t tx = {.base_frames = GATEWAY_USB_TX_BASE_FRAMES, .max_chunks = GATEWAY_USB_TX_MAX_CHUNKS,
+                                            .priority = GATEWAY_TASK_USB_TX_PRIO, .core = GATEWAY_TASK_USB_TX_CORE,
+                                            .floor_free = GATEWAY_USB_TX_FLOOR_FREE, .floor_largest = GATEWAY_USB_TX_FLOOR_LARGEST,
+                                            .idle_ms = GATEWAY_USB_TX_IDLE_MS, .gate = usb_tx_gate,
+                                            .pm_begin = usb_tx_pm_begin, .pm_end = usb_tx_pm_end};
+        tdongle_pm_burst_register(&usb_tx_pm, "usb_txq");   /* ADR 0016: one CPU-max hold mechanism, worker-only begin/end */
+        /* The shared runtime's state is built on first use; do that here, before the worker (1,536 B of stack) can ask the gate. */
+        ml_neg_t *neg=ml_rt_negotiation();
+        result=tinyusb_net_tx_ring_start(&tx);
+        if(result==ESP_OK)ml_neg_set_observer(neg,usb_tx_negotiation_changed,NULL);
+    }
     extern esp_err_t gateway_console_start(void);
     esp_err_t console=gateway_console_start();
     return console!=ESP_OK?console:result;

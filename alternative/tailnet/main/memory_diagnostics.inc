@@ -216,14 +216,33 @@ static void report_lwip(jw_writer *w) {
     report_field(w, "wifi_dynamic_tx", CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM);
     report_end(w);
 }
-/* USB data path: transmit ring (tunnel to host) and receive budget (host to lwIP). Drops here are
- * backpressure, not faults; tune GATEWAY_USB_TX_RING_BYTES from dropped_full vs high_water. */
+/* USB data path: elastic transmit ring (tunnel to host) and receive budget (host to lwIP). Drops here are
+ * backpressure, not faults. tx_ring_bytes is the capacity NOW (permanent plus live elastic chunks); tune the cap
+ * (GATEWAY_USB_TX_MAX_CHUNKS) from tx_dropped_full against tx_high_water_slabs, and read tx_grow_denied_* when it
+ * does not grow. tx_reclaim_events counts the times admission or a negotiation took the elastic memory back. */
 static void report_usb(jw_writer *w) {
     tinyusb_net_tx_stats_t tx;
     tinyusb_net_tx_ring_stats(&tx);
     report_begin(w, "usb");
     report_field(w, "tx_ring_bytes", tx.ring_bytes);
+    report_field(w, "tx_ring_base_bytes", tx.base_bytes);
+    report_field(w, "tx_ring_max_bytes", tx.max_bytes);
+    report_field(w, "tx_elastic_held_bytes", tx.elastic_held_bytes);
+    report_field(w, "tx_elastic_chunks", tx.chunks);
+    report_field(w, "tx_grow_events", tx.grow_events);
+    report_field(w, "tx_shrink_events", tx.shrink_events);
+    report_field(w, "tx_reclaim_events", tx.reclaim_events);
+    report_field(w, "tx_reclaimed_chunks", tx.reclaimed_chunks);
+    report_field(w, "tx_grow_denied_gate", tx.grow_denied_gate);
+    report_field(w, "tx_grow_denied_heap", tx.grow_denied_heap);
+    report_field(w, "tx_grow_denied_largest", tx.grow_denied_largest);
+    report_field(w, "tx_grow_denied_nomem", tx.grow_denied_nomem);
+    report_field(w, "tx_grow_raced", tx.grow_raced);
     report_field(w, "tx_high_water", tx.high_water_bytes);
+    report_field(w, "tx_high_water_slabs", tx.high_water_slabs);
+    report_field(w, "tx_pm_acquired", tx.pm_acquired);
+    report_field(w, "tx_pm_released", tx.pm_released);
+    report_field(w, "tx_pm_held", tx.pm_held);
     report_field(w, "tx_enqueued", tx.enqueued_frames);
     report_field(w, "tx_enqueued_bytes", tx.enqueued_bytes);
     report_field(w, "tx_sent", tx.sent_frames);

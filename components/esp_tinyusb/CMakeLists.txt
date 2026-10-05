@@ -11,6 +11,9 @@ if(${IDF_VERSION_MAJOR} LESS 6)
     list(APPEND priv_req "usb")
 endif()
 
+# tinyusb_net.c allocates the transmit ring with heap_caps
+list(APPEND priv_req "heap")
+
 if(CONFIG_TINYUSB_CDC_ENABLED)
     list(APPEND srcs
         "cdc.c"

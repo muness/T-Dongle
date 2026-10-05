@@ -11,8 +11,20 @@
 #include "ml_gateway_limits.h"
 #include "usb_rx_budget.h"
 #define CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT 2
-typedef struct {uint32_t ring_bytes,high_water_bytes,enqueued_frames,enqueued_bytes,sent_frames,sent_bytes,dropped_full,dropped_link_down,dropped_invalid,flushed_link_down,ntb_blocked,xfer_events,worker_stack_free;} tinyusb_net_tx_stats_t;
-static void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *s) { *s = (tinyusb_net_tx_stats_t){4576, 4212, 90, 120000, 80, 100000, 7, 1, 2, 3, 4, 55, 900}; }
+/* The real struct: a field added to the firmware's stats must be filled in here, not silently dropped. */
+typedef uint32_t TickType_t;
+#define tinyusb_net_tx_ring_stats real_tinyusb_net_tx_ring_stats   /* the header's declaration; the test supplies its own */
+#include "../../../components/esp_tinyusb/include/tinyusb_net.h"
+#undef tinyusb_net_tx_ring_stats
+static void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *s) {
+    *s = (tinyusb_net_tx_stats_t){
+        .ring_bytes = 9144, .base_bytes = 4572, .max_bytes = 35052, .elastic_held_bytes = 6096, .chunks = 2,
+        .high_water_bytes = 4212, .high_water_slabs = 9, .enqueued_frames = 90, .enqueued_bytes = 120000, .sent_frames = 80,
+        .sent_bytes = 100000, .dropped_full = 7, .dropped_link_down = 1, .dropped_invalid = 2, .flushed_link_down = 3,
+        .ntb_blocked = 4, .xfer_events = 55, .worker_stack_free = 900, .grow_events = 11, .shrink_events = 12,
+        .reclaim_events = 13, .reclaimed_chunks = 14, .grow_denied_gate = 15, .grow_denied_heap = 16,
+        .grow_denied_largest = 17, .grow_denied_nomem = 18, .grow_raced = 19, .pm_acquired = 20, .pm_released = 19, .pm_held = 1};
+}
 static gateway_usb_rx_budget usb_rx_budget;
 #define GATEWAY_VERSION "0.0.0-test"
 #include "route_table.h"
