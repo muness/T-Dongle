@@ -1,6 +1,6 @@
 # ADR 0020: Inbound pipeline: runs instead of datagrams, a router hand-off outside the core lock, a bounded queue, and cryptokey routing for IPv6
 
-Status: accepted for on-board validation, 2026-10-05. Follows ADR 0013 (shared runtime), 0014 (router hot path), 0015 (data-plane I/O), 0016 (DFS), 0018 (wg_mgr packet path, `wgperf`), 0019 (inbound loss). **Nothing here has been measured on the board.** The host measurements below are about structure (allocations, copies, lock takes, time inside the lock), which carries over; their nanoseconds do not. Section "On-board plan" says which `wgperf` stage and which counter confirms or refutes each claim.
+Status: accepted for on-board validation, 2026-10-05. *(ADR 0022 supersedes the receive queue's heap floor (now ML_HB_FLOOR, 29,884 B, always) and the UDP mailbox size (6): the board's 3 KB heap minimum was this queue, the ring and ten pinned Wi-Fi buffers drawing on the same 20 KB.)* Follows ADR 0013 (shared runtime), 0014 (router hot path), 0015 (data-plane I/O), 0016 (DFS), 0018 (wg_mgr packet path, `wgperf`), 0019 (inbound loss). **Nothing here has been measured on the board.** The host measurements below are about structure (allocations, copies, lock takes, time inside the lock), which carries over; their nanoseconds do not. Section "On-board plan" says which `wgperf` stage and which counter confirms or refutes each claim.
 
 ## Context
 
