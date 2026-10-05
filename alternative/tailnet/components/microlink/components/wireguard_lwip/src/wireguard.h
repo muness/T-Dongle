@@ -45,6 +45,7 @@
 
 // Platform-specific functions that need to be implemented per-platform
 #include "wireguard-platform.h"
+#include "wireguard_replay.h"
 #include "wireguard_pool.h"
 
 // tai64n contains 64-bit seconds and 32-bit nano offset (12 bytes)
@@ -93,6 +94,8 @@ struct pbuf;
 typedef err_t (*wireguard_udp_output_pbuf_fn)(uint32_t dest_ip, uint16_t dest_port, struct pbuf *p, void *ctx);
 typedef err_t (*wireguard_udp_output_fn)(uint32_t dest_ip, uint16_t dest_port, const uint8_t *data, size_t len, void *ctx);
 
+_Static_assert(REJECT_AFTER_MESSAGES == WIREGUARD_REPLAY_LIMIT, "the replay filter and the session limit must agree");
+
 struct wireguard_keypair {
     bool valid;
     bool initiator; // Did we initiate this session (send the initiation packet rather than sending the response packet)
@@ -108,8 +111,7 @@ struct wireguard_keypair {
     uint32_t last_tx;
     uint32_t last_rx;
 
-    uint32_t replay_bitmap;
-    uint64_t replay_counter;
+    struct wireguard_replay replay;   // anti-replay window (wireguard_replay.h)
 
     uint32_t local_index; // This is the index we generated for our end
     uint32_t remote_index; // This is the index on the other end
@@ -336,6 +338,7 @@ void keypair_destroy(struct wireguard_keypair *keypair);
 
 struct wireguard_keypair *get_peer_keypair_for_idx(struct wireguard_peer *peer, uint32_t idx);
 bool wireguard_check_replay(struct wireguard_keypair *keypair, uint64_t seq);
+wg_replay_verdict_t wireguard_check_replay_why(struct wireguard_keypair *keypair, uint64_t seq);
 
 uint8_t wireguard_get_message_type(const uint8_t *data, size_t len);
 

@@ -21,6 +21,7 @@
 #include "esp_heap_caps.h"
 #include "ml_runtime.h"
 #include "tdongle_wgperf.h"
+#include "ml_rx_stats.h"
 #include "ml_wg_idle.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -45,6 +46,7 @@ extern void gateway_route_mark(unsigned stage,uint32_t member);
 
 #include "wireguardif.h"
 #include "wireguard.h"
+#include "wireguard_stats.h"
 #include "chacha20poly1305.h"
 #include "mbedtls/base64.h"
 #include <string.h>
@@ -2216,10 +2218,17 @@ static esp_err_t wg_init_interface(microlink_t *ml) {
     return result;
 }
 
+/* Counters of the WireGuard receive path, for the serial `inbound` report (ml_rx_stats.h). */
+unsigned ml_wg_rx_stat_count(void) { return WG_RXS_COUNT; }
+uint32_t ml_wg_rx_stat(unsigned which) { return wireguard_rx_stat_get(which); }
+const char *ml_wg_rx_stat_name(unsigned which) { return wireguard_rx_stat_name(which); }
+unsigned ml_wg_replay_window(void) { return WIREGUARD_REPLAY_WINDOW_SIZE; }
+
 static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
     WGPERF_T(t);
     WGPERF_T(t_all);
     WGPERF_COUNT(in_pkts, 1);
+    ML_RX_STAT(wg_in);
     /* Handshake and cookie messages are logged; transport data (type 4, one per ACK or download segment) is not. */
     if (!(pkt->len >= 4 && pkt->data[0] == 0x04))
         ESP_LOGI(TAG, "WG RX: %d bytes, via_derp=%d, type=%d, from=%02x%02x%02x%02x",
@@ -2236,18 +2245,20 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
          * costs a flash read; an initiation gets a trial slot (see
          * directory_trial_*), kept only if WireGuard authenticates it. */
         sender=derp_sender_admit(ml,pkt);
-        if(sender<0){tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);return;}
+        if(sender<0){ML_RX_STAT(wg_sender_unknown);tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);return;}
         /* The packet only counts as the peer's activity if WireGuard accepts it. */
         sender_activity=wg_peer_activity(ml,sender);
     }
 #endif
     if (!ml->wg_netif) {
+        ML_RX_STAT(wg_no_netif);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
         return;
     }
 
     struct netif *netif = (struct netif *)ml->wg_netif;
     if (!netif->state) {
+        ML_RX_STAT(wg_no_netif);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
         return;
     }
@@ -2259,6 +2270,7 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
      * thread processes the packet. */
     struct pbuf *p = pbuf_alloc(PBUF_RAW, pkt->len, PBUF_RAM);
     if (!p) {
+        ML_RX_STAT(wg_pbuf_fail);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
         return;
     }
@@ -2280,6 +2292,7 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
      * the ChaCha20-Poly1305 in between (~0.4 ms per 1,400 B) blocks nobody. */
     struct wireguard_rx_job rx_job;
     int rx_pending = 0;
+    ML_RX_STAT(wg_to_wireguardif);
     WG_LOCKED(TDONGLE_LOCK_WG_OTHER, { ROUTE_MARK(5); rx_pending = wireguardif_rx_begin(netif, p, &addr, pkt->src_port, &rx_job); ROUTE_MARK(0); });
     if (rx_pending) {
         WGPERF_RESTART(t);

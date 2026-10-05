@@ -9,8 +9,10 @@ const char *ipaddr_ntoa(const ip_addr_t *a) {
     return buf;
 }
 
+int wg_host_pbuf_fail;
 struct pbuf *pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type) {
     (void)layer; (void)type;
+    if (wg_host_pbuf_fail) return NULL;
     struct pbuf *p = calloc(1, sizeof(*p));
     if (!p) return NULL;
     p->payload = calloc(1, length ? length : 1);

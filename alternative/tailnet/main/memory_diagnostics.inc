@@ -4,6 +4,9 @@
 #include "lwip/opt.h"
 #include "route_table.h"
 #include "tdongle_wgperf.h"
+#include "ml_rx_stats.h"
+#include "ml_net_io_drain.h"
+#include "lwip/stats.h"
 extern void mgmt_write(const char *s);
 static const char *const owner_names[TDONGLE_OWNER_COUNT] = {"other", "tls", "control", "map", "peer", "wg", "packet", "context"};
 static const char *const phase_names[TDONGLE_PHASE_COUNT] = {"start", "control", "noise", "register", "map", "derp", "steady"};
@@ -210,6 +213,7 @@ static void report_lwip(jw_writer *w) {
     report_field(w, "memp_tcp_seg", MEMP_NUM_TCP_SEG);
     report_field(w, "max_sockets", CONFIG_LWIP_MAX_SOCKETS);
     report_field(w, "tcp_recvmbox", CONFIG_LWIP_TCP_RECVMBOX_SIZE);
+    report_field(w, "udp_recvmbox", CONFIG_LWIP_UDP_RECVMBOX_SIZE);
     report_field(w, "tcpip_recvmbox", CONFIG_LWIP_TCPIP_RECVMBOX_SIZE);
     report_field(w, "wifi_static_rx", CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM);
     report_field(w, "wifi_dynamic_rx", CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM);
@@ -438,6 +442,52 @@ static void report_cpu(jw_writer *w) {
     report_end(w);
     free(tasks);
 }
+/* Every place an inbound datagram can be lost between the Wi-Fi interface and the USB host, as cumulative counters (never
+ * reset: diff two samples). Layers, in order (docs/adr/0019-inbound-loss.md has the reconciliation):
+ *   lwip   lwIP's own UDP counters. udp_recv counts a datagram BEFORE the socket mailbox, which drops silently when full, so
+ *          udp_recv - ml.udp_rx (net_io's reads) is the mailbox loss to date (DNS and other sockets add a little);
+ *   ml     net_io -> queues -> wg_mgr: ml_rx_stats.h;  wg  wireguardif receive path: wireguard_stats.h;
+ *   route  tunnel -> USB (the `route` report has the rest): reply_* reasons, tunnel_*, usb_tx, usb_tx_err. */
+static void report_inbound(jw_writer *w) {
+    report_begin(w, "inbound");
+    report_field(w, "udp_recvmbox", CONFIG_LWIP_UDP_RECVMBOX_SIZE);
+    report_field(w, "drain_cap", ML_NET_IO_DRAIN_CAP);
+    report_field(w, "wg_rx_queue_depth", ML_WG_RX_QUEUE_DEPTH);
+    report_field(w, "replay_window", ml_wg_replay_window());
+#if LWIP_STATS && UDP_STATS
+    jw_raw(w, ",\"lwip\":{\"udp_recv\":");
+    jw_number(w, lwip_stats.udp.recv);
+    report_field(w, "udp_drop", lwip_stats.udp.drop);
+    report_field(w, "udp_memerr", lwip_stats.udp.memerr);
+    report_field(w, "udp_err", lwip_stats.udp.err);
+    jw_char(w, '}');
+#endif
+    jw_raw(w, ",\"ml\":{");
+    for (unsigned i = 0; i < ML_RXS_COUNT; i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, ml_rx_stat_name(i));
+        jw_number(w, ml_rx_stat_get(i));
+    }
+    jw_raw(w, ",\"drain_burst_max\":");
+    jw_number(w, atomic_load_explicit(&ml_rx_stats.drain_burst_max, memory_order_relaxed));
+    jw_raw(w, "},\"wg\":{");
+    for (unsigned i = 0; i < ml_wg_rx_stat_count(); i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, ml_wg_rx_stat_name(i));
+        jw_number(w, ml_wg_rx_stat(i));
+    }
+    jw_raw(w, "},\"route\":{");
+    static const unsigned reasons[] = {RT_STAT_TUNNEL_MALFORMED, RT_STAT_TUNNEL_NOMEM, RT_STAT_BAD_PACKET, RT_STAT_REPLY_NO_MEMBER, RT_STAT_REPLY_NOT_US,
+                                       RT_STAT_REPLY_FLOW_RANGE, RT_STAT_REPLY_NO_FLOW, RT_STAT_REPLY_GENERATION, RT_STAT_REPLY_OWNER, RT_STAT_REPLY_IDLE,
+                                       RT_STAT_FORWARDED_IN, RT_STAT_USB_TX, RT_STAT_USB_TX_ERR, RT_STAT_TX_FAIL};
+    for (unsigned i = 0; i < sizeof(reasons) / sizeof(reasons[0]); i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, rt_stat_name(reasons[i]));
+        jw_number(w, gateway_route_stat(reasons[i]));
+    }
+    jw_char(w, '}');
+    report_end(w);
+}
 /* wg_mgr packet-path accounting (components/tdongle_runtime/include/tdongle_wgperf.h). Stages are [count,total,max] in the
  * unit named in "units"; "elapsed_ms" is the time since the last `wgperf reset`, so totals divide into rates. */
 extern bool ml_wg_log_bench(unsigned rounds, uint32_t *cycles_per_line);
@@ -518,6 +568,8 @@ bool gateway_memory_command(const char *line) {
         report_logbench(&w);
     } else if (!strcmp(line, "route")) {
         report_router(&w);
+    } else if (!strcmp(line, "inbound")) {
+        report_inbound(&w);
     } else if (!strcmp(line, "members")) {
         report_phases(&w);
         report_admission(&w);

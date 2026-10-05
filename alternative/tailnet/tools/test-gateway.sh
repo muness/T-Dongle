@@ -203,6 +203,29 @@ cc -std=gnu11 -O1 -g -fsanitize=thread -fno-sanitize-recover=all -w -DWIREGUARD_
    $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_egress_tsan
 build-host/test_wg_egress_tsan race
 build-host/test_wg_egress
+# Inbound loss (docs/adr/0019-inbound-loss.md). The replay window (32 -> 512 bits, RFC 6479 ring) against an exact reference model,
+# at the shipped size and at the neighbours (the code is size-generic; a wrong ring/window relation fails on some size).
+for bits in 512 64 128 2048 8192; do
+ cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -DWIREGUARD_REPLAY_RING_BITS=$bits -I $wg tests/test_wg_replay.c -o build-host/test_wg_replay_$bits
+ build-host/test_wg_replay_$bits 3000 | tail -$([[ $bits == 512 ]] && echo 12 || echo 1)
+done
+# Every inbound drop point of the real wireguardif.c counts exactly once; replay protection precedes endpoint/timer/keypair updates;
+# reordered arrival is accepted up to the window.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_counters.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_counters
+build-host/test_wg_rx_counters
+# net_io's drain loop (the cause of the silent UDP loss) and the counters' thread safety.
+cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -I components/microlink/include tests/test_net_io_drain.c -o build-host/test_net_io_drain
+build-host/test_net_io_drain
+cc -std=gnu11 -O1 -g -fsanitize=thread -pthread -I components/microlink/include -I $wg tests/test_rx_stats_threads.c -o build-host/test_rx_stats_threads
+build-host/test_rx_stats_threads
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -pthread -I components/microlink/include -I $wg tests/test_rx_stats_threads.c -o build-host/test_rx_stats_threads_asan
+build-host/test_rx_stats_threads_asan
+# Tunnel -> USB reject reasons, and the allocation-failure ownership rule.
+cc $RT_CC -fsanitize=address,undefined -fno-sanitize-recover=undefined tests/test_router_rx_reasons.c -o build-host/test_router_rx_reasons
+build-host/test_router_rx_reasons
 cc $TD_INC -std=c11 -Wall -Wextra -fsanitize=address,undefined -g tests/test_wg_idle.c -o build-host/test_wg_idle
 build-host/test_wg_idle
 build-host/test_jit_queue

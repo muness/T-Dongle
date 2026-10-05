@@ -65,7 +65,10 @@ static void xSemaphoreGive(int lock) {
 static void *esp_netif_get_netif_impl(void *ignored) { return &usb; }
 static int64_t clock_us = 1000;
 static int64_t esp_timer_get_time(void) { return clock_us; }
+static int stub_pbuf_fail; /* tests: when set, pbuf_alloc returns NULL (lwIP out of memory) */
 static struct pbuf *pbuf_alloc(int kind, size_t size, int memory) {
+    if (stub_pbuf_fail)
+        return NULL;
     struct pbuf *p = malloc(sizeof(*p));
     p->tot_len = size;
     p->payload = calloc(1, size);

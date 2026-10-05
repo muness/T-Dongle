@@ -388,11 +388,14 @@ static int route_emit_tunnel(membership_t *m, uint32_t peer, const uint8_t *b, s
 #endif
     return result;
 }
-static void route_emit_usb(struct pbuf *packet, uint32_t host) {
+static bool route_emit_usb(struct pbuf *packet, uint32_t host) {
     ip4_addr_t ip = {.addr = htonl(host)};
     struct netif *usb = esp_netif_get_netif_impl(usb_interface);
-    if (!usb || usb->output(usb, packet, &ip) != ERR_OK)
+    if (!usb || usb->output(usb, packet, &ip) != ERR_OK) {
         rt_stat(RT_STAT_TX_FAIL);
+        return false;
+    }
+    return true;
 }
 
 /* ---- USB -> tunnel ------------------------------------------------------------- */
@@ -626,13 +629,16 @@ err_t gateway_tunnel_input(struct pbuf *p, struct netif *wg) {
      * Normally lwIP trims it; our custom input bypasses that path. Use the
      * inner IPv4 length without relaxing USB-side packet validation. */
     if (p->tot_len < 20 || pbuf_copy_partial(p, first, 20, 0) != 20 || first[0] >> 4 != 4 || rd16(first + 2) > p->tot_len || rd16(first + 2) < 20) {
+        rt_stat(RT_STAT_TUNNEL_MALFORMED);
         pbuf_free(p);
         return ERR_OK;
     }
     size_t n = rd16(first + 2);
     struct pbuf *out = pbuf_alloc(PBUF_IP, n, PBUF_RAM);
     if (!out) {
-        pbuf_free(p);
+        /* lwIP's input contract: on an error return the CALLER still owns p and frees it (wireguardif does). Freeing it here
+         * as well was a double free the first time the heap ran out under load. */
+        rt_stat(RT_STAT_TUNNEL_NOMEM);
         return ERR_MEM;
     }
     uint8_t *b = out->payload;
@@ -647,13 +653,22 @@ err_t gateway_tunnel_input(struct pbuf *p, struct netif *wg) {
         membership_t *m = member_by_wg(wg);
         microlink_t *client = m ? m->client : NULL;
         rt_flow_t f;
-        if (client && client->vpn_ip == rd32(b + 16) &&
-            rt_flow_in(&rt, m->id, rd32(b + 12), rd16(b + h), rd16(b + h + 2), b[9], atomic_load(&usb_generation), now, &f)) {
-            nat_rewrite(b, h, f.alias, f.host, 2, f.local);
-            route_emit_usb(out, f.host);
-            rt_stat(RT_STAT_FORWARDED_IN);
-        } else
+        rt_flow_in_result why = RT_FLOW_IN_OK;
+        if (!client) {
+            rt_stat(RT_STAT_REPLY_NO_MEMBER);
             rt_stat(RT_STAT_REPLY_NOMATCH);
+        } else if (client->vpn_ip != rd32(b + 16)) {
+            rt_stat(RT_STAT_REPLY_NOT_US);
+            rt_stat(RT_STAT_REPLY_NOMATCH);
+        } else if ((why = rt_flow_in_why(&rt, m->id, rd32(b + 12), rd16(b + h), rd16(b + h + 2), b[9], atomic_load(&usb_generation), now, &f)) != RT_FLOW_IN_OK) {
+            static const unsigned reason[] = {0, RT_STAT_REPLY_FLOW_RANGE, RT_STAT_REPLY_NO_FLOW, RT_STAT_REPLY_GENERATION, RT_STAT_REPLY_OWNER, RT_STAT_REPLY_IDLE};
+            rt_stat(reason[why]);
+            rt_stat(RT_STAT_REPLY_NOMATCH);
+        } else {
+            nat_rewrite(b, h, f.alias, f.host, 2, f.local);
+            if (route_emit_usb(out, f.host))   /* a frame the USB netif refused is tx_fail, not forwarded */
+                rt_stat(RT_STAT_FORWARDED_IN);
+        }
         rt_rcu_exit(&rcu, token);
     }
     pbuf_free(out);

@@ -22,6 +22,7 @@
  */
 
 #include "microlink_internal.h"
+#include "ml_rx_stats.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_random.h"
@@ -586,7 +587,9 @@ static void op_deliver(void *user, const uint8_t *src_pubkey, uint8_t *data, siz
     memcpy(pkt.src_pubkey, src_pubkey, 32);
 
     QueueHandle_t target = (type == PKT_DISCO) ? ml->disco_rx_queue : ml->wg_rx_queue;
+    if (type != PKT_DISCO) ML_RX_STAT(derp_rx_wg);
     if (xQueueSend(target, &pkt, 0) != pdTRUE) {
+        if (type == PKT_DISCO) ML_RX_STAT(q_disco_full); else ML_RX_STAT(derp_q_wg_full);
         /* Download-direction RX drop: frames arrive faster than the consumer (wg_rx_queue depth) can
          * decrypt/forward. Rate-limited so a flood doesn't itself spam the SD recorder. */
         static uint32_t derp_rx_drops = 0;

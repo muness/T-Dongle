@@ -31,6 +31,7 @@ static gateway_usb_rx_budget usb_rx_budget;
 uint32_t gateway_route_stat(unsigned which) { return which * 3; }
 #define CONFIG_LWIP_MAX_SOCKETS 20
 #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
+#define CONFIG_LWIP_UDP_RECVMBOX_SIZE 10
 #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
 #define CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM 6
 #define CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM 16
@@ -95,6 +96,18 @@ static UBaseType_t uxTaskGetSystemState(TaskStatus_t *t, UBaseType_t n, uint32_t
     return 3;
 }
 static BaseType_t xTaskGetCoreID(TaskHandle_t h) { return (uintptr_t)h == 3 ? 0x7fffffff : (int)((uintptr_t)h - 1); }
+/* The inbound counters the `inbound` report reads: the real definitions live in ml_net_io.c / wireguard.c and lwIP. */
+#include "lwip/stats.h"
+#include "ml_rx_stats.h"
+#include "wireguard_stats.h"
+ml_rx_stats_t ml_rx_stats;
+wireguard_rx_stats_t wireguard_rx_stats;
+struct stats_ lwip_stats;
+#include "wireguard_replay.h"
+unsigned ml_wg_rx_stat_count(void) { return WG_RXS_COUNT; }          /* ml_wg_mgr.c in the firmware */
+uint32_t ml_wg_rx_stat(unsigned which) { return wireguard_rx_stat_get(which); }
+const char *ml_wg_rx_stat_name(unsigned which) { return wireguard_rx_stat_name(which); }
+unsigned ml_wg_replay_window(void) { return WIREGUARD_REPLAY_WINDOW_SIZE; }
 #include "json_writer.inc"
 #include "memory_diagnostics.inc"
 int main(void) {
@@ -115,8 +128,12 @@ int main(void) {
     tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_lock_wait, 100);tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_lock_wait, 250);
     tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_pass, 0xffffffffu);tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_pass, 5);
     tdongle_wgperf_count(&tdongle_wgperf, TDONGLE_WGPERF_C_passes, 2);
+    for (unsigned i = 0; i < ML_RXS_COUNT; i++) ml_rx_stat_add((ml_rx_stat_t)i, 100 + i);
+    ml_rx_stat_burst(13);
+    for (unsigned i = 0; i < WG_RXS_COUNT; i++) for (unsigned k = 0; k < 200 + i; k++) wireguard_rx_stat_add((wireguard_rx_stat_t)i);
+    lwip_stats.udp.recv = 5000; lwip_stats.udp.drop = 1; lwip_stats.udp.memerr = 2; lwip_stats.udp.err = 3;
     tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 700);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 42000);
-    const char *commands[] = {"memory", "route", "members", "memory bench", "memory locks", "wgperf", "wgperf logbench", "wgperf reset", "wgperf", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
+    const char *commands[] = {"memory", "route", "inbound", "members", "memory bench", "memory locks", "wgperf", "wgperf logbench", "wgperf reset", "wgperf", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));

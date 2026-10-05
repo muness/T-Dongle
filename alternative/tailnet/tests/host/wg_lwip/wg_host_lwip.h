@@ -69,6 +69,7 @@ typedef enum { PBUF_TRANSPORT = 0 } pbuf_layer;
 typedef enum { PBUF_RAM = 0 } pbuf_type;
 struct pbuf { void *payload; u16_t tot_len; u16_t len; struct pbuf *next; };
 struct pbuf *pbuf_alloc(pbuf_layer layer, u16_t length, pbuf_type type);
+extern int wg_host_pbuf_fail;   /* test hook: when non-zero pbuf_alloc returns NULL (lwIP out of memory) */
 u8_t pbuf_free(struct pbuf *p);
 err_t pbuf_take(struct pbuf *p, const void *data, u16_t len);
 u16_t pbuf_copy_partial(const struct pbuf *p, void *dst, u16_t len, u16_t offset);
@@ -78,6 +79,7 @@ u8_t pbuf_get_at(const struct pbuf *p, u16_t offset);
 struct ip_hdr { u8_t _v_hl; u8_t _tos; u16_t _len; u16_t _id; u16_t _offset; u8_t _ttl; u8_t _proto; u16_t _chksum; ip4_addr_t src; ip4_addr_t dest; };
 #define IPH_V(h) ((h)->_v_hl >> 4)
 #define IPH_LEN(h) ((h)->_len)
+#define IP_HLEN 20
 
 /* ---- netif / udp ---- */
 struct netif;

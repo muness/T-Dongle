@@ -502,9 +502,11 @@ static bool usb_tx_gate(void *ctx) { (void)ctx; return ml_neg_busy(ml_rt_negotia
 /* Token changed hands: wake the buffer's worker so it retires idle chunks now rather than at its next housekeeping. */
 static void usb_tx_negotiation_changed(void *ctx) { (void)ctx; tinyusb_net_tx_elastic_kick(); }
 static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
-    if (len > UINT16_MAX)
-        return ESP_ERR_INVALID_SIZE;
-    return tinyusb_net_tx_ring_send(buffer, (uint16_t)len);
+    rt_stat(RT_STAT_USB_TX);
+    esp_err_t result = len > UINT16_MAX ? ESP_ERR_INVALID_SIZE : tinyusb_net_tx_ring_send(buffer, (uint16_t)len);
+    if (result != ESP_OK)
+        rt_stat(RT_STAT_USB_TX_ERR);
+    return result;
 }
 /* Called only for tdongle_l2 (bridge mode) frames sent with tinyusb_net_send_sync. */
 static void usb_free_tx(void *buffer, void *ctx) { if(!gateway_tailnet_mode())tdongle_l2_release(buffer); }

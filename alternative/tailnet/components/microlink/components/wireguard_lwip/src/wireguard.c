@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include "wireguard_stats.h"
 
 #include "crypto.h"
 
@@ -385,51 +386,14 @@ static void wireguard_kdf3(uint8_t *tau1, uint8_t *tau2, uint8_t *tau3, const ui
     crypto_zero(output, sizeof(output));
 }
 
+wireguard_rx_stats_t wireguard_rx_stats;   // zero-initialised; see wireguard_stats.h
+
+wg_replay_verdict_t wireguard_check_replay_why(struct wireguard_keypair *keypair, uint64_t seq) {
+    return wireguard_replay_check(&keypair->replay, seq);
+}
+
 bool wireguard_check_replay(struct wireguard_keypair *keypair, uint64_t seq) {
-    // Implementation of packet replay window - as per RFC2401
-    // Adapted from code in Appendix C at https://tools.ietf.org/html/rfc2401
-    uint32_t diff;
-    bool result = false;
-    size_t ReplayWindowSize = sizeof(keypair->replay_bitmap) * CHAR_BIT; // 32 bits
-
-    // WireGuard data packet counter starts from 0 but algorithm expects packet numbers to start from 1
-    seq++;
-
-    if (seq != 0) {
-        if (seq > keypair->replay_counter) {
-            // new larger sequence number
-            diff = seq - keypair->replay_counter;
-            if (diff < ReplayWindowSize) {
-                // In window
-                keypair->replay_bitmap <<= diff;
-                // set bit for this packet
-                keypair->replay_bitmap |= 1;
-            } else {
-                // This packet has a "way larger"
-                keypair->replay_bitmap = 1;
-            }
-            keypair->replay_counter = seq;
-            // larger is good
-            result = true;
-        } else {
-            diff = keypair->replay_counter - seq;
-            if (diff < ReplayWindowSize) {
-                if (keypair->replay_bitmap & ((uint32_t)1 << diff)) {
-                    // already seen
-                } else {
-                    // mark as seen
-                    keypair->replay_bitmap |= ((uint32_t)1 << diff);
-                    // out of order but good
-                    result = true;
-                }
-            } else {
-                // too old or wrapped
-            }
-        }
-    } else {
-        // first == 0 or wrapped
-    }
-    return result;
+    return wireguard_replay_check(&keypair->replay, seq) == WG_REPLAY_OK;
 }
 
 struct wireguard_keypair *get_peer_keypair_for_idx(struct wireguard_peer *peer, uint32_t idx) {
@@ -583,8 +547,7 @@ void wireguard_start_session(struct wireguard_peer *peer, bool initiator) {
         wireguard_kdf2(new_keypair.receiving_key, new_keypair.sending_key, handshake->chaining_key, NULL, 0);
     }
 
-    new_keypair.replay_bitmap = 0;
-    new_keypair.replay_counter = 0;
+    wireguard_replay_reset(&new_keypair.replay);
 
     new_keypair.last_tx = 0;
     new_keypair.last_rx = 0; // No packets received yet
