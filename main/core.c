@@ -130,3 +130,19 @@ int trial_decision(uint64_t now, uint64_t started, uint64_t since, bool associat
         return 1;
     return now - started >= 45000 ? -1 : 0;
 }
+
+bool metadata_apply(settings_t *s, const metadata_edit_t *e) {
+    if (e->slot < 0 || e->slot >= PROFILE_MAX || e->priority < 0 || e->priority > 100 ||
+        !printable(e->name, 24, 1) || strstr(e->name, " ssid=") || !printable(e->expected_name, 24, 1) ||
+        !printable(e->expected_ssid, 32, 1))
+        return false;
+    profile_t *p = &s->p[e->slot];
+    if (strcmp(p->name, e->expected_name) || strcmp(p->ssid, e->expected_ssid) ||
+        p->priority != e->expected_priority)
+        return false;
+    memcpy(p->name, e->name, sizeof(p->name));
+    p->priority = e->priority;
+    if (e->preferred)
+        s->preferred = e->slot;
+    return true;
+}
