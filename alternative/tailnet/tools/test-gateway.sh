@@ -19,6 +19,21 @@ cc $TD_INC -std=c11 -fsanitize=address,undefined -g tests/test_usb_identity.c -o
 build-host/test_usb_identity
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
 build-host/test_router
+# Router hot path (docs/research/forwarding-latency.md): RAM-resident O(1) tables, RCU membership pinning, incremental checksums.
+RT_CC="$TD_INC -std=c11 -D_GNU_SOURCE -Wall -Wextra -g -pthread -I tests -I main -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter"
+cc $RT_CC -fsanitize=address,undefined tests/test_route_table.c -o build-host/test_route_table
+build-host/test_route_table
+cc $RT_CC -fsanitize=thread -DRT_TSAN tests/test_route_table.c -o build-host/test_route_table_tsan
+build-host/test_route_table_tsan
+cc $RT_CC -fsanitize=address,undefined tests/test_router_hotpath.c -o build-host/test_router_hotpath
+build-host/test_router_hotpath
+cc $RT_CC -fsanitize=thread -DHOT_TSAN tests/test_router_hotpath.c -o build-host/test_router_hotpath_tsan
+build-host/test_router_hotpath_tsan
+# Differential: the frozen pre-optimisation router against the new one, same random packets and control events.
+cc $RT_CC -fsanitize=address,undefined -DIMPL_OLD -c tests/router_impl.c -o build-host/router_old.o
+cc $RT_CC -fsanitize=address,undefined -DIMPL_NEW -c tests/router_impl.c -o build-host/router_new.o
+cc $RT_CC -fsanitize=address,undefined tests/test_router_differential.c build-host/router_old.o build-host/router_new.o -o build-host/test_router_differential
+for seed in $(seq 1 24); do build-host/test_router_differential "$seed" | tail -1; done
 : "${IDF_PATH:?Source ESP-IDF for the same cJSON used by the firmware}"
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I "$IDF_PATH/components/json/cJSON" tests/test_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_stream
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_projection.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_projection
