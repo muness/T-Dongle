@@ -18,6 +18,8 @@ extern SemaphoreHandle_t members_lock;
 int gateway_host_input(struct pbuf *, struct netif *);
 uint32_t gateway_alias(uint32_t id, uint32_t peer);
 void gateway_forget(uint32_t id);
+/* Router counters (route_table.h RT_STAT_*), for the serial `route` report. */
+uint32_t gateway_route_stat(unsigned which);
 /* Republish the memberships' MagicDNS domains for the DNS task; members_lock held. */
 void gateway_dns_domains_refresh(void);
 

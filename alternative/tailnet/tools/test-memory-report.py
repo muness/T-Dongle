@@ -55,6 +55,10 @@ admission = reports("members", "admission")[0]
 assert admission["override"] is True and len(admission["attempts"]) == 6
 assert [a["verdict"] for a in admission["attempts"]] == ["refused_budget", "refused_largest", "refused_sockets", "override", "refused_floor", "start_failed"], admission
 
+route = reports("route", "route")[0]
+assert route["forwarded_out"] == 0 and route["alias_miss"] == 9 and route["queue_full"] == 30 and route["queue_depth"] == 16 and route["flow_slots"] == 64, route
+assert len([k for k in route if k not in ("schema", "kind")]) == 16 + 4, route
+
 bench = reports("memory bench", "bench")[0]
 assert bench["rounds"] == 256 and bench["chacha20poly1305_ns_per_packet"] == 2000000 and bench["cipher_ceiling_kbit_s"] == 1400 * 8 * 1000000 // 2000000
 assert reports("memory guard 4096", "guard")[0]["guard_floor"] == 4096
@@ -67,4 +71,4 @@ for command, lines in sections.items():
     for item in lines:
         if isinstance(item, dict):
             assert len(json.dumps(item, separators=(",", ":"))) < 1800, (command, item["kind"])  # bounded, fits the console queue in a few chunks
-print("Serial reports: heap, attribution, lwip, phases, admission, bench and guard parse as bounded one-line JSON.")
+print("Serial reports: heap, attribution, lwip, route, phases, admission, bench and guard parse as bounded one-line JSON.")

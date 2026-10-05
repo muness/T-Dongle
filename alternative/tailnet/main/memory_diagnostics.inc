@@ -2,6 +2,7 @@
  * bounded, allocation-free and free of keys, auth keys, URLs and names. Included by
  * gateway_main.c after json_writer.inc. */
 #include "lwip/opt.h"
+#include "route_table.h"
 extern void mgmt_write(const char *s);
 static const char *const owner_names[TDONGLE_OWNER_COUNT] = {"other", "tls", "control", "map", "peer", "wg", "packet", "context"};
 static const char *const phase_names[TDONGLE_PHASE_COUNT] = {"start", "control", "noise", "register", "map", "derp", "steady"};
@@ -190,6 +191,17 @@ static void report_lwip(jw_writer *w) {
     report_field(w, "wifi_dynamic_tx", CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM);
     report_end(w);
 }
+/* Forwarding counters and the queue/cache bounds they are read against. */
+static void report_router(jw_writer *w) {
+    report_begin(w, "route");
+    for (unsigned i = 0; i < RT_STAT_COUNT; i++)
+        report_field(w, rt_stat_name(i), gateway_route_stat(i));
+    report_field(w, "queue_depth", ROUTE_QUEUE_DEPTH);
+    report_field(w, "queue_bytes", ROUTE_QUEUE_BYTES);
+    report_field(w, "alias_cache", RT_ALIASES);
+    report_field(w, "flow_slots", RT_FLOWS);
+    report_end(w);
+}
 static void report_phases(jw_writer *w) {
     tdongle_member_phases m;
     for (unsigned slot = 0; slot < TDONGLE_MEMORY_MEMBERS; slot++) {
@@ -285,6 +297,8 @@ bool gateway_memory_command(const char *line) {
         report_heap(&w);
         report_attribution(&w);
         report_lwip(&w);
+    } else if (!strcmp(line, "route")) {
+        report_router(&w);
     } else if (!strcmp(line, "members")) {
         report_phases(&w);
         report_admission(&w);
