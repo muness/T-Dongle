@@ -29,7 +29,13 @@ void wireguard_set_tai64n_base_seconds(uint64_t s) { (void)s; }
 static uint64_t g_prng = 0x9E3779B97F4A7C15ULL;
 static uint32_t g_script[32];
 static int g_script_n, g_script_pos, g_idx_calls; /* scripted values for 4-byte (receiver index) requests */
-static void script_set(const uint32_t *v, int n) { memcpy(g_script, v, n * sizeof(*v)); g_script_n = n; g_script_pos = 0; g_idx_calls = 0; }
+static void script_set(const uint32_t *v, int n) {
+    assert(n >= 0 && (size_t)n <= sizeof(g_script) / sizeof(g_script[0]));
+    /* script_set(NULL, 0) clears the script; memcpy still requires a nonnull
+     * source for a zero-byte copy under its C library contract. */
+    if (n > 0) { assert(v); memcpy(g_script, v, (size_t)n * sizeof(*v)); }
+    g_script_n = n; g_script_pos = 0; g_idx_calls = 0;
+}
 void wireguard_random_bytes(void *bytes, size_t size) {
     uint8_t *b = bytes;
     if (size == 4) {
