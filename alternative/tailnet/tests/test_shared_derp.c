@@ -23,19 +23,20 @@ static const ml_mux_ops_t mux_ops = {.service = service_fake};
 
 static fake_t A, B;
 static ml_mux_t mux;
-static int token;
+static ml_neg_t neg;
+static uint64_t vclock(void) { return vnow; }
 static fake_t *extra;     /* a third member, polled like the others */
 static uint32_t b_seq_rx, b_seq_tx;
 static uint64_t next_b_rx, next_b_tx;
 
 static void begin(size_t read_chunk, size_t write_chunk, bool shared_token) {
-    vnow = 1000; token = 0; b_seq_rx = b_seq_tx = 0;
+    vnow = 1000; ml_neg_init(&neg, vclock, 0, 0, 0); b_seq_rx = b_seq_tx = 0;
     fake_init(&A, "A", &vnow, 1);
     fake_init(&B, "B", &vnow, 2);
     A.read_chunk = B.read_chunk = read_chunk;
     A.write_chunk = B.write_chunk = write_chunk;
     A.transport_delay_ms = B.transport_delay_ms = 30;
-    if (shared_token) { A.token_owner = B.token_owner = &token; }
+    if (shared_token) { A.neg = B.neg = &neg; }
     ml_mux_init(&mux, &mux_ops, NULL, NULL);
     assert(ml_mux_attach(&mux, &A) == 0 && ml_mux_attach(&mux, &B) == 0);
     next_b_rx = next_b_tx = 0;
@@ -68,6 +69,7 @@ static void connect_both(void) {
 }
 static void end_checks(void) {
     ml_derp_link_close(&A.link); ml_derp_link_close(&B.link);
+    { ml_neg_status_t st; ml_neg_status(&neg, &st); assert(st.holder == 0 && st.lease_expired == 0); }   /* no leaked token on any path */
     assert(ml_mux_detach(&mux, &A, 100) && ml_mux_detach(&mux, &B, 100));
     ml_mux_destroy(&mux);
     while (A.qh != A.qt) { free(A.q[A.qh++ % 256].data); A.live_allocs--; }
@@ -176,7 +178,6 @@ static void scenario_handshake_hang(void) {
     ml_derp_link_connect(&A.link);
     run(ML_DERP_CONNECT_MS + 1500);
     assert(A.failed_events >= 1 && A.transports_closed >= 1);
-    assert(token == 0 || token == 1);           /* A never leaks the token */
     b_bounded("A's TLS handshake hung 30 s");
     A.transport_hang = false;
     run(30000);
@@ -203,7 +204,7 @@ static void scenario_negotiation_serialised(void) {
     begin(0, 0, true);
     static fake_t C;
     fake_init(&C, "C", &vnow, 3);
-    C.token_owner = &token; C.transport_delay_ms = 30;
+    C.neg = &neg; C.transport_delay_ms = 30;
     assert(ml_mux_attach(&mux, &C) == 0);
     extra = &C;
     ml_derp_link_connect(&B.link);
@@ -213,7 +214,7 @@ static void scenario_negotiation_serialised(void) {
     run(100);
     ml_derp_link_connect(&C.link);
     run(5000);
-    assert(C.link.state == ML_DERP_TOKEN && token == 1);   /* C queued behind A's negotiation */
+    assert(C.link.state == ML_DERP_TOKEN && ml_neg_holds(&neg, 1));   /* C queued behind A's negotiation */
     run(ML_DERP_CONNECT_MS - 5000 + 200);                  /* A hits its connect deadline and releases */
     A.transport_hang = false;
     run(3000);

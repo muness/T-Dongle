@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ml_derp_link.h"
+#include "ml_negotiation.h"
 
 typedef struct {
     uint8_t *d;
@@ -52,7 +53,7 @@ typedef struct {
     long live_allocs;
     bool alloc_fail;
     /* negotiation token (shared pointer; NULL = free pass) */
-    int *token_owner;           /* shared between fakes: 0 = free, else holder id */
+    ml_neg_t *neg;              /* the real negotiation token, shared between fakes (NULL = free pass) */
     int my_id;
     ml_derp_link_t link;
 } fake_t;
@@ -158,13 +159,12 @@ static void fake_event(void *u, ml_derp_event_t ev) {
 }
 static bool fake_token_try(void *u) {
     fake_t *f = u;
-    if (!f->token_owner) return true;
-    if (*f->token_owner == 0 || *f->token_owner == f->my_id) { *f->token_owner = f->my_id; return true; }
-    return false;
+    if (!f->neg) return true;
+    return ml_neg_request(f->neg, (uintptr_t)f->my_id, ML_NEG_PRIO_RELAY, ML_NEG_PHASE_DERP) == ML_NEG_GRANTED;
 }
 static void fake_token_release(void *u) {
     fake_t *f = u;
-    if (f->token_owner && *f->token_owner == f->my_id) *f->token_owner = 0;
+    if (f->neg) ml_neg_release(f->neg, (uintptr_t)f->my_id);
 }
 
 static const ml_derp_link_ops_t fake_ops = {

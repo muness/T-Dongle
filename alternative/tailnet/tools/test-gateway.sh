@@ -81,12 +81,17 @@ build-host/test_derp_receive
 # Shared runtime (ADR 0013 stage 1). The adversarial slicing check: two memberships share one DERP loop (the real
 # ml_derp_link state machine under the real ml_mux) while one member's server stalls, hangs or goes deaf. Virtual time
 # (exact) first, then real threads, sockets and a real clock under ASan/UBSan and under TSan.
-SHARED="components/microlink/src/ml_derp_link.c components/microlink/src/ml_mux.c"
+SHARED="components/microlink/src/ml_derp_link.c components/microlink/src/ml_mux.c components/microlink/src/ml_negotiation.c"
 cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -Itests $SHARED tests/test_shared_derp.c -o build-host/test_shared_derp
 build-host/test_shared_derp
 cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -pthread -Itests $SHARED tests/test_shared_derp_realtime.c -o build-host/test_shared_derp_rt
 build-host/test_shared_derp_rt
 cc $TD_INC -std=gnu11 -fsanitize=thread -g -Wall -Wextra -pthread -Itests $SHARED tests/test_shared_derp_realtime.c -o build-host/test_shared_derp_rt_tsan
+# The negotiation token: exclusion, ordering, aging, lease and stale-waiter recovery, bounded acquire, three concurrent joins.
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -pthread components/microlink/src/ml_negotiation.c tests/test_negotiation.c -o build-host/test_negotiation
+build-host/test_negotiation
+cc $TD_INC -std=gnu11 -fsanitize=thread -g -Wall -Wextra -pthread components/microlink/src/ml_negotiation.c tests/test_negotiation.c -o build-host/test_negotiation_tsan
+build-host/test_negotiation_tsan
 build-host/test_shared_derp_rt_tsan
 
 python - <<'PYCODE'
