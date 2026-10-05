@@ -175,6 +175,37 @@ static void concurrent(void) {
     ml_mutex_destroy(&shared.lock);
 }
 
+static unsigned obs_calls, obs_busy_seen;
+static ml_neg_t *obs_neg;
+static void observer(void *ctx) { assert(ctx == (void *)&obs_calls); obs_calls++; obs_busy_seen += obs_neg->holder != 0; }
+
+/* The elastic USB transmit buffer (ADR 0015) learns of negotiations through this: one call per change of state,
+ * with the new state already visible, for grants, releases and lease expiry; ml_neg_busy() is the live truth. */
+static void observation(void) {
+    ml_neg_t n; ml_neg_init(&n, vclock, 0, 0, 0); vnow = 1000;
+    obs_neg = &n; obs_calls = obs_busy_seen = 0;
+    assert(!ml_neg_busy(&n));
+    ml_neg_set_observer(&n, observer, &obs_calls);
+    assert(ml_neg_request(&n, 1, ML_NEG_PRIO_START, ML_NEG_PHASE_START) == ML_NEG_GRANTED);
+    assert(obs_calls == 1 && obs_busy_seen == 1 && ml_neg_busy(&n));
+    assert(ml_neg_request(&n, 1, ML_NEG_PRIO_START, ML_NEG_PHASE_START) == ML_NEG_GRANTED);   /* polling again: no change */
+    assert(ml_neg_request(&n, 2, ML_NEG_PRIO_START, ML_NEG_PHASE_START) == ML_NEG_QUEUED);    /* a waiter: no change */
+    assert(obs_calls == 1);
+    assert(!ml_neg_release(&n, 99) && obs_calls == 1);                                        /* not the holder: no change */
+    assert(ml_neg_release(&n, 1) && obs_calls == 2 && obs_busy_seen == 1 && !ml_neg_busy(&n));
+    assert(!ml_neg_release(&n, 1) && obs_calls == 2);
+    /* A lease expiry frees the token: observed too. */
+    assert(ml_neg_request(&n, 2, ML_NEG_PRIO_START, ML_NEG_PHASE_START) == ML_NEG_GRANTED && obs_calls == 3);
+    vnow += ML_NEG_LEASE_MS + 10;
+    ml_neg_request(&n, 3, ML_NEG_PRIO_START, ML_NEG_PHASE_START);    /* reaps 2, grants 3: two changes */
+    assert(ml_neg_holds(&n, 3) && obs_calls == 5 && ml_neg_busy(&n));
+    ml_neg_set_observer(&n, NULL, NULL);
+    ml_neg_release(&n, 3);
+    assert(obs_calls == 5 && !ml_neg_busy(&n));
+    ml_mutex_destroy(&n.lock);
+    puts("  observation: one callback per state change (grant, release, lease expiry); busy is live");
+}
+
 int main(void) {
     puts("negotiation token");
     basics();
@@ -183,6 +214,7 @@ int main(void) {
     self_healing();
     bounded();
     concurrent();
+    observation();
     puts("negotiation token: exclusive, ordered, bounded, self-healing");
     return 0;
 }

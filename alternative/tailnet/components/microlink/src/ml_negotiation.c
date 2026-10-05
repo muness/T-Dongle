@@ -35,6 +35,7 @@ static void end_hold(ml_neg_t *n, uint64_t now) {
     if (held > n->max_hold_ms) n->max_hold_ms = held;
     n->holder = 0;
     n->holder_phase = ML_NEG_PHASE_NONE;
+    if (n->observer) n->observer(n->observer_ctx);
 }
 
 /* Effective priority: the class, plus one per aging period spent waiting. */
@@ -103,6 +104,7 @@ ml_neg_result_t ml_neg_request(ml_neg_t *n, uintptr_t key, ml_neg_prio_t prio, m
             n->granted_ms = now;
             n->grants++;
             drop_waiter(n, best);
+            if (n->observer) n->observer(n->observer_ctx);
             result = ML_NEG_GRANTED;
             goto out;
         }
@@ -153,6 +155,20 @@ bool ml_neg_holds(ml_neg_t *n, uintptr_t key) {
     bool held = n->holder == key;
     ml_mutex_unlock(&n->lock);
     return held;
+}
+
+bool ml_neg_busy(ml_neg_t *n) {
+    ml_mutex_lock(&n->lock);
+    bool busy = n->holder != 0;
+    ml_mutex_unlock(&n->lock);
+    return busy;
+}
+
+void ml_neg_set_observer(ml_neg_t *n, void (*observer)(void *ctx), void *ctx) {
+    ml_mutex_lock(&n->lock);
+    n->observer = observer;
+    n->observer_ctx = ctx;
+    ml_mutex_unlock(&n->lock);
 }
 
 void ml_neg_status(ml_neg_t *n, ml_neg_status_t *out) {
