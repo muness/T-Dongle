@@ -29,12 +29,42 @@ You probably want to swap out the suplied versions for optimised C or assembly v
 
 The crypto routines supplied are:
 - BLAKE2S - adapted from the implementation in the RFC itself at https://tools.ietf.org/html/rfc7693
-- CHACHA20 - adapted from code at https://cr.yp.to/streamciphers/timings/estreambench/submissions/salsa20/chacha8/ref/chacha.c
+- CHACHA20 - adapted from code at https://cr.yp.to/streamciphers/timings/estreambench/submissions/salsa20/chacha8/ref/chacha.c; the block function was rewritten for ESP32-S3 (see below)
 - HCHACHA20 - implemented from scratch following description here https://tools.ietf.org/id/draft-arciszewski-xchacha-02.html
-- POLY1305 - taken from https://github.com/floodyberry/poly1305-donna
+- POLY1305 - state handling from https://github.com/floodyberry/poly1305-donna; the arithmetic core was rewritten for ESP32-S3 (5 x 32-bit limbs, branch-free carries, see below)
 - CHACHA20POLY1305 - implemented from scratch following description here https://tools.ietf.org/html/rfc7539
 - AEAD_XChaCha20_Poly1305 - implemented from scratch following description here https://tools.ietf.org/id/draft-arciszewski-xchacha-02.html
 - X25519 - taken from STROBE project at https://sourceforge.net/p/strobe, in addition there is a version optimised for Cortex-M0 processors which requires very little stack taken from https://munacl.cryptojedi.org/curve25519-cortexm0.shtml
+
+### ESP32-S3 performance notes (Xtensa LX7)
+
+The portable code above was 60 instructions per byte on the LX7 (one 1400-byte seal ~ 85k instructions) and
+the compiler-generated Poly1305 carried 25 data-dependent branches per block at `-Os`. The version in
+`src/crypto/refc` is about 43 instructions per byte, branch-free, and works at any alignment:
+
+- ChaCha20: the 16 state words are locals (no pointer-indirect state, no out-of-line round function),
+  rotates are `ssai`+`src`, and the keystream is XORed a word at a time when both buffers are 4-byte aligned.
+- Poly1305: 5 x 32-bit limbs (16 MULL/MULUH pairs per block instead of 25); carries are unsigned compares
+  (`saltu`), never branches. The aligned/unaligned decision is made outside the loops because GCC for
+  Xtensa merges an in-loop word-load/byte-load `if` into the byte-wise arm and silently drops the fast path.
+- Misaligned input (an IP packet at the +14 offset behind an Ethernet header) works and costs ~8% more.
+
+Tools (all in this tree):
+
+- `crypto bench` on the serial console: RFC self-test, then cycles for ChaCha20, Poly1305, seal and open at
+  64/512/1400 bytes plus a misaligned seal/open. `min` is best-of-8 with interrupts masked (the intrinsic cost);
+  `avg` is the mean with interrupts enabled (what the running system pays). A large avg/min gap means
+  preemption or flash-cache eviction; `CONFIG_WG_CRYPTO_IRAM` moves the per-packet code (~3 KB) to IRAM.
+  `CONFIG_WG_CRYPTO_BENCH_BASELINE` adds the original implementation as an A/B column.
+- `tools/xtensa-insn-count/run.sh [-Os|-O2] [len] [offset] [new|legacy|mbedtls]`: compiles the real code with the
+  Espressif GCC for ESP32-S3, executes it on a small Xtensa emulator, checks the output against a host oracle
+  and prints exact executed-instruction counts (plus a documented cycle estimate) and the conditional-branch
+  count of the secret-dependent functions (loop control only is expected).
+- `alternative/tailnet/tests/test_wg_crypto.c` (host, sanitised): RFC 8439 vectors, differential tests against
+  the original code and mbedTLS, tag-failure semantics. `alternative/tailnet/tools/bench-wg-crypto.sh`: host bench.
+
+`src/crypto/legacy/wg_crypto_legacy.c` is the original implementation kept as the test oracle and the bench
+baseline; it is not linked into the firmware unless `CONFIG_WG_CRYPTO_BENCH_BASELINE` is set.
 
 # Integrating into your platform
 

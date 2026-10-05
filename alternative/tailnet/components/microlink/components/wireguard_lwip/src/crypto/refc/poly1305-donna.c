@@ -1,9 +1,12 @@
 // Taken from https://github.com/floodyberry/poly1305-donna - public domain or MIT
 
+#include <stddef.h>
+#include <stdint.h>
+#include "wg_crypto_internal.h"
 #include "poly1305-donna.h"
-#include "poly1305-donna-32.h"
+#include "poly1305-32.h"
 
-void
+WG_CRYPTO_HOT void
 poly1305_update(poly1305_context *ctx, const unsigned char *m, size_t bytes) {
     poly1305_state_internal_t *st = (poly1305_state_internal_t *)ctx;
     size_t i;

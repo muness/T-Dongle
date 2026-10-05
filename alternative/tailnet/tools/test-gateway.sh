@@ -45,6 +45,19 @@ PYCODE
 mbed="$IDF_PATH/components/mbedtls/mbedtls"
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$mbed/include" -I "$mbed/library" tests/test_noise_inplace.c "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_noise_inplace
 build-host/test_noise_inplace
+
+# WireGuard data-path ChaCha20-Poly1305 (wireguard_lwip): RFC 8439 vectors, then thousands of random
+# lengths/alignments/tag failures against the original implementation and mbedTLS, sanitised, at two
+# optimisation levels (the aligned fast paths are only exercised for real by -fsanitize=alignment).
+wg=components/microlink/components/wireguard_lwip/src
+for opt in -O1 -O3; do
+ cc -std=gnu11 $opt -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -Wno-unused-const-variable \
+    -I tests -I "$wg" -I "$wg/crypto" -I "$wg/crypto/refc" -I "$wg/crypto/legacy" -I "$mbed/include" -I "$mbed/library" \
+    tests/test_wg_crypto.c "$wg/crypto/refc/chacha20.c" "$wg/crypto/refc/poly1305-donna.c" "$wg/crypto/refc/chacha20poly1305.c" \
+    "$wg/crypto.c" "$wg/crypto/legacy/wg_crypto_legacy.c" "$wg/crypto/wg_crypto_bench.c" "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" \
+    "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_wg_crypto
+ build-host/test_wg_crypto 8000
+done
 python tools/test-usb-peer.py
 
 python - <<'PYCODE'
