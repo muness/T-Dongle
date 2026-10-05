@@ -126,3 +126,21 @@ Updated 2026-10-05. Epic [muness/T-Dongle#22](https://github.com/muness/T-Dongle
 | F2c | candidate (discovery) | #20 | F2 | #10 |
 | R (acceptance) | candidate | #21 | R | all |
 | F4 | deferred | — | R | N ≥ 4 target |
+
+## Solution Space and Dissent (2026-10-05)
+
+Option C, a staged shared runtime in C plus a crypto track, was selected after `/dissent` returned ADJUST. Details are in [ADR 0013](adr/0013-shared-runtime.md).
+
+| Step | Disposition |
+|---|---|
+| F1a | selected (stop-line PR) |
+| F1/F1b | selected, staged (coord gated) |
+| N1/N1.2 | selected |
+| P2/P3 | selected |
+| D2 | selected (subsumes D3) |
+| D4 crypto (new) | selected |
+| N3 shared entropy/DRBG | selected |
+| N1.1 arena | deferred: largest block stable at 24–31 KB |
+| N3 record caps | deferred |
+| F4 | deferred |
+| F2a, F2b, F2c, D3-as-perf | rejected |
