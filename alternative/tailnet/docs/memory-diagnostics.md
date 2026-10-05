@@ -20,11 +20,11 @@ idf.py -B build-diagnostics -D IDF_TARGET=esp32s3 \
   -D "SDKCONFIG_DEFAULTS=$PWD/alternative/tailnet/sdkconfig.defaults;$PWD/alternative/tailnet/sdkconfig.diagnostics" build size
 ```
 
-Flash with the command `idf.py` prints (app-only keeps NVS and the saved memberships):
+Flash app-only (keeps NVS and the saved memberships). Use DIO at 40 MHz as shown, not the 80 MHz that `idf.py` may print: this board's W25Q128 boot-loops at QIO 80 MHz (`docs/REFERENCE.md`).
 
 ```sh
 python -m esptool --chip esp32s3 -b 460800 --before default_reset --after hard_reset write_flash \
-  --flash_mode dio --flash_size 16MB --flash_freq 80m 0x20000 build-diagnostics/tdongle_unified.bin
+  --flash_mode dio --flash_size 16MB --flash_freq 40m 0x20000 build-diagnostics/tdongle_unified.bin
 ```
 
 Check the profile before trusting a result: the default build must say `# CONFIG_TDONGLE_MEMORY_DIAGNOSTICS is not set` in `sdkconfig.unified`, and a diagnostics image answers `capabilities` with `memory_diagnostics` in its feature list.

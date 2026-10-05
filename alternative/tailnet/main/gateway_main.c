@@ -245,12 +245,14 @@ static void admission_note(const membership_t *m, tdongle_admit_verdict verdict,
 #else
 #define admission_note(m, verdict, free_now, largest, active, sockets) ((void)0)
 #endif
-#ifdef CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE
+#if defined(CONFIG_TDONGLE_MEMORY_DIAGNOSTICS) && defined(CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE)
 /* Diagnostics only: past the budget the guard floor is the sole admission rule, so the
  * cost of a further membership is measured instead of refused. */
+/* "memory guard 0" disables the allocator guard; the override still never starts below this. */
+enum { ADMISSION_OVERRIDE_MIN_FREE = 8192 };
 static bool admission_override(const membership_t *m, size_t free_now) {
     return (int32_t)((uint32_t)(esp_timer_get_time() / 1000) - m->next_attempt_ms) >= 0 &&
-           free_now >= tdongle_heap_guard_floor();
+           free_now >= (tdongle_heap_guard_floor() > ADMISSION_OVERRIDE_MIN_FREE ? tdongle_heap_guard_floor() : ADMISSION_OVERRIDE_MIN_FREE);
 }
 static void admission_failed(membership_t *m) {
     m->next_attempt_ms = (uint32_t)(esp_timer_get_time() / 1000) + 60000;

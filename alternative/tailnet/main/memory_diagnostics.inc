@@ -138,7 +138,10 @@ static void report_attribution(jw_writer *w) {
     report_field(w, "tagged", tagged);
     report_field(w, "synthetic", synthetic);
     /* Wi-Fi, lwIP, USB and the HTTP server are the baseline; difference this between ladder steps. */
-    report_field(w, "unattributed", allocated - tagged - synthetic);
+    /* Tagged bytes can include non-internal memory and synthetic is computed, so never let the unsigned difference wrap. */
+    uint64_t accounted = tagged + synthetic;
+    report_field(w, "unattributed", allocated > accounted ? allocated - accounted : 0);
+    report_field(w, "overattributed", accounted > allocated ? accounted - allocated : 0);
     report_field(w, "members_omitted", omitted);
     jw_raw(w, ",\"members\":[");
     for (unsigned i = 0; i < count; i++) {
@@ -224,7 +227,7 @@ static void report_admission(jw_writer *w) {
     report_begin(w, "admission");
     report_field(w, "guard_floor", tdongle_heap_guard_floor());
     jw_raw(w, ",\"override\":");
-#ifdef CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE
+#if defined(CONFIG_TDONGLE_MEMORY_DIAGNOSTICS) && defined(CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE)
     jw_raw(w, "true");
 #else
     jw_raw(w, "false");

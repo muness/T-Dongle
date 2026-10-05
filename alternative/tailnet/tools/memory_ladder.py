@@ -65,7 +65,16 @@ def summarize(samples):
 
 
 def capture(args, console=None, sleep=time.sleep, clock=time.monotonic):
+    owned = console is None
     console = console or Console.open(args.port)
+    try:
+        return _capture(args, console, sleep, clock)
+    finally:
+        if owned:
+            console.close()
+
+
+def _capture(args, console, sleep, clock):
     console.require_diagnostics()
     out_dir = pathlib.Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

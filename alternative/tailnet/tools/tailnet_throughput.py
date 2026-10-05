@@ -49,9 +49,17 @@ def iperf(args, extra):
     command = ["iperf3", "-c", args.target, "-p", str(args.iperf_port), "-t", str(args.duration), "-J"] + extra
     if args.bind:
         command += ["-B", args.bind]
+    if args.bind_dev:
+        command += ["--bind-dev", args.bind_dev]  # iperf3 >= 3.10, Linux only
+    command += list(args.iperf_arg or [])
     if "-u" in extra:
         command += ["-b", args.udp_rate]
-    done = subprocess.run(command, capture_output=True, text=True, timeout=args.duration + 30)
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=args.duration + 30)
+    except FileNotFoundError:
+        return {"error": "iperf3 is not installed"}
+    except subprocess.TimeoutExpired:
+        return {"error": f"iperf3 did not finish within {args.duration + 30} s (unreachable server, or the tunnel stalled)"}
     try:
         report = json.loads(done.stdout)
     except json.JSONDecodeError:
@@ -68,9 +76,14 @@ def iperf(args, extra):
 
 def icmp_rtt(args):
     command = ["ping", "-c", str(args.rtt_samples), "-i", "0.2", "-W", "1000" if sys.platform == "darwin" else "1"]
-    if args.bind:
+    if args.bind:  # source address
         command += ["-S" if sys.platform == "darwin" else "-I", args.bind]
-    done = subprocess.run(command + [args.target], capture_output=True, text=True, timeout=args.rtt_samples * 2 + 20)
+    elif args.bind_dev:
+        command += ["-b" if sys.platform == "darwin" else "-I", args.bind_dev]
+    try:
+        done = subprocess.run(command + [args.target], capture_output=True, text=True, timeout=args.rtt_samples * 2 + 20)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
     return [float(m) for m in re.findall(r"time[=<]([0-9.]+) ms", done.stdout)]
 
 
@@ -80,10 +93,10 @@ def tcp_rtt(args):
     for _ in range(args.rtt_samples):
         s = socket.socket()
         s.settimeout(2)
-        if args.bind:
-            s.bind((args.bind, 0))
-        started = time.perf_counter()
         try:
+            if args.bind:
+                s.bind((args.bind, 0))
+            started = time.perf_counter()
             s.connect((args.target, args.iperf_port))
             samples.append((time.perf_counter() - started) * 1000)
         except OSError:
@@ -103,13 +116,33 @@ def measure_rtt(args):
 
 
 def device_snapshot(console):
+    """A failed snapshot is recorded as {"error": ...}; it must not throw away the iperf3 results already taken."""
     if not console:
         return None
-    reports = console.json_command("memory")
-    heap = reports["heap"][0]
+    try:
+        heap = console.json_command("memory")["heap"][0]
+        return device_fields(heap)
+    except (ConsoleError, KeyError, IndexError, OSError) as error:
+        return {"error": f"{type(error).__name__}: {error}"[:200]}
+
+
+def device_fields(heap):
     return {"uptime_ms": heap["uptime_ms"], "free": heap["free"], "min": heap["min"], "largest": heap["largest"],
             "drops": heap["drops"], "queue_depth": heap["queue_depth"],
             "owners_peak": {k: v["peak"] for k, v in heap["owners"].items()}}
+
+
+def device_summary(runs):
+    good = [snap for r in runs for snap in (r["before"], r["after"]) if snap and "error" not in snap]
+    if len(good) < 2:
+        return {"error": "fewer than two usable device snapshots", "snapshot_errors": sum(
+            1 for r in runs for snap in (r["before"], r["after"]) if snap and "error" in snap)}
+    first, last = good[0], good[-1]
+    return {"min_free_during": min(snap["free"] for snap in good), "min_since_boot": last["min"],
+            "queue_depth": last["queue_depth"],
+            "drops_delta": {k: last["drops"][k] - first["drops"].get(k, 0) for k in last["drops"]},
+            "reset": any(b["uptime_ms"] < a["uptime_ms"] for a, b in zip(good, good[1:])),
+            "snapshot_errors": sum(1 for r in runs for snap in (r["before"], r["after"]) if snap and "error" in snap)}
 
 
 def run(args, console=None):
@@ -131,14 +164,11 @@ def run(args, console=None):
                          if values else {"n": 0, "errors": [r[name].get("error") for r in runs]})
     summary["rtt"] = {"method": rtt_kind, **(rtt_stats(all_rtt) or {"n": 0})}
     if console:
-        first, last = runs[0]["before"], runs[-1]["after"]
-        summary["device"] = {"min_free_during": min(min(r["before"]["free"], r["after"]["free"]) for r in runs),
-                             "min_since_boot": last["min"], "queue_depth": last["queue_depth"],
-                             "drops_delta": {k: last["drops"][k] - first["drops"][k] for k in last["drops"]},
-                             "reset": last["uptime_ms"] < first["uptime_ms"]}
+        summary["device"] = device_summary(runs)
     return {"meta": {"host_time": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
                      "target": args.target, "path": args.path, "label": args.label, "repeats": args.repeats,
-                     "duration_s": args.duration, "udp_rate": args.udp_rate, "bind": args.bind},
+                     "duration_s": args.duration, "udp_rate": args.udp_rate, "bind": args.bind,
+                     "bind_dev": args.bind_dev, "iperf_arg": args.iperf_arg},
             "runs": runs, "summary": summary}
 
 
@@ -151,7 +181,9 @@ def main(argv=None):
     p.add_argument("--duration", type=int, default=10, help="seconds per iperf3 run")
     p.add_argument("--udp-rate", default="4M", help="offered UDP load, iperf3 -b syntax")
     p.add_argument("--iperf-port", type=int, default=5201)
-    p.add_argument("--bind", help="local address to bind (the host's USB address)")
+    p.add_argument("--bind", help="local source address for iperf3 -B, ping and the RTT connect (the host's USB address, e.g. 192.168.77.2)")
+    p.add_argument("--bind-dev", help="bind to this interface instead (iperf3 --bind-dev on Linux, ping -b on macOS)")
+    p.add_argument("--iperf-arg", action="append", metavar="ARG", help="extra iperf3 argument, repeatable (e.g. --iperf-arg=--cport --iperf-arg=5300)")
     p.add_argument("--rtt", choices=("auto", "icmp", "tcp"), default="auto")
     p.add_argument("--rtt-samples", type=int, default=100)
     p.add_argument("--serial", help="diagnostics-build console port for heap and drop snapshots")
@@ -159,6 +191,10 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.repeats < 3:
         p.error("--repeats must be at least 3")
+    if args.duration < 1 or args.rtt_samples < 1:
+        p.error("--duration and --rtt-samples must be positive")
+    if args.bind and args.bind_dev:
+        p.error("--bind and --bind-dev are alternatives")
     console = None
     if args.serial:
         try:
@@ -167,7 +203,11 @@ def main(argv=None):
         except (ConsoleError, OSError) as error:
             print(f"error: {error}", file=sys.stderr)
             return 1
-    result = run(args, console)
+    try:
+        result = run(args, console)
+    finally:
+        if console:
+            console.close()
     out = pathlib.Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     path = out / f"throughput-{args.path}-{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%SZ}.json"

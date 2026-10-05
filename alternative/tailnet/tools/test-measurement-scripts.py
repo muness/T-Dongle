@@ -129,14 +129,43 @@ def test_throughput():
         n = len(calls)
         return {"error": "refused"} if n == 4 else {"mbit_s": float(n)}
 
+    real_iperf = tailnet_throughput.iperf
     tailnet_throughput.iperf = fake_iperf
     tailnet_throughput.measure_rtt = lambda args: ("tcp_connect", [10.0, 20.0, 30.0])
-    args = argparse.Namespace(target="198.18.0.86", path="derp", label="q4", repeats=3, duration=1, udp_rate="4M", bind=None, iperf_port=5201)
+    args = argparse.Namespace(target="198.18.0.86", path="derp", label="q4", repeats=3, duration=1, udp_rate="4M", bind=None, bind_dev=None, iperf_arg=None, iperf_port=5201)
     result = tailnet_throughput.run(args)
     assert len(result["runs"]) == 3 and calls[:3] == [[], ["-R"], ["-u"]]
     s = result["summary"]
     assert s["tcp_up"]["n"] == 2 and s["tcp_up"]["median_mbit_s"] == 4.0  # the failed run is excluded, not zeroed
     assert s["rtt"]["method"] == "tcp_connect" and s["rtt"]["n"] == 9 and s["rtt"]["p99_ms"] == 30.0
+    # iperf3 command line: source address and passthrough options reach the client; a hung or missing iperf3 is an error entry, not a crash.
+    import subprocess
+    seen = []
+    real_run = subprocess.run
+    def fake_run(command, **kw):
+        seen.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"error": "unable to connect"}), stderr="")
+    subprocess.run = fake_run
+    try:
+        bound = argparse.Namespace(**{**vars(args), "bind": "192.168.77.2", "rtt_samples": 3, "iperf_arg": ["--cport", "5300"], "udp_rate": "4M"})
+        out = real_iperf(bound, ["-u"])
+        assert out == {"error": "unable to connect"}
+        cmd = seen[0]
+        assert cmd[cmd.index("-B") + 1] == "192.168.77.2" and cmd[cmd.index("-c") + 1] == "198.18.0.86" and "--cport" in cmd and "-b" in cmd, cmd
+        def hang(command, **kw): raise subprocess.TimeoutExpired(command, 1)
+        subprocess.run = hang
+        assert "did not finish" in real_iperf(bound, [])["error"] and tailnet_throughput.icmp_rtt(bound) == []
+        def missing(command, **kw): raise FileNotFoundError()
+        subprocess.run = missing
+        assert "not installed" in real_iperf(bound, [])["error"]
+    finally:
+        subprocess.run = real_run
+    # A console that fails mid-run is recorded per snapshot; the run still completes.
+    class Broken:
+        def json_command(self, line): raise dongle_serial.ConsoleError("no done>")
+    assert "error" in tailnet_throughput.device_snapshot(Broken())
+    done = tailnet_throughput.run(args, Broken())
+    assert len(done["runs"]) == 3 and "error" in done["summary"]["device"]
     try:
         with contextlib.redirect_stderr(io.StringIO()):
             tailnet_throughput.main(["198.18.0.86", "--path", "direct", "--repeats", "2"])

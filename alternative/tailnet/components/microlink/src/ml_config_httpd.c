@@ -352,7 +352,7 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *json) {
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, str);
-    free(str);
+    cJSON_free(str);  /* allocated through the cJSON hooks, so freed through them */
     return ESP_OK;
 }
 

@@ -106,8 +106,15 @@ size_t tdongle_memory_ledger_bytes(void){return sizeof(owners)+sizeof(slots)+siz
 void tdongle_memory_drop(tdongle_drop where){if(where<TDONGLE_DROP_COUNT)__atomic_fetch_add(&drop_count[where],1,__ATOMIC_RELAXED);}
 uint32_t tdongle_memory_drops(tdongle_drop where){return where<TDONGLE_DROP_COUNT?__atomic_load_n(&drop_count[where],__ATOMIC_RELAXED):0;}
 uint32_t tdongle_memory_slot_evictions(void){portENTER_CRITICAL(&diag_lock);uint32_t n=eviction_count;portEXIT_CRITICAL(&diag_lock);return n;}
+/* A membership refused again and again (every supervisor tick) must not push the attempts that
+ * matter out of the six-entry ring: a repeated refusal replaces the previous identical one. */
+static bool refusal(uint32_t verdict){return verdict==TDONGLE_ADMIT_REFUSED_BUDGET||verdict==TDONGLE_ADMIT_REFUSED_LARGEST||verdict==TDONGLE_ADMIT_REFUSED_SOCKETS||verdict==TDONGLE_ADMIT_REFUSED_FLOOR;}
 void tdongle_memory_admission_note(const tdongle_admission_record *record){
  portENTER_CRITICAL(&diag_lock);
+ if(admission_used && refusal(record->verdict)){
+  tdongle_admission_record *last=&admissions[(admission_next+TDONGLE_MEMORY_ADMISSIONS-1)%TDONGLE_MEMORY_ADMISSIONS];
+  if(last->member_id==record->member_id && last->verdict==record->verdict){*last=*record;portEXIT_CRITICAL(&diag_lock);return;}
+ }
  admissions[admission_next]=*record;admission_next=(admission_next+1)%TDONGLE_MEMORY_ADMISSIONS;
  if(admission_used<TDONGLE_MEMORY_ADMISSIONS)admission_used++;
  portEXIT_CRITICAL(&diag_lock);

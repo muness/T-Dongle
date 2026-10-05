@@ -335,6 +335,14 @@ esp_err_t microlink_start(microlink_t *ml) {
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Diagnostics guard (always true in a release build): decide before any state change, socket or
+     * task exists, so a refusal leaves the instance idle and a later microlink_start can retry. */
+    if (!tdongle_memory_start_allowed(ML_TASK_NET_IO_STACK + ML_TASK_DERP_TX_STACK +
+                                      ML_TASK_COORD_STACK + ML_TASK_WG_MGR_STACK)) {
+        ESP_LOGE(TAG, "Not enough heap above the diagnostics guard floor for the membership tasks");
+        return ESP_ERR_NO_MEM;
+    }
+
     ml->state = ML_STATE_WIFI_WAIT;
 
     /* Set WiFi TX power if configured */
@@ -398,13 +406,8 @@ skip_bsd_socket:
     ;
 #endif
 
-    /* Create tasks. The diagnostics guard turns a stack that would exhaust the heap into a clean failure. */
+    /* Create tasks. */
     BaseType_t ret;
-    if (!tdongle_memory_start_allowed(ML_TASK_NET_IO_STACK + ML_TASK_DERP_TX_STACK +
-                                      ML_TASK_COORD_STACK + ML_TASK_WG_MGR_STACK)) {
-        ESP_LOGE(TAG, "Not enough heap above the diagnostics guard floor for the membership tasks");
-        return ESP_ERR_NO_MEM;
-    }
 
     ret = xTaskCreatePinnedToCore(ml_net_io_task, "ml_net_io", ML_TASK_NET_IO_STACK,
                                    ml, ML_TASK_NET_IO_PRIO, &ml->net_io_task, ML_TASK_NET_IO_CORE);

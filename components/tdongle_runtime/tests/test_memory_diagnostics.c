@@ -113,6 +113,14 @@ static void admissions_ring(void){
  assert(tdongle_memory_admission_count()==TDONGLE_MEMORY_ADMISSIONS);
  assert(tdongle_memory_admission_get(0).member_id==4 && tdongle_memory_admission_get(TDONGLE_MEMORY_ADMISSIONS-1).member_id==TDONGLE_MEMORY_ADMISSIONS+3);
  assert(tdongle_memory_admission_get(TDONGLE_MEMORY_ADMISSIONS).uptime_ms==0);
+ /* A refusal repeated every supervisor tick replaces itself instead of evicting real attempts. */
+ reset();
+ tdongle_admission_record ok={.member_id=1,.verdict=TDONGLE_ADMIT_OVERRIDE},no={.member_id=2,.verdict=TDONGLE_ADMIT_REFUSED_BUDGET};
+ tdongle_memory_admission_note(&ok);
+ for(unsigned i=0;i<50;i++){no.free_bytes=i;tdongle_memory_admission_note(&no);}
+ assert(tdongle_memory_admission_count()==2 && tdongle_memory_admission_get(0).member_id==1 && tdongle_memory_admission_get(1).free_bytes==49);
+ no.member_id=3;tdongle_memory_admission_note(&no);ok.member_id=2;tdongle_memory_admission_note(&ok);tdongle_memory_admission_note(&no);
+ assert(tdongle_memory_admission_count()==5);
 }
 int main(void){
  /* Release-size guard: the diagnostic state is the whole static overhead of the profile. */
