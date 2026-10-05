@@ -51,6 +51,8 @@ All reports are one JSON line each, plain ASCII, with `"schema":1`. They contain
 | `members` | one `phases` per membership slot (up to 3), then `admission` |
 | `memory guard <0-65536>` | `guard` after setting the floor |
 | `memory bench` | `bench` |
+| `route` | `route`: the router's cumulative counters (forwarding, tunnel->USB reject reasons, `usb_tx`) |
+| `inbound` | `inbound`: every inbound drop point from the UDP socket to the USB transmit, cumulative (below) |
 
 ### `heap`
 
@@ -114,6 +116,10 @@ The effective settings of this build, read from the preprocessed lwIP headers of
 | Sockets | 20 | |
 
 The firmware prints the same values (`lwip` line) so a result file records the build it came from.
+
+### `inbound`
+
+Cumulative counters (never reset; subtract two samples) for every place an inbound datagram can be lost or refused between the Wi-Fi interface and the USB host, plus the ones that count it arriving, so each hop can be reconciled against the next. Fields: `udp_recvmbox`, `drain_cap`, `wg_rx_queue_depth`, `replay_window` (configuration); `lwip` {`udp_recv`, `udp_drop`, `udp_memerr`, `udp_err`}; `ml` (net_io, the queues, wg_mgr: `ml_rx_stats.h`); `wg` (the WireGuard receive path, one terminal counter per datagram: `wireguard_stats.h`); `route` (tunnel to USB reject reasons, `forwarded_in`, `usb_tx`, `usb_tx_err`, `tx_fail`). lwIP counts a UDP datagram in `udp_recv` before the socket mailbox and frees it silently when the mailbox is full, so `udp_recv - ml.udp_rx` is the mailbox loss. `tools/inbound_accounting.py` takes two snapshots around an `iperf3 -u -R` run and prints the whole chain, the counted drops and what is left unattributed. docs/adr/0019-inbound-loss.md explains each counter.
 
 ### `bench`
 

@@ -13,6 +13,7 @@ import dongle_serial  # noqa: E402
 import memory_ladder  # noqa: E402
 import tailnet_throughput  # noqa: E402
 import cpu_profile  # noqa: E402
+import inbound_accounting  # noqa: E402
 
 OWNERS = ["other", "tls", "control", "map", "peer", "wg", "packet", "context"]
 
@@ -209,7 +210,39 @@ def test_cpu_profile():
     except dongle_serial.ConsoleError:
         pass
 
+def test_inbound_accounting():
+    from inbound_accounting import ML_LOSS, WG_LOSS, ROUTE_LOSS, USB_LOSS
+    def snap(ml_extra=None, wg_extra=None, rt_extra=None, usb_extra=None, base=0):
+        ml = {n: base for n in ["udp_rx", "udp_wg", "wg_in", "wg_to_wireguardif"] + ML_LOSS}
+        wg = {n: base for n in ["rx_data", "rx_delivered"] + WG_LOSS}
+        rt = {n: base for n in ["forwarded_in", "usb_tx"] + ROUTE_LOSS}
+        usb = {n: base for n in ["tx_sent"] + USB_LOSS}
+        ml.update(ml_extra or {}); wg.update(wg_extra or {}); rt.update(rt_extra or {}); usb.update(usb_extra or {})
+        return {"inbound": {"lwip": {"udp_recv": ml["udp_rx"] + (ml_extra or {}).get("_mailbox", 0), "udp_drop": 0, "udp_memerr": 0, "udp_err": 0},
+                            "ml": {k: v for k, v in ml.items() if k != "_mailbox"}, "wg": wg, "route": rt}, "usb": usb}
+    before = snap()
+    # The pre-fix board run: 3,133 sent, 3,228 arrived at lwIP (95 of them control), 2,927 reached USB, 2,905 received. Here the
+    # mailbox ate 221 of the WireGuard datagrams and nothing else counted anything.
+    after = snap({"udp_rx": 3007, "_mailbox": 221, "udp_wg": 3007 - 95, "wg_in": 2912, "wg_to_wireguardif": 2912},
+                 {"rx_data": 2912, "rx_delivered": 2912}, {"forwarded_in": 2912, "usb_tx": 2927}, {"tx_sent": 2927})
+    rows, summary = inbound_accounting.reconcile(before, after, 3133, 2905)
+    assert summary["mailbox_loss"] == 221 and summary["counted_total"] == 0 and summary["end_to_end_loss"] == 228
+    assert summary["unattributed"] == 7 and summary["loss_pct"] == 7.28           # 228 - 221: only the control/DNS noise is left
+    text = inbound_accounting.render(rows, summary)
+    assert "mailbox loss" in text and "unattributed 7" in text
+    # After the fix: every counted drop is named, the mailbox loss is gone.
+    after = snap({"udp_rx": 3228, "udp_wg": 3133, "q_wg_full": 4, "wg_in": 3129, "wg_to_wireguardif": 3129},
+                 {"rx_data": 3129, "rx_delivered": 3120, "rx_replay_old": 9}, {"forwarded_in": 3120, "usb_tx": 3125, "reply_no_flow": 2}, {"tx_sent": 3125, "tx_dropped_full": 1})
+    rows, summary = inbound_accounting.reconcile(before, after, 3133, 3120)
+    assert summary["mailbox_loss"] == 0 and summary["counted_losses"] == {"ml.q_wg_full": 4, "wg.rx_replay_old": 9, "route.reply_no_flow": 2, "usb.tx_dropped_full": 1}
+    assert summary["counted_total"] == 16 and summary["end_to_end_loss"] == 13 and summary["unattributed"] == -3
+    assert inbound_accounting.reconcile(before, after)[1].get("end_to_end_loss") is None   # sent/received are optional
+    class Link:
+        def json_command(self, line):
+            return {"inbound": [after["inbound"]]} if line == "inbound" else {"usb": [after["usb"]], "heap": [{"uptime_ms": 1, "free": 2, "min": 3, "largest": 4}]}
+    assert inbound_accounting.snapshot(Link())["usb"]["tx_sent"] == 3125
 
-for test in (test_console, test_capture, test_compare, test_throughput, test_cpu_profile):
+
+for test in (test_console, test_capture, test_compare, test_throughput, test_cpu_profile, test_inbound_accounting):
     test()
-print("Measurement scripts: serial framing, ladder capture/reset detection, per-task CPU shares, marginal-cost compare, throughput statistics passed.")
+print("Measurement scripts: serial framing, ladder capture/reset detection, per-task CPU shares, marginal-cost compare, throughput statistics, inbound accounting passed.")

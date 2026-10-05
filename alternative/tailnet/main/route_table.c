@@ -199,20 +199,30 @@ bool rt_flow_create(rt_t *t, const rt_flow_t *key, uint32_t generation, int64_t 
     return ok;
 }
 
-bool rt_flow_in(rt_t *t, uint32_t id, uint32_t peer, uint16_t remote, uint16_t mapped, uint8_t proto, uint32_t generation, int64_t now, rt_flow_t *out) {
-    bool ok = false;
+rt_flow_in_result rt_flow_in_why(rt_t *t, uint32_t id, uint32_t peer, uint16_t remote, uint16_t mapped, uint8_t proto, uint32_t generation, int64_t now, rt_flow_t *out) {
+    rt_flow_in_result result = RT_FLOW_IN_OK;
     if (mapped < RT_MAPPED_BASE || mapped >= RT_MAPPED_BASE + RT_FLOWS * RT_MAPPED_GENERATIONS)
-        return false;
+        return RT_FLOW_IN_RANGE;
     rt_lock();
     rt_flow_slot *f = &t->flow[(mapped - RT_MAPPED_BASE) & (RT_FLOWS - 1)];
-    if (f->used && f->generation == generation && f->flow.id == id && f->flow.peer == peer && f->flow.remote == remote && f->flow.mapped == mapped &&
-        f->flow.proto == proto && now - f->touched < RT_FLOW_IDLE_US) {
+    if (!f->used)
+        result = RT_FLOW_IN_NO_FLOW;
+    else if (f->generation != generation)
+        result = RT_FLOW_IN_GENERATION;
+    else if (!(f->flow.id == id && f->flow.peer == peer && f->flow.remote == remote && f->flow.mapped == mapped && f->flow.proto == proto))
+        result = RT_FLOW_IN_OWNER;
+    else if (!(now - f->touched < RT_FLOW_IDLE_US))
+        result = RT_FLOW_IN_IDLE;
+    else {
         f->touched = now;
         *out = f->flow;
-        ok = true;
     }
     rt_unlock();
-    return ok;
+    return result;
+}
+
+bool rt_flow_in(rt_t *t, uint32_t id, uint32_t peer, uint16_t remote, uint16_t mapped, uint8_t proto, uint32_t generation, int64_t now, rt_flow_t *out) {
+    return rt_flow_in_why(t, id, peer, remote, mapped, proto, generation, now, out) == RT_FLOW_IN_OK;
 }
 
 unsigned rt_flows_forget(rt_t *t, uint32_t id) {

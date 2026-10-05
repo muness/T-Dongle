@@ -6,7 +6,7 @@
 
 int main(void) {
     ml_adm_sizes_t s = {.context = 10256, .coord_stack = 8704, .task_tcb = 340, .queues = 1500, .wg_device = 228,
-                        .wg_slot = 904, .shared_stacks = 7168 + 7680 + 8192, .shared_tasks = 3, .route_queue_min = 2800};
+                        .wg_slot = 1096, .shared_stacks = 7168 + 7680 + 8192, .shared_tasks = 3, .route_queue_min = 2800};
     ml_adm_budget_t first, next;
     ml_adm_budget(&s, false, &first);
     ml_adm_budget(&s, true, &next);
@@ -17,7 +17,7 @@ int main(void) {
     assert(first.negotiation == ML_ADM_NEG_PEAK_BYTES && next.negotiation == first.negotiation);
     assert(next.member_steady == next.member_start + next.member_growth);
     assert(next.member_start == 10256 + 8704 + 340 + 1500);
-    assert(next.member_growth == 228 + 4 * 904 + ML_ADM_TLS_LIVE_BYTES + ML_ADM_LWIP_BYTES + ML_ADM_OTHER_BYTES + 2 * 1464);
+    assert(next.member_growth == 228 + 4 * 1096 + ML_ADM_TLS_LIVE_BYTES + ML_ADM_LWIP_BYTES + ML_ADM_OTHER_BYTES + 2 * 1464);
     assert(next.required == next.member_steady + 16000 + 16384 + 2800 && next.router == 2800);
     /* Decisions: budget first, then the contiguous block. */
     assert(ml_adm_decide(&next, next.required, 24000) == ML_ADM_OK);
@@ -30,14 +30,14 @@ int main(void) {
            first.required, next.required, next.member_steady, next.negotiation, next.recovery);
     /* Peer-slot allocation guard: a slot may not be the allocation that takes the largest free block under the TLS floor. */
     const size_t floor = ML_ADM_TLS_BLOCK_FLOOR;
-    assert(ml_adm_slot_alloc_ok(24576, 24576 - 904, floor));            /* the measured steady block, one slot out of it: fine */
+    assert(ml_adm_slot_alloc_ok(24576, 24576 - 1096, floor));            /* the measured steady block, one slot out of it: fine */
     assert(ml_adm_slot_alloc_ok(24576, 24576, floor));                   /* carved from a small hole: no effect */
-    assert(!ml_adm_slot_alloc_ok(floor + 100, floor + 100 - 904, floor)); /* this slot is the one that breaks the floor */
+    assert(!ml_adm_slot_alloc_ok(floor + 100, floor + 100 - 1096, floor)); /* this slot is the one that breaks the floor */
     assert(!ml_adm_slot_alloc_ok(floor, floor - 1, floor));
-    assert(ml_adm_slot_alloc_ok(floor - 1, floor - 904, floor));         /* already below: not this allocation's doing */
+    assert(ml_adm_slot_alloc_ok(floor - 1, floor - 1096, floor));         /* already below: not this allocation's doing */
     /* Why the pool is not static: 12 slots resident for ever against the four admission charges per membership. */
     const size_t static_extra = (12 - ML_ADM_PEER_SLOTS) * s.wg_slot;
-    assert(static_extra == 7232 && static_extra > 576);                  /* 576 B = the measured margin of the largest block */
+    assert(static_extra == 8 * 1096 && static_extra > 576);                  /* 576 B = the measured margin of the largest block */
     printf("peer pool: a static pool would take %zu B more than the %d slots charged; free after boot ~107,000 B leaves the first membership %zd B of margin instead of %zd B\n",
            static_extra, ML_ADM_PEER_SLOTS, (ssize_t)107000 - (ssize_t)first.required - (ssize_t)static_extra,
            (ssize_t)107000 - (ssize_t)first.required);

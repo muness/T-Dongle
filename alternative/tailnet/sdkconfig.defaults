@@ -34,6 +34,12 @@ CONFIG_LWIP_TCPIP_TASK_STACK_SIZE=8192
 CONFIG_LWIP_TCP_WND_DEFAULT=11520
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=11520
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=10
+# UDP receive mailbox, per socket: 6 -> 10. lwIP frees a datagram it cannot post to a full mailbox without counting it
+# anywhere, which is where the silent ~7 % loss of tailnet UDP came from (docs/adr/0019-inbound-loss.md). The main fix is
+# that net_io now empties a ready socket (ml_net_io_drain.h); this only widens the burst that can arrive between two net_io
+# runs (net_io is priority 7 on the core of the Wi-Fi and tcpip tasks). 4 B per slot per UDP socket, but a queued datagram
+# pins its Wi-Fi RX buffer until net_io reads it, so it stays small: 10 of the 22 Wi-Fi RX buffers at the very worst.
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=10
 CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y
 CONFIG_MBEDTLS_CHACHAPOLY_C=y

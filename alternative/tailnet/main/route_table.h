@@ -71,12 +71,18 @@ enum {
     RT_STAT_FORWARDED_OUT, RT_STAT_FORWARDED_IN, RT_STAT_BAD_PACKET, RT_STAT_ALIAS_MISS, RT_STAT_ALIAS_UNKNOWN,
     RT_STAT_ALIAS_FILL, RT_STAT_FLOW_FULL, RT_STAT_NO_MEMBER, RT_STAT_MEMBER_DOWN, RT_STAT_REPLY_NOMATCH,
     RT_STAT_QUEUE_FULL, RT_STAT_OVERSIZE_ICMP, RT_STAT_OVERSIZE_DROP, RT_STAT_ICMP_SUPPRESSED,
-    RT_STAT_TUNNEL_REJECT, RT_STAT_TX_FAIL, RT_STAT_HELD, RT_STAT_HELD_RELEASED, RT_STAT_HELD_DROPPED, RT_STAT_COUNT
+    RT_STAT_TUNNEL_REJECT, RT_STAT_TX_FAIL, RT_STAT_HELD, RT_STAT_HELD_RELEASED, RT_STAT_HELD_DROPPED,
+    /* Tunnel -> USB rejects, one counter per reason (REPLY_NOMATCH stays as their sum for the flow/membership reasons). */
+    RT_STAT_TUNNEL_MALFORMED, RT_STAT_TUNNEL_NOMEM, RT_STAT_REPLY_NO_MEMBER, RT_STAT_REPLY_NOT_US,
+    RT_STAT_REPLY_FLOW_RANGE, RT_STAT_REPLY_NO_FLOW, RT_STAT_REPLY_GENERATION, RT_STAT_REPLY_OWNER, RT_STAT_REPLY_IDLE,
+    /* usb_tx (the USB netif's transmit): every frame lwIP hands it, and those it refused (ring full, link down, bad length). */
+    RT_STAT_USB_TX, RT_STAT_USB_TX_ERR, RT_STAT_COUNT
 };
 static inline const char *rt_stat_name(unsigned which) {
     static const char *const names[RT_STAT_COUNT] = {
         "forwarded_out", "forwarded_in", "bad_packet", "alias_miss", "alias_unknown", "alias_fill", "flow_full", "no_member",
-        "member_down", "reply_nomatch", "queue_full", "oversize_icmp", "oversize_drop", "icmp_suppressed", "tunnel_reject", "tx_fail", "held", "held_released", "held_dropped"};
+        "member_down", "reply_nomatch", "queue_full", "oversize_icmp", "oversize_drop", "icmp_suppressed", "tunnel_reject", "tx_fail", "held", "held_released", "held_dropped",
+        "tunnel_malformed", "tunnel_nomem", "reply_no_member", "reply_not_us", "reply_flow_range", "reply_no_flow", "reply_generation", "reply_owner", "reply_idle", "usb_tx", "usb_tx_err"};
     return which < RT_STAT_COUNT ? names[which] : "";
 }
 extern atomic_uint rt_stats[RT_STAT_COUNT];
@@ -141,6 +147,9 @@ void rt_flow_touch(rt_t *t, const rt_flow_t *flow, uint32_t generation, int64_t 
 bool rt_flow_create(rt_t *t, const rt_flow_t *key, uint32_t generation, int64_t now, rt_flow_t *out);
 /* Tunnel reply from `peer` for membership `id`: exact tuple or nothing. */
 bool rt_flow_in(rt_t *t, uint32_t id, uint32_t peer, uint16_t remote, uint16_t mapped, uint8_t proto, uint32_t generation, int64_t now, rt_flow_t *out);
+/* The same lookup, saying why it refused (checked in this order). RT_FLOW_IN_OK is 0. */
+typedef enum { RT_FLOW_IN_OK = 0, RT_FLOW_IN_RANGE, RT_FLOW_IN_NO_FLOW, RT_FLOW_IN_GENERATION, RT_FLOW_IN_OWNER, RT_FLOW_IN_IDLE } rt_flow_in_result;
+rt_flow_in_result rt_flow_in_why(rt_t *t, uint32_t id, uint32_t peer, uint16_t remote, uint16_t mapped, uint8_t proto, uint32_t generation, int64_t now, rt_flow_t *out);
 unsigned rt_flows_forget(rt_t *t, uint32_t id);
 
 /* Quiescent-state RCU. Readers are wait-free. rt_rcu_synchronize returns once

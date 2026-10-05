@@ -15,6 +15,7 @@
 
 #include "microlink_internal.h"
 #include "ml_runtime.h"
+#include "ml_net_io_drain.h"
 #include "esp_log.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -22,6 +23,8 @@
 #include <errno.h>
 
 static const char *TAG = "ml_net_io";
+
+ml_rx_stats_t ml_rx_stats;   /* zero-initialised; see ml_rx_stats.h */
 
 /* DISCO magic bytes: "TS" + sparkles emoji UTF-8 */
 static const uint8_t DISCO_MAGIC[6] = { 'T', 'S', 0xf0, 0x9f, 0x92, 0xac };
@@ -50,7 +53,8 @@ static pkt_type_t classify_packet(const uint8_t *data, size_t len) {
     return PKT_UNKNOWN;
 }
 
-static void route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
+/* Takes ownership of `data`. Returns true when a queue the wg_mgr task reads gained a packet (the caller wakes it, once per drain). */
+static bool route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
                               uint32_t src_ip, uint16_t src_port) {
     pkt_type_t type = classify_packet(data, len);
 
@@ -75,19 +79,25 @@ static void route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
     bool wake_wg = false;
     switch (type) {
     case PKT_STUN:
+        ML_RX_STAT(udp_stun);
         if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
+            ML_RX_STAT(q_stun_full);
             tdongle_memory_drop(TDONGLE_DROP_NET_STUN_FULL);
             tdongle_heap_free(TDONGLE_OWNER_PACKET, data);  /* Queue full, drop */
         }
         break;
     case PKT_DISCO:
+        ML_RX_STAT(udp_disco);
         if (xQueueSend(ml->disco_rx_queue, &pkt, 0) != pdTRUE) {
+            ML_RX_STAT(q_disco_full);
             tdongle_memory_drop(TDONGLE_DROP_NET_DISCO_FULL);
             tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
         } else wake_wg = true;
         break;
     case PKT_WIREGUARD:
+        ML_RX_STAT(udp_wg);
         if (xQueueSend(ml->wg_rx_queue, &pkt, 0) != pdTRUE) {
+            ML_RX_STAT(q_wg_full);
             static uint32_t wg_rx_drops = 0;
             if ((++wg_rx_drops & 0x1F) == 1)
                 ESP_LOGW(TAG, "WG-RX(direct) queue full: dropped %lu",
@@ -97,10 +107,11 @@ static void route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
         } else wake_wg = true;
         break;
     default:
+        ML_RX_STAT(udp_unclassified);
         tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
         break;
     }
-    if (wake_wg) ml_rt_wake(ML_RT_TASK_WG_MGR);   /* event driven: a packet arrived, the manager runs now */
+    return wake_wg;
 }
 
 /* ---------------------------------------------------------------------------
@@ -135,63 +146,76 @@ typedef struct {
     uint8_t *scratch;
 } drain_t;
 
-static void queue_stun(microlink_t *ml, const uint8_t *scratch, int n, uint32_t src_ip, uint16_t src_port) {
-    uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(n));
-    if (!pkt_data) return;
-    memcpy(pkt_data, scratch, n);
-    ml_rx_packet_t pkt = {
-        .data = pkt_data,
-        .len = n,
-        .src_ip = src_ip,
-        .src_port = src_port,
-        .via_derp = false,
-    };
-    if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
-        tdongle_memory_drop(TDONGLE_DROP_NET_STUN_FULL);
-        tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt_data);
+/* One socket being drained: its family decides the sockaddr, the sink says where a datagram goes. */
+typedef struct {
+    microlink_t *ml;
+    int fd;
+    bool v6;
+    bool stun;      /* STUN socket: straight to the STUN queue; otherwise classify (DISCO socket, which also carries WireGuard) */
+    bool wake;      /* a queue the wg_mgr task reads gained a packet */
+} sock_drain_t;
+
+static int sock_recv(void *ctx, uint8_t *buf, size_t cap, uint32_t *src_ip, uint16_t *src_port) {
+    sock_drain_t *s = ctx;
+    int n;
+    if (s->v6) {
+        struct sockaddr_in6 a6;
+        socklen_t len = sizeof(a6);
+        n = ml_recvfrom(s->fd, buf, cap, MSG_DONTWAIT, (struct sockaddr *)&a6, &len);
+        *src_ip = 0;   /* IPv6: the parser reads the address from the payload (parse_response_ipv6) */
+        *src_port = ntohs(a6.sin6_port);
+    } else {
+        struct sockaddr_in a4;
+        socklen_t len = sizeof(a4);
+        n = ml_recvfrom(s->fd, buf, cap, MSG_DONTWAIT, (struct sockaddr *)&a4, &len);
+        *src_ip = ntohl(a4.sin_addr.s_addr);
+        *src_port = ntohs(a4.sin_port);
     }
+    if (n >= 0) return n;
+    return (errno == EAGAIN || errno == EWOULDBLOCK) ? ML_DRAIN_EMPTY : ML_DRAIN_ERROR;
+}
+
+static void sock_sink(void *ctx, const uint8_t *data, int n, uint32_t src_ip, uint16_t src_port) {
+    sock_drain_t *s = ctx;
+    uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(n));
+    if (!pkt_data) {
+        ML_RX_STAT(udp_alloc_fail);
+        return;
+    }
+    memcpy(pkt_data, data, n);
+    if (s->stun) {
+        ML_RX_STAT(udp_stun);
+        ml_rx_packet_t pkt = {
+            .data = pkt_data,
+            .len = n,
+            .src_ip = src_ip,
+            .src_port = src_port,
+            .via_derp = false,
+        };
+        if (xQueueSend(s->ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
+            ML_RX_STAT(q_stun_full);
+            tdongle_memory_drop(TDONGLE_DROP_NET_STUN_FULL);
+            tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt_data);
+        }
+    } else if (route_udp_packet(s->ml, pkt_data, n, src_ip, src_port)) {
+        s->wake = true;
+    }
+}
+
+static void drain_one(microlink_t *ml, int fd, bool v6, bool stun, uint8_t *scratch) {
+    sock_drain_t s = { .ml = ml, .fd = fd, .v6 = v6, .stun = stun, .wake = false };
+    ml_net_io_drain(sock_recv, sock_sink, &s, scratch, ML_NET_IO_SCRATCH_BYTES, ML_NET_IO_DRAIN_CAP);
+    if (s.wake) ml_rt_wake(ML_RT_TASK_WG_MGR);   /* event driven: packets arrived, the manager runs now (once per drain, not per packet) */
 }
 
 static void drain_ready(void *ctx, void *arg) {
     microlink_t *ml = ctx;
     drain_t *d = arg;
-    uint8_t *udp_buf = d->scratch;
 
-    /* DISCO UDP socket */
-    if (ml->disco_sock4 >= 0 && FD_ISSET(ml->disco_sock4, d->ready)) {
-        struct sockaddr_in src_addr;
-        socklen_t addr_len = sizeof(src_addr);
-        int n = ml_recvfrom(ml->disco_sock4, udp_buf, ML_NET_IO_SCRATCH_BYTES, 0,
-                            (struct sockaddr *)&src_addr, &addr_len);
-        if (n > 0) {
-            uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(n));
-            if (pkt_data) {
-                memcpy(pkt_data, udp_buf, n);
-                uint32_t src_ip = ntohl(src_addr.sin_addr.s_addr);
-                uint16_t src_port = ntohs(src_addr.sin_port);
-                route_udp_packet(ml, pkt_data, n, src_ip, src_port);
-            }
-        }
-    }
-
-    /* STUN socket (IPv4) */
-    if (ml->stun_sock >= 0 && FD_ISSET(ml->stun_sock, d->ready)) {
-        struct sockaddr_in src_addr;
-        socklen_t addr_len = sizeof(src_addr);
-        int n = ml_recvfrom(ml->stun_sock, udp_buf, ML_NET_IO_SCRATCH_BYTES, 0,
-                            (struct sockaddr *)&src_addr, &addr_len);
-        if (n > 0) queue_stun(ml, udp_buf, n, ntohl(src_addr.sin_addr.s_addr), ntohs(src_addr.sin_port));
-    }
-
-    /* STUN socket (IPv6) */
-    if (ml->stun_sock6 >= 0 && FD_ISSET(ml->stun_sock6, d->ready)) {
-        struct sockaddr_in6 src_addr6;
-        socklen_t addr_len = sizeof(src_addr6);
-        int n = ml_recvfrom(ml->stun_sock6, udp_buf, ML_NET_IO_SCRATCH_BYTES, 0,
-                            (struct sockaddr *)&src_addr6, &addr_len);
-        /* IPv6: src_ip 0, the parser reads the address from the payload (parse_response_ipv6) */
-        if (n > 0) queue_stun(ml, udp_buf, n, 0, ntohs(src_addr6.sin6_port));
-    }
+    /* DISCO/WireGuard UDP socket, then the STUN sockets (IPv4, IPv6) */
+    if (ml->disco_sock4 >= 0 && FD_ISSET(ml->disco_sock4, d->ready)) drain_one(ml, ml->disco_sock4, false, false, d->scratch);
+    if (ml->stun_sock >= 0 && FD_ISSET(ml->stun_sock, d->ready)) drain_one(ml, ml->stun_sock, false, true, d->scratch);
+    if (ml->stun_sock6 >= 0 && FD_ISSET(ml->stun_sock6, d->ready)) drain_one(ml, ml->stun_sock6, true, true, d->scratch);
 }
 
 static unsigned consecutive_badf;      /* only the net_io task reads or writes it */
