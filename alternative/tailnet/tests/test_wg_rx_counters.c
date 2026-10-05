@@ -376,11 +376,11 @@ static void t_bad_length(bool split) {
     size_t n = seal(dg, LOCAL_INDEX, 0, ip, 40);
     snap(); deliver(dg, n, split, 1);
     EXPECT_ONLY(rx_bad_length);
-    ip_packet(ip, PEER_SRC, 40, 4, 0);                                    /* total length 40, padded to 48: delivered, padding retained */
+    ip_packet(ip, PEER_SRC, 40, 4, 0);                                    /* total length 40, padded to 48: delivered, the padding trimmed off (the router sees exactly the IP packet) */
     n = seal(dg, LOCAL_INDEX, 1, ip, 40);
     snap(); deliver(dg, n, split, 1);
     EXPECT_ONLY(rx_delivered);
-    assert(last_input_len == 48);
+    assert(last_input_len == 40);
 }
 static void t_input_fail(bool split) {
     input_result = ERR_MEM;                                               /* the router refuses; ASan proves the pbuf is freed exactly once */
@@ -465,7 +465,7 @@ static void t_identity(void) {
         terminal_sum_check();
         for (unsigned i = 0; i < WG_RXS_COUNT; i++) {
             bool unreachable_here = i == WG_RXS_rx_bad_type || i == WG_RXS_rx_expired || i == WG_RXS_rx_keypair_unusable || i == WG_RXS_rx_session_gone ||
-                                    false;
+                                    i == WG_RXS_rx_ipv6_unsupported || i == WG_RXS_rx_allowed_ip6 /* the IPv4-only lwIP fake compiles the IPv6 branch out: tests/test_wg_ipv6_rx.c */;
             if (!unreachable_here && wireguard_rx_stat_get(i) == 0) { fprintf(stderr, "mixed run never reached %s (split=%d)\n", wireguard_rx_stat_name(i), split); abort(); }
         }
         rig_down();

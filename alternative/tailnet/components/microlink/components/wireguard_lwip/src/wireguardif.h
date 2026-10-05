@@ -218,6 +218,29 @@ void wireguardif_periodic_end(struct netif *netif);
 int wireguardif_rx_begin(struct netif *netif, struct pbuf *p, const ip_addr_t *addr, u16_t port, struct wireguard_rx_job *job);
 void wireguardif_rx_complete(struct netif *netif, const ip_addr_t *addr, u16_t port, struct wireguard_rx_job *job);
 
+// Batched, in-place form (the wg_mgr task). Same begin / decrypt / complete steps and locking, with three differences:
+//  * WIREGUARDIF_RX_INPLACE: `p` is exclusively owned, writable and one segment; the plaintext replaces the ciphertext inside it (no
+//    second buffer: the ChaCha20-Poly1305 open verifies the tag before it writes anything) and `p` itself becomes the packet that is
+//    delivered. Without the flag a separate plaintext pbuf is allocated, as in wireguardif_rx_begin.
+//  * wireguardif_rx_complete_deferred does everything wireguardif_rx_complete does EXCEPT the call to netif->input: an accepted
+//    packet is left in job->deliver, trimmed to its inner IP length (the 16 B padding is gone), counted by wireguardif_rx_deliver.
+//  * wireguardif_rx_deliver hands job[i].deliver of the first `n` jobs, in order, to the router: through the batch callback set by
+//    wireguardif_set_rx_batch if there is one, else netif->input one by one. It needs NO lock (the router takes the core lock itself
+//    for the one step that needs it). Counts rx_delivered / rx_input_fail per packet, frees what the router refused, returns the
+//    number delivered.
+// The decision cryptokey routing makes about a decrypted packet, on raw bytes (exported so it is tested without a pbuf):
+// bad version/short header, source not in the peer's AllowedIPs of its family (IPv4: ALLOWED_IP, IPv6: ALLOWED_IP6), length field wrong, or a well formed
+// packet of a version this gateway does not deliver. On OK, *ip_len is the inner packet's own length.
+typedef enum { WG_INNER_OK = 0, WG_INNER_BAD_IP, WG_INNER_ALLOWED_IP, WG_INNER_ALLOWED_IP6, WG_INNER_BAD_LENGTH, WG_INNER_IPV6_UNSUPPORTED } wg_inner_verdict_t;
+wg_inner_verdict_t wireguardif_inner_check(const struct wireguard_peer *peer, bool ipv6_ok, const uint8_t *pkt, size_t len, size_t *ip_len);
+#define WIREGUARDIF_RX_INPLACE 1u
+int wireguardif_rx_begin_ex(struct netif *netif, struct pbuf *p, const ip_addr_t *addr, u16_t port, struct wireguard_rx_job *job, unsigned flags);
+void wireguardif_rx_complete_deferred(struct netif *netif, const ip_addr_t *addr, u16_t port, struct wireguard_rx_job *job);
+unsigned wireguardif_rx_deliver(struct netif *netif, struct wireguard_rx_job *jobs, unsigned n);
+void wireguardif_set_rx_batch(struct netif *netif, wireguard_rx_batch_fn fn);
+// Allow delivery of authenticated inner IPv6 packets whose source passed the AllowedIPs check (default: off, counted rx_ipv6_unsupported).
+void wireguardif_set_rx_ipv6(struct netif *netif, bool enabled);
+
 // Disable WireGuard's internal UDP socket binding
 // Call before wireguardif_init to prevent WireGuard from binding its own socket.
 // The caller is then responsible for receiving packets and calling wireguardif_inject_packet.

@@ -229,6 +229,14 @@ build-host/test_rx_stats_threads_asan
 # Tunnel -> USB reject reasons, and the allocation-failure ownership rule.
 cc $RT_CC -fsanitize=address,undefined -fno-sanitize-recover=undefined tests/test_router_rx_reasons.c -o build-host/test_router_rx_reasons
 build-host/test_router_rx_reasons
+# Inbound pipeline (docs/adr/0020-inbound-pipeline.md).
+# Cryptokey routing for IPv4 AND IPv6 (WireGuard whitepaper 5.4.6) on the real wireguardif.c against the dual-stack lwIP fake: the
+# source must be in the peer's AllowedIPs of its own family, the IPv6 length is the Payload Length, unsupported IPv6 is counted.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -DWG_HOST_IPV6 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_ipv6_rx.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_ipv6_rx
+build-host/test_wg_ipv6_rx
 cc $TD_INC -std=c11 -Wall -Wextra -fsanitize=address,undefined -g tests/test_wg_idle.c -o build-host/test_wg_idle
 build-host/test_wg_idle
 build-host/test_jit_queue

@@ -98,8 +98,8 @@ ml_names = ["udp_rx", "udp_rx_empty", "udp_unclassified", "udp_alloc_fail", "udp
             "wg_to_wireguardif", "drain_burst_max"]
 assert list(inbound["ml"]) == ml_names and inbound["ml"]["udp_rx"] == 100 and inbound["ml"]["wg_to_wireguardif"] == 119 and inbound["ml"]["drain_burst_max"] == 13, inbound["ml"]
 wg_names = ["rx_data", "rx_bad_type", "rx_no_peer", "rx_keypair_unusable", "rx_expired", "rx_alloc_fail", "rx_session_gone", "rx_decrypt_fail",
-            "rx_keepalive", "rx_replay_dup", "rx_replay_old", "rx_replay_limit", "rx_bad_ip", "rx_allowed_ip", "rx_bad_length", "rx_input_fail", "rx_delivered"]
-assert list(inbound["wg"]) == wg_names and inbound["wg"]["rx_data"] == 200 and inbound["wg"]["rx_delivered"] == 216, inbound["wg"]
+            "rx_keepalive", "rx_replay_dup", "rx_replay_old", "rx_replay_limit", "rx_bad_ip", "rx_allowed_ip", "rx_allowed_ip6", "rx_bad_length", "rx_ipv6_unsupported", "rx_input_fail", "rx_delivered"]
+assert list(inbound["wg"]) == wg_names and inbound["wg"]["rx_data"] == 200 and inbound["wg"]["rx_delivered"] == 218, inbound["wg"]
 assert list(inbound["route"]) == ["tunnel_malformed", "tunnel_nomem", "bad_packet", "reply_no_member", "reply_not_us", "reply_flow_range", "reply_no_flow",
                                   "reply_generation", "reply_owner", "reply_idle", "forwarded_in", "usb_tx", "usb_tx_err", "tx_fail"], inbound["route"]
 
