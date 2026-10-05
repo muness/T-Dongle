@@ -1,0 +1,28 @@
+# host_derp_verify_phases.c, 64-bit host, mbedTLS 3.6.6 as configured by tests/derp_tls_host_config.h, 2026-10-05
+# 'peak' = peak live heap above the post-setup baseline (static record buffers excluded).
+== bundle only (the firmware's path today): derp1.tailscale.com
+  verify allocations live at the peak (57): 16717 16717 2608 2120 1064 1064 1048 1048 1048 744 744 744 744 520 520 512 
+  [phases] callbacks=4 live_at_first_callback=5312 peak_inside_callbacks=10696
+derp1.tailscale.com          none: ok peak=6056 after=0 | verify: ok peak=16008 after=0 | verified
+verified 1, failed 0; extra peak heap with verification: min 9952 avg 9952 max 9952 bytes (host, 64-bit)
+== bundle only (the firmware's path today): derp10.tailscale.com
+  verify allocations live at the peak (57): 16717 16717 2608 2120 1064 1064 1048 1048 1048 744 744 744 744 520 520 512 
+  [phases] callbacks=4 live_at_first_callback=5312 peak_inside_callbacks=10696
+derp10.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=16008 after=0 | verified
+verified 1, failed 0; extra peak heap with verification: min 9952 avg 9952 max 9952 bytes (host, 64-bit)
+== chain as served by derp1: c0 leaf P-256, c1 YE2 P-384, c2 Root YE P-384, c3 ISRG Root X2 cross-signed by X1 (RSA-4096 signature), c4 derpkey Ed25519 meta cert
+== static trust anchor = c1.der installed ahead of the bundle: derp1
+  verify allocations live at the peak (100): 16717 16717 2120 744 744 744 744 384 384 256 256 256 256 256 240 216 
+  [phases] callbacks=2 live_at_first_callback=5312 peak_inside_callbacks=0
+derp1.tailscale.com          none: ok peak=6056 after=0 | verify: ok peak=10168 after=0 | verified
+verified 1, failed 0; extra peak heap with verification: min 4112 avg 4112 max 4112 bytes (host, 64-bit)
+== static trust anchor = c2.der installed ahead of the bundle: derp1
+  verify allocations live at the peak (100): 16717 16717 2120 744 744 744 744 384 384 256 256 256 256 256 240 216 
+  [phases] callbacks=3 live_at_first_callback=5312 peak_inside_callbacks=0
+derp1.tailscale.com          none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+verified 1, failed 0; extra peak heap with verification: min 4128 avg 4128 max 4128 bytes (host, 64-bit)
+== static trust anchor = c3.der installed ahead of the bundle: derp1
+  verify allocations live at the peak (101): 16717 16717 2120 744 744 744 744 384 384 256 256 256 256 256 240 216 
+  [phases] callbacks=4 live_at_first_callback=5312 peak_inside_callbacks=0
+derp1.tailscale.com          none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+verified 1, failed 0; extra peak heap with verification: min 4128 avg 4128 max 4128 bytes (host, 64-bit)
