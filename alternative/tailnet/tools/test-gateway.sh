@@ -88,12 +88,12 @@ build-host/test_status_stream
 python - <<'PYCODE'
 from pathlib import Path
 h=Path('components/microlink/include/microlink_internal.h').read_text();a=h.index('/* Peer update (from coord');b=h.index('/* ============================================================================',a);c=h.index('typedef struct {',h.index('#define ML_MAX_DERP_NODES'));d=h.index('/* ============================================================================',c)
-Path('build-host/semantic_types.inc').write_text(h[a:b]+h[c:d])
+Path('build-host/semantic_types.inc').write_text('#include "ml_derp_cert.h"\n'+h[a:b]+h[c:d])
 s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static void parse_peers_from_map_response(');b=s.index('/* Add Endpoints',a);c=s.index('static void decode_derp_regions(');d=s.index('static bool activate_derp_regions(',c)
 Path('build-host/semantic_consumers.inc').write_text(s[a:b]+s[c:d])
 w=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=w.index('static void process_peer_updates(');b=w.index('/* ============================================================================',a);Path('build-host/batch_consumer.inc').write_text(w[a:b])
 PYCODE
-cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_map.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_map
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_map.c components/microlink/src/ml_derp_cert.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_map
 build-host/test_semantic_map
 python - <<'PYCODE'
 from pathlib import Path
@@ -121,15 +121,20 @@ python tools/test-journal.py
 
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_peer_directory.c -o build-host/test_peer_directory
 build-host/test_peer_directory
-cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_directory.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_directory
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_directory.c components/microlink/src/ml_derp_cert.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_directory
 build-host/test_semantic_directory
 
 python - <<'PYJIT'
 from pathlib import Path
-s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate(');b=s.index('/* The queue owns copies',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate_idle(');b=s.index('/* The queue owns copies',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+a=s.index('static bool wg_initiation_plausible(');b=s.index('#endif',a);Path('build-host/wg_initiation.inc').write_text(s[a:b])
 PYJIT
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_jit_directory.c -o build-host/test_jit_directory
 build-host/test_jit_directory
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_inbound_trial.c -o build-host/test_inbound_trial
+cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_wg_initiation.c -o build-host/test_wg_initiation
+build-host/test_wg_initiation
+build-host/test_inbound_trial
 
 python - <<'PYQUEUE'
 from pathlib import Path
@@ -143,3 +148,48 @@ python tools/test-resilience.py
 python tools/test-lcd.py
 python3 tools/test-measurement-scripts.py
 python3 tools/test-memory-report.py
+
+# self_dns_name publication (seqlock) under a concurrent writer: address/undefined and thread sanitizers.
+cc -std=c11 -Wall -Wextra -fsanitize=address,undefined -g -pthread tests/test_published_name.c -o build-host/test_published_name
+build-host/test_published_name
+cc -std=c11 -Wall -Wextra -fsanitize=thread -g -pthread tests/test_published_name.c -o build-host/test_published_name_tsan
+build-host/test_published_name_tsan
+
+# DERP TLS server authentication: real mbedTLS handshakes (TLS 1.2, peer certificate not kept, as on the
+# device) through ml_derp_tls.c and the ESP-IDF esp_crt_bundle.c trust store, both compiled unchanged.
+derp_tls_lib=build-host/mbedtls-derp
+if [ ! -f "$derp_tls_lib/libmbedtls_derp.a" ] || [ tests/derp_tls_host_config.h -nt "$derp_tls_lib/libmbedtls_derp.a" ]; then
+  rm -rf "$derp_tls_lib"; mkdir -p "$derp_tls_lib"
+  ls "$mbed"/library/*.c | xargs -P 8 -I{} sh -c 'cc -O1 -w -DMBEDTLS_CONFIG_FILE="\"derp_tls_host_config.h\"" -I tests -I "$1/include" -I "$1/library" -c "$2" -o "$3/$(basename "$2" .c).o"' _ "$mbed" {} "$derp_tls_lib"
+  ar rcs "$derp_tls_lib/libmbedtls_derp.a" "$derp_tls_lib"/*.o
+fi
+python tests/derp_pki.py build-host/derp-pki "$IDF_PATH/components/mbedtls/esp_crt_bundle/gen_crt_bundle.py"
+cc -std=gnu11 -DCONFIG_MBEDTLS_CERTIFICATE_BUNDLE_MAX_CERTS=200 -fsanitize=address,undefined -g -DMBEDTLS_CONFIG_FILE='"derp_tls_host_config.h"' -I tests/host_esp -I tests \
+  -I components/microlink/include -I "$mbed/include" -I "$mbed/library" -I "$IDF_PATH/components/mbedtls/esp_crt_bundle/include" \
+  tests/test_derp_tls.c components/microlink/src/ml_derp_tls.c components/microlink/src/ml_derp_cert.c "$IDF_PATH/components/mbedtls/esp_crt_bundle/esp_crt_bundle.c" \
+  "$derp_tls_lib/libmbedtls_derp.a" -o build-host/test_derp_tls
+build-host/test_derp_tls build-host/derp-pki
+
+# Control-plane Noise key: who vouches for it (real parse/fetch core of ml_coord.c, mock transport).
+python - <<'PYKEY'
+from pathlib import Path
+s=Path('components/microlink/src/ml_coord.c').read_text()
+a=s.index('/* Parse "[http[s]://]host[:port]" into bare host');b=s.index('/* --- end of the key-fetch core')
+Path('build-host/key_fetch.inc').write_text(s[a:b])
+h=Path('components/microlink/include/microlink_internal.h').read_text()
+a=h.index('#define ML_CTRL_KEY_NONE');b=h.index('#define CTRL_KEY_PLAINTEXT');b=h.index('\n',b)
+Path('build-host/ctrl_key_defs.inc').write_text(h[a:b]+'\n')
+PYKEY
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_control_key.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_control_key
+build-host/test_control_key
+
+# SNTP supervision and DERP pacing: a missing clock is retried, visible, and gates nothing else.
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I . tests/test_clock_sync.c -o build-host/test_clock_sync
+build-host/test_clock_sync
+
+# cJSON depth: the same limit the firmware build sets (CMakeLists.txt). No sanitizer here:
+# it inflates frames and this test measures the parser's stack.
+CJSON_LIMIT=$(sed -n 's/^set(TDONGLE_CJSON_NESTING_LIMIT \([0-9][0-9]*\)).*/\1/p' ../../CMakeLists.txt)
+[[ -n "$CJSON_LIMIT" ]] || { echo 'TDONGLE_CJSON_NESTING_LIMIT not found in CMakeLists.txt' >&2; exit 1; }
+cc $TD_INC -std=c11 -O1 -g -DCJSON_NESTING_LIMIT="$CJSON_LIMIT" -I "$IDF_PATH/components/json/cJSON" tests/test_json_depth.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_json_depth
+build-host/test_json_depth

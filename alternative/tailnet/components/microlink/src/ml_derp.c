@@ -28,11 +28,19 @@
 #include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
 #include "nacl_box.h"
+#include "ml_derp_pace.h"
+#include "esp_crt_bundle.h"
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
 
 static const char *TAG = "ml_derp";
+
+/* Trust anchors: the ESP-IDF certificate bundle (Mozilla roots, flash resident). */
+/* Public in the library, not declared by esp_crt_bundle.h: the callback that
+ * esp_crt_bundle_attach() installs and that ml_derp_tls.c chains to. */
+extern int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int depth, uint32_t *flags);
+static int derp_trust_attach(void *conf) { return esp_crt_bundle_attach(conf) == ESP_OK ? 0 : -1; }
 
 /* Timeout for DERP connection handshake operations */
 #define DERP_CONNECT_TIMEOUT_MS  10000
@@ -408,11 +416,23 @@ static int poll_derp_read(microlink_t *ml) {
     uint8_t frame_type = header[0];
     uint32_t len = ((uint32_t)header[1] << 24) | ((uint32_t)header[2] << 16) |
                    ((uint32_t)header[3] << 8) | header[4];
-    if (len > 65536)
+    /* The length field is read before anything authenticates it, and it sizes
+     * an allocation. Bound it by what this firmware can carry: a relayed packet
+     * is at most ML_DERP_MAX_FRAME bytes after the 32-byte source key (the DERP
+     * protocol's 64 KiB ceiling is far above any tunnel MTU), and every other
+     * frame this client acts on is a few dozen bytes. An oversize frame is a
+     * protocol violation or a corrupted stream: drop the connection, which the
+     * caller reconnects, rather than allocating up to 64 KiB on a heap that
+     * cannot supply it. */
+    bool relayed = frame_type == DERP_FRAME_RECV_PACKET;
+    if (relayed ? (len <= sizeof(src_key) ||
+                   len - sizeof(src_key) > ML_DERP_MAX_FRAME)
+                : len > ML_DERP_MAX_FRAME) {
+        ESP_LOGW(TAG, "DERP frame type 0x%02x length %lu out of bounds; reconnecting",
+                 frame_type, (unsigned long)len);
         return -1;
-    if (frame_type == DERP_FRAME_RECV_PACKET) {
-        if (len <= sizeof(src_key))
-            return -1;
+    }
+    if (relayed) {
         if (derp_read_exact(ml, src_key, sizeof(src_key), started, false) < 0)
             return -1;
         len -= sizeof(src_key);
@@ -505,8 +525,8 @@ void ml_derp_tx_task(void *arg) {
      * has ever been requested — from then on a disconnected relay is a fault
      * to recover from, not an idle state to park in. */
     bool derp_wanted = false;
-    uint64_t derp_next_retry_ms = 0;
-    uint32_t derp_backoff_ms = ML_DERP_RETRY_MIN_MS;
+    ml_derp_pace_t derp_pace = {0};
+    ml_derp_pace_reset(&derp_pace, ML_DERP_RETRY_MIN_MS);
 
     while (!(xEventGroupGetBits(ml->events) & ML_EVT_SHUTDOWN_REQUEST)) {
         loop_count++;
@@ -552,7 +572,7 @@ void ml_derp_tx_task(void *arg) {
                 xEventGroupClearBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
                 derp_wanted = true;
                 /* Retry up to 3 times with 2s backoff */
-                for (int attempt = 0; attempt < 3 && !ml->derp.connected; attempt++) {
+                for (int attempt = 0; attempt < 3 && !ml->derp.connected && ml_derp_clock_valid(); attempt++) {
                     if (attempt > 0) {
                         ESP_LOGW(TAG, "DERP connect retry %d/3 in 2s...", attempt + 1);
                         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -579,7 +599,7 @@ void ml_derp_tx_task(void *arg) {
                  * (1s+3×2s ≈ 7s outage → 200ms+3×500ms) so a transient flap
                  * costs sub-second, not multi-second, of dropped relay traffic. */
                 vTaskDelay(pdMS_TO_TICKS(200));
-                for (int attempt = 0; attempt < 3 && !ml->derp.connected; attempt++) {
+                for (int attempt = 0; attempt < 3 && !ml->derp.connected && ml_derp_clock_valid(); attempt++) {
                     if (attempt > 0) {
                         ESP_LOGW(TAG, "DERP reconnect retry %d/3 in 500ms...", attempt + 1);
                         vTaskDelay(pdMS_TO_TICKS(500));
@@ -605,23 +625,23 @@ void ml_derp_tx_task(void *arg) {
              * on exponential backoff (cap matches the coord reconnect
              * policy's never-give-up shape). */
             if (derp_wanted) {
-                uint64_t now = ml_get_time_ms();
-                if (derp_next_retry_ms == 0) {
-                    derp_next_retry_ms = now + derp_backoff_ms;
-                } else if (now >= derp_next_retry_ms) {
+                uint32_t deferrals = derp_pace.deferrals;
+                /* A wall clock that is not set yet holds the connect back
+                 * without counting as a relay failure (ml_derp_pace.h). */
+                if (ml_derp_pace_due(&derp_pace, ml_get_time_ms(), ml_derp_clock_valid(),
+                                     ML_DERP_RETRY_MIN_MS)) {
                     ESP_LOGW(TAG, "DERP down — retrying connect (backoff %lus)",
-                             (unsigned long)(derp_backoff_ms / 1000));
+                             (unsigned long)(derp_pace.backoff_ms / 1000));
                     if (ml_derp_connect(ml) == ESP_OK) {
                         connected_since_ms = ml_get_time_ms();
                         verbose_phase = true;
                     } else {
                         ml->rc_derp_retry++;
-                        derp_backoff_ms *= 2;
-                        if (derp_backoff_ms > ML_DERP_RETRY_MAX_MS) {
-                            derp_backoff_ms = ML_DERP_RETRY_MAX_MS;
-                        }
-                        derp_next_retry_ms = ml_get_time_ms() + derp_backoff_ms;
+                        ml_derp_pace_failed(&derp_pace, ml_get_time_ms(), ML_DERP_RETRY_MAX_MS);
                     }
+                } else if (derp_pace.deferrals != deferrals) {
+                    ml->derp.tls_deferred++;
+                    ESP_LOGW(TAG, "DERP connect held back: wall clock not set (SNTP), certificates cannot be verified");
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -629,8 +649,7 @@ void ml_derp_tx_task(void *arg) {
         }
 
         /* Connected: reset the retry ladder so the next outage starts fresh. */
-        derp_backoff_ms = ML_DERP_RETRY_MIN_MS;
-        derp_next_retry_ms = 0;
+        ml_derp_pace_reset(&derp_pace, ML_DERP_RETRY_MIN_MS);
 
         /* #33: RX-liveness watchdog. last_recv_ms advances on every received
          * frame (server keepalives arrive every ~15-60s), so prolonged
@@ -665,6 +684,10 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
     const char *derp_host = ML_DERP_HOST;
     int derp_port = ML_DERP_PORT;
     bool region_in_map = false;
+    ml_derp_cert_t derp_cert = { .kind = ML_DERP_CERT_HOSTNAME };
+    /* The map is rewritten by the control task at any time; take a private
+     * copy of the name the TLS policy is judged against. */
+    char host_copy[sizeof(ml->derp_regions[0].nodes[0].hostname)];
 
     if (ml->derp_region_count > 0 && ml->derp_home_region > 0) {
         for (int i = 0; i < ml->derp_region_count; i++) {
@@ -673,8 +696,10 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
                  * This ensures we connect to the same node as most peers. */
                 for (int attempt = 0; attempt < ml->derp_regions[i].node_count; attempt++) {
                     if (!ml->derp_regions[i].nodes[attempt].stun_only &&
-                        ml->derp_regions[i].nodes[attempt].hostname[0]) {
+                        ml->derp_regions[i].nodes[attempt].hostname[0] &&
+                        ml->derp_regions[i].nodes[attempt].cert.kind != ML_DERP_CERT_INVALID) {
                         derp_host = ml->derp_regions[i].nodes[attempt].hostname;
+                        derp_cert = ml->derp_regions[i].nodes[attempt].cert;
                         if (ml->derp_regions[i].nodes[attempt].derp_port > 0) {
                             derp_port = ml->derp_regions[i].nodes[attempt].derp_port;
                         }
@@ -697,8 +722,10 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         for (int i = 0; i < ml->derp_region_count && !region_in_map; i++) {
             for (int j = 0; j < ml->derp_regions[i].node_count; j++) {
                 if (!ml->derp_regions[i].nodes[j].stun_only &&
-                    ml->derp_regions[i].nodes[j].hostname[0]) {
+                    ml->derp_regions[i].nodes[j].hostname[0] &&
+                    ml->derp_regions[i].nodes[j].cert.kind != ML_DERP_CERT_INVALID) {
                     derp_host = ml->derp_regions[i].nodes[j].hostname;
+                    derp_cert = ml->derp_regions[i].nodes[j].cert;
                     if (ml->derp_regions[i].nodes[j].derp_port > 0) {
                         derp_port = ml->derp_regions[i].nodes[j].derp_port;
                     }
@@ -710,6 +737,19 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
                 }
             }
         }
+    }
+
+    strlcpy(host_copy, derp_host, sizeof(host_copy));
+    derp_host = host_copy;
+
+    /* Certificates cannot be judged before the wall clock is set (SNTP): a
+     * handshake now would fail on "not yet valid" and burn a TLS attempt's
+     * memory and time. Report it as its own reason and let the ladder retry. */
+    if (!ml_derp_clock_valid()) {
+        ESP_LOGW(TAG, "DERP connect to %s deferred: clock not set yet, cannot verify the server certificate",
+                 derp_host);
+        ml->derp.tls_deferred++;
+        return ESP_ERR_INVALID_STATE;
     }
 
     int64_t t_derp_start = esp_timer_get_time();
@@ -771,7 +811,18 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
                                  MBEDTLS_SSL_IS_CLIENT,
                                  MBEDTLS_SSL_TRANSPORT_STREAM,
                                  MBEDTLS_SSL_PRESET_DEFAULT);
-    mbedtls_ssl_conf_authmode(&ml->derp.ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+    /* The server must prove it is the DERP node named in the map (see
+     * ml_derp_tls.h). A configuration failure means no connection at all. */
+    ml_derp_verify_t verify;
+    static const ml_derp_trust_t trust = { .attach = derp_trust_attach, .trust = esp_crt_verify_callback };
+    int cfg_ret = ml_derp_tls_configure(&ml->derp.ssl_conf, &verify, &derp_cert, derp_host, &trust);
+    if (cfg_ret != 0) {
+        char why[160];
+        ml_derp_tls_describe(NULL, cfg_ret, NULL, why, sizeof(why));
+        ESP_LOGE(TAG, "DERP TLS verification setup failed for %s: %s", derp_host, why);
+        ml->derp.tls_verify_failures++;
+        goto fail_tls;
+    }
     mbedtls_ssl_conf_rng(&ml->derp.ssl_conf, mbedtls_ctr_drbg_random, &ml->derp.ctr_drbg);
     mbedtls_ssl_conf_read_timeout(&ml->derp.ssl_conf, DERP_CONNECT_TIMEOUT_MS);
 
@@ -781,7 +832,14 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         ESP_LOGE(TAG, "mbedtls_ssl_setup failed (out of memory?)");
         goto fail_tls;
     }
-    mbedtls_ssl_set_hostname(&ml->derp.ssl, derp_host);
+    /* SNI is the HostName, except for an IP literal: Go's crypto/tls (Tailscale's
+     * client) sends none for one, and RFC 6066 forbids literal addresses. The
+     * name the certificate must carry is checked by ml_derp_tls.c either way. */
+    {
+        uint32_t literal[4];
+        if (mbedtls_x509_crt_parse_cn_inet_pton(derp_host, literal) == 0)
+            mbedtls_ssl_set_hostname(&ml->derp.ssl, derp_host);
+    }
     /* Store socket fd BEFORE setting bio.
      * Use custom BIO callbacks that route through ml_read_sock/ml_write_sock,
      * which transparently support both lwIP and AT socket backends.
@@ -796,11 +854,20 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         if (ret == MBEDTLS_ERR_SSL_WANT_READ || ret == MBEDTLS_ERR_SSL_WANT_WRITE) {
             continue;
         }
-        char err_buf[128];
-        mbedtls_strerror(ret, err_buf, sizeof(err_buf));
-        ESP_LOGE(TAG, "TLS handshake failed: %s", err_buf);
+        char why[200];
+        ml_derp_tls_describe(&ml->derp.ssl, ret, &verify, why, sizeof(why));
+        if (ret == MBEDTLS_ERR_X509_CERT_VERIFY_FAILED || verify.verdict_flags) {
+            ESP_LOGE(TAG, "DERP %s failed certificate verification (%s): %s", derp_host,
+                     derp_cert.kind == ML_DERP_CERT_PIN ? "pinned" :
+                     derp_cert.kind == ML_DERP_CERT_NAME ? "CertName" : "HostName", why);
+            ml->derp.tls_verify_failures++;
+        } else {
+            ESP_LOGE(TAG, "TLS handshake to %s failed: %s", derp_host, why);
+        }
+        ml_derp_tls_finish(&ml->derp.ssl_conf);
         goto fail_tls;
     }
+    ml_derp_tls_finish(&ml->derp.ssl_conf); /* `verify` is about to go out of scope */
 
     int64_t t_derp_tls = esp_timer_get_time();
     ESP_LOGI(TAG, "[TIMING] DERP TLS handshake: %lld ms", (t_derp_tls - t_derp_tcp) / 1000);

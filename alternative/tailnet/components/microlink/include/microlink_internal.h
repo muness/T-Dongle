@@ -17,6 +17,9 @@
 
 #include "microlink.h"
 #include "ml_config_httpd.h"
+#include "ml_published_name.h"
+#include "ml_derp_cert.h"
+#include "ml_derp_tls.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -49,25 +52,48 @@ extern "C" {
  * ========================================================================== */
 
 /* Task configuration.
- * Stack sizes right-sized 2026-05-26 from measured high-water marks to free
- * internal DRAM (FreeRTOS stacks are internal-only). Observed peak usage:
- * net_io ~3.0K, derp_tx ~3.7K, coord ~8.3K (TLS + a 4K on-stack recv_buf),
- * wg_mgr ~4.3K. Trimmed only the clearly-oversized ones, keeping a generous
- * margin over the observed peak (TLS handshakes can spike). coord/wg_mgr
- * left as-is — they run closer to their ceiling. */
-#define ML_TASK_NET_IO_STACK    (6 * 1024)   /* was 8K; ~3K peak observed */
+ *
+ * Stack sizes (FreeRTOS stacks are internal DRAM, charged per membership by
+ * member_start_budget()). Rule: size >= 2 x the highest stack use measured on
+ * hardware, rounded up to 512 B, and never less than peak + 2 KiB.
+ *
+ * Evidence: firmware 0.2.22 on the T-Dongle-S3, 2026-10-05 (docs/diagnostics/
+ * baseline-0.2.22-2026-10-05.md), uxTaskGetStackHighWaterMark after a join that
+ * included the DERP TLS handshake and 4x4-stream bidirectional iperf over the
+ * direct path. Peak use: net_io 3,376, derp_tx 3,716, coord 4,152, wg_mgr 3,644.
+ * The stack overflow canary stays on (CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY).
+ *
+ * Paths that capture did not run, bounded from the linked binary's frame sizes
+ * (tools/stack-frames.py prints the frame of each function in the linked binary;
+ * they were added up along the real call chains from the source):
+ *   derp_tx  DERP certificate verification now runs in the handshake
+ *            (ml_derp_connect 1,344 B frame + ssl_handshake chain + x509 verify
+ *            + esp_crt_verify_callback + RSA/ECDSA verify): about +1.5 KB over the
+ *            VERIFY_NONE handshake that was measured, so about 5.2 KB peak.
+ *            DERP-only relay traffic and a TLS retry use the same or shallower
+ *            chains (derp_write_frame 48, ssl_write 160).
+ *   coord    map re-fetch and reconnect repeat the measured map path
+ *            (gateway_read_map, ml_directory_commit 960, snprintf 192/800);
+ *            the new custom-login-server key fetch (https) is shallower than that
+ *            (ctrl_key_fetch 352 + esp_tls + mbedTLS handshake), about 3.8 KB.
+ *   wg_mgr   inbound activation of an unknown peer adds derp_sender_admit 336 and
+ *            directory_activate_idle 336 on the paths JIT activation already
+ *            walked; DISCO authentication reuses the nacl_box_beforenm frame.
+ *   net_io   only socket receive and queue hand-off.
+ * Every size below leaves at least 2 KiB over the highest estimate. */
+#define ML_TASK_NET_IO_STACK    (7168)       /* 3,376 B measured -> 7,168 (was 6,144) */
 #define ML_TASK_NET_IO_PRIO     7
 #define ML_TASK_NET_IO_CORE     0
 
-#define ML_TASK_DERP_TX_STACK   (10 * 1024)  /* was 14K; ~3.7K peak observed */
+#define ML_TASK_DERP_TX_STACK   (7680)       /* 3,716 B measured, ~5.2 KB est. with verification (was 10,240) */
 #define ML_TASK_DERP_TX_PRIO    5
 #define ML_TASK_DERP_TX_CORE    0
 
-#define ML_TASK_COORD_STACK     (12 * 1024)
+#define ML_TASK_COORD_STACK     (8704)       /* 4,152 B measured (was 12,288) */
 #define ML_TASK_COORD_PRIO      5
 #define ML_TASK_COORD_CORE      1
 
-#define ML_TASK_WG_MGR_STACK    (8 * 1024)
+#define ML_TASK_WG_MGR_STACK    (7680)       /* 3,644 B measured (was 8,192) */
 #define ML_TASK_WG_MGR_PRIO     7
 #define ML_TASK_WG_MGR_CORE     1
 
@@ -104,7 +130,17 @@ extern "C" {
 #define ML_MAX_PEERS            CONFIG_ML_MAX_PEERS
 #define ML_MAX_ENDPOINTS        8
 #define ML_MAX_PACKET_SIZE      1500
+/* Largest payload accepted in one DERP frame after the 32-byte source key of a
+ * RecvPacket (and the cap for every other post-handshake frame). The DERP frame
+ * header (type byte + 4 length bytes, derp.go frameHeaderLen) is not part of the
+ * length field, and a RecvPacket's 32-byte source key is subtracted before this
+ * cap applies. The largest WireGuard data message is a tunnel packet of up to
+ * ML_MAX_PACKET_SIZE bytes padded to 16 plus 16 bytes of header and 16 of tag:
+ * 1,500 -> 1,504 + 32 = 1,536 <= 1,564. Our netif MTU is 1,420 (1,456 on the
+ * wire) and Tailscale's default 1,280 (1,312); handshake messages are < 150. */
 #define ML_DERP_MAX_FRAME       (ML_MAX_PACKET_SIZE + 64)
+_Static_assert(ML_DERP_MAX_FRAME >= ((ML_MAX_PACKET_SIZE + 15) / 16) * 16 + 32,
+               "a maximum-size WireGuard data message must fit one DERP frame");
 
 /* DERP */
 /* 2026-05-28: tried region 26 (Nuremberg, = tailscale-105's home DERP) to kill
@@ -119,6 +155,17 @@ extern "C" {
 /* Tailscale control plane */
 #define ML_CTRL_HOST            "controlplane.tailscale.com"
 #define ML_CTRL_PORT            443
+
+/* Who vouches for the control server's Noise key (see ml_coord.c). */
+#define ML_CTRL_KEY_NONE            0 /* nothing established yet */
+#define ML_CTRL_KEY_PINNED_BUILTIN  1 /* Tailscale SaaS key compiled into ml_noise.c */
+#define ML_CTRL_KEY_PINNED_CONFIG   2 /* ctrl_noise_key from the configuration */
+#define ML_CTRL_KEY_TLS_VERIFIED    3 /* fetched over https, certificate verified */
+#define ML_CTRL_KEY_PLAINTEXT       4 /* fetched over http: NOT authenticated */
+#define CTRL_KEY_PINNED_BUILTIN ML_CTRL_KEY_PINNED_BUILTIN
+#define CTRL_KEY_PINNED_CONFIG  ML_CTRL_KEY_PINNED_CONFIG
+#define CTRL_KEY_TLS_VERIFIED   ML_CTRL_KEY_TLS_VERIFIED
+#define CTRL_KEY_PLAINTEXT      ML_CTRL_KEY_PLAINTEXT
 #define ML_CTRL_PROTOCOL_VER    131
 
 /* Hostinfo.IPNVersion is supplied per-device via microlink_config_t.ipn_version
@@ -347,6 +394,11 @@ typedef struct {
     uint8_t disco_key[32];
     char hostname[64];
     bool active;
+    /* Activated because of an inbound claim nobody has authenticated yet (a
+     * DERP source key). Set only while it holds the membership's single trial
+     * slot; cleared when WireGuard authenticates this peer, or the peer is
+     * removed when the trial expires. See directory_trial_* in ml_wg_mgr.c. */
+    bool unconfirmed;
 
     /* Endpoints */
     struct {
@@ -439,6 +491,7 @@ typedef struct {
     uint16_t stun_port;     /* 0 = default 3478 */
     uint16_t derp_port;     /* 0 = default 443 */
     bool stun_only;         /* true if node only serves STUN, not DERP */
+    ml_derp_cert_t cert;    /* how to authenticate the TLS server: from DERPNode.CertName */
 } ml_derp_node_t;
 
 typedef struct {
@@ -482,6 +535,8 @@ typedef struct {
     bool connected;
     volatile bool rx_parked;        /* reader sets true when NOT touching the ssl context */
     uint64_t last_recv_ms;          /* For keepalive watchdog */
+    uint32_t tls_verify_failures;   /* handshakes refused because the server did not authenticate */
+    uint32_t tls_deferred;          /* connects postponed until the wall clock is set */
 } ml_derp_conn_t;
 
 /* ============================================================================
@@ -536,7 +591,10 @@ struct microlink_s {
     /* State (atomic reads from any task, writes only from coord) */
     volatile microlink_state_t state;
     volatile uint32_t vpn_ip;
-    char self_dns_name[128];
+    /* MagicDNS name of this node. Written by the control task, read by the
+     * status, LCD and DNS tasks: use ml_published_name_set/get, never the
+     * text directly (it can be mid-rewrite). */
+    ml_published_name_t self_dns_name;
 
     /* True when load_or_generate_keys() found every keypair in NVS at
      * boot (i.e. this device has a persistent node identity). False
@@ -596,6 +654,16 @@ struct microlink_s {
     volatile unsigned jit_packet_count;
     uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
     uint32_t directory_applied;
+    /* Budget for work an unauthenticated inbound packet can cause (flash
+     * lookup, X25519, a peer slot). Owned by wg_mgr. */
+    struct {
+        uint8_t pending;              /* peer index + 1 holding the trial slot, 0 = free */
+        uint8_t tokens;               /* lookups the next packets may still cause */
+        uint64_t refill_ms;           /* last token refill */
+        uint64_t deadline_ms;         /* the trial peer must authenticate by then */
+        uint64_t cooldown_until_ms;   /* no new trial before this after a failed one */
+        uint32_t started, confirmed, expired, refused;
+    } inbound_trial;
     ml_directory_t directory;
     volatile bool map_batch_pending; /* at most one owned semantic batch per membership */
     QueueHandle_t peer_update_queue;    /* coord -> wg_mgr */
@@ -767,6 +835,11 @@ struct microlink_s {
      * server key. */
     uint8_t ctrl_noise_pubkey[32];
     bool ctrl_noise_pubkey_valid;
+    uint8_t ctrl_key_auth;           /* ML_CTRL_KEY_*: who vouches for the key above */
+    uint8_t ctrl_key_failures;       /* consecutive Noise handshake failures with a fetched key */
+    uint32_t ctrl_key_drop_backoff_ms; /* gap enforced between drops of the fetched key */
+    uint64_t ctrl_key_next_drop_ms;  /* no drop before this (uptime ms) */
+    uint32_t ctrl_key_refetches;     /* fetched keys dropped after failures */
 
     /* Subnet routes to advertise on register (Hostinfo.RoutableIPs).
      * Newline-separated CIDR string copied from microlink_config_t.advertise_routes.
