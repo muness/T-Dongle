@@ -95,7 +95,11 @@ static UBaseType_t uxTaskGetSystemState(TaskStatus_t *t, UBaseType_t n, uint32_t
     return 3;
 }
 static BaseType_t xTaskGetCoreID(TaskHandle_t h) { return (uintptr_t)h == 3 ? 0x7fffffff : (int)((uintptr_t)h - 1); }
+static int wifi_current = 1;   /* slot 2 selected and pinned: the report shows the user's choice */
+#include "wifi_policy.h"
+static wifi_pin wifi_pinned = {1, 0, 0};
 #include "json_writer.inc"
+#include "wifi_link.inc"
 #include "memory_diagnostics.inc"
 int main(void) {
     microlink_t client = {(void *)3000, true, false, 0, NULL};
@@ -121,6 +125,38 @@ int main(void) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));
     }
+    /* Wi-Fi link and lwIP counters: a 16-bit counter near its wrap, a pool with failed allocations, then a reset. */
+    host_wifi_ap = (wifi_ap_record_t){.primary = 6, .second = WIFI_SECOND_CHAN_ABOVE, .rssi = -70, .phy_11b = 1, .phy_11g = 1, .phy_11n = 1, .bandwidth = WIFI_BW_HT40,
+                                      .bssid = {1, 2, 3, 4, 5, 6}, .ssid = "do-not-print"};
+    host_wifi_avg_rssi = -64; host_wifi_phy = WIFI_PHY_MODE_HT40; host_wifi_bw = WIFI_BW_HT40; host_wifi_ps = WIFI_PS_NONE; host_wifi_power = 78;
+    wifi_link_note_connect(&wifi_link_stats);
+    wifi_link_note_disconnect(&wifi_link_stats, WIFI_REASON_BEACON_TIMEOUT, -88, 4242);
+    wifi_link_note_connect(&wifi_link_stats);
+    wifi_link_note_disconnect(&wifi_link_stats, 8, -50, 5000);
+#if LWIP_STATS
+    lwip_stats.link = (struct stats_proto){.xmit = 10, .recv = 65535, .drop = 3, .memerr = 2, .err = 1};
+    lwip_stats.tcp = (struct stats_proto){.recv = 500, .drop = 7, .cachehit = 9};
+    lwip_stats.mem = (struct stats_mem){.name = "HEAP", .err = 4, .avail = 100, .used = 40, .max = 60, .illegal = 1};
+    static struct stats_mem pbuf = {.name = "PBUF", .avail = 16, .used = 2, .max = 9, .err = 5}, pool = {.name = "PBUF_POOL", .avail = 16, .used = 1, .max = 16, .err = 11}, nameless = {.avail = 1};
+    lwip_stats.memp[MEMP_PBUF] = &pbuf; lwip_stats.memp[MEMP_PBUF_POOL] = &pool; lwip_stats.memp[MEMP_TCP_SEG] = &nameless;
+#endif
+    puts("#> wifistats_before");
+    printf("#handled %d\n", gateway_memory_command("wifistats"));
+    puts("#> wifistats_dump");
+    printf("#handled %d\n", gateway_memory_command("wifistats dump"));
+    puts("#> wifistats_reset");
+    printf("#handled %d\n", gateway_memory_command("wifistats reset"));
+    puts("#> wifistats_after");
+    gateway_memory_command("wifistats");
+    puts("#> wifistats_unknown_arg");
+    printf("#handled %d\n", gateway_memory_command("wifistats nonsense"));
+    host_wifi_associated = false;
+    puts("#> wifistats_down");
+    gateway_memory_command("wifistats");
+    host_wifi_associated = true; host_wifi_fail_rssi = host_wifi_fail_phy = host_wifi_fail_bw = host_wifi_fail_ps = host_wifi_fail_power = true;
+    puts("#> wifistats_partial");
+    gateway_memory_command("wifistats");
+    printf("#dumps %u\n", host_wifi_dumps);
     task_count = 40;   /* more tasks than the report's table: it must say so, not print an empty list silently */
     puts("#> cpu_many");
     gateway_memory_command("cpu");

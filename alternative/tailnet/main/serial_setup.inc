@@ -4,9 +4,13 @@ bool gateway_serial_command(const char *line) {
  char reply[768];
  if(!strcmp(line,"status")){
   tdongle_temperature t=tdongle_temperature_snapshot();
-  snprintf(reply,sizeof(reply),"mode=%s trial=0 active=%d wifi=%s rssi=unknown usb_enumerated=%d usb_transport_ready=%d host_interface_ready=unknown internet=not_checked\r\nfirmware=" GATEWAY_VERSION "\r\nuptime_ms=%llu free_heap=%lu\r\nchip_temperature valid=%d current_tenths=%ld peak_tenths=%ld sampled_uptime_ms=%lu errors=%lu age_ms=%lu samples=%lu changed_uptime_ms=%lu step_tenths=%d\r\n",
-   gateway_tailnet_mode()?"tailnet":"adapter",wifi_current+1,online?"up":"joining",tud_mounted(),tud_ready(),(unsigned long long)(esp_timer_get_time()/1000),(unsigned long)esp_get_free_heap_size(),t.valid,(long)t.current_tenths,(long)t.peak_tenths,(unsigned long)t.sampled_at_ms,(unsigned long)t.errors,(unsigned long)t.age_ms,(unsigned long)t.samples,(unsigned long)t.changed_at_ms,TDONGLE_TEMPERATURE_STEP_TENTHS);mgmt_write(reply);
+  wifi_link_info link=wifi_link_read();char rssi_buffer[5];const char *rssi_text=wifi_link_rssi_text(&link,rssi_buffer);
+  /* Android parses the chip_temperature line with an end-anchored regex that stops after errors=: extra fields live on the
+   * chip_temperature_detail line so existing clients keep working (additions go on new lines, never onto old ones). */
+  snprintf(reply,sizeof(reply),"mode=%s trial=0 active=%d wifi=%s rssi=%s usb_enumerated=%d usb_transport_ready=%d host_interface_ready=unknown internet=not_checked\r\nfirmware=" GATEWAY_VERSION "\r\nuptime_ms=%llu free_heap=%lu\r\nchip_temperature valid=%d current_tenths=%ld peak_tenths=%ld sampled_uptime_ms=%lu errors=%lu\r\nchip_temperature_detail age_ms=%lu samples=%lu changed_uptime_ms=%lu step_tenths=%d\r\n",
+   gateway_tailnet_mode()?"tailnet":"adapter",wifi_current+1,online?"up":"joining",rssi_text,tud_mounted(),tud_ready(),(unsigned long long)(esp_timer_get_time()/1000),(unsigned long)esp_get_free_heap_size(),t.valid,(long)t.current_tenths,(long)t.peak_tenths,(unsigned long)t.sampled_at_ms,(unsigned long)t.errors,(unsigned long)t.age_ms,(unsigned long)t.samples,(unsigned long)t.changed_at_ms,TDONGLE_TEMPERATURE_STEP_TENTHS);mgmt_write(reply);
   {bool clock_valid=ml_derp_clock_valid();snprintf(reply,sizeof(reply),"clock=%s valid=%d sntp_restarts=%lu server=%s retry_in_ms=%lu\r\n",gw_clock_state(&sntp_clock,clock_valid,online),clock_valid,(unsigned long)sntp_clock.restarts,gw_clock_server_name[sntp_clock.server%GW_CLOCK_SERVERS],(unsigned long)sntp_clock.retry_in_ms);mgmt_write(reply);}
+  if(wifi_link_line(reply,sizeof(reply),&link,&wifi_link_stats))mgmt_write(reply);
   for(unsigned i=0;i<tdongle_memory_count();i++){tdongle_memory_record m=tdongle_memory_get(i);snprintf(reply,sizeof(reply),"memory_pressure uptime_ms=%lu operation=%lu requested=%lu free=%lu minimum=%lu largest=%lu failed=%lu\r\n",(unsigned long)m.uptime_ms,(unsigned long)m.operation,(unsigned long)m.requested,(unsigned long)m.free_bytes,(unsigned long)m.minimum_bytes,(unsigned long)m.largest_bytes,(unsigned long)m.failed);mgmt_write(reply);}
   return true;
  }
@@ -38,8 +42,10 @@ bool gateway_serial_command(const char *line) {
   memset(&profile,0,sizeof(profile));
  }else if(!strncmp(line,"use ",4)){
   char *end;long slot=strtol(line+4,&end,10);
-  if(*end || slot<1 || slot>(long)wifi_saved.count || !wifi_ready)mgmt_write("ERR Invalid saved network\r\n");
-  else {wifi_config_t candidate={0};memcpy(candidate.sta.ssid,wifi_saved.profiles[slot-1].ssid,strlen(wifi_saved.profiles[slot-1].ssid));strlcpy((char*)candidate.sta.password,wifi_saved.profiles[slot-1].password,64);wifi_scan_pauses_reconnect=true;esp_wifi_disconnect();if(esp_wifi_set_config(WIFI_IF_STA,&candidate)==ESP_OK){wifi_config=candidate;wifi_current=slot-1;esp_wifi_connect();}wifi_scan_pauses_reconnect=false;}
+  int result=*end?-1:wifi_use_profile(slot);
+  if(result==0){snprintf(reply,sizeof(reply),"OK switching to %ld\r\n",slot);mgmt_write(reply);}
+  else if(result==-2)mgmt_write("ERR Wi-Fi driver refused the network; previous setting kept\r\n");
+  else mgmt_write("ERR Invalid saved network\r\n");
  }else{char *end;long slot=strtol(line+4,&end,10);if(*end || slot<1 || slot>(long)wifi_saved.count || !wifi_save_profile(wifi_saved.profiles[slot-1].ssid,"",true))mgmt_write("ERR Saved network could not be removed\r\n");else mgmt_write("OK deleted\r\n");}
  xSemaphoreGive(members_lock);return true;
 }

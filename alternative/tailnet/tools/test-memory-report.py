@@ -97,8 +97,69 @@ for bad in ("memory guard", "memory guard 70000", "memory guard 12x"):
 assert "#handled 0" in sections["memory nonsense"]
 busy = reports("busy", "attribution")[0]
 assert busy["error"] == "memberships busy"
+# Wi-Fi link + lwIP counters (`wifistats`): raw cumulative counters as bounded JSON lines, privacy-clean, resettable.
+def lines(command):
+    return [x for x in sections[command] if isinstance(x, dict)]
+def named(command, kind, name):
+    found = [x for x in lines(command) if x["kind"] == kind and x.get("name") == name]
+    assert len(found) == 1, (command, kind, name, lines(command))
+    return found[0]
+before = lines("wifistats_before")
+assert [x["kind"] for x in before[:2]] == ["wifi_link", "lwip_stats"], before
+assert all(x["schema"] == 1 and x["uptime_ms"] == 123456 for x in before)
+link = before[0]["link"]
+assert before[0]["driver_counters"] == "not_exposed"
+assert link == {"connected": True, "join": "connected", "selected_slot": 2, "pinned": True, "pin_failed_slot": 0, "rssi_dbm": -64, "channel": 6, "secondary": "above", "phy": "HT40", "bandwidth_cfg_mhz": 40,
+                "ap_bandwidth_mhz": 40, "ap_modes": "bgn", "power_save": "none", "tx_power_qdbm": 78, "connects": 2, "disconnects": 2,
+                "beacon_timeouts": 1, "last_disconnect_reason": 8, "last_disconnect_rssi_dbm": -50, "last_disconnect_uptime_ms": 5000}, link
+assert before[1]["enabled"] == 1 and before[1]["counter_bits"] == 16
+assert [x["name"] for x in before if x["kind"] == "lwip_proto"] == ["link", "etharp", "ip", "icmp", "udp", "tcp"]
+l = named("wifistats_before", "lwip_proto", "link")
+assert (l["xmit"], l["recv"], l["drop"], l["memerr"], l["err"], l["counter_bits"]) == (10, 65535, 3, 2, 1, 16), l
+assert named("wifistats_before", "lwip_proto", "tcp")["drop"] == 7 and named("wifistats_before", "lwip_proto", "ip")["recv"] == 0
+assert set(l) == {"schema", "kind", "name", "uptime_ms", "counter_bits", "xmit", "recv", "fw", "drop", "chkerr", "lenerr", "memerr", "rterr", "proterr", "opterr", "err", "cachehit"}
+assert named("wifistats_before", "lwip_pool", "MEM") == {"schema": 1, "kind": "lwip_pool", "name": "MEM", "uptime_ms": 123456, "avail": 100, "used": 40, "max_used": 60, "err": 4, "illegal": 1}
+assert named("wifistats_before", "lwip_pool", "PBUF_POOL")["err"] == 11 and named("wifistats_before", "lwip_pool", "PBUF")["max_used"] == 9
+assert named("wifistats_before", "lwip_pool", "memp2")["avail"] == 1   # a pool without a name still reports
+assert "#handled 1" in sections["wifistats_before"] and "#handled 1" in sections["wifistats_dump"] and "#handled 1" in sections["wifistats_reset"]
+assert "#handled 0" in sections["wifistats_unknown_arg"]
+dump = lines("wifistats_dump")[0]
+assert dump["kind"] == "wifi_driver_dump" and dump["esp_err"] == 0 and "#dumps 1" in sections["wifistats_partial"]
+reset = lines("wifistats_reset")[0]
+assert reset == {"schema": 1, "kind": "wifi_stats_reset", "uptime_ms": 123456, "events_reset": 1, "lwip_reset": 1}, reset
+after = lines("wifistats_after")
+assert after[0]["link"]["connects"] == after[0]["link"]["disconnects"] == after[0]["link"]["beacon_timeouts"] == 0
+assert after[0]["link"]["rssi_dbm"] == -64          # live state survives a reset
+for x in after:
+    if x["kind"] == "lwip_proto":
+        assert all(v == 0 for k, v in x.items() if k not in ("schema", "kind", "name", "uptime_ms", "counter_bits")), x
+    if x["kind"] == "lwip_pool":
+        assert x["err"] == 0 and x["illegal"] == 0 and x["max_used"] == x["used"], x   # peak restarts from current use
+        assert x["avail"] == named("wifistats_before", "lwip_pool", x["name"])["avail"]
+down = lines("wifistats_down")[0]["link"]
+assert down["connected"] is False and "rssi_dbm" not in down and "channel" not in down and down["connects"] == 0
+partial = lines("wifistats_partial")[0]["link"]
+assert partial["rssi_dbm"] == -70 and partial["phy"] == "unknown" and partial["bandwidth_cfg_mhz"] == 0
+assert partial["power_save"] == "unknown" and partial["tx_power_qdbm"] is None   # failed reads are unknown, never a fake zero
+for command in sections:
+    if command.startswith("wifistats"):
+        text = "\n".join(json.dumps(x) for x in lines(command))
+        assert "do-not-print" not in text and "bssid" not in text.lower() and "ssid" not in text.lower(), command   # privacy
+        for line in lines(command):
+            assert len(json.dumps(line, separators=(",", ":"))) < 600, (command, line["kind"])
+# Release/diagnostics images without lwIP statistics still answer, and say so.
+nostats = out / "test_memory_report_nostats"
+subprocess.run(["cc", "-std=gnu11", "-g", "-fsanitize=address,undefined", "-DHOST_LWIP_STATS=0", "-DCONFIG_TDONGLE_MEMORY_DIAGNOSTICS=1",
+                "-DCONFIG_TDONGLE_MEMORY_GUARD_FLOOR_BYTES=12288", "-I", str(r / "tests/host"), "-I", str(r / "main"),
+                "-I", str(runtime / "tests/stubs"), "-I", str(runtime / "include"), "-I", str(r / "components/microlink/include"),
+                str(r / "tests/test_memory_report.c"), str(runtime / "memory.c"), str(runtime / "memory_diagnostics.c"), "-o", str(nostats)], check=True)
+text2 = subprocess.run([str(nostats)], check=True, capture_output=True, text=True).stdout
+block = text2.split("#> wifistats_before\n")[1].split("#> ")[0]
+kinds = [json.loads(x) for x in block.splitlines() if x.startswith("{")]
+assert [x["kind"] for x in kinds] == ["wifi_link", "lwip_stats"] and kinds[1]["enabled"] == 0, kinds
+
 for command, lines in sections.items():
     for item in lines:
         if isinstance(item, dict):
             assert len(json.dumps(item, separators=(",", ":"))) < 1800, (command, item["kind"])  # bounded, fits the console queue in a few chunks
-print("Serial reports: heap, attribution, lwip, usb, route, phases, admission, bench and guard parse as bounded one-line JSON.")
+print("Serial reports: heap, attribution, lwip, usb, route, phases, admission, bench, guard and wifistats parse as bounded one-line JSON.")
