@@ -227,6 +227,33 @@ void wireguardif_disable_socket_bind(void);
 // When socket binding is disabled, this callback is used to send packets
 // via an external unified socket instead of the internal lwIP UDP PCB.
 void wireguardif_set_udp_output(struct netif *netif, wireguard_udp_output_fn fn, void *ctx);
+/* Optional zero-copy variant, used instead of the copying callback while set (keeps the ctx given above). */
+void wireguardif_set_udp_output_pbuf(struct netif *netif, wireguard_udp_output_pbuf_fn fn);
+
+/* Prepared egress (wireguardif_output_prepared): the pbuf is [16 B header space][plaintext, zero padded to 16][16 B tag]. */
+#define WIREGUARDIF_DATA_HDR 16
+#define WIREGUARDIF_DATA_PAD(n) ((((size_t)(n)) + 15) & ~(size_t)15)
+#define WIREGUARDIF_DATA_ALLOC(n) (WIREGUARDIF_DATA_HDR + WIREGUARDIF_DATA_PAD(n) + WIREGUARD_AUTHTAG_LEN)
+err_t wireguardif_output_prepared(struct netif *netif, struct pbuf *wg, uint16_t plain_len, const ip4_addr_t *ipaddr);
+/* The same in three steps, the seal outside the lwIP core lock (see wireguardif.c): begin and commit need the lock. */
+int wireguardif_tx_begin(struct netif *netif, struct pbuf *wg, uint16_t plain_len, const ip4_addr_t *ipaddr, struct wireguard_tx_job *job, err_t *result);
+err_t wireguardif_tx_commit(struct netif *netif, struct wireguard_tx_job *job);
+
+/* Diagnostics builds: per-stage cycle sink, set by the microlink manager (tdongle_wgperf). Compiled out otherwise. */
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+#include "esp_cpu.h"
+enum { WGIF_STAGE_LOOKUP, WGIF_STAGE_SEAL, WGIF_STAGE_UDP };
+typedef void (*wireguardif_stage_fn)(unsigned stage, uint32_t cycles);
+extern wireguardif_stage_fn wireguardif_stage_sink;
+#define WGIF_T(t) uint32_t t = (uint32_t)esp_cpu_get_cycle_count()
+#define WGIF_LAP(t, stage) do { uint32_t now_ = (uint32_t)esp_cpu_get_cycle_count(); \
+    wireguardif_stage_fn sink_ = wireguardif_stage_sink; \
+    if (sink_) { sink_((stage), now_ - (t)); } \
+    (t) = now_; } while (0)
+#else
+#define WGIF_T(t) ((void)0)
+#define WGIF_LAP(t, stage) ((void)0)
+#endif
 
 // Force all peer output through DERP relay callback (cellular mode).
 // When enabled, peer_output always uses DERP even if peer has a direct endpoint.

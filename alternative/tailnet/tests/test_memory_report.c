@@ -74,6 +74,7 @@ size_t heap_caps_get_minimum_free_size(unsigned c) { return 31000; }
 size_t heap_caps_get_largest_free_block(unsigned c) { return 24576; }
 size_t heap_caps_get_total_size(unsigned c) { return 300000; }
 size_t heap_caps_get_allocated_size(void *p) { for (unsigned i = 0; i < 16; i++) if (sizes[i].block == p) return sizes[i].size; return 0; }
+bool ml_wg_log_bench(unsigned rounds, uint32_t *c) { *c = 31000; return rounds == 200; }
 bool ml_wg_crypto_bench(size_t len, unsigned rounds, uint32_t *aead_ns, uint32_t *copy_ns) { *aead_ns = 2000000; *copy_ns = 20000; return true; }
 void mgmt_write(const char *s) { fputs(s, stdout); }
 static void *tracked(size_t size) { void *p = malloc(size); for (unsigned i = 0; i < 16; i++) if (!sizes[i].block) { sizes[i] = (typeof(sizes[0])){p, size}; break; } return p; }
@@ -110,8 +111,12 @@ int main(void) {
         tdongle_memory_admission_note(&r);
     }
     tdongle_memory_drop(TDONGLE_DROP_DERP_TX_FULL);
+    tdongle_wgperf_reset_now();
+    tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_lock_wait, 100);tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_lock_wait, 250);
+    tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_pass, 0xffffffffu);tdongle_wgperf_add(&tdongle_wgperf, TDONGLE_WGPERF_pass, 5);
+    tdongle_wgperf_count(&tdongle_wgperf, TDONGLE_WGPERF_C_passes, 2);
     tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 700);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 42000);
-    const char *commands[] = {"memory", "route", "members", "memory bench", "memory locks", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
+    const char *commands[] = {"memory", "route", "members", "memory bench", "memory locks", "wgperf", "wgperf logbench", "wgperf reset", "wgperf", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));

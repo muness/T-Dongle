@@ -2,6 +2,7 @@
 #include "ml_rt_core.h"
 #include "esp_log.h"
 #include "tdongle_pm.h"
+#include "tdongle_wgperf.h"
 #include <string.h>
 
 /* The FreeRTOS half of the shared runtime. The part that has to be right (when the tasks start and stop, the order a
@@ -108,9 +109,28 @@ static void wg_mgr_task(void *arg) {
     ESP_LOGI(TAG, "wg_mgr started (Core %d)", xPortGetCoreID());
     while (!ml_rt_core_should_stop(core)) {
         ml_wg_pass_begin(&rt.wg_pass);
+        WGPERF_T(tpm);
         ml_rt_burst_begin(ML_RT_TASK_WG_MGR);
+        WGPERF_LAP(tpm, pm);
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+        uint32_t sent_before = tdongle_wgperf_counter_get(&tdongle_wgperf, TDONGLE_WGPERF_C_out_direct) +
+                               tdongle_wgperf_counter_get(&tdongle_wgperf, TDONGLE_WGPERF_C_out_flushed);
+#endif
+        WGPERF_T(tpass);
         ml_mux_pass(&core->mux[ML_RT_TASK_WG_MGR]);
+        WGPERF_CHARGE(tpass, pass);
+        WGPERF_COUNT(passes, 1);
+        if (ml_wg_pass_work_take() == 0) WGPERF_COUNT(passes_idle, 1);
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+        {
+            uint32_t sent = tdongle_wgperf_counter_get(&tdongle_wgperf, TDONGLE_WGPERF_C_out_direct) +
+                            tdongle_wgperf_counter_get(&tdongle_wgperf, TDONGLE_WGPERF_C_out_flushed) - sent_before;
+            if (sent) WGPERF_ADD(batch, sent);
+        }
+#endif
+        WGPERF_RESTART(tpm);
         ml_rt_burst_end(ML_RT_TASK_WG_MGR);
+        WGPERF_LAP(tpm, pm);
         uint64_t now = ml_get_time_ms();
         wait_for_work(rt.wg_pass.next_due_ms > now ? (uint32_t)(rt.wg_pass.next_due_ms - now) : 0);
     }

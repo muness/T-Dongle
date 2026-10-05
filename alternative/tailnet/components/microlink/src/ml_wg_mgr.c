@@ -20,6 +20,8 @@
 #include "ml_admission.h"
 #include "esp_heap_caps.h"
 #include "ml_runtime.h"
+#include "tdongle_wgperf.h"
+#include "ml_wg_idle.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_netif.h"
@@ -265,12 +267,9 @@ static void wireguard_device_release(struct netif *netif) {
     wireguardif_free(netif);
 }
 
-static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
-                                const uint8_t *data, size_t len, void *ctx) {
-    microlink_t *ml = (microlink_t *)ctx;
-    if (!ml) return ERR_CONN;
-
-    /* Log WG packets sent via direct UDP */
+/* "WG UDP TX": one line per handshake/cookie packet, none per transport-data packet (type 4). */
+static void wg_log_udp_tx(uint32_t dest_ip, uint16_t dest_port, const uint8_t *data, size_t len) {
+    if (len >= 1 && data[0] == 0x04) return;
     uint32_t ip_host = ntohl(dest_ip);
     ESP_LOGI(TAG, "WG UDP TX: %d bytes -> %d.%d.%d.%d:%d type=%d",
              (int)len,
@@ -278,6 +277,51 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
              (int)((ip_host >> 8) & 0xFF), (int)(ip_host & 0xFF),
              (int)dest_port,
              len >= 1 ? data[0] : -1);
+}
+
+/* tailscale "send both" (wgengine/magicsock/endpoint.go send), see the long note below: a handshake packet that went to
+ * the direct endpoint is also relayed via DERP. Shared by the copying and the pbuf send. */
+static void wg_send_both(microlink_t *ml, uint32_t dest_ip, const uint8_t *data, size_t len) {
+    /* tailscale "send both" (wgengine/magicsock/endpoint.go send): a WireGuard
+     * HANDSHAKE packet (type 0x01 init / 0x02 response / 0x03 cookie) is ALSO
+     * relayed via DERP, not only sent to the direct endpoint. DERP is the
+     * reliable bootstrap path that always works (both peers hold a home-DERP
+     * connection); direct is an opportunistic upgrade. Without this, a peer
+     * behind an aggressive symmetric NAT (per-packet source-port remap) never
+     * completes the handshake: the direct copy goes to a port the peer no longer
+     * uses and is silently dropped, and microlink's exclusive direct-OR-DERP
+     * flip never reliably lands the init on DERP. Bulk data (type 0x04) is NOT
+     * duplicated here -- the existing direct path + 30s DERP-fallback carry it
+     * once the session is up. Peer found by dest address (host-order endpoints
+     * vs network-order dest_ip). */
+    if (len >= 1 && (data[0] == 0x01 || data[0] == 0x02 || data[0] == 0x03)) {
+        for (int pi = 0; pi < ml->peer_count; pi++) {
+            ml_peer_t *pr = &ml->peers[pi];
+            bool match = (pr->best_ip && htonl(pr->best_ip) == dest_ip);
+            if (!match) {
+                for (int e = 0; e < pr->endpoint_count && e < ML_MAX_ENDPOINTS; e++) {
+                    if (!pr->endpoints[e].is_ipv6 && pr->endpoints[e].ip &&
+                        htonl(pr->endpoints[e].ip) == dest_ip) { match = true; break; }
+                }
+            }
+            if (match) {
+                ml_derp_queue_send(ml, pr->public_key, data, len);
+                ESP_LOGI(TAG, "WG send-both: handshake type=%d also relayed via DERP to %s",
+                         (int)data[0], pr->hostname);
+                break;
+            }
+        }
+    }
+}
+
+static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
+                                const uint8_t *data, size_t len, void *ctx) {
+    microlink_t *ml = (microlink_t *)ctx;
+    if (!ml) return ERR_CONN;
+
+    /* Only control packets (handshake, cookie) are logged: a transport-data line per packet was ~140 formatted
+     * ESP_LOGI calls a second on the forwarding path (docs/adr/0018-wg-mgr-packet-path.md). */
+    wg_log_udp_tx(dest_ip, dest_port, data, len);
 
     /* Use raw PCB to send — safe from any thread context */
     if (!ml->wg_output_pcb) return ERR_CONN;
@@ -331,44 +375,46 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
 
     err_t err = udp_sendto(ml->wg_output_pcb, p, &dst, dest_port);
     pbuf_free(p);
+    wg_send_both(ml, dest_ip, data, len);
+    return err;
+}
 
-    /* tailscale "send both" (wgengine/magicsock/endpoint.go send): a WireGuard
-     * HANDSHAKE packet (type 0x01 init / 0x02 response / 0x03 cookie) is ALSO
-     * relayed via DERP, not only sent to the direct endpoint. DERP is the
-     * reliable bootstrap path that always works (both peers hold a home-DERP
-     * connection); direct is an opportunistic upgrade. Without this, a peer
-     * behind an aggressive symmetric NAT (per-packet source-port remap) never
-     * completes the handshake: the direct copy goes to a port the peer no longer
-     * uses and is silently dropped, and microlink's exclusive direct-OR-DERP
-     * flip never reliably lands the init on DERP. Bulk data (type 0x04) is NOT
-     * duplicated here -- the existing direct path + 30s DERP-fallback carry it
-     * once the session is up. Peer found by dest address (host-order endpoints
-     * vs network-order dest_ip). */
-    if (len >= 1 && (data[0] == 0x01 || data[0] == 0x02 || data[0] == 0x03)) {
-        for (int pi = 0; pi < ml->peer_count; pi++) {
-            ml_peer_t *pr = &ml->peers[pi];
-            bool match = (pr->best_ip && htonl(pr->best_ip) == dest_ip);
-            if (!match) {
-                for (int e = 0; e < pr->endpoint_count && e < ML_MAX_ENDPOINTS; e++) {
-                    if (!pr->endpoints[e].is_ipv6 && pr->endpoints[e].ip &&
-                        htonl(pr->endpoints[e].ip) == dest_ip) { match = true; break; }
-                }
-            }
-            if (match) {
-                ml_derp_queue_send(ml, pr->public_key, data, len);
-                ESP_LOGI(TAG, "WG send-both: handshake type=%d also relayed via DERP to %s",
-                         (int)data[0], pr->hostname);
-                break;
-            }
-        }
-    }
-
+/* The same send without the copies: the datagram is already a contiguous PBUF_TRANSPORT pbuf (wireguardif builds it in
+ * place), so it goes to the UDP pcb as it is. lwIP adds its UDP, IP and link headers in the headroom (and leaves them
+ * there: the pbuf's payload, len and tot_len are not the datagram any more once udp_sendto has run, so nothing here reads
+ * them afterwards) and the caller's reference is untouched (udp_sendto does not consume the pbuf). */
+static err_t wg_udp_output_pbuf_cb(uint32_t dest_ip, uint16_t dest_port, struct pbuf *p, void *ctx) {
+    microlink_t *ml = (microlink_t *)ctx;
+    if (!ml || !ml->wg_output_pcb) return ERR_CONN;
+    const uint8_t *data = (const uint8_t *)p->payload;
+    const size_t len = p->tot_len;   /* before the send: lwIP prepends its headers to this pbuf in place and does not take them off */
+    wg_log_udp_tx(dest_ip, dest_port, data, len);
+    ip_addr_t dst;
+    IP_SET_TYPE_VAL(dst, IPADDR_TYPE_V4);
+    ip4_addr_set_u32(ip_2_ip4(&dst), dest_ip);  /* already network byte order */
+    err_t err = udp_sendto(ml->wg_output_pcb, p, &dst, dest_port);
+    wg_send_both(ml, dest_ip, data, len);
     return err;
 }
 
 /* ============================================================================
  * WireGuard Interface Initialization
  * ========================================================================== */
+
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+/* wireguardif's per-stage cycles (lookup, seal, udp) into the wgperf report. */
+static void wg_stage_sink(unsigned stage, uint32_t cycles) {
+    switch (stage) {
+    case WGIF_STAGE_LOOKUP: WGPERF_ADD(out_lookup, cycles); break;
+    case WGIF_STAGE_SEAL: WGPERF_ADD(out_seal, cycles); break;
+    case WGIF_STAGE_UDP: WGPERF_ADD(out_udp, cycles); break;
+    default: break;
+    }
+}
+#define WG_PERF_INSTALL() (wireguardif_stage_sink = wg_stage_sink)
+#else
+#define WG_PERF_INSTALL() ((void)0)
+#endif
 
 /* Peer slots of the global pool: ledger-tagged to the `wg` owner (see peer_pool_reserve). */
 static struct { uint32_t refused_largest; uint32_t largest_low; } slot_guard = { .largest_low = UINT32_MAX };
@@ -396,8 +442,9 @@ static void wg_pool_free(void *block) { tdongle_heap_free(TDONGLE_OWNER_WG, bloc
  * diagnostics builds only; `memory locks`). The budget the shared task works to is ~1 ms per hold: the cryptography runs
  * outside the lock (initiation: wireguard_initiation_*, receive: wireguard_rx_*) and periodic work is taken one peer at
  * a time. */
-#define WG_LOCKED(site, body) do { LOCK_TCPIP_CORE(); int64_t hold_start_ = tdongle_lock_clock(); body; \
-    tdongle_lock_hold((site), (uint32_t)(tdongle_lock_clock() - hold_start_)); UNLOCK_TCPIP_CORE(); } while (0)
+#define WG_LOCKED(site, body) do { WGPERF_T(wgperf_lk_); LOCK_TCPIP_CORE(); WGPERF_LAP(wgperf_lk_, lock_wait); \
+    int64_t hold_start_ = tdongle_lock_clock(); body; \
+    tdongle_lock_hold((site), (uint32_t)(tdongle_lock_clock() - hold_start_)); WGPERF_LAP(wgperf_lk_, lock_hold); UNLOCK_TCPIP_CORE(); } while (0)
 #define GATEWAY_WG_SITE(site, expr) ({ err_t result_; WG_LOCKED(site, result_ = (expr)); result_; })
 #define GATEWAY_WG_CALL(expr) GATEWAY_WG_SITE(TDONGLE_LOCK_WG_OTHER, expr)
 static esp_err_t wg_init_interface_impl(microlink_t *ml) {
@@ -479,6 +526,8 @@ static esp_err_t wg_init_interface_impl(microlink_t *ml) {
     /* Register output callbacks for magicsock mode */
     wireguardif_set_derp_output(netif, wg_derp_output_cb, ml);
     wireguardif_set_udp_output(netif, wg_udp_output_cb, ml);
+    wireguardif_set_udp_output_pbuf(netif, wg_udp_output_pbuf_cb);
+    WG_PERF_INSTALL();
 
     /* On cellular AT socket bridge, force all WG output through DERP relay.
      * AT sockets are TCP-only, so direct UDP is impossible.
@@ -546,9 +595,11 @@ static int find_peer_by_key(microlink_t *ml, const uint8_t *pubkey) {
 static int find_peer_by_ip(microlink_t *ml, uint32_t vpn_ip) {
     for (int i = 0; i < ml->peer_count; i++) {
         if (ml->peers[i].active && ml->peers[i].vpn_ip == vpn_ip) {
+            WGPERF_COUNT(lookup_scans, (uint32_t)i + 1);
             return i;
         }
     }
+    WGPERF_COUNT(lookup_scans, (uint32_t)ml->peer_count);
     return -1;
 }
 
@@ -1297,71 +1348,166 @@ static void directory_reconcile(microlink_t *ml) {
             }
     ml->directory_applied=generation;
 }
-/* The queue owns copies, at most four packets per membership including pending.
- * Network callbacks never provision peers or read flash. */
+/* ----------------------------------------------------------------------------
+ * Egress: USB -> tunnel packets (docs/adr/0018-wg-mgr-packet-path.md)
+ *
+ * usb_routes builds the WireGuard datagram where it will be sent from: one lwIP RAM pbuf in the transport layout
+ * [16 B header space][plaintext, zero padded to 16][16 B tag space], preceded by a small record (destination, enqueue
+ * time) in its headroom. The pbuf pointer (bit 0 set, to tell it from a peer-update block) is the queue entry. wg_mgr
+ * seals it in place and hands the same pbuf to the UDP pcb: one allocation and one copy per packet, where there were
+ * six allocations and four copies (calloc+copy, pbuf+copy, transport pbuf+copy, linearising buffer+copy, SPIRAM wrapper
+ * +copy). Network callbacks still never provision peers or read flash: a packet for a peer that is not resident waits in
+ * a pending slot (at most ML_JIT_PENDING per membership including those still in the queue) while wg_mgr activates it.
+ * ------------------------------------------------------------------------- */
+typedef struct { uint32_t vpn_ip, enq_us; uint16_t len; } ml_egress_meta_t;
+/* Units of work done in the current pass (packets, timers, drains): a pass that did none was idle. wg_mgr task only. */
+static unsigned g_pass_work;
+/* Arrival order of parked packets (wg_mgr task only): slots are reused in any order, so the flush goes by this, not by slot. */
+static uint32_t g_park_seq;
+unsigned ml_wg_pass_work_take(void) { unsigned n = g_pass_work; g_pass_work = 0; return n; }
+
 esp_err_t ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *data,size_t len) {
     if(!ml || !data || !len || len>1400 || ml->state!=ML_STATE_CONNECTED)return ESP_ERR_INVALID_STATE;
     /* Pending packets are not charged to admission beyond the typical two (ml_admission.h): the rest comes from free heap
      * above the recovery reserve, and is refused here when it would not. */
-    if(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)<ML_ADM_RECOVERY_BYTES+len+sizeof(ml_peer_update_t)+sizeof(size_t))return ESP_ERR_NO_MEM;
+    if(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)<ML_ADM_RECOVERY_BYTES+WIREGUARDIF_DATA_ALLOC(len)+sizeof(ml_egress_meta_t)+sizeof(struct pbuf)+64)return ESP_ERR_NO_MEM;
     unsigned old=__atomic_fetch_add(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
     if(old>=ML_JIT_PENDING) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
-    ml_peer_update_t *packet=tdongle_heap_tag(TDONGLE_OWNER_WG, calloc(1,sizeof(*packet)+sizeof(size_t)+len));
+    WGPERF_T(t);
+    size_t padded=WIREGUARDIF_DATA_PAD(len);
+    struct pbuf *packet=pbuf_alloc(PBUF_TRANSPORT,(u16_t)WIREGUARDIF_DATA_ALLOC(len),PBUF_RAM);
     if(!packet) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
-    packet->action=ML_PEER_PACKET;packet->vpn_ip=ip;
-    memcpy(packet+1,&len,sizeof(len));memcpy((uint8_t *)(packet+1)+sizeof(len),data,len);
-    if(xQueueSend(ml->peer_update_queue,&packet,0)!=pdTRUE) {
-        tdongle_heap_free(TDONGLE_OWNER_WG, packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+    uint8_t *wire=packet->payload;
+    memset(wire,0,WIREGUARDIF_DATA_HDR);                                  /* header: filled when sealed */
+    memcpy(wire+WIREGUARDIF_DATA_HDR,data,len);
+    memset(wire+WIREGUARDIF_DATA_HDR+len,0,padded-len+WIREGUARD_AUTHTAG_LEN);   /* padding and tag space */
+    if(pbuf_add_header(packet,sizeof(ml_egress_meta_t))) {pbuf_free(packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+    ml_egress_meta_t meta={.vpn_ip=ip,.enq_us=WGPERF_US_NOW(),.len=(uint16_t)len};
+    memcpy(packet->payload,&meta,sizeof(meta));
+    void *entry=ml_pu_tag_packet(packet);
+    if(xQueueSend(ml->peer_update_queue,&entry,0)!=pdTRUE) {
+        pbuf_free(packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+    WGPERF_COUNT(wakes,1);
     ml_rt_wake(ML_RT_TASK_WG_MGR);   /* event driven: the queue is serviced now, not at the next poll */
+    WGPERF_LAP(t,prep);
     return ESP_OK;
 }
-static void directory_flush_packets(microlink_t *ml) {
-    for(unsigned i=0;i<ML_JIT_PENDING;i++) {
-        ml_peer_update_t *packet=ml->jit_pending[i].packet;if(!packet)continue;
-        int idx=find_peer_by_ip(ml,packet->vpn_ip);
-        bool discard=idx<0 || ml_get_time_ms()>=ml->jit_pending[i].expires;
-        if(discard)ml->jit_dropped++;
-        if(!discard && ml_wg_mgr_peer_is_up(ml,packet->vpn_ip)) {
-            size_t len;memcpy(&len,packet+1,sizeof(len));
-            struct pbuf *b=pbuf_alloc(PBUF_IP,len,PBUF_RAM);
-            if(b) {
-                pbuf_take(b,(uint8_t *)(packet+1)+sizeof(len),len);
-                ip4_addr_t ip={.addr=htonl(packet->vpn_ip)};
-                struct netif *wg=ml->wg_netif;
-                ROUTE_MARK(4);
-                GATEWAY_WG_SITE(TDONGLE_LOCK_WG_OUTPUT, wg->output(wg,b,&ip));pbuf_free(b);
-                ROUTE_MARK(0);
-                ml->peers[idx].jit_used_ms=ml_get_time_ms();
-            }
-            discard=true;
+/* Has WireGuard a session for this peer (either keypair)? The quiet form of ml_wg_mgr_peer_is_up: that one logs a line
+ * per call, which on the data path was one line per packet. */
+static bool wg_peer_session_up(microlink_t *ml,const ml_peer_t *peer) {
+    if(!ml->wg_netif || peer->wg_peer_index<0)return false;
+    return wireguardif_peer_is_up((struct netif *)ml->wg_netif,(u8_t)peer->wg_peer_index,NULL,NULL)==ERR_OK;
+}
+/* Seal and send one prepared packet, then drop the reference. The result is not used: as before, a packet that cannot be
+ * sent now (no usable keypair, send error) is lost, and TCP above retransmits. */
+static void gateway_send_packet(microlink_t *ml,struct pbuf *packet,uint32_t vpn_ip,uint16_t len) {
+    struct netif *wg=ml->wg_netif;
+    if(wg) {
+        WGPERF_T(t);
+        ip4_addr_t ip={.addr=htonl(vpn_ip)};
+        /* ChaCha20-Poly1305 over up to 1.4 KB is ~62k cycles (0.26 ms): not under the core lock (as the receive direction,
+         * PR #30). begin and commit hold it for the lookup, the nonce and the send; the seal in between touches only this
+         * packet's pbuf and a private copy of the key (wireguardif.c, wireguardif_tx_begin). */
+        struct wireguard_tx_job job;err_t result=ERR_CONN;int seal=0;
+        ROUTE_MARK(4);
+        WG_LOCKED(TDONGLE_LOCK_WG_OUTPUT, seal=wireguardif_tx_begin(wg,packet,len,&ip,&job,&result));
+        if(seal) {
+            wireguard_tx_seal(&job);
+            WG_LOCKED(TDONGLE_LOCK_WG_COMMIT, result=wireguardif_tx_commit(wg,&job));
         }
-        if(discard) {tdongle_heap_free(TDONGLE_OWNER_WG, packet);ml->jit_pending[i].packet=NULL;
-            __atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);}
+        (void)result;
+        ROUTE_MARK(0);
+        WGPERF_LAP(t,send);
+    }
+    pbuf_free(packet);
+}
+static void gateway_release_slot(microlink_t *ml,unsigned i) {
+    ml->jit_pending[i].packet=NULL;
+    __atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
+}
+static bool gateway_parked_for(const microlink_t *ml,uint32_t vpn_ip) {
+    for(unsigned i=0;i<ML_JIT_PENDING;i++)if(ml->jit_pending[i].packet && ml->jit_pending[i].vpn_ip==vpn_ip)return true;
+    return false;
+}
+/* One packet taken from the queue. A resident peer with a session and nothing waiting ahead of it for the same
+ * destination is sent now, in this pass (what the pending slot and the flush that followed did for every packet, with
+ * three more peer lookups and a log line); anything else is parked and the handshake started, as before. A peer that is
+ * not resident is activated first (ADR-0012 amendment: JIT activation, eviction rules and the 5 s expiry unchanged). */
+static void gateway_egress_packet(microlink_t *ml,struct pbuf *packet) {
+    g_pass_work++;
+    ml_egress_meta_t meta;
+    memcpy(&meta,packet->payload,sizeof(meta));
+    pbuf_remove_header(packet,sizeof(meta));
+    WGPERF_ADD(q_latency,WGPERF_US_NOW()-meta.enq_us);
+    WGPERF_T(t);
+    ml_peer_update_t record;
+    int idx=find_peer_by_ip(ml,meta.vpn_ip);
+    if(idx>=0){ml->jit_hits++;ml->peers[idx].jit_used_ms=ml_get_time_ms();}
+    else if(ml_directory_find(ml,meta.vpn_ip,NULL,NULL,0,&record)) {
+        __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
+        idx=directory_activate(ml,&record);
+        __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
+    }
+    bool up=idx>=0 && wg_peer_session_up(ml,&ml->peers[idx]);
+    WGPERF_LAP(t,lookup);
+    if(up && !gateway_parked_for(ml,meta.vpn_ip)) {
+        WGPERF_COUNT(out_direct,1);
+        gateway_send_packet(ml,packet,meta.vpn_ip,meta.len);
+        __atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);   /* the budget counts queued and parked packets only */
+        return;
+    }
+    if(idx>=0)for(unsigned i=0;i<ML_JIT_PENDING;i++)if(!ml->jit_pending[i].packet) {
+        ml->jit_pending[i].packet=packet;ml->jit_pending[i].expires=ml_get_time_ms()+5000;
+        ml->jit_pending[i].vpn_ip=meta.vpn_ip;ml->jit_pending[i].len=meta.len;ml->jit_pending[i].seq=++g_park_seq;
+        WGPERF_COUNT(out_parked,1);
+        ROUTE_MARK(3);
+        ml_wg_mgr_trigger_handshake(ml,meta.vpn_ip);ROUTE_MARK(0);
+        return;
+    }
+    WGPERF_COUNT(out_discard,1);
+    ml->jit_dropped++;pbuf_free(packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
+}
+static void directory_flush_packets(microlink_t *ml) {
+    /* In arrival order (oldest `seq` first), not slot order: a slot freed by one peer's packet is taken by the next packet
+     * of any peer, so slot order is not arrival order and would send a peer's newer packet ahead of its older one. */
+    unsigned done=0;
+    for(;;) {
+        int pick=-1;
+        for(unsigned i=0;i<ML_JIT_PENDING;i++) {
+            if(!ml->jit_pending[i].packet || (done&(1u<<i)))continue;
+            if(pick<0 || (int32_t)(ml->jit_pending[i].seq-ml->jit_pending[pick].seq)<0)pick=(int)i;
+        }
+        if(pick<0)break;
+        unsigned i=(unsigned)pick;done|=1u<<i;
+        struct pbuf *packet=ml->jit_pending[i].packet;
+        int idx=find_peer_by_ip(ml,ml->jit_pending[i].vpn_ip);
+        bool discard=idx<0 || ml_get_time_ms()>=ml->jit_pending[i].expires;
+        if(discard){ml->jit_dropped++;WGPERF_COUNT(out_discard,1);pbuf_free(packet);gateway_release_slot(ml,i);continue;}
+        if(wg_peer_session_up(ml,&ml->peers[idx])) {
+            WGPERF_COUNT(out_flushed,1);
+            gateway_send_packet(ml,packet,ml->jit_pending[i].vpn_ip,ml->jit_pending[i].len);
+            ml->peers[idx].jit_used_ms=ml_get_time_ms();
+            gateway_release_slot(ml,i);
+        }
     }
 }
 #endif
+void ml_pu_free_entry(void *entry) {
+    if (!entry) return;
+    if (ml_pu_is_packet(entry)) pbuf_free(ml_pu_packet(entry));
+    else tdongle_heap_free(TDONGLE_OWNER_PEER, entry);
+}
 static void process_peer_updates(microlink_t *ml) {
     ml_peer_update_t *update;
     while (xQueueReceive(ml->peer_update_queue, &update, 0) == pdTRUE) {
         if (!update)
             continue;
-        __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
 #ifdef ESP_PLATFORM
-        if(update->action==ML_PEER_PACKET) {
-            ml_peer_update_t record;int idx=-1;
-            idx=find_peer_by_ip(ml,update->vpn_ip);
-            if(idx>=0){ml->jit_hits++;ml->peers[idx].jit_used_ms=ml_get_time_ms();}
-            else if(ml_directory_find(ml,update->vpn_ip,NULL,NULL,0,&record))idx=directory_activate(ml,&record);
-            bool kept=false;
-            if(idx>=0)for(unsigned i=0;i<ML_JIT_PENDING;i++)if(!ml->jit_pending[i].packet) {
-                ml->jit_pending[i].packet=update;ml->jit_pending[i].expires=ml_get_time_ms()+5000;
-                ROUTE_MARK(3);
-                ml_wg_mgr_trigger_handshake(ml,update->vpn_ip);ROUTE_MARK(0);kept=true;break;
-            }
-            if(!kept) {ml->jit_dropped++;tdongle_heap_free(TDONGLE_OWNER_WG, update);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);}
-            __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);continue;
-        }
+        /* An egress packet changes no peer metadata (an activation bumps the generation itself), so it takes no part in
+         * the odd/even protocol that status readers use. */
+        if(ml_pu_is_packet(update)) {gateway_egress_packet(ml,ml_pu_packet(update));continue;}
 #endif
+        __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
         bool is_batch = update->action == ML_PEER_BATCH;
         if (is_batch) {
             ml_peer_batch_t *batch = (ml_peer_batch_t *)update;
@@ -2071,10 +2217,15 @@ static esp_err_t wg_init_interface(microlink_t *ml) {
 }
 
 static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
-    ESP_LOGI(TAG, "WG RX: %d bytes, via_derp=%d, type=%d, from=%02x%02x%02x%02x",
-             (int)pkt->len, pkt->via_derp,
-             pkt->len >= 4 ? pkt->data[0] : -1,
-             pkt->src_pubkey[0], pkt->src_pubkey[1], pkt->src_pubkey[2], pkt->src_pubkey[3]);
+    WGPERF_T(t);
+    WGPERF_T(t_all);
+    WGPERF_COUNT(in_pkts, 1);
+    /* Handshake and cookie messages are logged; transport data (type 4, one per ACK or download segment) is not. */
+    if (!(pkt->len >= 4 && pkt->data[0] == 0x04))
+        ESP_LOGI(TAG, "WG RX: %d bytes, via_derp=%d, type=%d, from=%02x%02x%02x%02x",
+                 (int)pkt->len, pkt->via_derp,
+                 pkt->len >= 4 ? pkt->data[0] : -1,
+                 pkt->src_pubkey[0], pkt->src_pubkey[1], pkt->src_pubkey[2], pkt->src_pubkey[3]);
 #ifdef ESP_PLATFORM
     int sender = -1;
     uint32_t sender_activity = 0;
@@ -2113,6 +2264,7 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
     }
     pbuf_take(p, pkt->data, pkt->len);
     tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);  /* Original data no longer needed — pbuf has its own copy */
+    WGPERF_LAP(t, rx_prep);
 
     /* Build source address */
     ip_addr_t addr;
@@ -2130,14 +2282,18 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
     int rx_pending = 0;
     WG_LOCKED(TDONGLE_LOCK_WG_OTHER, { ROUTE_MARK(5); rx_pending = wireguardif_rx_begin(netif, p, &addr, pkt->src_port, &rx_job); ROUTE_MARK(0); });
     if (rx_pending) {
+        WGPERF_RESTART(t);
         wireguard_rx_decrypt(&rx_job);
+        WGPERF_LAP(t, rx_decrypt);
         WG_LOCKED(TDONGLE_LOCK_WG_COMMIT, { ROUTE_MARK(5); wireguardif_rx_complete(netif, &addr, pkt->src_port, &rx_job); ROUTE_MARK(0); });
+        WGPERF_LAP(t, rx_deliver);
     }
 #ifdef ESP_PLATFORM
     if(sender>=0 && wg_peer_activity(ml,sender)!=sender_activity)
         ml->peers[sender].jit_used_ms=ml_get_time_ms();
     directory_trial_poll(ml);
 #endif
+    WGPERF_CHARGE(t_all, rx_pkt);
 }
 
 /* ============================================================================
@@ -2722,6 +2878,20 @@ static void wg_periodic_sliced(microlink_t *ml) {
     WG_LOCKED(TDONGLE_LOCK_WG_PERIODIC, wireguardif_periodic_end(netif));
 }
 
+/* When does this membership next need the task? Its own timers, a backlog the drain budgets left behind (one tick, so
+ * lower priorities get the core between slices), packets waiting for a handshake or a trial deadline (polled at 10 ms
+ * while they exist). */
+static void wg_register_due(microlink_t *ml, ml_wg_pass_t *pass, uint64_t now) {
+    ml_wg_loop_t *loop = &ml->wgm;
+    wg_due(pass, loop->last_wg_periodic_ms + 400);
+    wg_due(pass, loop->last_disco_probe_ms + 1000);
+    wg_due(pass, loop->last_snapshot_ms + 10000);
+    if (uxQueueMessagesWaiting(ml->wg_rx_queue) || uxQueueMessagesWaiting(ml->disco_rx_queue) ||
+        uxQueueMessagesWaiting(ml->peer_update_queue))
+        wg_due(pass, now + 1);
+    if (ml->jit_packet_count || ml->inbound_trial.pending) wg_due(pass, now + 10);
+}
+
 static void member_service(void *ctx, void *shared) {
     microlink_t *ml = ctx;
     ml_wg_pass_t *pass = shared;
@@ -2755,6 +2925,33 @@ static void member_service(void *ctx, void *shared) {
         loop->stage = ML_WG_STAGE_RUNNING;
     }
 
+    /* A slice with nothing to do (a wake-up left behind by a burst, or a housekeeping deadline that was not ours) only
+     * re-arms its timers: ml_wg_slice_idle is deliberately conservative, see ml_wg_idle.h. */
+    {
+        ml_wg_idle_t idle = {
+            .queued = uxQueueMessagesWaiting(ml->wg_rx_queue) + uxQueueMessagesWaiting(ml->disco_rx_queue) +
+                      uxQueueMessagesWaiting(ml->peer_update_queue),
+            .packets_pending = ml->jit_packet_count != 0,
+            .trial_pending = ml->inbound_trial.pending != 0,
+            .directory_stale = __atomic_load_n(&ml->directory.generation, __ATOMIC_ACQUIRE) != ml->directory_applied,
+            .stun_cmm_due = !loop->stun_cmm_sent && !ml_at_socket_is_ready() && ml->stun_public_ip != 0 && ml->peer_count > 0,
+            .derp_changed = ((bits & ML_EVT_DERP_CONNECTED) != 0) != loop->derp_was_connected,
+            .now_ms = ml_get_time_ms(),
+            .periodic_at_ms = loop->last_wg_periodic_ms + 400,
+            .probes_at_ms = loop->last_disco_probe_ms + 1000,
+            .snapshot_at_ms = loop->last_snapshot_ms + 10000,
+            .wg_ready = ml->wg_netif != NULL,
+        };
+#ifdef CONFIG_ML_ZERO_COPY_WG
+        idle.queued += __atomic_load_n(&ml->zc.rx_tail, __ATOMIC_RELAXED) != __atomic_load_n(&ml->zc.rx_head, __ATOMIC_ACQUIRE);
+#endif
+        if (ml_wg_slice_idle(&idle)) {
+            WGPERF_COUNT(passes_skipped, 1);
+            wg_register_due(ml, pass, idle.now_ms);
+            return;
+        }
+    }
+
     /* One drain window, charged to the pass as well as to its own limit. */
     uint64_t budget_start_ms = ml_get_time_ms();   /* DISCO budget window */
     #define WG_MGR_BUDGET_LEFT(ms) ((ml_get_time_ms() - budget_start_ms) < (ms) && pass->drain_ms < WG_MGR_PASS_BUDGET_MS)
@@ -2764,7 +2961,12 @@ static void member_service(void *ctx, void *shared) {
 #ifdef ESP_PLATFORM
     directory_reconcile(ml);
 #endif
-    process_peer_updates(ml);
+    {
+        WGPERF_T(tu);
+        unsigned work_before = g_pass_work;
+        process_peer_updates(ml);
+        if (g_pass_work != work_before) WGPERF_CHARGE(tu, updates);
+    }
 #ifdef ESP_PLATFORM
     directory_trial_poll(ml);
     directory_flush_packets(ml);
@@ -2801,6 +3003,8 @@ static void member_service(void *ctx, void *shared) {
     }
 
     /* Process DISCO packets */
+    WGPERF_T(tdisco);
+    unsigned disco_before = loop->disco_rx_10s;
 #ifdef CONFIG_ML_ZERO_COPY_WG
     /* Zero-copy mode: drain SPSC ring buffer (PCB callback → wg_mgr) */
     {
@@ -2835,14 +3039,19 @@ static void member_service(void *ctx, void *shared) {
     }
     if (uxQueueMessagesWaiting(ml->disco_rx_queue) > 0) loop->budget_hits_10s++;
     WG_MGR_CHARGE();
+    if (loop->disco_rx_10s != disco_before) { WGPERF_CHARGE(tdisco, disco_rx); g_pass_work++; }
 
     /* Process WireGuard packets */
     ml_rx_packet_t wg_pkt;
     budget_start_ms = ml_get_time_ms();   /* WG data plane: fresh window, not charged for DISCO */
+    WGPERF_T(tdrain);
+    int drained = 0;
     for (int n = 0; n < WG_MGR_WG_BURST && WG_MGR_BUDGET_LEFT(WG_MGR_WG_BUDGET_MS) &&
                     xQueueReceive(ml->wg_rx_queue, &wg_pkt, 0) == pdTRUE; n++) {
         process_wg_packet(ml, &wg_pkt);
+        drained++;
     }
+    if (drained) { WGPERF_CHARGE(tdrain, drain_wg); g_pass_work += (unsigned)drained; }
     WG_MGR_CHARGE();
 
     /* Run WireGuard periodic processing (handshakes, keepalives, rekeys).
@@ -2852,7 +3061,10 @@ static void member_service(void *ctx, void *shared) {
     uint64_t now = ml_get_time_ms();
     if (ml->wg_netif && now - loop->last_wg_periodic_ms >= 400) {
         uint64_t t0 = now;
+        WGPERF_T(tp);
         wg_periodic_sliced(ml);
+        WGPERF_LAP(tp, periodic);
+        g_pass_work++;
         uint64_t dt = ml_get_time_ms() - t0;
         loop->last_wg_periodic_ms = now;
         /* Throughput-collapse diag: only log when actually slow (>30ms),
@@ -2867,7 +3079,10 @@ static void member_service(void *ctx, void *shared) {
     now = ml_get_time_ms();
     if (now - loop->last_disco_probe_ms > 1000) {
         uint64_t t0 = now;
+        WGPERF_T(td);
         disco_periodic_probes(ml);
+        WGPERF_LAP(td, disco_tick);
+        g_pass_work++;
         uint64_t dt = ml_get_time_ms() - t0;
         loop->last_disco_probe_ms = now;
         if (dt > 30) {
@@ -2884,10 +3099,14 @@ static void member_service(void *ctx, void *shared) {
      * was busy. 2026-05-27. Bounded like the first drain, with its own
      * window so the slow periodic work above cannot starve it (#46). */
     budget_start_ms = ml_get_time_ms();
+    WGPERF_RESTART(tdrain);
+    drained = 0;
     for (int n = 0; n < WG_MGR_WG_BURST && WG_MGR_BUDGET_LEFT(WG_MGR_WG_BUDGET_MS) &&
                     xQueueReceive(ml->wg_rx_queue, &wg_pkt, 0) == pdTRUE; n++) {
         process_wg_packet(ml, &wg_pkt);
+        drained++;
     }
+    if (drained) { WGPERF_CHARGE(tdrain, drain_wg); g_pass_work += (unsigned)drained; }
     WG_MGR_CHARGE();
     #undef WG_MGR_CHARGE
     #undef WG_MGR_BUDGET_LEFT
@@ -2909,17 +3128,7 @@ static void member_service(void *ctx, void *shared) {
         loop->last_snapshot_ms = now;
     }
 
-    /* When does this membership next need the task? Its own timers, a backlog the drain budgets left behind (one
-     * tick, so lower priorities get the core between slices), packets waiting for a handshake or a trial deadline
-     * (polled at 10 ms while they exist). */
-    now = ml_get_time_ms();
-    wg_due(pass, loop->last_wg_periodic_ms + 400);
-    wg_due(pass, loop->last_disco_probe_ms + 1000);
-    wg_due(pass, loop->last_snapshot_ms + 10000);
-    if (uxQueueMessagesWaiting(ml->wg_rx_queue) || uxQueueMessagesWaiting(ml->disco_rx_queue) ||
-        uxQueueMessagesWaiting(ml->peer_update_queue))
-        wg_due(pass, now + 1);
-    if (ml->jit_packet_count || ml->inbound_trial.pending) wg_due(pass, now + 10);
+    wg_register_due(ml, pass, ml_get_time_ms());
 }
 
 /* Runs under the wg_mgr mux lock after the membership left the table: shut the WireGuard interface down while
@@ -2983,6 +3192,17 @@ bool ml_wg_crypto_bench(size_t len, unsigned rounds, uint32_t *aead_ns, uint32_t
     }
     *copy_ns = (uint32_t)((esp_timer_get_time() - started) * 1000 / rounds);
     tdongle_heap_free(TDONGLE_OWNER_OTHER, packet);
+    return true;
+}
+
+/* What one per-packet ESP_LOGI cost before it was removed: the same format as the old "WG UDP TX" line, as configured
+ * (level, console channel, vprintf). Run from the console task; the line goes wherever logs go. */
+bool ml_wg_log_bench(unsigned rounds, uint32_t *cycles_per_line) {
+    if (!rounds) return false;
+    uint32_t start = (uint32_t)esp_cpu_get_cycle_count();
+    for (unsigned i = 0; i < rounds; i++)
+        ESP_LOGI(TAG, "WG UDP TX: %d bytes -> %d.%d.%d.%d:%d type=%d", 1432, 100, 100, 5, 7, 41641, 4);
+    *cycles_per_line = ((uint32_t)esp_cpu_get_cycle_count() - start) / rounds;
     return true;
 }
 #endif

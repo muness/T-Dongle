@@ -21,6 +21,8 @@ sections, current = {}, None
 for line in text.splitlines():
     if line.startswith("#> "):
         current = line[3:]
+        while current in sections:
+            current += "'"   # the same command twice: keep both outputs
         sections[current] = []
     elif line.startswith("#"):
         sections[current].append(line)
@@ -69,6 +71,13 @@ locks = reports("memory locks", "locks")[0]
 assert locks["bucket_limits_us"] == [100, 250, 500, 1000, 2000, 5000, 10000, 30000]
 assert locks["sites"]["wg_periodic"]["count"] == 2 and locks["sites"]["wg_periodic"]["max_us"] == 42000 and locks["sites"]["wg_periodic"]["over_1ms"] == 1
 assert locks["sites"]["wg_periodic"]["buckets"] == [0, 0, 0, 1, 0, 0, 0, 0, 1] and locks["sites"]["wg_other"]["count"] == 0
+wg = [reports("wgperf", "wgperf")[0], reports("wgperf reset", "wgperf_reset")[0], reports("wgperf'", "wgperf")[0]]
+first = wg[0]
+assert first["cpu_mhz"] == 240 and list(first["stages"])[:3] == ["q_latency", "prep", "pass"] and len(first["units"]) == len(first["stages"])
+assert first["stages"]["lock_wait"] == [2, 350, 250] and first["stages"]["pass"] == [2, 0xffffffff + 5, 0xffffffff], first["stages"]["pass"]
+assert first["units"][0] == "us" and first["units"][1] == "cy" and first["units"][-1] == "pkt" and first["counters"]["passes"] == 2
+assert all(v == [0, 0, 0] for v in wg[2]["stages"].values()) and all(v == 0 for v in wg[2]["counters"].values())   # after the reset
+assert reports("wgperf logbench", "logbench")[0]["cycles_per_line"] == 31000
 cpu = reports("cpu", "cpu")[0]
 assert cpu["cpu_mhz"] == 240 and cpu["total"] == 4294967295 and cpu["cores"] == 2 and cpu["tasks_listed"] == 3 and cpu["uptime_ms"] == 123456
 assert [(t["name"], t["runtime"], t["priority"], t["core"], t["stack_free"]) for t in cpu["tasks"]] == \
