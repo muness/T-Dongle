@@ -6,7 +6,7 @@
 
 int main(void) {
     ml_adm_sizes_t s = {.context = 10256, .coord_stack = 8704, .task_tcb = 340, .queues = 1500, .wg_device = 228,
-                        .wg_slot = 904, .shared_stacks = 7168 + 7680 + 8192, .shared_tasks = 3};
+                        .wg_slot = 904, .shared_stacks = 7168 + 7680 + 8192, .shared_tasks = 3, .route_queue_min = 2800};
     ml_adm_budget_t first, next;
     ml_adm_budget(&s, false, &first);
     ml_adm_budget(&s, true, &next);
@@ -17,8 +17,8 @@ int main(void) {
     assert(first.negotiation == ML_ADM_NEG_PEAK_BYTES && next.negotiation == first.negotiation);
     assert(next.member_steady == next.member_start + next.member_growth);
     assert(next.member_start == 10256 + 8704 + 340 + 1500);
-    assert(next.member_growth == 228 + 4 * 904 + ML_ADM_TLS_LIVE_BYTES + ML_ADM_LWIP_BYTES + ML_ADM_OTHER_BYTES);
-    assert(next.required == next.member_steady + 16000 + 16384);
+    assert(next.member_growth == 228 + 4 * 904 + ML_ADM_TLS_LIVE_BYTES + ML_ADM_LWIP_BYTES + ML_ADM_OTHER_BYTES + 2 * 1464);
+    assert(next.required == next.member_steady + 16000 + 16384 + 2800 && next.router == 2800);
     /* Decisions: budget first, then the contiguous block. */
     assert(ml_adm_decide(&next, next.required, 24000) == ML_ADM_OK);
     assert(ml_adm_decide(&next, next.required - 1, 99999) == ML_ADM_REFUSED_BUDGET);

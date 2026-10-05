@@ -2338,7 +2338,9 @@ void ml_coord_task(void *arg) {
     static const char waiting_text[] = "Waiting for another membership to finish joining";
     ml_neg_t *neg = ml_rt_negotiation();
     const uintptr_t neg_key = ml_neg_key(ml->config.diagnostic_id, ML_NEG_PHASE_CONTROL);
-    bool neg_holding = false;
+    /* True from the first instruction: the gateway's start path hands this task the token (same phase-A key). The first
+     * sync keeps it in a negotiating state and releases it otherwise; where nothing was handed over, releasing is a no-op. */
+    bool neg_holding = true;
 
     /* Wait for WiFi/cellular OR shutdown */
     ESP_LOGI(TAG, "Waiting for WiFi...");

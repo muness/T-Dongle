@@ -10,6 +10,8 @@
 #include "tdongle_memory.h"
 #include "ml_gateway_limits.h"
 #define GATEWAY_VERSION "0.0.0-test"
+#include "route_table.h"
+uint32_t gateway_route_stat(unsigned which) { return which * 3; }
 #define CONFIG_LWIP_MAX_SOCKETS 20
 #define CONFIG_LWIP_TCP_RECVMBOX_SIZE 6
 #define CONFIG_LWIP_TCPIP_RECVMBOX_SIZE 32
@@ -75,7 +77,7 @@ int main(void) {
     }
     tdongle_memory_drop(TDONGLE_DROP_DERP_TX_FULL);
     tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 700);tdongle_lock_hold(TDONGLE_LOCK_WG_PERIODIC, 42000);
-    const char *commands[] = {"memory", "members", "memory bench", "memory locks", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
+    const char *commands[] = {"memory", "route", "members", "memory bench", "memory locks", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);
         printf("#handled %d\n", gateway_memory_command(commands[i]));

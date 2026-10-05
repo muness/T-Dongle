@@ -61,6 +61,10 @@ locks = reports("memory locks", "locks")[0]
 assert locks["bucket_limits_us"] == [100, 250, 500, 1000, 2000, 5000, 10000, 30000]
 assert locks["sites"]["wg_periodic"]["count"] == 2 and locks["sites"]["wg_periodic"]["max_us"] == 42000 and locks["sites"]["wg_periodic"]["over_1ms"] == 1
 assert locks["sites"]["wg_periodic"]["buckets"] == [0, 0, 0, 1, 0, 0, 0, 0, 1] and locks["sites"]["wg_other"]["count"] == 0
+route = reports("route", "route")[0]
+assert route["forwarded_out"] == 0 and route["alias_miss"] == 9 and route["queue_full"] == 30 and route["queue_depth"] == 16 and route["flow_slots"] == 64, route
+assert len([k for k in route if k not in ("schema", "kind")]) == 19 + 4, route
+
 bench = reports("memory bench", "bench")[0]
 assert bench["rounds"] == 256 and bench["chacha20poly1305_ns_per_packet"] == 2000000 and bench["cipher_ceiling_kbit_s"] == 1400 * 8 * 1000000 // 2000000
 assert reports("memory guard 4096", "guard")[0]["guard_floor"] == 4096
@@ -73,4 +77,4 @@ for command, lines in sections.items():
     for item in lines:
         if isinstance(item, dict):
             assert len(json.dumps(item, separators=(",", ":"))) < 1800, (command, item["kind"])  # bounded, fits the console queue in a few chunks
-print("Serial reports: heap, attribution, lwip, phases, admission, bench and guard parse as bounded one-line JSON.")
+print("Serial reports: heap, attribution, lwip, route, phases, admission, bench and guard parse as bounded one-line JSON.")

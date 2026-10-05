@@ -17,6 +17,7 @@
 #include "gateway.h"
 #include "ml_runtime.h"
 #include "ml_admission.h"
+#include "route_table.h"
 #include "boot_health.h"
 #include "lcd.h"
 #include "lcd_view.h"
@@ -228,6 +229,12 @@ static bool stop_member(membership_t *m) {
  * negotiation peak is reserved however many memberships there are, because negotiations are serialised by the
  * token (ml_negotiation.h). Shared registration/map byte buffers are static, not charged per member. The decision
  * inputs are all in /status. */
+_Static_assert(ROUTE_HEAP_RESERVE == ML_ADM_RECOVERY_BYTES, "the router queue must stop at the same recovery reserve admission keeps");
+_Static_assert(GATEWAY_TASK_USB_ROUTES_CORE == ML_TASK_WG_MGR_CORE && GATEWAY_TASK_USB_ROUTES_PRIO > ML_TASK_WG_MGR_PRIO &&
+               ML_TASK_WG_MGR_PRIO > ML_TASK_COORD_PRIO && ML_TASK_COORD_CORE == ML_TASK_WG_MGR_CORE,
+               "core 1: usb_routes > wg_mgr > coord");
+_Static_assert(ML_TASK_NET_IO_CORE == ML_TASK_DERP_TX_CORE && ML_TASK_NET_IO_PRIO > ML_TASK_DERP_TX_PRIO,
+               "core 0: net_io > derp");
 static size_t member_queue_bytes(void) {
     return ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
            (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH +
@@ -245,6 +252,7 @@ static ml_adm_budget_t admission_budget(void) {
         .wg_slot = ml_wg_slot_bytes(),
         .shared_stacks = ML_RT_SHARED_STACK_BYTES,
         .shared_tasks = ML_RT_TASK_COUNT,
+        .route_queue_min = ROUTE_QUEUE_BYTES_MIN,
     };
     ml_adm_budget_t budget;
     ml_adm_budget(&sizes, ml_rt_start_bytes() == 0, &budget);   /* 0: the shared tasks are already running */
@@ -278,7 +286,7 @@ static void admission_failed(membership_t *m) {
 #define admission_override(m, free_now) false
 #define admission_failed(m) ((void)0)
 #endif
-static void start_member_holding_token(membership_t *m);
+static bool start_member_holding_token(membership_t *m);
 static void start_member(membership_t *m) {
     if (!gateway_tailnet_mode() || !m->enabled || m->client || !online)
         return;
@@ -301,10 +309,14 @@ static void start_member(membership_t *m) {
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 4);
         return;
     }
-    start_member_holding_token(m);
-    ml_neg_release(neg, key);
+    /* Handed over, not released and re-acquired: on success the control task (same phase-A key) already holds the token
+     * and keeps it through its negotiation states, so no other membership can start in the gap between microlink_start
+     * and the control task's first request. Every path that did not start a control task releases here, and
+     * microlink_stop releases the key again as a backstop. */
+    if (!start_member_holding_token(m))
+        ml_neg_release(neg, key);
 }
-static void start_member_holding_token(membership_t *m) {
+static bool start_member_holding_token(membership_t *m) {
     /* Reserve for parsed JSON, networking and recovery HTTP. Shared receive
      * buffers are static. Runtime peak sufficiency needs board qualification. */
     size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -323,13 +335,13 @@ static void start_member_holding_token(membership_t *m) {
                                                            : TDONGLE_ADMIT_REFUSED_LARGEST,
                        free_now, largest, active, &sockets);
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 2);
-        return;
+        return false;
     }
     if (!gateway_socket_admit(CONFIG_LWIP_MAX_SOCKETS, active, sockets.open)) {
         strlcpy(m->error, "Socket capacity reserved for USB setup and DNS", sizeof(m->error));
         admission_note(m, TDONGLE_ADMIT_REFUSED_SOCKETS, free_now, largest, active, &sockets);
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 3);
-        return;
+        return false;
     }
     admission_note(m, within_budget ? TDONGLE_ADMIT_OK : TDONGLE_ADMIT_OVERRIDE, free_now, largest,
                    active, &sockets);
@@ -352,7 +364,7 @@ static void start_member_holding_token(membership_t *m) {
                        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), active, &sockets);
         admission_failed(m);
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_FAILED, 1);
-        return;
+        return false;
     }
     esp_err_t err = microlink_start(m->client);
     m->start_heap_after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -364,13 +376,14 @@ static void start_member_holding_token(membership_t *m) {
         if (!stop_member(m)) {
             m->enabled = false;
             save_members();
-            return;
+            return false;
         }
         snprintf(m->error, sizeof(m->error), "Start failed: %s",
                  esp_err_to_name(err));
-        return;
+        return false;
     }
     m->error[0] = 0;
+    return true;   /* started: the control task now owns the token (same key) */
 }
 bool gateway_display_state(lcd_state *s) {
     s->bridge=!gateway_tailnet_mode();

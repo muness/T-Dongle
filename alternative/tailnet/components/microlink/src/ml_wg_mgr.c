@@ -1301,6 +1301,9 @@ static void directory_reconcile(microlink_t *ml) {
  * Network callbacks never provision peers or read flash. */
 esp_err_t ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *data,size_t len) {
     if(!ml || !data || !len || len>1400 || ml->state!=ML_STATE_CONNECTED)return ESP_ERR_INVALID_STATE;
+    /* Pending packets are not charged to admission beyond the typical two (ml_admission.h): the rest comes from free heap
+     * above the recovery reserve, and is refused here when it would not. */
+    if(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)<ML_ADM_RECOVERY_BYTES+len+sizeof(ml_peer_update_t)+sizeof(size_t))return ESP_ERR_NO_MEM;
     unsigned old=__atomic_fetch_add(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
     if(old>=ML_JIT_PENDING) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
     ml_peer_update_t *packet=tdongle_heap_tag(TDONGLE_OWNER_WG, calloc(1,sizeof(*packet)+sizeof(size_t)+len));

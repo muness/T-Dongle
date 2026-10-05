@@ -13,6 +13,11 @@
  *                                                  lwIP sockets and PCBs, other tagged state)
  *                       + one negotiation peak     (a single join's transient above steady: the token guarantees
  *                                                  at most one at a time, whatever N is)
+
+ *                       + the router queue floor   (charged once: two full packets; the queue's ceiling and the
+ *                                                  pending-packet worst case (ML_JIT_PENDING per membership) are NOT
+ *                                                  charged but are refused at allocation time whenever they would take free heap
+ *                                                  below the recovery reserve: rt_queue_budget, ml_gateway_queue_packet)
  *                       + the recovery reserve     (free heap kept for HTTP/control recovery)
  *   and a largest free block of at least ML_ADM_LARGEST_BLOCK.
  *
@@ -37,6 +42,8 @@
 #define ML_ADM_RECOVERY_BYTES   16384   /* kept free for HTTP/control recovery (the v120 panic was at 7,464 B free) */
 #define ML_ADM_LARGEST_BLOCK    24000   /* steady largest block measured 24,576 B; the TLS record buffer is ~16.7 KB */
 #define ML_ADM_PEER_SLOTS       4       /* resident WireGuard peers charged per membership (the pool holds 12 in all) */
+#define ML_ADM_JIT_TYPICAL      2       /* outbound packets pending on a membership while its peer's handshake runs (typical) */
+#define ML_ADM_JIT_PACKET_BYTES 1464    /* one pending packet: ML_JIT_PACKET_MAX + the update header, rounded */
 #define ML_ADM_TLS_BLOCK_FLOOR  17408   /* the DERP TLS record buffer (~16.7 KB) must always find one free block this big;
                                            17 KiB. A peer slot may not be the allocation that takes the heap below it. */
 
@@ -49,6 +56,7 @@ typedef struct {
     size_t wg_slot;          /* sizeof(struct wireguard_peer) */
     size_t shared_stacks;    /* net_io + derp + wg_mgr stacks */
     unsigned shared_tasks;   /* 3 */
+    size_t route_queue_min;  /* the router queue's guaranteed floor (ROUTE_QUEUE_BYTES_MIN): two full packets */
 } ml_adm_sizes_t;
 
 typedef struct {
@@ -60,6 +68,7 @@ typedef struct {
     size_t recovery;
     size_t required;         /* free heap needed to admit the next membership */
     size_t largest_block;
+    size_t router;           /* charged once: the router queue's floor; its ceiling is drawn from free heap above the recovery reserve */
 } ml_adm_budget_t;
 
 typedef enum { ML_ADM_OK, ML_ADM_REFUSED_BUDGET, ML_ADM_REFUSED_LARGEST } ml_adm_verdict_t;
@@ -68,11 +77,12 @@ static inline void ml_adm_budget(const ml_adm_sizes_t *s, bool runtime_running, 
     b->shared_runtime = runtime_running ? 0 : s->shared_stacks + s->shared_tasks * s->task_tcb;
     b->member_start = s->context + s->coord_stack + s->task_tcb + s->queues;
     b->member_growth = s->wg_device + ML_ADM_PEER_SLOTS * s->wg_slot + ML_ADM_TLS_LIVE_BYTES + ML_ADM_LWIP_BYTES +
-                       ML_ADM_OTHER_BYTES;
+                       ML_ADM_OTHER_BYTES + ML_ADM_JIT_TYPICAL * ML_ADM_JIT_PACKET_BYTES;
     b->member_steady = b->member_start + b->member_growth;
     b->negotiation = ML_ADM_NEG_PEAK_BYTES;
     b->recovery = ML_ADM_RECOVERY_BYTES;
-    b->required = b->shared_runtime + b->member_steady + b->negotiation + b->recovery;
+    b->router = s->route_queue_min;
+    b->required = b->shared_runtime + b->member_steady + b->negotiation + b->recovery + b->router;
     b->largest_block = ML_ADM_LARGEST_BLOCK;
 }
 

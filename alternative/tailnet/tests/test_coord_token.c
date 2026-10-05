@@ -35,6 +35,18 @@ int main(void) {
     coord_token_sync(&neg, other, COORD_LONG_POLL, ML_NEG_PRIO_START, &other_hold);
     ml_neg_status_t st; ml_neg_status(&neg, &st);
     assert(st.holder == 0 && st.waiting == 0);
+    /* Hand-over from the gateway's start path: the task starts with the token already held under the same key. In a
+     * negotiating state it keeps it without a gap; in any other state the first sync releases it. */
+    bool handed = true;
+    assert(ml_neg_acquire(&neg, me, ML_NEG_PRIO_START, ML_NEG_PHASE_START, 100));
+    assert(coord_token_sync(&neg, me, COORD_STUN_PROBE, ML_NEG_PRIO_START, &handed) && ml_neg_holds(&neg, me));
+    assert(!coord_token_sync(&neg, other, COORD_STUN_PROBE, ML_NEG_PRIO_START, &other_hold));    /* nobody slips in */
+    coord_token_sync(&neg, me, COORD_LONG_POLL, ML_NEG_PRIO_START, &handed);
+    coord_token_sync(&neg, other, COORD_LONG_POLL, ML_NEG_PRIO_START, &other_hold);
+    handed = true;
+    assert(ml_neg_acquire(&neg, me, ML_NEG_PRIO_START, ML_NEG_PHASE_START, 100));
+    assert(coord_token_sync(&neg, me, COORD_IDLE, ML_NEG_PRIO_START, &handed) && !ml_neg_holds(&neg, me));
+    ml_neg_status(&neg, &st); assert(st.holder == 0 && st.waiting == 0);
     puts("coord token: held exactly in STUN_PROBE..FETCH_PEERS, released on every other state, nothing leaks");
     return 0;
 }

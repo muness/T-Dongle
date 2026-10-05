@@ -37,6 +37,10 @@ typedef struct {
     struct netif *wg_netif;
 } microlink_t;
 static bool reject,up,known=true;static unsigned queued,sends;static uint64_t now;
+#define MALLOC_CAP_INTERNAL 1
+#define ML_ADM_RECOVERY_BYTES 16384
+static size_t free_heap=1u<<20;
+static size_t heap_caps_get_free_size(int caps){(void)caps;return free_heap;}
 static ml_peer_update_t *queue[ML_JIT_PENDING];
 static int xQueueSend(int q,void *packet,int wait) {
     if(reject)return 0;assert(queued<ML_JIT_PENDING);queue[queued++]=*(ml_peer_update_t **)packet;return 1;
@@ -57,6 +61,8 @@ int main(void) {
     directory_flush_packets(&m);assert(!sends && m.jit_packet_count==ML_JIT_PENDING);
     up=true;now=100;directory_flush_packets(&m);assert(sends==ML_JIT_PENDING && !m.jit_packet_count);
     queued=0;reject=true;assert(ml_gateway_queue_packet(&m,1,(const uint8_t *)"data",4)==ESP_ERR_NO_MEM);assert(!m.jit_packet_count);
+    free_heap=ML_ADM_RECOVERY_BYTES+100;assert(ml_gateway_queue_packet(&m,1,(const uint8_t *)"data",4)==ESP_ERR_NO_MEM && !m.jit_packet_count);   /* never below the recovery reserve */
+    free_heap=1u<<20;
     reject=false;assert(!ml_gateway_queue_packet(&m,0x64400001,(const uint8_t *)"data",4));m.jit_pending[0].packet=queue[0];m.jit_pending[0].expires=101;
     now=102;directory_flush_packets(&m);assert(!m.jit_packet_count && m.jit_dropped==1 && sends==ML_JIT_PENDING);
     puts("JIT packet queue: per-membership cap, retained until handshake, rejection cleanup and timeout passed");

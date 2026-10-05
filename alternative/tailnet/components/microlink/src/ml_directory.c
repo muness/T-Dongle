@@ -217,6 +217,14 @@ bool ml_directory_alias_find(uint32_t id,uint32_t peer,uint32_t alias,ml_directo
     if(f)fclose(f);
     UNLOCK();return found;
 }
+bool ml_directory_alias_scan(void (*visit)(void *context, const ml_directory_alias_t *record), void *context) {
+    LOCK();FILE *f=fopen(ROOT "/aliases","rb");bool ok=f!=NULL;
+    struct {ml_directory_alias_t record;uint32_t crc;} entry;
+    while(f && fread(&entry,sizeof(entry),1,f)==1)
+        if(entry.crc==~crc_bytes(~0u,&entry.record,sizeof(entry.record)))visit(context,&entry.record);
+    if(f)fclose(f);
+    UNLOCK();return ok;
+}
 bool ml_directory_alias_save(const ml_directory_alias_t *record) {
     LOCK();FILE *f=fopen(ROOT "/aliases","a+b");bool ok=false;
     struct {ml_directory_alias_t record;uint32_t crc;} entry={.record=*record};
