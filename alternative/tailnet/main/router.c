@@ -6,6 +6,7 @@
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "gateway.h"
 #include "boot_health.h"
 #include "lwip/inet.h"
@@ -41,6 +42,16 @@ static int64_t fill_negative_until[4];
 static int64_t last_fill_us = -ROUTE_FILL_SPACING_US, last_refresh_us = -ROUTE_REFRESH_SPACING_US, last_icmp_us = -ROUTE_ICMP_SPACING_US;
 static uint8_t route_scratch[ROUTE_MTU]; /* usb_routes only */
 static atomic_uint usb_generation = 1;
+/* Packets waiting for an alias fill. usb_routes only (hold_* below); the byte
+ * count is read by the ingress hook to charge them against the queue budget. */
+static struct {
+    struct pbuf *packet;
+    uint32_t dest;
+    unsigned length, generation;
+    int64_t expires;
+} hold[ROUTE_HOLD_SLOTS];
+static unsigned hold_count;
+static atomic_uint route_held_bytes;
 #ifdef GATEWAY_HOST_TEST
 static bool routes_ready = true;
 #endif
@@ -74,6 +85,7 @@ static nvs_handle_t route_store;
 static bool routes_ready;
 static QueueHandle_t route_queue;
 static atomic_uint route_queued_bytes;
+static atomic_uint route_budget = ROUTE_QUEUE_BYTES; /* refreshed by usb_routes from the free heap */
 typedef struct {
     struct pbuf *packet;
     struct netif *input;
@@ -135,23 +147,31 @@ static bool fill_pending(void) {
             return true;
     return false;
 }
-static void alias_miss(uint32_t alias, int64_t now) {
+/* Returns true when a fill for this alias is pending (the packet may wait for it). */
+static bool alias_miss(uint32_t alias, int64_t now) {
     rt_stat(RT_STAT_ALIAS_MISS);
     if (alias < RT_ALIAS_BASE || alias >= atomic_load(&alias_limit)) {
         rt_stat(RT_STAT_ALIAS_UNKNOWN);
-        return;
+        return false;
     }
     for (unsigned i = 0; i < 4; i++) {
         if (atomic_load(&fill_request[i]) == alias)
-            return;
+            return true;
         if (atomic_load(&fill_negative[i]) == alias && now < fill_negative_until[i])
-            return;
+            return false;
     }
     for (unsigned i = 0; i < 4; i++) {
         unsigned empty = 0;
         if (atomic_compare_exchange_strong(&fill_request[i], &empty, alias))
-            return;
+            return true;
     }
+    return false;
+}
+static bool fill_requested(uint32_t alias) {
+    for (unsigned i = 0; i < 4; i++)
+        if (atomic_load(&fill_request[i]) == alias)
+            return true;
+    return false;
 }
 /* One background fill per call. Runs on usb_routes only when its queue is empty. */
 static void alias_fill_run(int64_t now) {
@@ -295,7 +315,15 @@ static bool clamp_mss(uint8_t *b, size_t n, unsigned h) {
             uint16_t old = rd16(b + pos + 2);
             if (old > 1360) {
                 wr16(b + pos + 2, 1360);
-                rt_csum_replace16(b + h + 16, old, 1360);
+                if ((pos - h) & 1) {
+                    /* After a NOP the value straddles two checksum words (x,hi) and
+                     * (lo,y); a single 16-bit replacement would corrupt the sum. The
+                     * byte after the value is inside the header (see below). */
+                    uint16_t w0 = rd16(b + pos + 1), w1 = rd16(b + pos + 3);
+                    rt_csum_replace16(b + h + 16, (uint16_t)((w0 & 0xff00) | (old >> 8)), w0);
+                    rt_csum_replace16(b + h + 16, (uint16_t)((old & 0xff) << 8 | (w1 & 0xff)), w1);
+                } else
+                    rt_csum_replace16(b + h + 16, old, 1360);
             }
         }
         pos += b[pos + 1];
@@ -364,7 +392,7 @@ static void route_emit_usb(struct pbuf *packet, uint32_t host) {
 }
 
 /* ---- USB -> tunnel ------------------------------------------------------------- */
-enum { ROUTE_DONE, ROUTE_NEED_MEMBERS };
+enum { ROUTE_DONE, ROUTE_NEED_MEMBERS, ROUTE_HOLD };
 
 static int route_try(uint8_t *b, size_t n, unsigned h, uint32_t dest, uint32_t host, int64_t now, uint32_t generation) {
     uint16_t local = rd16(b + h), remote = rd16(b + h + 2);
@@ -375,8 +403,7 @@ static int route_try(uint8_t *b, size_t n, unsigned h, uint32_t dest, uint32_t h
     if (hit)
         a = (rt_alias_t){f.id, f.peer, f.alias};
     else if (!rt_alias_find(&rt, dest, &a)) {
-        alias_miss(dest, now);
-        return ROUTE_DONE;
+        return alias_miss(dest, now) ? ROUTE_HOLD : ROUTE_DONE;
     }
     membership_t *m = member_by_id(a.id);
     if (!m)
@@ -402,16 +429,18 @@ static int route_try(uint8_t *b, size_t n, unsigned h, uint32_t dest, uint32_t h
         rt_stat(RT_STAT_FORWARDED_OUT);
     return ROUTE_DONE;
 }
-static void route_outbound(uint8_t *b, size_t n, uint32_t dest) {
+/* Returns true when the alias is not cached but a fill is pending: the caller
+ * may hold the packet and run it again after the fill (hold_service). */
+static bool route_outbound(uint8_t *b, size_t n, uint32_t dest) {
     unsigned h;
     if (!valid(b, n, &h) || !clamp_mss(b, n, h) || b[8] < 2) {
         rt_stat(RT_STAT_BAD_PACKET);
-        return;
+        return false;
     }
     uint32_t host = rd32(b + 12);
     if ((host & 0xffffff00) != 0xc0a84d00 || host == 0xc0a84d01 || host == 0xc0a84dff) {
         rt_stat(RT_STAT_BAD_PACKET);
-        return;
+        return false;
     }
     uint32_t generation = atomic_load(&usb_generation);
     int64_t now = esp_timer_get_time();
@@ -420,11 +449,64 @@ static void route_outbound(uint8_t *b, size_t n, uint32_t dest) {
         int result = route_try(b, n, h, dest, host, now, generation);
         rt_rcu_exit(&rcu, token);
         if (result == ROUTE_DONE)
-            return;
+            return false;
+        if (result == ROUTE_HOLD)
+            return true;
         if (!members_refresh(now))
             break;
     }
     rt_stat(RT_STAT_NO_MEMBER);
+    return false;
+}
+
+/* ---- cache-miss hold ------------------------------------------------------------
+ * A packet whose alias is not cached used to be dropped, so a new TCP flow to
+ * an uncached peer paid a retransmission timeout (1 s, often longer) for its SYN.
+ * Instead, up to ROUTE_HOLD_SLOTS packets (ROUTE_HOLD_BYTES in all) wait at most
+ * ROUTE_HOLD_US for the background fill, then run through route_outbound again.
+ * The pbuf is kept as it is (it was already charged to the queue), so nothing is
+ * allocated and the memory is bounded by the same budget. A hold ends at once
+ * when the fill found no record, and never outlives a USB detach. */
+static void hold_drop(unsigned i) {
+    atomic_fetch_sub(&route_held_bytes, hold[i].length);
+    pbuf_free(hold[i].packet);
+    rt_stat(RT_STAT_HELD_DROPPED);
+    memmove(&hold[i], &hold[i + 1], (--hold_count - i) * sizeof(hold[0]));
+}
+static bool hold_add(struct pbuf *p, uint32_t dest, unsigned length, int64_t now) {
+    if (hold_count == ROUTE_HOLD_SLOTS || atomic_load(&route_held_bytes) + length > ROUTE_HOLD_BYTES)
+        return false;
+    hold[hold_count++] = (__typeof__(hold[0])){p, dest, length, atomic_load(&usb_generation), now + ROUTE_HOLD_US};
+    atomic_fetch_add(&route_held_bytes, length);
+    rt_stat(RT_STAT_HELD);
+    return true;
+}
+/* usb_routes only. Releases (in arrival order) every held packet whose alias has
+ * arrived; drops those that expired, lost their fill or outlived the USB link. */
+static void hold_service(int64_t now) {
+    for (unsigned i = 0; i < hold_count;) {
+        rt_alias_t a;
+        if (hold[i].generation != atomic_load(&usb_generation) || now >= hold[i].expires) {
+            hold_drop(i);
+        } else if (rt_alias_find(&rt, hold[i].dest, &a)) {
+            struct pbuf *p = hold[i].packet;
+            uint32_t dest = hold[i].dest;
+            unsigned length = hold[i].length;
+            memmove(&hold[i], &hold[i + 1], (--hold_count - i) * sizeof(hold[0]));
+            pbuf_copy_partial(p, route_scratch, length, 0);
+            pbuf_free(p);
+            atomic_fetch_sub(&route_held_bytes, length);
+            rt_stat(RT_STAT_HELD_RELEASED);
+            route_outbound(route_scratch, length, dest); /* a second miss drops: no second wait */
+        } else if (!fill_requested(hold[i].dest)) {
+            hold_drop(i); /* fill finished without a record */
+        } else
+            i++;
+    }
+}
+static void hold_flush(void) {
+    while (hold_count)
+        hold_drop(0);
 }
 /* The tunnel cannot carry more than ROUTE_MTU and this router never fragments.
  * A DF packet gets the standard ICMP "fragmentation needed" (RFC 1191) with the
@@ -472,7 +554,15 @@ static void route_oversize(struct pbuf *p, uint32_t dest) {
     memcpy(r + 28, q, quote);
     wr16(r + 22, finish(sum(r + 20, 8 + quote, 0)));
     pbuf_take(reply, r, total);
+#ifndef GATEWAY_HOST_TEST
+    /* netif->output is etharp_output: not thread safe without the core lock, and
+     * this runs on usb_routes, not on tcpip or under gateway_tunnel_input's lock. */
+    LOCK_TCPIP_CORE();
+#endif
     route_emit_usb(reply, host);
+#ifndef GATEWAY_HOST_TEST
+    UNLOCK_TCPIP_CORE();
+#endif
     pbuf_free(reply);
     rt_stat(RT_STAT_OVERSIZE_ICMP);
 }
@@ -516,8 +606,9 @@ static int gateway_process_host_input(struct pbuf *p, struct netif *input) {
         return 1;
     }
     pbuf_copy_partial(p, route_scratch, n, 0);
+    if (route_outbound(route_scratch, n, dest) && hold_add(p, dest, n, esp_timer_get_time()))
+        return 1; /* the hold owns the pbuf now */
     pbuf_free(p);
-    route_outbound(route_scratch, n, dest);
     return 1;
 }
 
@@ -606,19 +697,37 @@ bool gateway_routes_init(void) {
 }
 static void route_task(void *context) {
     route_item item;
+    unsigned burst = 0;
+    int64_t last_budget_us = 0;
     for (;;) {
+        int64_t now = esp_timer_get_time();
+        if (now - last_budget_us >= 20000) {
+            last_budget_us = now;
+            atomic_store(&route_budget, rt_queue_budget(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)));
+        }
+        if (hold_count)
+            hold_service(now);
         /* Sleep until a packet arrives. With a miss pending, sleep only until the
-         * next fill is due, and fill when the queue is empty. */
+         * next fill is due, and fill when the queue is empty. Held packets bound
+         * the sleep by their expiry so they are never stranded. */
         TickType_t wait = portMAX_DELAY;
         if (fill_pending() && !uxQueueMessagesWaiting(route_queue)) {
-            int64_t due = last_fill_us + ROUTE_FILL_SPACING_US, now = esp_timer_get_time();
+            int64_t due = last_fill_us + ROUTE_FILL_SPACING_US;
             if (now >= due) {
                 alias_fill_run(now);
+                hold_service(esp_timer_get_time());
                 continue;
             }
             wait = pdMS_TO_TICKS((due - now + 999) / 1000);
             if (!wait)
                 wait = 1; /* never degrade into a poll when the tick is coarser than the spacing */
+        }
+        if (hold_count) {
+            TickType_t limit = pdMS_TO_TICKS((hold[0].expires - now + 999) / 1000);
+            if (!limit)
+                limit = 1;
+            if (limit < wait)
+                wait = limit;
         }
         if (xQueueReceive(route_queue, &item, wait) != pdTRUE)
             continue;
@@ -627,6 +736,16 @@ static void route_task(void *context) {
             pbuf_free(item.packet);
         else if (!gateway_process_host_input(item.packet, item.input))
             pbuf_free(item.packet);
+        /* Fairness: usb_routes outranks wg_mgr (7) and coord (5) on core 1. A
+         * producer that keeps the queue non-empty would otherwise hold the core
+         * until the idle-task watchdog fires. After ROUTE_BURST_PACKETS in a row
+         * (about 3 ms of work) sleep one tick, a duty cycle near 25% worst case. */
+        if (!uxQueueMessagesWaiting(route_queue))
+            burst = 0;
+        else if (++burst >= ROUTE_BURST_PACKETS) {
+            burst = 0;
+            vTaskDelay(1);
+        }
     }
 }
 #endif
@@ -643,7 +762,7 @@ int gateway_host_input(struct pbuf *p,struct netif *input) {
         }
         bool accepted=false;
         if(routes_ready && route_queue) {
-            accepted=atomic_fetch_add(&route_queued_bytes,item.length)+item.length<=ROUTE_QUEUE_BYTES &&
+            accepted=atomic_fetch_add(&route_queued_bytes,item.length)+item.length+atomic_load(&route_held_bytes)<=atomic_load(&route_budget) &&
                      xQueueSend(route_queue,&item,0)==pdTRUE;
             if(!accepted)atomic_fetch_sub(&route_queued_bytes,item.length);
         }

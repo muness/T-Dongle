@@ -17,7 +17,7 @@ static atomic_uint usb_generation=1;
 static bool routes_ready=true,queue_accept=true;
 static int route_queue=1;
 static unsigned queued,processed,drops;
-static atomic_uint route_queued_bytes;
+static atomic_uint route_queued_bytes,route_held_bytes,route_budget=ROUTE_QUEUE_BYTES;
 typedef struct {struct pbuf *packet;struct netif *input;unsigned generation,length;} route_item;
 static void *esp_netif_get_netif_impl(void *handle){return handle;}
 static int pbuf_copy_partial(struct pbuf *p,void *out,size_t n,size_t offset){assert(n==20 && !offset);if(p->tot_len<20)return 0;memcpy(out,p->data,n);return n;}
@@ -63,6 +63,15 @@ int main(void) {
         gateway_host_input(&p,&usb);
         assert(p.freed==(i>=2));
     }
+    /* Packets parked for a cache fill are charged to the same budget. */
+    atomic_store(&route_queued_bytes,0);atomic_store(&route_held_bytes,2000);
+    {struct pbuf p=packet(ROUTE_QUEUE_BYTES-2000,true);gateway_host_input(&p,&usb);assert(!p.freed);atomic_fetch_sub(&route_queued_bytes,p.tot_len);}
+    {struct pbuf p=packet(ROUTE_QUEUE_BYTES-2000+1,true);gateway_host_input(&p,&usb);assert(p.freed);}
+    atomic_store(&route_held_bytes,0);
+    /* The budget can shrink with the heap: nothing above it is admitted. */
+    atomic_store(&route_queued_bytes,0);atomic_store(&route_budget,3000);
+    {struct pbuf p=packet(1400,true),q=packet(1400,true),r=packet(1400,true);gateway_host_input(&p,&usb);gateway_host_input(&q,&usb);gateway_host_input(&r,&usb);assert(!p.freed&&!q.freed&&r.freed);}
+    atomic_store(&route_budget,ROUTE_QUEUE_BYTES);atomic_store(&route_queued_bytes,0);
     /* A full queue refuses small packets too, and counts each one. */
     queue_accept=false;drops=0;atomic_store(&route_queued_bytes,0);
     for(unsigned i=0;i<10;i++) {struct pbuf p=packet(60,false);gateway_host_input(&p,&usb);assert(p.freed);}

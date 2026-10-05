@@ -72,6 +72,7 @@ static microlink_t c1 = {&wg1, 0x64400001, 4, CLIENT_ALIVE}, c2 = {&wg2, 0x64400
 static membership_t m2 = {NULL, 2, &c2}, m1 = {&m2, 1, &c1};
 
 static void reset_tables(void) {
+    hold_flush();
     rt_init(&rt);
     for (unsigned i = 0; i < ROUTE_MEMBERS; i++)
         atomic_store(&member_slot[i], NULL);
@@ -180,6 +181,134 @@ static void alias_cache_misses(void) {
     flash_count = 0;
     gateway_forget(1);
     members = NULL;
+}
+
+
+/* 2b. A packet whose alias is not cached waits (bounded) for the background fill
+ *     instead of being dropped: a dropped SYN costs a retransmission timeout. */
+static unsigned held_bytes(void) { return atomic_load(&route_held_bytes); }
+static uint32_t evict_one(uint32_t *first_out) {
+    reset_tables();
+    memset(fill_request, 0, sizeof(fill_request));
+    memset(fill_negative, 0, sizeof(fill_negative));
+    flash_count = 0;
+    stub_next_alias = 64;
+    atomic_store(&alias_limit, RT_ALIAS_BASE + 64);
+    members = &m1;
+    uint32_t first = gateway_alias(1, 0x64600000);
+    for (unsigned i = 1; i < 200; i++)
+        assert(gateway_alias(1 + i % 2, 0x64600000 + i));
+    rt_alias_t tmp;
+    for (unsigned i = 0; i < 200; i++)
+        if (!rt_alias_find(&rt, first + i, &tmp))
+            return first + i;
+    assert(0);
+    return 0;
+}
+static void miss_hold(void) {
+    uint32_t first, a = evict_one(&first);
+    uint8_t pkt[1500];
+    size_t n = build_packet(pkt, 0xc0a84d02, a, 6, 4000, 80, 0, true, false);
+    unsigned before = out_count, finds = flash_finds, held0 = stat(RT_STAT_HELD);
+    /* First packets are held, not forwarded and not dropped; the third and later exceed the two slots. */
+    send_host(pkt, n);
+    assert(out_count == before && stat(RT_STAT_HELD) == held0 + 1 && held_bytes() == n);
+    send_host(pkt, n);
+    send_host(pkt, n);
+    send_host(pkt, n);
+    assert(out_count == before && hold_count == 2 && held_bytes() == 2 * n && flash_finds == finds);
+    unsigned released = stat(RT_STAT_HELD_RELEASED);
+    hold_service(clock_us); /* nothing to release before the fill */
+    assert(out_count == before && hold_count == 2);
+    alias_fill_run(clock_us += 20000);
+    hold_service(clock_us);
+    assert(hold_count == 0 && held_bytes() == 0 && stat(RT_STAT_HELD_RELEASED) == released + 2);
+    assert(out_count == before + 2 && flash_finds == finds + 1);
+    size_t sn;
+    struct netif *on;
+    const uint8_t *sent = last(&sn, &on);
+    assert(on == &wg1 || on == &wg2);
+    assert(packet_ok(sent, sn) && pk_rd32(sent + 12) == (on == &wg1 ? c1.vpn_ip : c2.vpn_ip));
+    assert(pk_rd16(sent + 20) >= RT_MAPPED_BASE && pk_rd16(sent + 22) == 80);
+    /* The held packet's flow is now established: the reply finds it. */
+    uint8_t reply[1500];
+    size_t rn = build_packet(reply, pk_rd32(sent + 16), pk_rd32(sent + 12), 6, 80, pk_rd16(sent + 20), 0, false, false);
+    struct netif *wg = on;
+    unsigned mark = out_count;
+    send_tunnel(wg, reply, rn);
+    sent = last(&sn, &on);
+    assert(out_count == mark + 1 && on == &usb && pk_rd16(sent + 22) == 4000);
+
+    /* Expiry: with no fill the held packet is dropped after ROUTE_HOLD_US, not kept. */
+    a = evict_one(&first);
+    n = build_packet(pkt, 0xc0a84d02, a, 6, 4001, 80, 0, true, false);
+    before = out_count;
+    send_host(pkt, n);
+    assert(hold_count == 1);
+    hold_service(clock_us += ROUTE_HOLD_US - 1);
+    assert(hold_count == 1);
+    unsigned dropped = stat(RT_STAT_HELD_DROPPED);
+    hold_service(clock_us += 1);
+    assert(hold_count == 0 && held_bytes() == 0 && stat(RT_STAT_HELD_DROPPED) == dropped + 1 && out_count == before);
+
+    /* A fill that finds no record ends the hold at once. */
+    memset(fill_request, 0, sizeof(fill_request));
+    a = RT_ALIAS_BASE + 5000;
+    atomic_store(&alias_limit, RT_ALIAS_BASE + 6000);
+    n = build_packet(pkt, 0xc0a84d02, a, 6, 4002, 80, 0, true, false);
+    send_host(pkt, n);
+    assert(hold_count == 1);
+    alias_fill_run(clock_us += 20000);
+    hold_service(clock_us);
+    assert(hold_count == 0 && held_bytes() == 0 && out_count == before);
+    /* An address that cannot exist is never held. */
+    n = build_packet(pkt, 0xc0a84d02, RT_ALIAS_BASE + 90000, 6, 4003, 80, 0, true, false);
+    send_host(pkt, n);
+    assert(hold_count == 0 && held_bytes() == 0);
+
+    /* A USB detach (generation change) discards held packets unforwarded. */
+    a = evict_one(&first);
+    n = build_packet(pkt, 0xc0a84d02, a, 6, 4004, 80, 0, true, false);
+    before = out_count;
+    send_host(pkt, n);
+    assert(hold_count == 1);
+    alias_fill_run(clock_us += 20000);
+    gateway_usb_detach();
+    hold_service(clock_us);
+    assert(hold_count == 0 && held_bytes() == 0 && out_count == before);
+
+    /* The byte budget bounds what a hold can pin: a second full-size packet does not fit. */
+    a = evict_one(&first);
+    n = build_packet(pkt, 0xc0a84d02, a, 17, 4005, 53, ROUTE_MTU - 28, false, false);
+    assert(n == ROUTE_MTU);
+    send_host(pkt, n);
+    send_host(pkt, n);
+    assert(hold_count == 1 && held_bytes() == ROUTE_MTU && held_bytes() <= ROUTE_HOLD_BYTES);
+    hold_flush();
+    assert(held_bytes() == 0);
+
+    /* A flood of distinct uncached aliases cannot hold more than the two slots. */
+    reset_tables();
+    flash_count = 0;
+    stub_next_alias = 64;
+    members = &m1;
+    atomic_store(&alias_limit, RT_ALIAS_BASE + 64);
+    for (unsigned i = 0; i < 100; i++)
+        gateway_alias(1, 0x64800000 + i);
+    for (unsigned i = 0; i < 64; i++) {
+        n = build_packet(pkt, 0xc0a84d02, RT_ALIAS_BASE + 64 + (i * 7) % 100, 6, 5000 + i, 80, 0, true, false);
+        send_host(pkt, n);
+        assert(hold_count <= ROUTE_HOLD_SLOTS && held_bytes() <= ROUTE_HOLD_BYTES);
+    }
+    reset_tables();
+    atomic_store(&alias_limit, RT_ALIAS_BASE + 64);
+    flash_count = 0;
+    members = NULL;
+
+    /* Queue budget: a ceiling that shrinks with the free heap but always admits two full packets. */
+    assert(rt_queue_budget(0) == ROUTE_QUEUE_BYTES_MIN && rt_queue_budget(6400) == ROUTE_QUEUE_BYTES_MIN);
+    assert(rt_queue_budget(ROUTE_HEAP_RESERVE + 5000) == 5000 && rt_queue_budget(1u << 20) == ROUTE_QUEUE_BYTES);
+    assert(ROUTE_QUEUE_BYTES_MIN >= 2 * ROUTE_MTU);
 }
 
 /* 3. Boot preload warms the cache from flash once; forwarding then needs nothing. */
@@ -352,6 +481,27 @@ static void checksum_integrity(void) {
             assert(pk_finish(pk_sum(sent, 20, 0)) == 0 && l4_check(sent, sn) != 0);
         }
     }
+    /* A NOP before the MSS option puts the value on an odd offset, so it straddles two
+     * checksum words; the clamp must still leave a valid checksum. */
+    for (unsigned nops = 0; nops < 4; nops++)
+        for (unsigned old = 1361; old <= 1500; old += 139) {
+            uint8_t b[64];
+            size_t hdr = 20 + 4 * ((20 + nops + 4 + 3) / 4);
+            memset(b, 0, sizeof(b));
+            b[0] = 0x45; b[8] = 30; b[9] = 6;
+            pk_wr16(b + 2, hdr);
+            pk_wr32(b + 12, 0xc0a84d02); pk_wr32(b + 16, a);
+            pk_wr16(b + 20, 4100 + nops); pk_wr16(b + 22, 80);
+            pk_wr32(b + 24, pk_rnd()); pk_wr32(b + 28, pk_rnd());
+            b[32] = ((hdr - 20) / 4) << 4; b[33] = 2; pk_wr16(b + 34, pk_rnd());
+            for (unsigned i = 0; i < nops; i++) b[40 + i] = 1;
+            b[40 + nops] = 2; b[41 + nops] = 4; pk_wr16(b + 42 + nops, old);
+            fill_checksums(b, hdr, 20, false);
+            assert(packet_ok(b, hdr));
+            send_host(b, hdr);
+            const uint8_t *sent = last(&sn, &on);
+            assert(sn == hdr && packet_ok(sent, sn) && pk_rd16(sent + 42 + nops) == 1360);
+        }
     gateway_forget(1);
     members = NULL;
 }
@@ -499,6 +649,7 @@ int main(void) {
     printf("router hot path\n");
     no_flash_on_forwarding_path();
     alias_cache_misses();
+    miss_hold();
     preload();
     invalidation_and_ownership();
     no_members_lock_on_forwarding();

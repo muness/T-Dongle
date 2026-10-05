@@ -120,7 +120,11 @@ unsigned H(captured)(void) { return captured; }
 const cap_t *H(capture)(unsigned i) { return &captures[i]; }
 void H(clear)(void) { captured = 0; }
 #ifdef IMPL_NEW
-void new_fill(void) { alias_fill_run(clock_us); }
+void new_fill(void) {
+    alias_fill_run(clock_us);
+    hold_service(clock_us);
+}
+void new_hold_flush(void) { hold_flush(); }
 #endif
 /* Debug aid for a failing differential run. */
 void H(debug)(uint32_t dest) {

@@ -36,6 +36,27 @@
 #define ROUTE_QUEUE_BYTES (16 * 1024)
 #endif
 
+/* Cache-miss hold: the first packets of a flow whose alias is not cached wait
+ * for the background fill instead of being dropped (a dropped SYN costs a
+ * 1 s retransmission timeout). Bounded in count, bytes and time; the bytes are
+ * charged against the same budget as the queue. */
+#define ROUTE_HOLD_SLOTS 2
+#define ROUTE_HOLD_BYTES 2048
+#define ROUTE_HOLD_US 100000
+/* Task fairness: after this many packets in a row from a never-empty queue the
+ * consumer sleeps one tick so core-1 tasks below it (wg_mgr, coord) run. */
+#define ROUTE_BURST_PACKETS 32
+/* The queue's byte budget is a ceiling. When the internal heap is low it shrinks
+ * so a stalled consumer cannot pin the memory Wi-Fi and WireGuard need. */
+#define ROUTE_HEAP_RESERVE 4096
+#define ROUTE_QUEUE_BYTES_MIN 2800 /* two full packets always fit */
+static inline unsigned rt_queue_budget(size_t free_heap) {
+    size_t room = free_heap > ROUTE_HEAP_RESERVE ? free_heap - ROUTE_HEAP_RESERVE : 0;
+    if (room < ROUTE_QUEUE_BYTES_MIN)
+        room = ROUTE_QUEUE_BYTES_MIN;
+    return room > ROUTE_QUEUE_BYTES ? ROUTE_QUEUE_BYTES : (unsigned)room;
+}
+
 #define RT_ALIASES 64
 #define RT_FLOWS 64
 #define RT_FLOW_IDLE_US 120000000LL
@@ -48,12 +69,12 @@ enum {
     RT_STAT_FORWARDED_OUT, RT_STAT_FORWARDED_IN, RT_STAT_BAD_PACKET, RT_STAT_ALIAS_MISS, RT_STAT_ALIAS_UNKNOWN,
     RT_STAT_ALIAS_FILL, RT_STAT_FLOW_FULL, RT_STAT_NO_MEMBER, RT_STAT_MEMBER_DOWN, RT_STAT_REPLY_NOMATCH,
     RT_STAT_QUEUE_FULL, RT_STAT_OVERSIZE_ICMP, RT_STAT_OVERSIZE_DROP, RT_STAT_ICMP_SUPPRESSED,
-    RT_STAT_TUNNEL_REJECT, RT_STAT_TX_FAIL, RT_STAT_COUNT
+    RT_STAT_TUNNEL_REJECT, RT_STAT_TX_FAIL, RT_STAT_HELD, RT_STAT_HELD_RELEASED, RT_STAT_HELD_DROPPED, RT_STAT_COUNT
 };
 static inline const char *rt_stat_name(unsigned which) {
     static const char *const names[RT_STAT_COUNT] = {
         "forwarded_out", "forwarded_in", "bad_packet", "alias_miss", "alias_unknown", "alias_fill", "flow_full", "no_member",
-        "member_down", "reply_nomatch", "queue_full", "oversize_icmp", "oversize_drop", "icmp_suppressed", "tunnel_reject", "tx_fail"};
+        "member_down", "reply_nomatch", "queue_full", "oversize_icmp", "oversize_drop", "icmp_suppressed", "tunnel_reject", "tx_fail", "held", "held_released", "held_dropped"};
     return which < RT_STAT_COUNT ? names[which] : "";
 }
 extern atomic_uint rt_stats[RT_STAT_COUNT];

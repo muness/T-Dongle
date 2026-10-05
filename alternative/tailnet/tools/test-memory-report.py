@@ -57,7 +57,7 @@ assert [a["verdict"] for a in admission["attempts"]] == ["refused_budget", "refu
 
 route = reports("route", "route")[0]
 assert route["forwarded_out"] == 0 and route["alias_miss"] == 9 and route["queue_full"] == 30 and route["queue_depth"] == 16 and route["flow_slots"] == 64, route
-assert len([k for k in route if k not in ("schema", "kind")]) == 16 + 4, route
+assert len([k for k in route if k not in ("schema", "kind")]) == 19 + 4, route
 
 bench = reports("memory bench", "bench")[0]
 assert bench["rounds"] == 256 and bench["chacha20poly1305_ns_per_packet"] == 2000000 and bench["cipher_ceiling_kbit_s"] == 1400 * 8 * 1000000 // 2000000
