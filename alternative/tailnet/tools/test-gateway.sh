@@ -13,6 +13,8 @@ for name in coord_read wifi_policy wifi_profiles; do
 done
 # The USB wrapper is shared with the original bridge; test its real code too.
 (cd ../.. && TEST_CFLAGS="-fsanitize=address,undefined -g" python3 tools/test_net.py)
+cc -std=c11 -fsanitize=address,undefined -g tests/test_usb_identity.c -o build-host/test_usb_identity
+build-host/test_usb_identity
 cc -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
 build-host/test_router
 : "${IDF_PATH:?Source ESP-IDF for the same cJSON used by the firmware}"

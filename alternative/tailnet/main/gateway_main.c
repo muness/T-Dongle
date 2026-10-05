@@ -8,6 +8,7 @@
 #include "esp_event.h"
 #include "esp_http_server.h"
 #include "esp_mac.h"
+#include "usb_identity.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
 #include "esp_sntp.h"
@@ -1056,8 +1057,8 @@ static esp_err_t start_usb(void) {
     if(result!=ESP_OK)return result;
     tinyusb_net_config_t net = {.on_recv_callback = usb_rx,
                                 .free_tx_buffer = usb_free_tx};
-    if(gateway_tailnet_mode())identity_mac[0]=(identity_mac[0]|2)&~1;
-    memcpy(net.mac_addr, identity_mac, 6);
+    if(gateway_tailnet_mode()){uint8_t device[6];gateway_usb_macs(identity_mac,device,net.mac_addr);}
+    else memcpy(net.mac_addr, identity_mac, 6);
     result=tinyusb_net_init(&net);
     extern esp_err_t gateway_console_start(void);
     esp_err_t console=gateway_console_start();
@@ -1086,9 +1087,9 @@ static esp_err_t start_network(void) {
                                  .stack = ESP_NETIF_NETSTACK_DEFAULT_ETH};
     usb_interface = esp_netif_new(&config);
     if(!usb_interface)return ESP_ERR_NO_MEM;
-    uint8_t mac[6];
-    START_TRY(esp_read_mac(mac, ESP_MAC_WIFI_STA));
-    mac[0] = (mac[0] | 2) & ~1;
+    uint8_t station[6], mac[6], host[6];
+    START_TRY(esp_read_mac(station, ESP_MAC_WIFI_STA));
+    gateway_usb_macs(station, mac, host);
     START_TRY(esp_netif_set_mac(usb_interface, mac));
     esp_netif_dns_info_t dns = {0};
     IP_SET_TYPE_VAL(dns.ip, IPADDR_TYPE_V4);
