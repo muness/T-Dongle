@@ -1,0 +1,178 @@
+# host_derp_anchor_live.c ANCHOR=1 against all 88 DERP hostnames of https://login.tailscale.com/derpmap/default, 2026-10-05, 64-bit host, shipped ml_derp_tls.c + IDF esp_crt_bundle.c + full Mozilla bundle (cacrt_all.pem)
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp1f.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp1g.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp1h.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp1i.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp10b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp10c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp10d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp11e.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp11f.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp11g.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp12d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp12e.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp12f.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp13b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp13c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp13d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp14b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp14c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp14d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp15b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp15c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp15d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp16b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp16c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp16d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp17b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp17c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp17d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp18b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp18c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp18d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp19b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp19c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp19d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp2d.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp2e.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp2f.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp20b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp20c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp20d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp21b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp21c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp21d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp22b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp22c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp22d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp23b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp23c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp23d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp24b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp24c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp24d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp25b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp25c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp25d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp26b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp26c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp26d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp27b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp27c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp27d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp27e.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp28b.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp28c.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp28d.tailscale.com        none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp3e.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp3f.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp3g.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp3h.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp4f.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp4g.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp4h.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp4i.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp4j.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp5e.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp5f.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp5g.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp6.tailscale.com          none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp7e.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp7f.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp7g.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp7h.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp8e.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp8f.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp8g.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp9d.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp9e.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+  [phases] bundle callbacks=3 anchor_matches=1 peak_inside_callbacks=0
+derp9f.tailscale.com         none: ok peak=6056 after=0 | verify: ok peak=10184 after=0 | verified
+verified 88, failed 0; extra peak heap with verification: min 4128 avg 4128 max 4128 bytes (host, 64-bit)

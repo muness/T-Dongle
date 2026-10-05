@@ -212,9 +212,14 @@ if [ ! -f "$derp_tls_lib/libmbedtls_derp.a" ] || [ tests/derp_tls_host_config.h 
   ar rcs "$derp_tls_lib/libmbedtls_derp.a" "$derp_tls_lib"/*.o
 fi
 python tests/derp_pki.py build-host/derp-pki "$IDF_PATH/components/mbedtls/esp_crt_bundle/gen_crt_bundle.py"
-cc -std=gnu11 -DCONFIG_MBEDTLS_CERTIFICATE_BUNDLE_MAX_CERTS=200 -fsanitize=address,undefined -g -DMBEDTLS_CONFIG_FILE='"derp_tls_host_config.h"' -I tests/host_esp -I tests \
-  -I components/microlink/include -I "$mbed/include" -I "$mbed/library" -I "$IDF_PATH/components/mbedtls/esp_crt_bundle/include" \
-  tests/test_derp_tls.c components/microlink/src/ml_derp_tls.c components/microlink/src/ml_derp_cert.c "$IDF_PATH/components/mbedtls/esp_crt_bundle/esp_crt_bundle.c" \
+# The trust-anchor match (ml_derp_tls.c) runs against a two-certificate bundle, whose second entry is not 2-byte
+# aligned: ESP-IDF's own reader (esp_crt_bundle.c) loads u16 fields through a cast, fine on xtensa and x86, so that
+# one file is built without the alignment check. The code under test (ml_derp_tls.c) keeps the full sanitizers.
+DERP_TLS_FLAGS="-std=gnu11 -DCONFIG_MBEDTLS_CERTIFICATE_BUNDLE_MAX_CERTS=200 -g -DMBEDTLS_CONFIG_FILE=\"derp_tls_host_config.h\" -I tests/host_esp -I tests \
+  -I components/microlink/include -I $mbed/include -I $mbed/library -I $IDF_PATH/components/mbedtls/esp_crt_bundle/include"
+cc $DERP_TLS_FLAGS -fsanitize=address,undefined -fno-sanitize=alignment -c "$IDF_PATH/components/mbedtls/esp_crt_bundle/esp_crt_bundle.c" -o build-host/esp_crt_bundle.o
+cc $DERP_TLS_FLAGS -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+  tests/test_derp_tls.c components/microlink/src/ml_derp_tls.c components/microlink/src/ml_derp_cert.c build-host/esp_crt_bundle.o \
   "$derp_tls_lib/libmbedtls_derp.a" -o build-host/test_derp_tls
 build-host/test_derp_tls build-host/derp-pki
 

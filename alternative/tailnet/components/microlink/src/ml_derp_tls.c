@@ -68,6 +68,65 @@ static bool equal_bytes(const uint8_t *a, const uint8_t *b, size_t n) {
     return diff == 0;
 }
 
+/* ---- Trust anchor match ------------------------------------------------------
+ *
+ * What DERP presents. Let's Encrypt chains are  leaf <- YE2 <- Root YE <- ISRG Root X2, and the server
+ * also sends "ISRG Root X2" as a cross-certificate signed by ISRG Root X1 (RSA-4096), so that older clients
+ * that only trust X1 can still build a path. mbedTLS parses every presented certificate and verifies each link
+ * with the already parsed key of the one above (P-384, one ECDSA at a time). The presented X2 has no parent in
+ * the chain and no configured trust anchor, so it is flagged NOT_TRUSTED, and the ESP-IDF bundle callback then
+ * parses X1's 4096-bit RSA key from the bundle and verifies the cross-signature: about 5.8 KB of transient heap on
+ * the host (docs/research/membership-bytes.md section 4), the largest block of the whole handshake.
+ *
+ * Why skipping that check is sound. The bundle already contains X2 itself as a trust anchor. RFC 5280
+ * section 6.1.1(d) takes the trust anchor as input, established out of band, as a name, a public key and its
+ * algorithm, and section 6.1 starts every path at such an anchor; a trust anchor is not defined by a certificate
+ * or by the signature on one. The signature a certificate carries only proves who issued that copy; if the key
+ * and the name are already trusted, a copy issued by anybody (X1 for the cross-certificate) says nothing more
+ * about trust. So a presented certificate whose subject DN and SubjectPublicKeyInfo equal a bundle entry is that
+ * anchor, and the path below it was verified by mbedTLS against exactly that key: forging it needs the X2 private
+ * key, the same as with the cross-signature.
+ *
+ * Constraints that keep it from widening trust:
+ *  - BOTH the full subject DN (raw DER bytes) AND the full SubjectPublicKeyInfo (raw DER bytes) must be equal.
+ *    A name alone never matches; a different key under the same name falls through to the bundle callback,
+ *    which looks up the issuer by name and fails the signature. Byte equality is stricter than RFC 5280
+ *    section 7.1 name matching (no case or whitespace folding), so it can only miss a match, never add one.
+ *  - Only a certificate that mbedTLS flagged with exactly NOT_TRUSTED (the weak-hash flag aside, like the bundle
+ *    callback). EXPIRED, FUTURE, BAD_KEY, BAD_PK or anything else on the certificate stays and fails the
+ *    handshake: validity of the presented certificate is still enforced, stricter than an anchor needs.
+ *  - Never the leaf (depth 0): the certificate that names the server must be issued by a CA. Everything below
+ *    the anchor is verified by mbedTLS as before: signatures, validity of every intermediate and the leaf,
+ *    basicConstraints/keyUsage/path length of the CA links, and the SAN-only host name check below.
+ *  - The pin (sha256-raw) path never gets here, VERIFY_REQUIRED is unchanged, and a chain that does not match
+ *    goes to the bundle callback exactly as before. No flag is ever cleared for a non-matching certificate.
+ */
+static uint32_t rd32(const uint8_t *p) {
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+bool ml_derp_bundle_has_anchor(const uint8_t *bundle, size_t length, const mbedtls_x509_crt *crt) {
+    if (!bundle || !crt || length < 8) return false;
+    if (!crt->subject_raw.p || !crt->subject_raw.len || !crt->pk_raw.p || !crt->pk_raw.len) return false;
+    /* [u32 offset] x n, then entries [u16 name_len][u16 key_len][subject DER][SubjectPublicKeyInfo DER] */
+    uint32_t first = rd32(bundle);
+    if (first < 4 || (first & 3) || first >= length) return false;
+    uint32_t count = first / 4;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t off = rd32(bundle + 4 * (size_t)i);
+        if (off < first || off > length - 4) continue;       /* length >= 8: no overflow, also with a 32-bit size_t */
+        size_t name_len = (size_t)bundle[off] | (size_t)bundle[off + 1] << 8;
+        size_t key_len = (size_t)bundle[off + 2] | (size_t)bundle[off + 3] << 8;
+        if (name_len != crt->subject_raw.len || key_len != crt->pk_raw.len) continue;
+        if (name_len + key_len > length - off - 4) continue;
+        const uint8_t *name = bundle + off + 4;
+        if (equal_bytes(name, crt->subject_raw.p, name_len) &&
+            equal_bytes(name + name_len, crt->pk_raw.p, key_len))
+            return true;
+    }
+    return false;
+}
+
 /* mbedTLS calls this for every certificate of the chain, the top one first and
  * the leaf (depth 0) last, after it has set the flags for that certificate.
  * A non-zero return aborts the handshake. mbedTLS's own host name judgement
@@ -104,7 +163,16 @@ static int verify_cb(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t *flag
          * whose single problem is NOT_TRUSTED. */
         if (depth == 0)
             *flags &= ~(uint32_t)MBEDTLS_X509_BADCERT_CN_MISMATCH;
-        int r = v->trust ? v->trust(NULL, crt, depth, flags) : MBEDTLS_ERR_X509_BAD_INPUT_DATA;
+        int r;
+        if (depth > 0 && v->is_anchor && (*flags & ~(uint32_t)MBEDTLS_X509_BADCERT_BAD_MD) == MBEDTLS_X509_BADCERT_NOT_TRUSTED &&
+            v->is_anchor(crt)) {
+            /* The store's own anchor (see "Trust anchor match"): no signature to verify. */
+            *flags &= ~(uint32_t)(MBEDTLS_X509_BADCERT_NOT_TRUSTED | MBEDTLS_X509_BADCERT_BAD_MD);
+            if (v->anchor_hits < UINT8_MAX) v->anchor_hits++;
+            r = 0;
+        } else {
+            r = v->trust ? v->trust(NULL, crt, depth, flags) : MBEDTLS_ERR_X509_BAD_INPUT_DATA;
+        }
         if (r != 0) {
             if (depth == 0) {
                 v->leaf_seen = true;
@@ -142,6 +210,7 @@ int ml_derp_tls_configure(mbedtls_ssl_config *conf, ml_derp_verify_t *state,
         if (!trust || !trust->attach || !trust->trust || trust->attach(conf) != 0)
             return MBEDTLS_ERR_X509_BAD_INPUT_DATA;
         state->trust = trust->trust;
+        state->is_anchor = trust->is_anchor;
     }
     mbedtls_ssl_conf_verify(conf, verify_cb, state);
     return 0;

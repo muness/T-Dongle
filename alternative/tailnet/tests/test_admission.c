@@ -18,7 +18,10 @@ int main(void) {
     assert(next.member_steady == next.member_start + next.member_growth);
     assert(next.member_start == 10256 + 8704 + 340 + 1500);
     assert(next.member_growth == 228 + 4 * 904 + ML_ADM_TLS_LIVE_BYTES + ML_ADM_LWIP_BYTES + ML_ADM_OTHER_BYTES + 2 * 1464);
-    assert(next.required == next.member_steady + 16000 + 16384 + 2800 && next.router == 2800);
+    assert(next.required == next.member_steady + ML_ADM_NEG_PEAK_BYTES + ML_ADM_RECOVERY_BYTES + 2800 && next.router == 2800);
+    /* The negotiation peak is the handshake WITHOUT the RSA-4096 cross-signature check (ml_derp_tls.c trust anchor match):
+     * the board's 15,964 B above steady less the estimated 4,500 B. The coord stack is held by the rule in microlink_internal.h. */
+    assert(ML_ADM_NEG_PEAK_BYTES == 11500 && 15964 - 4500 <= ML_ADM_NEG_PEAK_BYTES);
     /* Decisions: budget first, then the contiguous block. */
     assert(ml_adm_decide(&next, next.required, 24000) == ML_ADM_OK);
     assert(ml_adm_decide(&next, next.required - 1, 99999) == ML_ADM_REFUSED_BUDGET);

@@ -1,3 +1,4 @@
+#define _GNU_SOURCE 1
 /* DERP TLS server authentication against real mbedTLS handshakes.
  *
  * ml_derp_tls.c and the ESP-IDF esp_crt_bundle.c (the code the firmware uses as
@@ -6,6 +7,7 @@
  * the client is configured exactly as ml_derp_connect() configures it. */
 #include <assert.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +15,7 @@
 #include "mbedtls/entropy.h"
 #include "mbedtls/error.h"
 #include "mbedtls/pk.h"
+#include "mbedtls/platform.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509_crt.h"
 #include "esp_crt_bundle.h"
@@ -64,16 +67,42 @@ static int pipe_recv(void *ctx, unsigned char *buf, size_t len) {
 
 /* ---- the trust store the firmware uses ------------------------------------ */
 static int bundle_attach(void *conf) { return esp_crt_bundle_attach(conf) == ESP_OK ? 0 : -1; }
-static const ml_derp_trust_t bundle_trust = { .attach = bundle_attach, .trust = esp_crt_verify_callback };
+static const uint8_t *held;      /* the bundle esp_crt_bundle_attach() trusts */
+static size_t held_len;
+/* The firmware's is_anchor() (ml_derp.c derp_is_trust_anchor) asks the same question of its embedded bundle. */
+static bool bundle_is_anchor(const mbedtls_x509_crt *crt) { return ml_derp_bundle_has_anchor(held, held_len, crt); }
+/* One trust store, run with and without the trust-anchor match: every scenario must give the same verdict. */
+static ml_derp_trust_t bundle_trust_obj = { .attach = bundle_attach, .trust = esp_crt_verify_callback, .is_anchor = bundle_is_anchor };
+#define bundle_trust bundle_trust_obj
 static int refusing_attach(void *conf) { (void)conf; return -1; }
 static const ml_derp_trust_t broken_trust = { .attach = refusing_attach, .trust = esp_crt_verify_callback };
 
 static void use_bundle(const char *name) {
     size_t n;
-    static uint8_t *held;
-    free(held);
+    free((void *)held);
     held = slurp(file(name, ""), &n);
-    assert(esp_crt_bundle_set(held, n - 1) == ESP_OK);
+    held_len = n - 1;
+    assert(esp_crt_bundle_set(held, held_len) == ESP_OK);
+}
+
+/* ---- heap accounting of the client handshake ------------------------------ */
+/* mbedTLS allocates through these hooks. Blocks allocated while the client's handshake runs are counted; the
+ * peak is the most such bytes live at once (the transient the DERP task needs, host 64-bit sizes). */
+typedef union { struct { size_t n; int counted; } h; max_align_t align; } mem_hdr_t;
+static int mem_scope;
+static size_t mem_live, mem_peak;
+static void *counting_calloc(size_t a, size_t b) {
+    mem_hdr_t *h = calloc(1, sizeof(*h) + a * b);
+    if (!h) return NULL;
+    h->h.n = a * b; h->h.counted = mem_scope;
+    if (mem_scope) { mem_live += h->h.n; if (mem_live > mem_peak) mem_peak = mem_live; }
+    return h + 1;
+}
+static void counting_free(void *p) {
+    if (!p) return;
+    mem_hdr_t *h = (mem_hdr_t *)p - 1;
+    if (h->h.counted) mem_live -= h->h.n;
+    free(h);
 }
 
 /* ---- one handshake --------------------------------------------------------- */
@@ -87,6 +116,7 @@ typedef struct {
 typedef struct {
     int client_error;           /* 0 = connected */
     uint32_t flags;
+    size_t peak;                /* client handshake peak heap (bytes) */
     char sni_seen[64];
     char why[300];
     ml_derp_verify_t verify;
@@ -145,10 +175,13 @@ static outcome_t connect_to(const scenario_t *sc) {
         mbedtls_ssl_set_bio(&cssl, &client, pipe_send, pipe_recv, NULL);
         mbedtls_ssl_set_bio(&sssl, &server, pipe_send, pipe_recv, NULL);
         server_sni[0] = 0;
+        mem_live = mem_peak = 0;
         int c = 1, s = 1;
         for (int i = 0; i < 2000 && (c || s); i++) {
             if (c) {
+                mem_scope = 1;
                 c = mbedtls_ssl_handshake(&cssl);
+                mem_scope = 0;
                 if (c && c != MBEDTLS_ERR_SSL_WANT_READ && c != MBEDTLS_ERR_SSL_WANT_WRITE) { out.client_error = c; break; }
             }
             if (s) {
@@ -162,6 +195,7 @@ static outcome_t connect_to(const scenario_t *sc) {
         }
         if (c && !out.client_error) out.client_error = c;
         out.flags = mbedtls_ssl_get_verify_result(&cssl);
+        out.peak = mem_peak;
         ml_derp_tls_finish(&cconf);
         ml_derp_tls_describe(&cssl, out.client_error, &out.verify, out.why, sizeof(out.why));
         snprintf(out.sni_seen, sizeof(out.sni_seen), "%s", server_sni);
@@ -212,11 +246,10 @@ static void parse_cases(void) {
     cases += 12;
 }
 
-int main(int argc, char **argv) {
-    assert(argc == 2);
-    pki = argv[1];
-    parse_cases();
-    mbedtls_ssl_config probe; mbedtls_ssl_config_init(&probe);
+/* Every pre-existing scenario (valid chain, host names, untrusted, validity, wildcard, IP, CertName, pin, fail-closed
+ * setup, repeatability). Run once per trust-anchor mode with identical expectations: matching the store's anchors
+ * must not change a single verdict for these chains. */
+static void suite(void) {
 
     /* 1. The normal case: chain to a trusted root, name HostName. */
     use_bundle("bundle_root");
@@ -299,7 +332,177 @@ int main(int argc, char **argv) {
     snprintf(text, sizeof(text), "%s", o.why);
     assert(strstr(text, "X509") && strstr(text, "does not match") != NULL);
 
+}
+
+/* ---- trust-anchor match: cross-signed root ----------------------------------------------------------------- */
+/* DERP presents  leaf <- intermediate <- "X2" (cross-certificate signed by the RSA-4096 "X1").  X1 and X2 are both
+ * in the bundle. The match must (a) accept the presented X2 as the anchor it is, with a smaller peak because the
+ * RSA-4096 signature is never verified, and (b) accept nothing else. */
+static outcome_t cross(const char *stem, const char *sni, const char *cert_name, const char *bundle, bool anchor) {
+    use_bundle(bundle);
+    bundle_trust_obj.is_anchor = anchor ? bundle_is_anchor : NULL;
+    return connect_to(&(scenario_t){ stem, stem, sni, cert_name, &bundle_trust });
+}
+#define HOST "derp1.test.example"
+/* The same verdict with the anchor match on and off; returns the "on" outcome. */
+static outcome_t both_fail(const char *stem, const char *sni, const char *cert_name, const char *bundle, uint32_t flag) {
+    outcome_t off = cross(stem, sni, cert_name, bundle, false);
+    EXPECT_FAIL(off, flag);
+    assert(off.verify.anchor_hits == 0);
+    outcome_t on = cross(stem, sni, cert_name, bundle, true);
+    EXPECT_FAIL(on, flag);
+    return on;
+}
+
+static void cross_cases(void) {
+    outcome_t on, off;
+
+    /* a. The real shape: X1 and X2 both in the store. */
+    off = cross("xok", HOST, NULL, "bundle_cross", false);
+    EXPECT_OK(off); assert(off.verify.anchor_hits == 0);                     /* verified through X1 (RSA) */
+    on = cross("xok", HOST, NULL, "bundle_cross", true);
+    EXPECT_OK(on); assert(on.verify.anchor_hits == 1);                       /* X2 taken as the anchor itself */
+    printf("cross-signed root, host heap peak of the client handshake: %zu B verifying the RSA-4096 cross-signature, "
+           "%zu B matching the anchor (-%zu B)\n", off.peak, on.peak, off.peak - on.peak);
+    assert(on.peak + 2500 <= off.peak);                                      /* three RSA-4096 integers and their work area */
+    /* b. X1 is not needed once X2 is the anchor; without the match it is (the match is what trusts X2 here). */
+    on = cross("xok", HOST, NULL, "bundle_x2", true);
+    EXPECT_OK(on); assert(on.verify.anchor_hits == 1);
+    off = cross("xok", HOST, NULL, "bundle_x2", false);
+    EXPECT_FAIL(off, MBEDTLS_X509_BADCERT_NOT_TRUSTED);
+    /* c. Only X1 in the store: X2 is not an anchor, the RSA path still works and the match is never claimed. */
+    on = cross("xok", HOST, NULL, "bundle_x1", true);
+    EXPECT_OK(on); assert(on.verify.anchor_hits == 0);
+    /* d. A store that trusts neither. */
+    on = both_fail("xok", HOST, NULL, "bundle_rogue", MBEDTLS_X509_BADCERT_NOT_TRUSTED);
+    assert(on.verify.anchor_hits == 0);
+
+    /* e. Everything below the anchor is still verified: host name, CertName, validity of leaf, intermediate and the
+     *    presented certificate itself, in both modes and in the store where the match is the only way in. */
+    static const char *const stores[] = { "bundle_cross", "bundle_x2" };
+    for (unsigned i = 0; i < 2; i++) {
+        const char *b = stores[i];
+        both_fail("xother", HOST, NULL, b, MBEDTLS_X509_BADCERT_CN_MISMATCH);                  /* wrong host */
+        both_fail("xok", "derp2.test.example", NULL, b, MBEDTLS_X509_BADCERT_CN_MISMATCH);
+        both_fail("xleaf_expired", HOST, NULL, b, MBEDTLS_X509_BADCERT_EXPIRED);               /* expired leaf */
+        both_fail("xinter_expired", HOST, NULL, b, MBEDTLS_X509_BADCERT_EXPIRED);              /* expired intermediate */
+        both_fail("xanchor_expired", HOST, NULL, b, MBEDTLS_X509_BADCERT_EXPIRED);             /* expired presented anchor */
+        both_fail("xanchor_future", HOST, NULL, b, MBEDTLS_X509_BADCERT_FUTURE);               /* not yet valid anchor */
+        /* CertName: the SNI stays HostName, the chain must name CertName. */
+        on = cross("xfront", "front.example", HOST, b, true);
+        assert(!on.client_error && !strcmp(on.sni_seen, "front.example") && on.verify.anchor_hits == 1); cases++;
+        both_fail("xfront", "front.example", "other.example", b, MBEDTLS_X509_BADCERT_CN_MISMATCH);
+        /* Same subject DN, different key; a cross-certificate signed by an impostor carrying X1's name; the right
+         * key under another subject DN: none is the anchor, none verifies. */
+        on = both_fail("xfake_self", HOST, NULL, b, MBEDTLS_X509_BADCERT_NOT_TRUSTED); assert(on.verify.anchor_hits == 0);
+        on = both_fail("xfake_cross", HOST, NULL, b, MBEDTLS_X509_BADCERT_NOT_TRUSTED); assert(on.verify.anchor_hits == 0);
+        on = both_fail("xrenamed", HOST, NULL, b, MBEDTLS_X509_BADCERT_NOT_TRUSTED); assert(on.verify.anchor_hits == 0);
+        /* The anchor's own certificate as the server's certificate: the leaf is never taken as an anchor (no SAN, so
+         * the host name fails; the anchor counter stays at zero). */
+        on = both_fail("x2", HOST, NULL, b, MBEDTLS_X509_BADCERT_CN_MISMATCH); assert(on.verify.anchor_hits == 0);
+    }
+    bundle_trust_obj.is_anchor = bundle_is_anchor;
+}
+
+/* ml_derp_bundle_has_anchor on its own: subject AND key, and no crash on a damaged bundle. */
+static void bundle_cases(void) {
+    use_bundle("bundle_cross");
+    mbedtls_x509_crt x1, x2, x2c, fake, renamed, root;
+    mbedtls_x509_crt_init(&x1); mbedtls_x509_crt_init(&x2); mbedtls_x509_crt_init(&x2c);
+    mbedtls_x509_crt_init(&fake); mbedtls_x509_crt_init(&renamed); mbedtls_x509_crt_init(&root);
+    const struct { const char *stem; mbedtls_x509_crt *crt; } load[] = {
+        { "x1", &x1 }, { "x2", &x2 }, { "x2_cross", &x2c }, { "fake_x2", &fake }, { "renamed_x2", &renamed }, { "root", &root } };
+    for (unsigned i = 0; i < sizeof(load) / sizeof(load[0]); i++) {
+        size_t n;
+        uint8_t *pem = slurp(file(load[i].stem, ".pem"), &n);
+        assert(!mbedtls_x509_crt_parse(load[i].crt, pem, n));
+        free(pem);
+    }
+    assert(ml_derp_bundle_has_anchor(held, held_len, &x1));
+    assert(ml_derp_bundle_has_anchor(held, held_len, &x2));
+    assert(ml_derp_bundle_has_anchor(held, held_len, &x2c));      /* the cross-certificate has X2's subject and key */
+    assert(!ml_derp_bundle_has_anchor(held, held_len, &fake));    /* same subject DN, other key */
+    assert(!ml_derp_bundle_has_anchor(held, held_len, &renamed)); /* same key, other subject DN */
+    assert(!ml_derp_bundle_has_anchor(held, held_len, &root));
+    assert(!ml_derp_bundle_has_anchor(NULL, held_len, &x2) && !ml_derp_bundle_has_anchor(held, 0, &x2) &&
+           !ml_derp_bundle_has_anchor(held, held_len, NULL));
+    mbedtls_x509_crt empty; mbedtls_x509_crt_init(&empty);
+    assert(!ml_derp_bundle_has_anchor(held, held_len, &empty));
+    cases += 11;
+
+    /* One changed byte in the stored key, or in the stored subject, of the X2 entry: no longer a match, and X1 is
+     * unaffected. */
+    uint8_t *copy = malloc(held_len + 1);
+    for (int field = 0; field < 2; field++) {
+        const mbedtls_x509_buf *want = field ? &x2.subject_raw : &x2.pk_raw;
+        memcpy(copy, held, held_len);
+        uint8_t *at = memmem(copy, held_len, want->p, want->len);
+        assert(at);
+        at[want->len - 1] ^= 1;
+        assert(!ml_derp_bundle_has_anchor(copy, held_len, &x2));
+        assert(ml_derp_bundle_has_anchor(copy, held_len, &x1));
+        cases += 2;
+    }
+
+    /* A damaged bundle matches nothing it should not and never reads outside the buffer (ASan): every truncation, and
+     * every single-bit change of the offset table and of each entry's length header. A prefix can only lose matches. */
+    uint8_t *exact = malloc(held_len);                               /* exact size: an over-read is a heap overflow */
+    for (size_t len = 0; len <= held_len; len++) {
+        memcpy(exact = realloc(exact, len ? len : 1), held, len);
+        bool a = ml_derp_bundle_has_anchor(exact, len, &x2), b = ml_derp_bundle_has_anchor(exact, len, &x1);
+        if (len < 8) assert(!a && !b);
+        if (a) assert(ml_derp_bundle_has_anchor(held, held_len, &x2));
+    }
+    uint32_t first;
+    memcpy(&first, held, 4);
+    size_t table = first;
+    for (size_t bit = 0; bit < table * 8; bit++) {                    /* the offset table */
+        exact = realloc(exact, held_len);
+        memcpy(exact, held, held_len);
+        exact[bit / 8] ^= (uint8_t)(1u << (bit % 8));
+        (void)ml_derp_bundle_has_anchor(exact, held_len, &x2);
+        (void)ml_derp_bundle_has_anchor(exact, held_len, &x1);
+    }
+    for (uint32_t i = 0; i < first / 4; i++) {                        /* each entry's two length fields */
+        uint32_t off;
+        memcpy(&off, held + 4 * i, 4);
+        for (size_t bit = 0; bit < 32; bit++) {
+            memcpy(exact, held, held_len);
+            exact[off + bit / 8] ^= (uint8_t)(1u << (bit % 8));
+            (void)ml_derp_bundle_has_anchor(exact, held_len, &x2);
+            (void)ml_derp_bundle_has_anchor(exact, held_len, &x1);
+        }
+    }
+    free(exact); free(copy);
+    cases += 2;
+    mbedtls_x509_crt_free(&x1); mbedtls_x509_crt_free(&x2); mbedtls_x509_crt_free(&x2c);
+    mbedtls_x509_crt_free(&fake); mbedtls_x509_crt_free(&renamed); mbedtls_x509_crt_free(&root);
+    mbedtls_x509_crt_free(&empty);
+}
+
+int main(int argc, char **argv) {
+    assert(argc == 2);
+    pki = argv[1];
+    mbedtls_platform_set_calloc_free(counting_calloc, counting_free);
+    parse_cases();
+    mbedtls_ssl_config probe; mbedtls_ssl_config_init(&probe);
+
+    /* The pre-existing scenarios, once with the store's anchors matched (the firmware) and once without. */
+    unsigned before = cases;
+    bundle_trust_obj.is_anchor = bundle_is_anchor;
+    suite();
+    unsigned per_mode = cases - before;
+    bundle_trust_obj.is_anchor = NULL;
+    suite();
+    bundle_trust_obj.is_anchor = bundle_is_anchor;
+    unsigned legacy = cases;
+
+    cross_cases();
+    bundle_cases();
     mbedtls_ssl_config_free(&probe);
-    printf("DERP TLS: %u verification cases (valid chain, wrong host, untrusted, expired/future, wildcard, IP, CertName, sha256-raw pin, fail-closed setup) passed\n", cases);
+    printf("DERP TLS: %u verification cases (%u existing scenarios x 2 anchor modes, then %u trust-anchor-match cases: "
+           "cross-signed root accepted with a smaller peak, same subject with another key, same key with another subject, "
+           "impostor cross-signer, expired/not-yet-valid anchor, expired leaf/intermediate, wrong host, CertName, damaged bundles) passed\n",
+           cases, per_mode, cases - legacy);
     return 0;
 }
