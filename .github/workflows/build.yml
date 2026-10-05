@@ -1,5 +1,14 @@
 name: firmware-and-host-tests
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    branches: ["codex/release-paid-companion", "main", "overhaul/multi-tailnet", "tdongle/integration"]
+  pull_request:
+  workflow_dispatch:
+
+# Keep one current validation run per source branch, including manual runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
   host:
     runs-on: [self-hosted, linux, x64, linux-general]
