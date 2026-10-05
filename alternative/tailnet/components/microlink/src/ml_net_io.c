@@ -74,12 +74,14 @@ static void route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
     switch (type) {
     case PKT_STUN:
         if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
-            free(data);  /* Queue full, drop */
+            tdongle_memory_drop(TDONGLE_DROP_NET_STUN_FULL);
+            tdongle_heap_free(TDONGLE_OWNER_PACKET, data);  /* Queue full, drop */
         }
         break;
     case PKT_DISCO:
         if (xQueueSend(ml->disco_rx_queue, &pkt, 0) != pdTRUE) {
-            free(data);
+            tdongle_memory_drop(TDONGLE_DROP_NET_DISCO_FULL);
+            tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
         }
         break;
     case PKT_WIREGUARD:
@@ -88,11 +90,12 @@ static void route_udp_packet(microlink_t *ml, uint8_t *data, size_t len,
             if ((++wg_rx_drops & 0x1F) == 1)
                 ESP_LOGW(TAG, "WG-RX(direct) queue full: dropped %lu",
                          (unsigned long)wg_rx_drops);
-            free(data);  /* Queue full, drop */
+            tdongle_memory_drop(TDONGLE_DROP_NET_WG_FULL);
+            tdongle_heap_free(TDONGLE_OWNER_PACKET, data);  /* Queue full, drop */
         }
         break;
     default:
-        free(data);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
         break;
     }
 }
@@ -153,7 +156,7 @@ void ml_net_io_task(void *arg) {
             int n = ml_recvfrom(ml->disco_sock4, udp_buf, sizeof(udp_buf), 0,
                              (struct sockaddr *)&src_addr, &addr_len);
             if (n > 0) {
-                uint8_t *pkt_data = malloc(n);
+                uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(n));
                 if (pkt_data) {
                     memcpy(pkt_data, udp_buf, n);
                     uint32_t src_ip = ntohl(src_addr.sin_addr.s_addr);
@@ -170,7 +173,7 @@ void ml_net_io_task(void *arg) {
             int n = ml_recvfrom(ml->stun_sock, udp_buf, sizeof(udp_buf), 0,
                              (struct sockaddr *)&src_addr, &addr_len);
             if (n > 0) {
-                uint8_t *pkt_data = malloc(n);
+                uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(n));
                 if (pkt_data) {
                     memcpy(pkt_data, udp_buf, n);
                     ml_rx_packet_t pkt = {
@@ -181,7 +184,8 @@ void ml_net_io_task(void *arg) {
                         .via_derp = false,
                     };
                     if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
-                        free(pkt_data);
+                        tdongle_memory_drop(TDONGLE_DROP_NET_STUN_FULL);
+                        tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt_data);
                     }
                 }
             }
@@ -194,7 +198,7 @@ void ml_net_io_task(void *arg) {
             int n = ml_recvfrom(ml->stun_sock6, udp_buf, sizeof(udp_buf), 0,
                              (struct sockaddr *)&src_addr6, &addr_len);
             if (n > 0) {
-                uint8_t *pkt_data = malloc(n);
+                uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(n));
                 if (pkt_data) {
                     memcpy(pkt_data, udp_buf, n);
                     ml_rx_packet_t pkt = {
@@ -205,7 +209,8 @@ void ml_net_io_task(void *arg) {
                         .via_derp = false,
                     };
                     if (xQueueSend(ml->stun_rx_queue, &pkt, 0) != pdTRUE) {
-                        free(pkt_data);
+                        tdongle_memory_drop(TDONGLE_DROP_NET_STUN_FULL);
+                        tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt_data);
                     }
                 }
             }

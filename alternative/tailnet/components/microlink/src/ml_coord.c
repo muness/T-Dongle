@@ -44,9 +44,9 @@
 static const char *TAG = "ml_coord";
 
 static void *coord_alloc(size_t bytes){
- void *p=ml_psram_malloc(bytes);
+ void *p=tdongle_heap_tag(TDONGLE_OWNER_CONTROL, ml_psram_malloc(bytes));
 #ifdef ESP_PLATFORM
- tdongle_memory_note(1,bytes,p==NULL);
+ tdongle_memory_note(TDONGLE_MEMORY_OP_CONTROL_BUFFER,bytes,p==NULL);
 #endif
  return p;
 }
@@ -582,7 +582,7 @@ static void ml_conn_close(microlink_t *ml) {
      * into the next one prepends stale bytes to its FIRST framed message -
      * which is the initial full netmap, the most valuable message on the
      * stream. It would be lost to the length-prefix guard. */
-    free(ml->h2_acc);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc);
     ml->h2_acc = NULL;
     ml->h2_acc_len = 0;
     ml->lp_acc_len = 0;
@@ -631,13 +631,13 @@ static int noise_send(microlink_t *ml, ml_noise_state_t *noise,
                           NULL, 0,
                           plaintext, pt_len,
                           frame + 3) != ESP_OK) {
-        free(frame);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, frame);
         return -1;
     }
     noise->tx_nonce++;
 
     int ret = coord_send(ml, frame, 3 + ct_len);
-    free(frame);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, frame);
     return ret;
 }
 
@@ -681,12 +681,12 @@ static int noise_recv_buffer(microlink_t *ml, ml_noise_state_t *noise,
         ml->noise_error=3;errno=EMSGSIZE;return -1;
     }
 
-    uint8_t *ciphertext = in_place ? plaintext : ml_psram_malloc(ct_len);
+    uint8_t *ciphertext = in_place ? plaintext : tdongle_heap_tag(TDONGLE_OWNER_CONTROL, ml_psram_malloc(ct_len));
     if (!ciphertext) {ml->noise_error=4;errno=ENOMEM;return -1;}
 
     if (coord_recv_committed(ml, ciphertext, ct_len) < 0) {
         ml->noise_error = 5;
-        if (!in_place) free(ciphertext);
+        if (!in_place) tdongle_heap_free(TDONGLE_OWNER_CONTROL, ciphertext);
         return -1;
     }
 
@@ -696,12 +696,12 @@ static int noise_recv_buffer(microlink_t *ml, ml_noise_state_t *noise,
                           plaintext) != ESP_OK) {
         ESP_LOGE(TAG, "Noise decrypt failed (nonce=%llu)", (unsigned long long)noise->rx_nonce);
         ml->noise_error=6;errno=EBADMSG;
-        if (!in_place) free(ciphertext);
+        if (!in_place) tdongle_heap_free(TDONGLE_OWNER_CONTROL, ciphertext);
         return -1;
     }
     noise->rx_nonce++;
 
-    if (!in_place) free(ciphertext);
+    if (!in_place) tdongle_heap_free(TDONGLE_OWNER_CONTROL, ciphertext);
     return (int)pt_len;
 }
 
@@ -919,10 +919,10 @@ static int do_noise_handshake(microlink_t *ml, ml_noise_state_t *noise) {
     ESP_LOGI(TAG, "Sending Noise handshake (msg1=%d bytes, b64=%d chars)", (int)msg1_len, (int)b64_len);
 
     if (coord_send(ml, (uint8_t *)http_req, req_len) < 0) {
-        free(http_req);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, http_req);
         return -1;
     }
-    free(http_req);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, http_req);
 
     if (gateway_read_upgrade(ml) < 0) return -1;
     ml->control_stage = 3;
@@ -1083,7 +1083,7 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
 
     /* Build HTTP/2 HEADERS + DATA frames */
     uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
-    if (!h2_buf) { free(json_str); return -1; }
+    if (!h2_buf) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); return -1; }
 
     int h2_pos = 0;
 
@@ -1092,23 +1092,23 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
                                               "POST", "/machine/register",
                                               CTRL_HOST_HDR(ml), "application/json",
                                               1, false);
-    if (hdr_len < 0) { free(json_str); free(h2_buf); return -1; }
+    if (hdr_len < 0) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += hdr_len;
 
     /* DATA frame (JSON body, END_STREAM) */
     int data_len = ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos,
                                             (uint8_t *)json_str, json_len,
                                             1, true);
-    free(json_str);
-    if (data_len < 0) { free(h2_buf); return -1; }
+    tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
+    if (data_len < 0) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += data_len;
 
     /* Encrypt and send as one Noise frame */
     if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
-        free(h2_buf);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
         return -1;
     }
-    free(h2_buf);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
 
     int64_t t_reg_sent = esp_timer_get_time();
     ESP_LOGI(TAG, "RegisterRequest sent (%d H2 bytes) [TIMING] send: %lld ms",
@@ -1499,7 +1499,7 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
         /* Send to wg_mgr task via queue */
         if (!gateway_peer_publish(ml, &update)) {
             ESP_LOGW(TAG, "Peer update queue full, dropping %s", update->hostname);
-            free(update);
+            tdongle_heap_free(TDONGLE_OWNER_PEER, update);
         }
     }
 
@@ -1537,7 +1537,7 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
             ESP_LOGI(TAG, "Peer sweep: %s not in authoritative netmap — removing",
                      ml->peers[i].hostname);
             if (!gateway_peer_publish(ml, &rm)) {
-                free(rm);
+                tdongle_heap_free(TDONGLE_OWNER_PEER, rm);
             } else {
                 swept++;
             }
@@ -1582,7 +1582,7 @@ check_removed:
             }
 
             if (!gateway_peer_publish(ml, &update)) {
-                free(update);
+                tdongle_heap_free(TDONGLE_OWNER_PEER, update);
             }
         }
     }
@@ -1666,7 +1666,7 @@ check_removed:
                      update->has_online ? (update->online ? "true" : "false") : "-");
 
             if (!gateway_peer_publish(ml, &update)) {
-                free(update);
+                tdongle_heap_free(TDONGLE_OWNER_PEER, update);
             }
         }
     }
@@ -1966,7 +1966,7 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
 
     /* Build H2 HEADERS + DATA, stream ID 3 (stream 1 was register) */
     uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
-    if (!h2_buf) { free(json_str); return -1; }
+    if (!h2_buf) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); return -1; }
 
     int h2_pos = 0;
 
@@ -1974,21 +1974,21 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
                                               "POST", "/machine/map",
                                               CTRL_HOST_HDR(ml), "application/json",
                                               3, false);
-    if (hdr_len < 0) { free(json_str); free(h2_buf); return -1; }
+    if (hdr_len < 0) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += hdr_len;
 
     int data_len = ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos,
                                             (uint8_t *)json_str, json_len,
                                             3, true);
-    free(json_str);
-    if (data_len < 0) { free(h2_buf); return -1; }
+    tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
+    if (data_len < 0) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += data_len;
 
     if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
-        free(h2_buf);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
         return -1;
     }
-    free(h2_buf);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
     }  /* if (send_request) */
 
     int result = gateway_read_map(ml, noise, send_request ? 3 : 5, true);
@@ -2041,28 +2041,28 @@ static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise, bool omi
 
     /* Build H2 frames on stream ID 5 */
     uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
-    if (!h2_buf) { free(json_str); return -1; }
+    if (!h2_buf) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); return -1; }
 
     int h2_pos = 0;
     int hdr_len = ml_h2_build_headers_frame(h2_buf, json_len + 512,
                                               "POST", "/machine/map",
                                               CTRL_HOST_HDR(ml), "application/json",
                                               5, false);
-    if (hdr_len < 0) { free(json_str); free(h2_buf); return -1; }
+    if (hdr_len < 0) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += hdr_len;
 
     int data_len = ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos,
                                             (uint8_t *)json_str, json_len,
                                             5, true);
-    free(json_str);
-    if (data_len < 0) { free(h2_buf); return -1; }
+    tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
+    if (data_len < 0) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += data_len;
 
     if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
-        free(h2_buf);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
         return -1;
     }
-    free(h2_buf);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
 
     ESP_LOGI(TAG, "Streaming MapRequest sent on stream 5");
     return 0;
@@ -2129,7 +2129,7 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     for (size_t i = 0; i < json_len; i++) { ep_hash ^= (uint8_t)json_str[i]; ep_hash *= 16777619u; }
     if (ep_hash == ml->last_ep_update_hash) {
         ESP_LOGD(TAG, "Endpoint update unchanged (%d endpoints, %d bytes), not re-sent", ep_count, (int)json_len);
-        free(json_str);
+        tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
         return 0;
     }
     ESP_LOGI(TAG, "Endpoint update: %d bytes, %d endpoints (Stream=false, OmitPeers=true)",
@@ -2144,29 +2144,29 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     ml->h2_next_stream_id += 2;
 
     uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
-    if (!h2_buf) { free(json_str); return -1; }
+    if (!h2_buf) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); return -1; }
 
     int h2_pos = 0;
     int hdr_len = ml_h2_build_headers_frame(h2_buf, json_len + 512,
                                               "POST", "/machine/map",
                                               CTRL_HOST_HDR(ml), "application/json",
                                               sid, false);
-    if (hdr_len < 0) { free(json_str); free(h2_buf); return -1; }
+    if (hdr_len < 0) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += hdr_len;
 
     int data_len = ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos,
                                             (uint8_t *)json_str, json_len,
                                             sid, true);  /* END_STREAM */
-    free(json_str);
-    if (data_len < 0) { free(h2_buf); return -1; }
+    tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
+    if (data_len < 0) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += data_len;
 
     if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
-        free(h2_buf);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
         ESP_LOGE(TAG, "Failed to send endpoint update");
         return -1;
     }
-    free(h2_buf);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
 
     ESP_LOGI(TAG, "Endpoint update sent on H2 stream %lu", (unsigned long)sid);
     ml->last_ep_update_hash = ep_hash;
@@ -2260,6 +2260,7 @@ void ml_coord_task(void *arg) {
     ml_coord_cmd_t cmd;
     uint64_t last_activity_ms = ml_get_time_ms();
     int reconnect_attempts = 0;
+    uint64_t map_applied_ms = 0;  /* nonzero until the steady-state heap capture is taken */
 
     /* Noise protocol state - owned exclusively by this task */
     ml_noise_state_t noise = {0};
@@ -2349,6 +2350,7 @@ void ml_coord_task(void *arg) {
             }
             ml->h2_next_stream_id = 7;  /* Reset H2 stream counter for new connection */
             ml->last_ep_update_hash = 0;   /* new map session: send the endpoints once regardless */
+            tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_CONTROL);
             state = COORD_NOISE_HANDSHAKE;
             break;
 
@@ -2361,6 +2363,7 @@ void ml_coord_task(void *arg) {
                 state = COORD_RECONNECTING;
                 break;
             }
+            tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_NOISE);
             state = COORD_H2_PREFACE;
             break;
 
@@ -2389,6 +2392,7 @@ void ml_coord_task(void *arg) {
                 state = COORD_RECONNECTING;
                 break;
             }
+            tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_REGISTER);
             state = COORD_FETCH_PEERS;
             break;
 
@@ -2439,6 +2443,8 @@ void ml_coord_task(void *arg) {
                  * 100.64.0.1 forever, and a netif whose address never
                  * matches the real tailnet IP silently drops every inbound
                  * packet (all TCP dead while DISCO keeps answering). */
+                tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_MAP);
+                map_applied_ms = ml_get_time_ms();
                 xEventGroupSetBits(ml->events, ML_EVT_COORD_REGISTERED);
 
                 if (!ml->derp.connected) {
@@ -2498,6 +2504,11 @@ void ml_coord_task(void *arg) {
             ml->control_stage = 7;
             {
                 uint64_t now = ml_get_time_ms();
+
+                if (map_applied_ms && now - map_applied_ms >= 60000) {
+                    tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_STEADY);
+                    map_applied_ms = 0;
+                }
 
                 /* Check control plane watchdog (120s) */
                 if (now - last_activity_ms > ml->t_ctrl_watchdog_ms) {
@@ -2602,7 +2613,7 @@ void ml_coord_task(void *arg) {
                          * IGNORED, so we need this separate Stream=false request. */
                         do_send_endpoint_update(ml, &noise);
                     }
-                    free(stun_pkt.data);
+                    tdongle_heap_free(TDONGLE_OWNER_PACKET, stun_pkt.data);
                 }
 
                 /* STUN retry logic: 3 attempts per server, 2s apart, then fallback */
@@ -2658,7 +2669,7 @@ void ml_coord_task(void *arg) {
 
                 if (ml->derp.connected && now - ml->last_derp_keepalive_ms > 60000) {
                     uint8_t preferred = 0x01;
-                    uint8_t *ka_data = malloc(1);
+                    uint8_t *ka_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(1));
                     if (ka_data) {
                         *ka_data = preferred;
                         ml_derp_tx_item_t ka_item = {
@@ -2668,7 +2679,7 @@ void ml_coord_task(void *arg) {
                         };
                         memset(ka_item.dest_pubkey, 0, 32);
                         if (xQueueSend(ml->derp_tx_queue, &ka_item, 0) != pdTRUE) {
-                            free(ka_data);
+                            tdongle_heap_free(TDONGLE_OWNER_PACKET, ka_data);
                         }
                     }
                     ml->last_derp_keepalive_ms = now;

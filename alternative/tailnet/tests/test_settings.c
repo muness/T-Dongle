@@ -7,6 +7,7 @@
 #include <string.h>
 #include <strings.h>
 #include "cJSON.h"
+#include "tdongle_memory.h"
 #define ESP_OK 0
 #define ESP_ERR_NVS_NOT_FOUND 2
 #define ESP_ERR_INVALID_SIZE 3

@@ -1,3 +1,4 @@
+#include "tdongle_memory.h"
 #define _POSIX_C_SOURCE 200809L
 #define GATEWAY_FLASH_DIRECTORY 1
 #define main legacy_main

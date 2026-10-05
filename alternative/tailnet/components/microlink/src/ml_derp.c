@@ -230,7 +230,7 @@ static int derp_tls_write_all(microlink_t *ml, const uint8_t *data, size_t len) 
 static int derp_write_frame(microlink_t *ml, uint8_t type,
                              const uint8_t *payload, uint32_t len) {
     uint32_t total = 5 + len;
-    uint8_t *buf = ml_psram_malloc(total);
+    uint8_t *buf = tdongle_heap_tag(TDONGLE_OWNER_PACKET, ml_psram_malloc(total));
     if (!buf) return -1;
     buf[0] = type;
     buf[1] = (len >> 24) & 0xFF;
@@ -239,7 +239,7 @@ static int derp_write_frame(microlink_t *ml, uint8_t type,
     buf[4] = len & 0xFF;
     if (len > 0 && payload) memcpy(buf + 5, payload, len);
     int ret = derp_tls_write_all(ml, buf, total);
-    free(buf);
+    tdongle_heap_free(TDONGLE_OWNER_PACKET, buf);
     return ret < 0 ? -1 : 0;
 }
 
@@ -252,7 +252,7 @@ static int derp_send_packet(microlink_t *ml, const uint8_t *dest_key,
                               const uint8_t *data, size_t len) {
     uint32_t body = 32 + (uint32_t)len;          /* dest key + payload */
     uint32_t total = 5 + body;                    /* + DERP frame header */
-    uint8_t *frame = ml_psram_malloc(total);
+    uint8_t *frame = tdongle_heap_tag(TDONGLE_OWNER_PACKET, ml_psram_malloc(total));
     if (!frame) return -1;
 
     frame[0] = DERP_FRAME_SEND_PACKET;
@@ -269,7 +269,7 @@ static int derp_send_packet(microlink_t *ml, const uint8_t *dest_key,
         ESP_LOGW(TAG, "derp_send_packet FAILED: dest=%02x%02x%02x%02x len=%d",
                  dest_key[0], dest_key[1], dest_key[2], dest_key[3], (int)len);
     }
-    free(frame);
+    tdongle_heap_free(TDONGLE_OWNER_PACKET, frame);
     return ret;
 }
 
@@ -318,7 +318,8 @@ static void route_derp_packet(microlink_t *ml, uint8_t *data, size_t len,
         if ((++derp_rx_drops & 0x1F) == 1)
             ESP_LOGW(TAG, "DERP-RX queue full: dropped %lu (type=%d)",
                      (unsigned long)derp_rx_drops, (int)type);
-        free(data);
+        tdongle_memory_drop(TDONGLE_DROP_DERP_RX_FULL);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, data);
     }
 }
 
@@ -367,7 +368,7 @@ static void dispatch_derp_frame(microlink_t *ml, uint8_t frame_type,
         break;
     }
 
-    if (payload) free(payload);
+    tdongle_heap_free(TDONGLE_OWNER_PACKET, payload);
 }
 
 /**
@@ -416,11 +417,11 @@ static int poll_derp_read(microlink_t *ml) {
             return -1;
         len -= sizeof(src_key);
     }
-    uint8_t *payload = len ? ml_psram_malloc(len) : NULL;
+    uint8_t *payload = len ? tdongle_heap_tag(TDONGLE_OWNER_PACKET, ml_psram_malloc(len)) : NULL;
     if (len && !payload)
         return -1;
     if (len && derp_read_exact(ml, payload, len, started, false) < 0) {
-        free(payload);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, payload);
         return -1;
     }
     /* Dispatch either transfers this allocation to a queue or frees it. */
@@ -440,7 +441,7 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
     /* Relay buffer goes to SPIRAM (not DMA, not latency-critical): with a
      * deeper TX queue this can hold ~64 × ~1.3KB in-flight — keep it off the
      * chronically-tight internal DRAM. Freed with plain free() (heap_caps). */
-    uint8_t *pkt_data = ml_psram_malloc(len);
+    uint8_t *pkt_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, ml_psram_malloc(len));
     if (!pkt_data) return ESP_ERR_NO_MEM;
     memcpy(pkt_data, data, len);
 
@@ -465,7 +466,8 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
     for (int i = 0; i < 3; i++) {
         ml_derp_tx_item_t dropped;
         if (xQueueReceive(ml->derp_tx_queue, &dropped, 0) == pdTRUE) {
-            free(dropped.data);  /* Drop oldest */
+            tdongle_memory_drop(TDONGLE_DROP_DERP_TX_EVICT);
+            tdongle_heap_free(TDONGLE_OWNER_PACKET, dropped.data);  /* Drop oldest */
         }
         if (xQueueSend(ml->derp_tx_queue, &item, 0) == pdTRUE) {
             return ESP_OK;
@@ -477,7 +479,8 @@ esp_err_t ml_derp_queue_send(microlink_t *ml, const uint8_t *dest_key,
     static uint32_t derp_tx_drops = 0;
     if ((++derp_tx_drops & 0x1F) == 1)
         ESP_LOGW(TAG, "DERP-TX queue full: dropped %lu", (unsigned long)derp_tx_drops);
-    free(pkt_data);
+    tdongle_memory_drop(TDONGLE_DROP_DERP_TX_FULL);
+    tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt_data);
     return ESP_ERR_TIMEOUT;
 }
 
@@ -958,7 +961,7 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
 
         /* Encrypt JSON with NaCl box: our WG private key -> DERP server public key */
         size_t ciphertext_len = json_len + NACL_BOX_MACBYTES;
-        uint8_t *ciphertext = malloc(ciphertext_len);
+        uint8_t *ciphertext = tdongle_heap_tag(TDONGLE_OWNER_OTHER, malloc(ciphertext_len));
         if (!ciphertext) {
             goto fail_tls;
         }
@@ -970,22 +973,22 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
                      ml->wg_private_key     /* sender: our WG node key */
                      ) != 0) {
             ESP_LOGE(TAG, "NaCl box encrypt failed");
-            free(ciphertext);
+            tdongle_heap_free(TDONGLE_OWNER_OTHER, ciphertext);
             goto fail_tls;
         }
 
         /* Build ClientInfo frame payload: nodekey(32) + nonce(24) + ciphertext */
         size_t ci_payload_len = 32 + NACL_BOX_NONCEBYTES + ciphertext_len;
-        uint8_t *ci_payload = malloc(ci_payload_len);
+        uint8_t *ci_payload = tdongle_heap_tag(TDONGLE_OWNER_OTHER, malloc(ci_payload_len));
         if (!ci_payload) {
-            free(ciphertext);
+            tdongle_heap_free(TDONGLE_OWNER_OTHER, ciphertext);
             goto fail_tls;
         }
 
         memcpy(ci_payload, ml->wg_public_key, 32);
         memcpy(ci_payload + 32, nonce, NACL_BOX_NONCEBYTES);
         memcpy(ci_payload + 32 + NACL_BOX_NONCEBYTES, ciphertext, ciphertext_len);
-        free(ciphertext);
+        tdongle_heap_free(TDONGLE_OWNER_OTHER, ciphertext);
 
         ESP_LOGI(TAG, "DERP ClientInfo node_key=%02x%02x%02x%02x%02x%02x%02x%02x",
                  ml->wg_public_key[0], ml->wg_public_key[1],
@@ -996,10 +999,10 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         /* Send ClientInfo frame */
         if (derp_write_frame(ml, DERP_FRAME_CLIENT_INFO, ci_payload, ci_payload_len) < 0) {
             ESP_LOGE(TAG, "Failed to send ClientInfo");
-            free(ci_payload);
+            tdongle_heap_free(TDONGLE_OWNER_OTHER, ci_payload);
             goto fail_tls;
         }
-        free(ci_payload);
+        tdongle_heap_free(TDONGLE_OWNER_OTHER, ci_payload);
 
         ESP_LOGI(TAG, "ClientInfo sent");
     }
@@ -1011,10 +1014,10 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
         err = derp_recv_frame_header(ml, &si_type, &si_len, DERP_CONNECT_TIMEOUT_MS);
         if (err == ESP_OK && si_type == DERP_FRAME_SERVER_INFO && si_len > 0) {
             /* Read and discard ServerInfo payload */
-            uint8_t *si_buf = malloc(si_len);
+            uint8_t *si_buf = tdongle_heap_tag(TDONGLE_OWNER_OTHER, malloc(si_len));
             if (si_buf) {
                 derp_tls_read_all(ml, si_buf, si_len, DERP_CONNECT_TIMEOUT_MS);
-                free(si_buf);
+                tdongle_heap_free(TDONGLE_OWNER_OTHER, si_buf);
             }
             ESP_LOGI(TAG, "ServerInfo received (discarded)");
         } else if (err != ESP_OK) {
@@ -1044,6 +1047,7 @@ esp_err_t ml_derp_connect(microlink_t *ml) {
 
     ml->derp.connected = true;
     ml->derp.last_recv_ms = ml_get_time_ms();
+    tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_DERP);
     xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECTED);
 
     int64_t t_derp_done = esp_timer_get_time();
@@ -1088,7 +1092,7 @@ void ml_derp_disconnect(microlink_t *ml) {
     /* Drain TX queue */
     ml_derp_tx_item_t item;
     while (xQueueReceive(ml->derp_tx_queue, &item, 0) == pdTRUE) {
-        free(item.data);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, item.data);
     }
 
     ESP_LOGI(TAG, "DERP disconnected");

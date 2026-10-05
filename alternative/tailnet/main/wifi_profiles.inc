@@ -62,7 +62,7 @@ static void wifi_maintain(void){
         if(!connected)esp_wifi_disconnect();
         wifi_scan_config_t scan={.show_hidden=true,.scan_type=WIFI_SCAN_TYPE_ACTIVE,.scan_time.active={.min=40,.max=100}};
         esp_err_t result=esp_wifi_scan_start(&scan,true);
-        tdongle_memory_note(5,0,result!=ESP_OK);
+        tdongle_memory_note(TDONGLE_MEMORY_OP_WIFI_PROFILES,0,result!=ESP_OK);
         if(result==ESP_OK){while(esp_wifi_scan_get_ap_record(&ap)==ESP_OK)for(unsigned i=0;i<count;i++)if(!strncmp(profiles[i].ssid,(char*)ap.ssid,32)&&ap.rssi>signal[i])signal[i]=ap.rssi;esp_wifi_clear_ap_list();}
         uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
         for(unsigned i=0;i<count;i++)if((int32_t)(wifi_retry_after[i]-now)>0)signal[i]=-127;

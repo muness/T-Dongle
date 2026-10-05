@@ -1,0 +1,5 @@
+# Memory evidence build: owner-tagged heap, per-phase join capture, admission override and the
+# serial "memory" / "members" commands. Layer on top of sdkconfig.defaults; never ship this image.
+CONFIG_TDONGLE_MEMORY_DIAGNOSTICS=y
+CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE=y
+CONFIG_TDONGLE_MEMORY_GUARD_FLOOR_BYTES=12288

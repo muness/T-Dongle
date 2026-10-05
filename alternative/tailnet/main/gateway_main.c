@@ -84,7 +84,7 @@ static void gateway_diag_write(const microlink_t *ml, uint32_t member_id,
                                uint32_t event, uint32_t detail) {
     if (!diag_lock || xSemaphoreTake(diag_lock, pdMS_TO_TICKS(20)) != pdTRUE) return;
     gateway_diag_ring_t *ring = malloc(sizeof(*ring));
-    tdongle_memory_note(2,sizeof(*ring),ring==NULL);
+    tdongle_memory_note(TDONGLE_MEMORY_OP_DIAG_WRITE,sizeof(*ring),ring==NULL);
     if (!ring) { xSemaphoreGive(diag_lock); return; }
     gateway_diag_load(ring);
     uint32_t uptime = (uint32_t)(esp_timer_get_time() / 1000);
@@ -160,7 +160,7 @@ static bool save_members(void) {
     if(!json)return false;
     bool fits=strlen(json)<16384;
     esp_err_t result=fits?nvs_set_str(store,"members",json):ESP_ERR_INVALID_SIZE;
-    free(json);
+    tdongle_heap_free(TDONGLE_OWNER_MAP,json);
     return result==ESP_OK && nvs_commit(store)==ESP_OK;
 }
 static void identify(membership_t *m) {
@@ -221,17 +221,46 @@ static bool stop_member(membership_t *m) {
  * allocator/task bookkeeping, deferred WG/TLS allocations (40,000 bytes), and
  * 16 KiB retained for HTTP/control recovery.
  * Shared registration/map byte buffers are static, not charged per member. */
+static size_t member_queue_bytes(void) {
+    return ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
+           (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH +
+            ML_STUN_RX_QUEUE_DEPTH) * sizeof(ml_rx_packet_t) +
+           ML_COORD_CMD_QUEUE_DEPTH * sizeof(ml_coord_cmd_t) +
+           ML_PEER_UPDATE_QUEUE_DEPTH * sizeof(ml_peer_update_t *) + 6 * sizeof(StaticQueue_t);
+}
 static size_t member_start_budget(void) {
     size_t tasks = ML_TASK_NET_IO_STACK + ML_TASK_DERP_TX_STACK +
                    ML_TASK_COORD_STACK + ML_TASK_WG_MGR_STACK;
-    size_t queues = ML_DERP_TX_QUEUE_DEPTH * sizeof(ml_derp_tx_item_t) +
-                    (ML_DISCO_RX_QUEUE_DEPTH + ML_WG_RX_QUEUE_DEPTH +
-                     ML_STUN_RX_QUEUE_DEPTH) * sizeof(ml_rx_packet_t) +
-                    ML_COORD_CMD_QUEUE_DEPTH * sizeof(ml_coord_cmd_t) +
-                    ML_PEER_UPDATE_QUEUE_DEPTH * sizeof(ml_peer_update_t *);
-    return sizeof(microlink_t) + tasks + queues + 6 * sizeof(StaticQueue_t) +
+    return sizeof(microlink_t) + tasks + member_queue_bytes() +
            4 * sizeof(StaticTask_t) + 2048 + 16384 + 40000;
 }
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+static void admission_note(const membership_t *m, tdongle_admit_verdict verdict, size_t free_now,
+                           size_t largest, unsigned active, const gateway_socket_stats *sockets) {
+    tdongle_admission_record r = {(uint32_t)(esp_timer_get_time() / 1000), m->id, free_now, largest,
+                                  member_start_budget(), sockets->open, CONFIG_LWIP_MAX_SOCKETS,
+                                  active, verdict};
+    tdongle_memory_admission_note(&r);
+}
+#else
+#define admission_note(m, verdict, free_now, largest, active, sockets) ((void)0)
+#endif
+#if defined(CONFIG_TDONGLE_MEMORY_DIAGNOSTICS) && defined(CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE)
+/* Diagnostics only: past the budget the guard floor is the sole admission rule, so the
+ * cost of a further membership is measured instead of refused. */
+/* "memory guard 0" disables the allocator guard; the override still never starts below this. */
+enum { ADMISSION_OVERRIDE_MIN_FREE = 8192 };
+static bool admission_override(const membership_t *m, size_t free_now) {
+    return (int32_t)((uint32_t)(esp_timer_get_time() / 1000) - m->next_attempt_ms) >= 0 &&
+           free_now >= (tdongle_heap_guard_floor() > ADMISSION_OVERRIDE_MIN_FREE ? tdongle_heap_guard_floor() : ADMISSION_OVERRIDE_MIN_FREE);
+}
+static void admission_failed(membership_t *m) {
+    m->next_attempt_ms = (uint32_t)(esp_timer_get_time() / 1000) + 60000;
+}
+#else
+#define admission_override(m, free_now) false
+#define admission_failed(m) ((void)0)
+#endif
 static void start_member(membership_t *m) {
     if (!gateway_tailnet_mode() || !m->enabled || m->client || !online)
         return;
@@ -244,22 +273,31 @@ static void start_member(membership_t *m) {
     }
     /* Reserve for parsed JSON, networking and recovery HTTP. Shared receive
      * buffers are static. Runtime peak sufficiency needs board qualification. */
-    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < member_start_budget() ||
-        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < 24000) {
-        strlcpy(m->error, "Not enough free memory to activate this membership",
-                sizeof(m->error));
-        gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 2);
-        return;
-    }
+    size_t free_now = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
     unsigned active = 0;
     for (membership_t *other = members; other; other = other->next)
         if (other->client) active++;
     gateway_socket_stats sockets = gateway_sockets_snapshot();
+    bool within_budget = free_now >= member_start_budget() && largest >= 24000;
+    if (!within_budget && !admission_override(m, free_now)) {
+        strlcpy(m->error, "Not enough free memory to activate this membership",
+                sizeof(m->error));
+        admission_note(m, free_now < member_start_budget() ? TDONGLE_ADMIT_REFUSED_BUDGET
+                                                           : TDONGLE_ADMIT_REFUSED_LARGEST,
+                       free_now, largest, active, &sockets);
+        gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 2);
+        return;
+    }
     if (!gateway_socket_admit(CONFIG_LWIP_MAX_SOCKETS, active, sockets.open)) {
         strlcpy(m->error, "Socket capacity reserved for USB setup and DNS", sizeof(m->error));
+        admission_note(m, TDONGLE_ADMIT_REFUSED_SOCKETS, free_now, largest, active, &sockets);
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_BLOCKED, 3);
         return;
     }
+    admission_note(m, within_budget ? TDONGLE_ADMIT_OK : TDONGLE_ADMIT_OVERRIDE, free_now, largest,
+                   active, &sockets);
+    tdongle_memory_phase(m->id, TDONGLE_PHASE_START);
     gateway_diag_membership(m->id, GATEWAY_DIAG_START_ATTEMPT, 0);
     microlink_config_t config = {.identity_namespace = m->ns,
                                  .auth_key = m->key,
@@ -274,12 +312,18 @@ static void start_member(membership_t *m) {
     if (!m->client) {
         strlcpy(m->error, "Could not allocate or save this identity",
                 sizeof(m->error));
+        admission_note(m, TDONGLE_ADMIT_START_FAILED, heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                       heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), active, &sockets);
+        admission_failed(m);
         gateway_diag_membership(m->id, GATEWAY_DIAG_START_FAILED, 1);
         return;
     }
     esp_err_t err = microlink_start(m->client);
     m->start_heap_after=heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     if (err != ESP_OK) {
+        admission_note(m, TDONGLE_ADMIT_START_FAILED, heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                       heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL), active, &sockets);
+        admission_failed(m);
         gateway_diag_record(m->client, GATEWAY_DIAG_START_FAILED, err);
         if (!stop_member(m)) {
             m->enabled = false;
@@ -313,7 +357,7 @@ static void manager(void *arg) {
     bool last_online = !online;
     for (;;) {
         tdongle_temperature_sample();
-        tdongle_memory_note(0,0,0);
+        tdongle_memory_note(TDONGLE_MEMORY_OP_TICK,0,0);
         wifi_maintain();
         if (last_online != online) {
             gateway_diag_membership(0, GATEWAY_DIAG_UPSTREAM, online);
@@ -391,7 +435,7 @@ static esp_err_t json_reply(httpd_req_t *req, cJSON *j) {
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     esp_err_t err = httpd_resp_sendstr(req, s);
-    free(s);
+    tdongle_heap_free(TDONGLE_OWNER_MAP, s);
     return err;
 }
 static esp_err_t failure(httpd_req_t *req, const char *message) {
@@ -544,7 +588,7 @@ static esp_err_t diagnostics(httpd_req_t *req) {
     if (!local_request(req))
         return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "USB access required");
     gateway_diag_ring_t *ring=calloc(1,sizeof(*ring));
-    tdongle_memory_note(3,sizeof(*ring),ring==NULL);
+    tdongle_memory_note(TDONGLE_MEMORY_OP_JOURNAL,sizeof(*ring),ring==NULL);
     if(!ring)return httpd_resp_send_err(req,HTTPD_500_INTERNAL_SERVER_ERROR,"Out of memory reading journal");
     ring->magic=DIAG_RING_MAGIC;
     uint32_t last_read[7]={0};
@@ -604,6 +648,9 @@ static esp_err_t home(httpd_req_t *req) {
                            setup_html_end - setup_html_start);
 }
 #include "json_writer.inc"
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+#include "memory_diagnostics.inc"
+#endif
 typedef struct {
     uint32_t id, state, vpn_ip;
     size_t start_heap_before, start_heap_after;
@@ -645,7 +692,7 @@ static esp_err_t status(httpd_req_t *req) {
         return status_busy(req);
     status_member *snapshot =
         capacity ? calloc(capacity, sizeof(*snapshot)) : NULL;
-    tdongle_memory_note(4,capacity*sizeof(*snapshot),capacity && !snapshot);
+    tdongle_memory_note(TDONGLE_MEMORY_OP_STATUS_SNAPSHOT,capacity*sizeof(*snapshot),capacity && !snapshot);
     if (capacity && !snapshot)
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    "Out of memory taking setup snapshot");
@@ -1195,6 +1242,7 @@ static bool start_step(unsigned stage,esp_err_t (*start)(void)) {
 /* Compiled unchanged by the host fault-injection harness. */
 #include "startup_sequence.inc"
 void app_main(void) {
+    tdongle_memory_diagnostics_init();
     /* Read only before USB descriptors are created; normal settings startup
      * still validates storage and reports failures without erasing anything. */
     nvs_handle_t early;

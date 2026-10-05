@@ -159,7 +159,8 @@ static size_t checked_strlcpy(char *out,const char *src,size_t size){size_t n=te
 static struct {unsigned count;struct {char ssid[33];} profiles[8];} wifi_saved;
 #include "../../../components/tdongle_runtime/include/tdongle_mode.h"
 #include "../../../components/tdongle_runtime/include/tdongle_temperature.h"
-static void tdongle_memory_note(unsigned o,size_t n,int f){}
+#include "tdongle_memory.h"
+void tdongle_memory_note(unsigned o,size_t n,int f){}
 static void gateway_dns_domains_refresh(void){}
 static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
 tdongle_temperature tdongle_temperature_snapshot(void){return (tdongle_temperature){.valid=true,.current_tenths=550,.peak_tenths=600,.sampled_at_ms=1000};}

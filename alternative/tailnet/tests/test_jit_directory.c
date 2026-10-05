@@ -1,3 +1,4 @@
+#include "tdongle_memory.h"
 #define ROUTE_MARK(stage) ((void)0)
 #define _POSIX_C_SOURCE 200809L
 #include <assert.h>

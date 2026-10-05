@@ -45,7 +45,8 @@ static int esp_wifi_scan_get_ap_record(wifi_ap_record_t*a){if(scan_cursor==8)ret
 static int esp_wifi_clear_ap_list(void){return 0;}
 static int esp_wifi_set_config(int i,wifi_config_t*c){wifi_config=*c;return 0;}
 static int esp_wifi_connect(void){joins++;connected=true;online=true;return 0;}
-static void tdongle_memory_note(unsigned o,size_t n,int f){}
+#include "tdongle_memory.h"
+void tdongle_memory_note(unsigned o,size_t n,int f){}
 #include "wifi_worker.inc"
 int main(void){
  have_old=true;old_settings.version=CFG_VERSION;strcpy(old_settings.p[0].ssid,"bridge");strcpy(old_settings.p[0].pass,"secret");assert(wifi_load_profiles() && wifi_saved.count==1 && !strcmp(wifi_saved.profiles[0].ssid,"bridge"));have_old=false;

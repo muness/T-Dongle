@@ -19,6 +19,7 @@
 #include "esp_netif.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "lwip/sockets.h"
 #include "lwip/netif.h"
 #include "lwip/pbuf.h"
@@ -36,6 +37,7 @@ extern void gateway_route_mark(unsigned stage,uint32_t member);
 
 #include "wireguardif.h"
 #include "wireguard.h"
+#include "chacha20poly1305.h"
 #include "mbedtls/base64.h"
 #include <string.h>
 #include <errno.h>
@@ -245,8 +247,16 @@ static void ml_spiram_pbuf_free_fn(struct pbuf *p) {
     /* pbuf_custom.pbuf == p; ml_spiram_pbuf_t starts at pc which is the
      * same address. Free the SPIRAM payload first, then the wrapper. */
     ml_spiram_pbuf_t *wrap = (ml_spiram_pbuf_t *)p;
+    tdongle_heap_forget(TDONGLE_OWNER_PACKET, wrap->data_spiram);
     heap_caps_free(wrap->data_spiram);
+    tdongle_heap_forget(TDONGLE_OWNER_PACKET, wrap);
     heap_caps_free(wrap);
+}
+
+/* The WireGuard device (peers, keypairs) is allocated inside wireguardif_init. */
+static void wireguard_device_release(struct netif *netif) {
+    tdongle_heap_forget(TDONGLE_OWNER_WG, netif->state);
+    wireguardif_free(netif);
 }
 
 static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
@@ -290,9 +300,10 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
     const u16_t total_len = (u16_t)(hdr_offset + len);
     ml_spiram_pbuf_t *wrap = heap_caps_malloc(sizeof(*wrap),
                                                 MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!wrap) return ERR_MEM;
-    wrap->data_spiram = malloc(total_len);
+    if (!tdongle_heap_tag(TDONGLE_OWNER_PACKET, wrap)) return ERR_MEM;
+    wrap->data_spiram = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(total_len));
     if (!wrap->data_spiram) {
+        tdongle_heap_forget(TDONGLE_OWNER_PACKET, wrap);
         heap_caps_free(wrap);
         return ERR_MEM;
     }
@@ -301,7 +312,9 @@ static err_t wg_udp_output_cb(uint32_t dest_ip, uint16_t dest_port,
     struct pbuf *p = pbuf_alloced_custom(PBUF_TRANSPORT, (u16_t)len, PBUF_REF,
                                           &wrap->pc, wrap->data_spiram, total_len);
     if (!p) {
+        tdongle_heap_forget(TDONGLE_OWNER_PACKET, wrap->data_spiram);
         heap_caps_free(wrap->data_spiram);
+        tdongle_heap_forget(TDONGLE_OWNER_PACKET, wrap);
         heap_caps_free(wrap);
         return ERR_MEM;
     }
@@ -358,7 +371,7 @@ static esp_err_t wg_init_interface_impl(microlink_t *ml) {
     key_to_base64(ml->wg_private_key, privkey_b64, sizeof(privkey_b64));
 
     /* Allocate lwIP netif */
-    struct netif *netif = (struct netif *)calloc(1, sizeof(struct netif));
+    struct netif *netif = (struct netif *)tdongle_heap_tag(TDONGLE_OWNER_WG, calloc(1, sizeof(struct netif)));
     if (!netif) {
         ESP_LOGE(TAG, "Failed to allocate WG netif");
         return ESP_FAIL;
@@ -378,9 +391,10 @@ static esp_err_t wg_init_interface_impl(microlink_t *ml) {
     err_t err = wireguardif_init(netif);
     if (err != ERR_OK) {
         ESP_LOGE(TAG, "wireguardif_init failed: %d", err);
-        free(netif);
+        tdongle_heap_free(TDONGLE_OWNER_WG, netif);
         return ESP_FAIL;
     }
+    tdongle_heap_adopt(TDONGLE_OWNER_WG, netif->state);
 
     /* Set IP addresses: our VPN IP (or temporary until we get one) */
     if (ml->vpn_ip != 0) {
@@ -420,7 +434,7 @@ static esp_err_t wg_init_interface_impl(microlink_t *ml) {
         wg_udp_pcb_create_cb(ml);
         if(!ml->wg_output_pcb) {
             wireguardif_shutdown(netif);netif_set_link_down(netif);netif_set_down(netif);
-            netif_remove(netif);wireguardif_free(netif);free(netif);return ESP_ERR_NO_MEM;
+            netif_remove(netif);wireguard_device_release(netif);tdongle_heap_free(TDONGLE_OWNER_WG, netif);return ESP_ERR_NO_MEM;
         }
     }
 
@@ -979,12 +993,12 @@ esp_err_t ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *dat
     if(!ml || !data || !len || len>1400 || ml->state!=ML_STATE_CONNECTED)return ESP_ERR_INVALID_STATE;
     unsigned old=__atomic_fetch_add(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);
     if(old>=4) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
-    ml_peer_update_t *packet=calloc(1,sizeof(*packet)+sizeof(size_t)+len);
+    ml_peer_update_t *packet=tdongle_heap_tag(TDONGLE_OWNER_WG, calloc(1,sizeof(*packet)+sizeof(size_t)+len));
     if(!packet) {__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
     packet->action=ML_PEER_PACKET;packet->vpn_ip=ip;
     memcpy(packet+1,&len,sizeof(len));memcpy((uint8_t *)(packet+1)+sizeof(len),data,len);
     if(xQueueSend(ml->peer_update_queue,&packet,0)!=pdTRUE) {
-        free(packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
+        tdongle_heap_free(TDONGLE_OWNER_WG, packet);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);return ESP_ERR_NO_MEM;}
     return ESP_OK;
 }
 static void directory_flush_packets(microlink_t *ml) {
@@ -1007,7 +1021,7 @@ static void directory_flush_packets(microlink_t *ml) {
             }
             discard=true;
         }
-        if(discard) {free(packet);ml->jit_pending[i].packet=NULL;
+        if(discard) {tdongle_heap_free(TDONGLE_OWNER_WG, packet);ml->jit_pending[i].packet=NULL;
             __atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);}
     }
 }
@@ -1030,7 +1044,7 @@ static void process_peer_updates(microlink_t *ml) {
                 ROUTE_MARK(3);
                 ml_wg_mgr_trigger_handshake(ml,update->vpn_ip);ROUTE_MARK(0);kept=true;break;
             }
-            if(!kept) {ml->jit_dropped++;free(update);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);}
+            if(!kept) {ml->jit_dropped++;tdongle_heap_free(TDONGLE_OWNER_WG, update);__atomic_fetch_sub(&ml->jit_packet_count,1,__ATOMIC_ACQ_REL);}
             __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);continue;
         }
 #endif
@@ -1071,7 +1085,7 @@ static void process_peer_updates(microlink_t *ml) {
         } else
             apply_peer_update(ml, update);
         __atomic_add_fetch(&ml->peer_generation,1,__ATOMIC_SEQ_CST);
-        free(update);
+        tdongle_heap_free(ml_peer_update_owner(update), update);
         if (is_batch)
             __atomic_store_n(&ml->map_batch_pending, false, __ATOMIC_RELEASE);
     }
@@ -1594,7 +1608,7 @@ static void process_disco_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
     if (!shared) return;
 
     size_t plaintext_len = ciphertext_len - NACL_BOX_MACBYTES;
-    uint8_t *plaintext = malloc(plaintext_len);
+    uint8_t *plaintext = tdongle_heap_tag(TDONGLE_OWNER_OTHER, malloc(plaintext_len));
     if (!plaintext) return;
 
     if (nacl_box_open_afternm(plaintext, ciphertext, ciphertext_len, nonce, shared) != 0) {
@@ -1605,12 +1619,12 @@ static void process_disco_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
                  pkt->via_derp ? "DERP" : "direct",
                  sender_disco_key[0], sender_disco_key[1],
                  sender_disco_key[2], sender_disco_key[3]);
-        free(plaintext);
+        tdongle_heap_free(TDONGLE_OWNER_OTHER, plaintext);
         return;
     }
 
     if (plaintext_len < 2) {
-        free(plaintext);
+        tdongle_heap_free(TDONGLE_OWNER_OTHER, plaintext);
         return;
     }
 
@@ -1725,7 +1739,7 @@ static void process_disco_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
         break;
     }
 
-    free(plaintext);
+    tdongle_heap_free(TDONGLE_OWNER_OTHER, plaintext);
     /* pkt->data is freed by the caller */
 }
 
@@ -1750,18 +1764,18 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
         ml_peer_update_t record;
         int idx=find_peer_by_key(ml,pkt->src_pubkey);
         if(idx>=0)ml->peers[idx].jit_used_ms=ml_get_time_ms();
-        else if(!ml_directory_find(ml,0,pkt->src_pubkey,NULL,0,&record) || directory_activate(ml,&record)<0) {free(pkt->data);return;}
+        else if(!ml_directory_find(ml,0,pkt->src_pubkey,NULL,0,&record) || directory_activate(ml,&record)<0) {tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);return;}
     }
 #endif
     if (!ml->wg_netif) {
-        free(pkt->data);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
         return;
     }
 
     struct netif *netif = (struct netif *)ml->wg_netif;
     void *device = netif->state;
     if (!device) {
-        free(pkt->data);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
         return;
     }
 
@@ -1772,11 +1786,11 @@ static void process_wg_packet(microlink_t *ml, const ml_rx_packet_t *pkt) {
      * thread processes the packet. */
     struct pbuf *p = pbuf_alloc(PBUF_RAW, pkt->len, PBUF_RAM);
     if (!p) {
-        free(pkt->data);
+        tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);
         return;
     }
     pbuf_take(p, pkt->data, pkt->len);
-    free(pkt->data);  /* Original data no longer needed — pbuf has its own copy */
+    tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt->data);  /* Original data no longer needed — pbuf has its own copy */
 
     /* Build source address */
     ip_addr_t addr;
@@ -2452,7 +2466,7 @@ void ml_wg_mgr_task(void *arg) {
         for (int n = 0; n < WG_MGR_DISCO_BURST && WG_MGR_BUDGET_LEFT(WG_MGR_DISCO_BUDGET_MS) &&
                         xQueueReceive(ml->disco_rx_queue, &disco_pkt, 0) == pdTRUE; n++) {
             process_disco_packet(ml, &disco_pkt);
-            free(disco_pkt.data);
+            tdongle_heap_free(TDONGLE_OWNER_PACKET, disco_pkt.data);
             disco_rx_10s++;
         }
         if (uxQueueMessagesWaiting(ml->disco_rx_queue) > 0) budget_hits_10s++;
@@ -2552,8 +2566,8 @@ void ml_wg_mgr_task(void *arg) {
         /* The struct wireguard_device behind netif->state (every peer's
          * keypairs; ~14.7 KB on the S3 build) was never released: only the
          * netif around it was, so each stop/start cycle leaked it. */
-        wireguardif_free(netif);
-        free(netif);
+        wireguard_device_release(netif);
+        tdongle_heap_free(TDONGLE_OWNER_WG, netif);
         UNLOCK_TCPIP_CORE();
     }
 
@@ -2567,10 +2581,33 @@ static void gateway_release_cb(void *arg) {
     if (ml->wg_output_pcb) { udp_remove(ml->wg_output_pcb); ml->wg_output_pcb = NULL; }
     if (ml->wg_netif) {
         struct netif *n = ml->wg_netif;
-        wireguardif_shutdown(n); netif_set_down(n); netif_remove(n); wireguardif_free(n); free(n);
+        wireguardif_shutdown(n); netif_set_down(n); netif_remove(n); wireguard_device_release(n); tdongle_heap_free(TDONGLE_OWNER_WG, n);
         ml->wg_netif = NULL;
     }
 }
 void ml_gateway_release_netif(microlink_t *ml) {
     tcpip_callback_with_block(gateway_release_cb, ml, 1);
 }
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+bool ml_wg_crypto_bench(size_t len, unsigned rounds, uint32_t *aead_ns, uint32_t *copy_ns) {
+    uint8_t *packet = tdongle_heap_tag(TDONGLE_OWNER_OTHER, malloc(2 * (len + 16)));
+    if (!packet || !rounds) {
+        tdongle_heap_free(TDONGLE_OWNER_OTHER, packet);
+        return false;
+    }
+    uint8_t key[32] = {1};
+    memset(packet, 0x5a, len);
+    int64_t started = esp_timer_get_time();
+    for (unsigned i = 0; i < rounds; i++)
+        chacha20poly1305_encrypt(packet + len + 16, packet, len, NULL, 0, i, key);
+    *aead_ns = (uint32_t)((esp_timer_get_time() - started) * 1000 / rounds);
+    started = esp_timer_get_time();
+    for (unsigned i = 0; i < rounds; i++) {
+        memcpy(packet + len + 16, packet, len);
+        __asm__ __volatile__("" ::: "memory");
+    }
+    *copy_ns = (uint32_t)((esp_timer_get_time() - started) * 1000 / rounds);
+    tdongle_heap_free(TDONGLE_OWNER_OTHER, packet);
+    return true;
+}
+#endif

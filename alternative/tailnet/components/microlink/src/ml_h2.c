@@ -135,6 +135,8 @@ int ml_h2_build_preface(uint8_t *out, size_t out_size) {
      * Each setting is 6 bytes: 2-byte ID + 4-byte value (RFC 7540 Section 6.5.1)
      * Without this, the server uses the HTTP/2 default of 65535 bytes (64KB),
      * which is too small for large MapResponses (100KB+ on 60+ peer tailnets). */
+    /* Flow-control credit only: no buffer of this size exists. Gateway mode streams DATA through the
+     * shared gateway_plain workspace (ML_GATEWAY_PLAIN_BYTES), so the 64 KB is just what the server may send unacknowledged. */
     uint32_t window_size = ML_H2_BUFFER_SIZE;
     pos += write_frame_header(out + pos, 6, H2_FRAME_SETTINGS, 0, 0);
 

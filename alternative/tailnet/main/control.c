@@ -7,6 +7,13 @@
 #include "soc/rtc_cntl_reg.h"
 #include "tusb.h"
 extern void mgmt_write(const char *s);
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+#define MEMORY_COMMANDS "memory [guard N|bench], members, "
+#define MEMORY_FEATURE ",memory_diagnostics"
+#else
+#define MEMORY_COMMANDS ""
+#define MEMORY_FEATURE ""
+#endif
 extern bool gateway_online(void);
 static QueueHandle_t commands;
 static StaticQueue_t command_queue;
@@ -33,9 +40,9 @@ static void command_task(void *arg) {
             continue;
         if (!strcmp(line, "help"))
             mgmt_write("T-Dongle tailnet gateway protocol=1\r\nCommands: status, list, "
-                       "capabilities, reboot, bootloader. Setup: http://192.168.77.1/\r\n");
+                       "capabilities, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/\r\n");
         else if (!strcmp(line, "capabilities"))
-            mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display\r\n");
+            mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display" MEMORY_FEATURE "\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display" MEMORY_FEATURE "\r\n");
         else if (!strcmp(line, "status")) {
             gateway_serial_command(line);
         } else if (!strcmp(line, "boot-status")) {
@@ -43,7 +50,7 @@ static void command_task(void *arg) {
         } else if (!strcmp(line, "retry-startup")) {
             if(gateway_boot_retry()!=ESP_OK)mgmt_write("ERR Could not preserve crash evidence or reset recovery guard\r\n");
             else {mgmt_write("OK restarting services\r\ndone>\r\n");vTaskDelay(pdMS_TO_TICKS(300));esp_restart();}
-        } else if(gateway_serial_command(line)) {
+        } else if(gateway_serial_command(line) || gateway_memory_command(line)) {
         }
         else if (!strcmp(line, "reboot")) {
             mgmt_write("OK rebooting\r\ndone>\r\n");

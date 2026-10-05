@@ -1,3 +1,4 @@
+#include "tdongle_memory.h"
 #define ROUTE_MARK(stage) ((void)0)
 #include <assert.h>
 #include <stdbool.h>

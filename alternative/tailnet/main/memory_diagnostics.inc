@@ -1,0 +1,307 @@
+/* Serial memory diagnostics (CONFIG_TDONGLE_MEMORY_DIAGNOSTICS). Each report is one JSON line:
+ * bounded, allocation-free and free of keys, auth keys, URLs and names. Included by
+ * gateway_main.c after json_writer.inc. */
+#include "lwip/opt.h"
+extern void mgmt_write(const char *s);
+static const char *const owner_names[TDONGLE_OWNER_COUNT] = {"other", "tls", "control", "map", "peer", "wg", "packet", "context"};
+static const char *const phase_names[TDONGLE_PHASE_COUNT] = {"start", "control", "noise", "register", "map", "derp", "steady"};
+static const char *const verdict_names[] = {"ok", "refused_budget", "refused_largest", "refused_sockets", "override", "refused_floor", "start_failed"};
+static int memory_sink(void *context, const char *data, size_t length) {
+    char part[257];
+    while (length) {
+        size_t take = length < 256 ? length : 256;
+        memcpy(part, data, take);
+        part[take] = 0;
+        mgmt_write(part);
+        data += take;
+        length -= take;
+    }
+    return 0;
+}
+static void report_begin(jw_writer *w, const char *kind) {
+    jw_raw(w, "{\"schema\":1,\"kind\":");
+    jw_string(w, kind);
+}
+static void report_end(jw_writer *w) {
+    jw_raw(w, "}\r\n");
+    jw_flush(w);
+}
+static void report_field(jw_writer *w, const char *key, uint64_t value) {
+    jw_char(w, ',');
+    jw_key(w, key);
+    jw_number(w, value);
+}
+static void report_owner_list(jw_writer *w, const char *key, const uint32_t *values) {
+    jw_char(w, ',');
+    jw_key(w, key);
+    jw_char(w, '[');
+    for (unsigned i = 0; i < TDONGLE_OWNER_COUNT; i++) {
+        if (i) jw_char(w, ',');
+        jw_number(w, values[i]);
+    }
+    jw_char(w, ']');
+}
+typedef struct {
+    uint32_t id, stacks, tcbs, h2_acc, tasks, stack_free[4];
+    bool lp_acc;
+} memory_member;
+enum { MEMORY_MEMBER_LIMIT = TDONGLE_MEMORY_MEMBERS + 1 };
+/* Copies what the report needs under the lifetime lock; returns the number of memberships with clients. */
+static bool memory_snapshot(memory_member *out, unsigned *count, unsigned *omitted) {
+    if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(100)) != pdTRUE) return false;
+    *count = *omitted = 0;
+    for (membership_t *m = members; m; m = m->next) {
+        microlink_t *c = m->client;
+        if (!c) continue;
+        if (*count == MEMORY_MEMBER_LIMIT) { (*omitted)++; continue; }
+        memory_member *v = &out[(*count)++];
+        TaskHandle_t tasks[4] = {c->net_io_task, c->derp_tx_task, c->coord_task, c->wg_mgr_task};
+        const uint32_t stacks[4] = {ML_TASK_NET_IO_STACK, ML_TASK_DERP_TX_STACK, ML_TASK_COORD_STACK, ML_TASK_WG_MGR_STACK};
+        *v = (memory_member){.id = m->id, .h2_acc = c->h2_acc_len, .lp_acc = c->lp_acc != NULL};
+        for (unsigned t = 0; t < 4; t++) {
+            v->stack_free[t] = UINT32_MAX;
+            if (!tasks[t] || c->stop_incomplete) continue;
+            v->tasks++;
+            v->stacks += stacks[t];
+            v->tcbs += sizeof(StaticTask_t);
+            v->stack_free[t] = uxTaskGetStackHighWaterMark(tasks[t]);
+        }
+    }
+    xSemaphoreGive(members_lock);
+    return true;
+}
+static void report_heap(jw_writer *w) {
+    report_begin(w, "heap");
+    report_field(w, "uptime_ms", esp_timer_get_time() / 1000);
+    jw_char(w, ',');
+    jw_key(w, "firmware");
+    jw_string(w, GATEWAY_VERSION);
+    report_field(w, "free", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    report_field(w, "min", heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL));
+    report_field(w, "largest", heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+    report_field(w, "total", heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
+    report_field(w, "guard_floor", tdongle_heap_guard_floor());
+    report_field(w, "underflows", tdongle_heap_underflows());
+    report_field(w, "ledger_bytes", tdongle_memory_ledger_bytes());
+    jw_raw(w, ",\"queue_depth\":{\"derp_tx\":");
+    jw_number(w, ML_DERP_TX_QUEUE_DEPTH);
+    report_field(w, "disco_rx", ML_DISCO_RX_QUEUE_DEPTH);
+    report_field(w, "wg_rx", ML_WG_RX_QUEUE_DEPTH);
+    report_field(w, "stun_rx", ML_STUN_RX_QUEUE_DEPTH);
+    jw_char(w, '}');
+    jw_raw(w, ",\"owners\":{");
+    for (unsigned i = 0; i < TDONGLE_OWNER_COUNT; i++) {
+        tdongle_owner_stats s = tdongle_heap_owner((tdongle_owner)i);
+        if (i) jw_char(w, ',');
+        jw_key(w, owner_names[i]);
+        jw_raw(w, "{\"live\":");
+        jw_number(w, s.live);
+        report_field(w, "peak", s.peak);
+        report_field(w, "allocs", s.allocs);
+        report_field(w, "frees", s.frees);
+        report_field(w, "failed", s.failed);
+        report_field(w, "denied", s.denied);
+        jw_char(w, '}');
+    }
+    jw_char(w, '}');
+    static const char *const drop_names[TDONGLE_DROP_COUNT] = {"derp_tx_evict", "derp_tx_full", "derp_rx_full", "net_disco_full", "net_wg_full", "net_stun_full", "router_ingress"};
+    jw_raw(w, ",\"drops\":{");
+    for (unsigned i = 0; i < TDONGLE_DROP_COUNT; i++) {
+        if (i) jw_char(w, ',');
+        jw_key(w, drop_names[i]);
+        jw_number(w, tdongle_memory_drops((tdongle_drop)i));
+    }
+    jw_char(w, '}');
+    report_end(w);
+}
+static void report_attribution(jw_writer *w) {
+    memory_member snapshot[MEMORY_MEMBER_LIMIT];
+    unsigned count = 0, omitted = 0;
+    if (!memory_snapshot(snapshot, &count, &omitted)) {
+        report_begin(w, "attribution");
+        jw_raw(w, ",\"error\":\"memberships busy\"");
+        report_end(w);
+        return;
+    }
+    uint64_t tagged = 0, synthetic = 0;
+    bool lp_acc = false;
+    uint32_t h2_acc = 0;
+    for (unsigned i = 0; i < TDONGLE_OWNER_COUNT; i++) tagged += tdongle_heap_owner((tdongle_owner)i).live;
+    for (unsigned i = 0; i < count; i++) {
+        synthetic += snapshot[i].stacks + snapshot[i].tcbs + member_queue_bytes();
+        lp_acc |= snapshot[i].lp_acc;
+        if (snapshot[i].h2_acc > h2_acc) h2_acc = snapshot[i].h2_acc;
+    }
+    uint64_t allocated = heap_caps_get_total_size(MALLOC_CAP_INTERNAL) - heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    report_begin(w, "attribution");
+    report_field(w, "allocated", allocated);
+    report_field(w, "tagged", tagged);
+    report_field(w, "synthetic", synthetic);
+    /* Wi-Fi, lwIP, USB and the HTTP server are the baseline; difference this between ladder steps. */
+    /* Tagged bytes can include non-internal memory and synthetic is computed, so never let the unsigned difference wrap. */
+    uint64_t accounted = tagged + synthetic;
+    report_field(w, "unattributed", allocated > accounted ? allocated - accounted : 0);
+    report_field(w, "overattributed", accounted > allocated ? accounted - allocated : 0);
+    report_field(w, "members_omitted", omitted);
+    jw_raw(w, ",\"members\":[");
+    for (unsigned i = 0; i < count; i++) {
+        memory_member *v = &snapshot[i];
+        if (i) jw_char(w, ',');
+        jw_raw(w, "{\"id\":");
+        jw_number(w, v->id);
+        report_field(w, "tasks", v->tasks);
+        report_field(w, "stacks", v->stacks);
+        report_field(w, "tcbs", v->tcbs);
+        report_field(w, "queues", member_queue_bytes());
+        jw_raw(w, ",\"stack_free\":[");
+        for (unsigned t = 0; t < 4; t++) {
+            if (t) jw_char(w, ',');
+            if (v->stack_free[t] == UINT32_MAX) jw_raw(w, "null"); else jw_number(w, v->stack_free[t]);
+        }
+        jw_raw(w, "]}");
+    }
+    jw_raw(w, "],\"n2\":{\"lp_acc_capacity\":");
+    jw_number(w, ML_JSON_BUFFER_SIZE);
+    jw_raw(w, ",\"lp_acc_allocated\":");
+    jw_bool(w, lp_acc);
+    report_field(w, "h2_window_advertised", ML_H2_BUFFER_SIZE);
+    report_field(w, "h2_acc_live_max", h2_acc);
+    report_field(w, "gateway_plain_static", ML_GATEWAY_PLAIN_BYTES);
+    report_field(w, "gateway_json_static", ML_GATEWAY_JSON_BYTES);
+    jw_char(w, '}');
+    report_end(w);
+}
+static void report_lwip(jw_writer *w) {
+    report_begin(w, "lwip");
+    report_field(w, "tcp_wnd", TCP_WND);
+    report_field(w, "tcp_snd_buf", TCP_SND_BUF);
+    report_field(w, "tcp_mss", TCP_MSS);
+    report_field(w, "tcp_snd_queuelen", TCP_SND_QUEUELEN);
+    report_field(w, "wnd_scale", LWIP_WND_SCALE);
+    report_field(w, "pbuf_pool_size", PBUF_POOL_SIZE);
+    report_field(w, "pbuf_pool_bufsize", PBUF_POOL_BUFSIZE);
+    report_field(w, "memp_tcp_pcb", MEMP_NUM_TCP_PCB);
+    report_field(w, "memp_tcp_seg", MEMP_NUM_TCP_SEG);
+    report_field(w, "max_sockets", CONFIG_LWIP_MAX_SOCKETS);
+    report_field(w, "tcp_recvmbox", CONFIG_LWIP_TCP_RECVMBOX_SIZE);
+    report_field(w, "tcpip_recvmbox", CONFIG_LWIP_TCPIP_RECVMBOX_SIZE);
+    report_field(w, "wifi_static_rx", CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM);
+    report_field(w, "wifi_dynamic_rx", CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM);
+    report_field(w, "wifi_dynamic_tx", CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM);
+    report_end(w);
+}
+static void report_phases(jw_writer *w) {
+    tdongle_member_phases m;
+    for (unsigned slot = 0; slot < TDONGLE_MEMORY_MEMBERS; slot++) {
+        if (!tdongle_memory_member_get(slot, &m)) continue;
+        report_begin(w, "phases");
+        report_field(w, "member", m.member_id);
+        report_field(w, "attempt", m.attempt);
+        jw_raw(w, ",\"owner_order\":[");
+        for (unsigned i = 0; i < TDONGLE_OWNER_COUNT; i++) {
+            if (i) jw_char(w, ',');
+            jw_string(w, owner_names[i]);
+        }
+        jw_raw(w, "],\"phases\":{");
+        bool first = true;
+        for (unsigned p = 0; p < TDONGLE_PHASE_COUNT; p++) {
+            const tdongle_phase_record *r = &m.phase[p];
+            if (!r->valid) continue;
+            if (!first) jw_char(w, ',');
+            first = false;
+            jw_key(w, phase_names[p]);
+            jw_raw(w, "{\"t\":");
+            jw_number(w, r->uptime_ms);
+            report_field(w, "free", r->free_bytes);
+            report_field(w, "min", r->minimum_bytes);
+            report_field(w, "largest", r->largest_bytes);
+            report_field(w, "exact", r->exact);
+            report_owner_list(w, "peak", r->owner_peak);
+            jw_char(w, '}');
+        }
+        jw_char(w, '}');
+        report_end(w);
+    }
+}
+static void report_admission(jw_writer *w) {
+    report_begin(w, "admission");
+    report_field(w, "guard_floor", tdongle_heap_guard_floor());
+    jw_raw(w, ",\"override\":");
+#if defined(CONFIG_TDONGLE_MEMORY_DIAGNOSTICS) && defined(CONFIG_TDONGLE_MEMORY_ADMISSION_OVERRIDE)
+    jw_raw(w, "true");
+#else
+    jw_raw(w, "false");
+#endif
+    report_field(w, "slot_evictions", tdongle_memory_slot_evictions());
+    jw_raw(w, ",\"attempts\":[");
+    for (unsigned i = 0; i < tdongle_memory_admission_count(); i++) {
+        tdongle_admission_record r = tdongle_memory_admission_get(i);
+        if (i) jw_char(w, ',');
+        jw_raw(w, "{\"t\":");
+        jw_number(w, r.uptime_ms);
+        report_field(w, "member", r.member_id);
+        report_field(w, "free", r.free_bytes);
+        report_field(w, "largest", r.largest_bytes);
+        report_field(w, "budget", r.budget_bytes);
+        report_field(w, "sockets", r.sockets_open);
+        report_field(w, "socket_limit", r.sockets_limit);
+        report_field(w, "active", r.active);
+        jw_raw(w, ",\"verdict\":");
+        jw_string(w, r.verdict < sizeof(verdict_names) / sizeof(verdict_names[0]) ? verdict_names[r.verdict] : "unknown");
+        jw_char(w, '}');
+    }
+    jw_char(w, ']');
+    report_end(w);
+}
+/* Time the tagged allocator against the plain one, and the WireGuard cipher against a plain copy
+ * of a full-size packet (the data path does one of each per packet, plus several more copies). */
+static void report_bench(jw_writer *w) {
+    enum { ROUNDS = 256 };
+    void *volatile block;
+    int64_t started = esp_timer_get_time();
+    for (unsigned i = 0; i < ROUNDS; i++) { block = malloc(64); free(block); }
+    uint64_t plain = esp_timer_get_time() - started;
+    started = esp_timer_get_time();
+    for (unsigned i = 0; i < ROUNDS; i++) { block = tdongle_heap_tag(TDONGLE_OWNER_OTHER, malloc(64)); tdongle_heap_free(TDONGLE_OWNER_OTHER, block); }
+    uint64_t tagged = esp_timer_get_time() - started;
+    report_begin(w, "bench");
+    report_field(w, "rounds", ROUNDS);
+    report_field(w, "plain_ns_per_pair", plain * 1000 / ROUNDS);
+    report_field(w, "tagged_ns_per_pair", tagged * 1000 / ROUNDS);
+    uint32_t aead_ns, copy_ns;
+    enum { PACKET = 1400 };
+    if (ml_wg_crypto_bench(PACKET, 64, &aead_ns, &copy_ns)) {
+        report_field(w, "packet_bytes", PACKET);
+        report_field(w, "chacha20poly1305_ns_per_packet", aead_ns);
+        report_field(w, "copy_ns_per_packet", copy_ns);
+        /* One core doing nothing but encrypting: the ceiling the cipher alone puts on a tunnel. */
+        report_field(w, "cipher_ceiling_kbit_s", aead_ns ? (uint64_t)PACKET * 8 * 1000000 / aead_ns : 0);
+    }
+    report_end(w);
+}
+bool gateway_memory_command(const char *line) {
+    jw_writer w = {.sink = memory_sink};
+    if (!strcmp(line, "memory")) {
+        report_heap(&w);
+        report_attribution(&w);
+        report_lwip(&w);
+    } else if (!strcmp(line, "members")) {
+        report_phases(&w);
+        report_admission(&w);
+    } else if (!strcmp(line, "memory bench"))
+        report_bench(&w);
+    else if (!strncmp(line, "memory guard", 12) && (!line[12] || line[12] == ' ')) {
+        char *end = (char *)line;
+        unsigned long bytes = line[12] ? strtoul(line + 13, &end, 10) : 0;
+        if (!line[12] || !line[13] || *end || bytes > 65536) {
+            mgmt_write("ERR memory guard takes 0-65536 bytes\r\n");
+            return true;
+        }
+        tdongle_heap_set_guard_floor(bytes);
+        report_begin(&w, "guard");
+        report_field(&w, "guard_floor", tdongle_heap_guard_floor());
+        report_end(&w);
+    } else
+        return false;
+    return true;
+}

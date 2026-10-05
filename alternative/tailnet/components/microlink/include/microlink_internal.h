@@ -27,6 +27,8 @@
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "esp_heap_caps.h"
+#include "tdongle_memory.h"
+#include "ml_gateway_limits.h"
 /* Forward-declare esp_tls_t so we can hold a pointer without pulling in
  * the full esp_tls.h header (esp-tls REQUIRES added in CMakeLists). */
 struct esp_tls;
@@ -73,13 +75,28 @@ extern "C" {
 /* TX 16->64 (2026-05-27): absorb speedtest bursts so packets queue instead of
  * being dropped at enqueue; relay buffers are SPIRAM-backed (ml_psram_malloc),
  * the queue control struct itself is ~64×48B internal (negligible). */
+#ifdef CONFIG_TDONGLE_QUEUE_DEPTH_SWEEP
+#define ML_QUEUE_SWEEP CONFIG_TDONGLE_QUEUE_DEPTH_SWEEP
+#else
+#define ML_QUEUE_SWEEP 0
+#endif
+#if ML_QUEUE_SWEEP
+#define ML_DERP_TX_QUEUE_DEPTH  ML_QUEUE_SWEEP
+#define ML_DISCO_RX_QUEUE_DEPTH ML_QUEUE_SWEEP
+#else
 #define ML_DERP_TX_QUEUE_DEPTH  8
 #define ML_DISCO_RX_QUEUE_DEPTH 8
+#endif
 /* WG RX 8->32 (2026-05-27): download-direction frames arrive in bursts via DERP;
  * depth 8 overflowed and silently dropped → TCP loss → exit-node throughput
  * collapse. ml_rx_packet_t is small (ptr+len+meta); 32 is ~1KB internal. */
+#if ML_QUEUE_SWEEP
+#define ML_WG_RX_QUEUE_DEPTH    ML_QUEUE_SWEEP
+#define ML_STUN_RX_QUEUE_DEPTH  (ML_QUEUE_SWEEP < 4 ? ML_QUEUE_SWEEP : 4)
+#else
 #define ML_WG_RX_QUEUE_DEPTH    8
 #define ML_STUN_RX_QUEUE_DEPTH  4
+#endif
 #define ML_COORD_CMD_QUEUE_DEPTH 4
 #define ML_PEER_UPDATE_QUEUE_DEPTH 16
 
@@ -313,6 +330,10 @@ typedef struct {
     bool authoritative;
     ml_peer_update_t updates[];
 } ml_peer_batch_t;
+/* Peer-update queue entries are heap blocks of two kinds: map batches and queued host packets. */
+static inline tdongle_owner ml_peer_update_owner(const ml_peer_update_t *update) {
+    return update && update->action == ML_PEER_PACKET ? TDONGLE_OWNER_WG : TDONGLE_OWNER_PEER;
+}
 
 /* ============================================================================
  * Peer State (owned exclusively by wg_mgr task)
@@ -697,7 +718,8 @@ struct microlink_s {
     uint8_t *h2_acc;
     size_t   h2_acc_len;
 
-    uint8_t *lp_acc;         /* PSRAM, ML_JSON_BUFFER_SIZE, lazily allocated */
+    /* Never allocated in gateway mode: nothing assigns it, so only destroy ever frees it (docs/memory-diagnostics.md). */
+    uint8_t *lp_acc;
     size_t   lp_acc_len;
 
     /* Key expiry (parsed from MapResponse self-node) */
@@ -1020,4 +1042,8 @@ static inline void *ml_psram_calloc(size_t n, size_t size) {
 }
 #endif
 
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+/* Times the WireGuard cipher (ChaCha20-Poly1305) and a plain copy of len-byte packets. */
+bool ml_wg_crypto_bench(size_t len, unsigned rounds, uint32_t *aead_ns, uint32_t *copy_ns);
+#endif
 esp_err_t ml_gateway_queue_packet(microlink_t *ml, uint32_t ip, const uint8_t *data, size_t len);

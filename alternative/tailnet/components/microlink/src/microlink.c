@@ -84,7 +84,11 @@ static esp_err_t load_or_generate_keys(microlink_t *ml) {
  * ========================================================================== */
 
 static void *cjson_psram_malloc(size_t size) {
-    return ml_psram_malloc(size);
+    return tdongle_heap_tag(TDONGLE_OWNER_MAP, ml_psram_malloc(size));
+}
+
+static void cjson_free(void *block) {
+    tdongle_heap_free(TDONGLE_OWNER_MAP, block);
 }
 
 /* ============================================================================
@@ -126,19 +130,19 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     /* Route cJSON to PSRAM */
     cJSON_Hooks hooks = {
         .malloc_fn = cjson_psram_malloc,
-        .free_fn = free
+        .free_fn = cjson_free
     };
     cJSON_InitHooks(&hooks);
 
     /* Allocate context from PSRAM */
-    microlink_t *ml = ml_psram_calloc(1, sizeof(microlink_t));
+    microlink_t *ml = tdongle_heap_tag(TDONGLE_OWNER_CONTEXT, ml_psram_calloc(1, sizeof(microlink_t)));
     if (!ml) {
         ESP_LOGE(TAG, "Failed to allocate context");
         return NULL;
     }
 
     if (!config->identity_namespace || !config->identity_namespace[0] || strlen(config->identity_namespace) > 15) {
-        free(ml); return NULL;
+        tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml); return NULL;
     }
     snprintf(ml->identity_namespace, sizeof(ml->identity_namespace), "%s", config->identity_namespace);
     /* Copy config */
@@ -180,7 +184,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
 
     /* Load or generate persistent keys */
     if (load_or_generate_keys(ml) != ESP_OK) {
-        free(ml);
+        tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml);
         return NULL;
     }
 
@@ -301,7 +305,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     ml->events = xEventGroupCreate();
     if (!ml->events) {
         ESP_LOGE(TAG, "Failed to create event group");
-        free(ml);
+        tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml);
         return NULL;
     }
 
@@ -329,6 +333,14 @@ esp_err_t microlink_start(microlink_t *ml) {
     if (ml->state != ML_STATE_IDLE) {
         ESP_LOGW(TAG, "Already started (state=%d)", ml->state);
         return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Diagnostics guard (always true in a release build): decide before any state change, socket or
+     * task exists, so a refusal leaves the instance idle and a later microlink_start can retry. */
+    if (!tdongle_memory_start_allowed(ML_TASK_NET_IO_STACK + ML_TASK_DERP_TX_STACK +
+                                      ML_TASK_COORD_STACK + ML_TASK_WG_MGR_STACK)) {
+        ESP_LOGE(TAG, "Not enough heap above the diagnostics guard floor for the membership tasks");
+        return ESP_ERR_NO_MEM;
     }
 
     ml->state = ML_STATE_WIFI_WAIT;
@@ -394,7 +406,7 @@ skip_bsd_socket:
     ;
 #endif
 
-    /* Create tasks */
+    /* Create tasks. */
     BaseType_t ret;
 
     ret = xTaskCreatePinnedToCore(ml_net_io_task, "ml_net_io", ML_TASK_NET_IO_STACK,
@@ -552,9 +564,9 @@ void microlink_destroy(microlink_t *ml) {
      * ML_JSON_BUFFER_SIZE) were never released here before: every
      * stop/start cycle lost ~650 KB on the reference router. */
     ml_directory_abort(ml);
-    for(unsigned i=0;i<4;i++)free(ml->jit_pending[i].packet);
+    for(unsigned i=0;i<4;i++)tdongle_heap_free(TDONGLE_OWNER_WG, ml->jit_pending[i].packet);
     ml_derp_disconnect(ml);
-    if (ml->h2_acc) { free(ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0; }
+    if (ml->h2_acc) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0; }
     if (ml->lp_acc) { free(ml->lp_acc); ml->lp_acc = NULL; ml->lp_acc_len = 0; }
 
     extern void ml_gateway_release_netif(microlink_t *);
@@ -578,11 +590,11 @@ void microlink_destroy(microlink_t *ml) {
         QueueHandle_t rxq[] = { ml->disco_rx_queue, ml->wg_rx_queue, ml->stun_rx_queue };
         for (size_t i = 0; i < sizeof(rxq) / sizeof(rxq[0]); i++) {
             if (!rxq[i]) continue;
-            while (xQueueReceive(rxq[i], &pkt, 0) == pdTRUE) free(pkt.data);
+            while (xQueueReceive(rxq[i], &pkt, 0) == pdTRUE) tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt.data);
         }
         ml_peer_update_t *upd;
         if (ml->peer_update_queue) {
-            while (xQueueReceive(ml->peer_update_queue, &upd, 0) == pdTRUE) free(upd);
+            while (xQueueReceive(ml->peer_update_queue, &upd, 0) == pdTRUE) tdongle_heap_free(ml_peer_update_owner(upd), upd);
         }
     }
 
@@ -602,7 +614,7 @@ void microlink_destroy(microlink_t *ml) {
     memset(ml->wg_private_key, 0, 32);
     memset(ml->disco_private_key, 0, 32);
 
-    free(ml);
+    tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml);
     ESP_LOGI(TAG, "Destroyed");
 }
 
