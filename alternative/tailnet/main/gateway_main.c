@@ -181,6 +181,7 @@ static wifi_config_t wifi_config;
 #include "core.h"
 #include "wifi_policy.h"
 #include "wifi_profiles.inc"
+#include "wifi_link.inc"
 #include "serial_setup.inc"
 
 extern const char setup_html_start[] asm("_binary_setup_html_start");
@@ -535,11 +536,13 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
         wifi_rescan=true;
     if (base == WIFI_EVENT && event == WIFI_EVENT_STA_DISCONNECTED) {
         online = false;
+        wifi_link_event_disconnected((const wifi_event_sta_disconnected_t *)data);
         if(!gateway_tailnet_mode())tdongle_l2_link(false);
         if(!wifi_scan_pauses_reconnect && wifi_current>=0)
             wifi_retry_after[wifi_current]=(uint32_t)(esp_timer_get_time()/1000)+60000;
         /* Worker rescans with backoff; never reconnect recursively here. */
     }
+    if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED)wifi_link_event_connected();
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && !gateway_tailnet_mode()){online=true;tdongle_l2_link(true);}
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
         online = true;
@@ -970,6 +973,15 @@ static esp_err_t status(httpd_req_t *req) {
     NUM("socket_last_at_ms", sockets.last_at_ms);
     NUM("reset_reason", esp_reset_reason());
     BOOL("wifi", online);
+    {   /* Additive: RSSI, channel, PHY and disconnect counters, with no BSSID or SSID. Omitted whole if it cannot fit. */
+        wifi_link_info link = wifi_link_read();
+        char link_json[WIFI_LINK_JSON_MAX];
+        if (wifi_link_json(link_json, sizeof(link_json), &link, &wifi_link_stats)) {
+            jw_key(w, "wifi_link");
+            jw_raw(w, link_json);
+            jw_char(w, ',');
+        }
+    }
     {   /* The wall clock gates DERP (certificate validity): a clock that never arrives must be visible. */
         bool clock_valid=ml_derp_clock_valid();
         jw_raw(w,"\"clock\":{");

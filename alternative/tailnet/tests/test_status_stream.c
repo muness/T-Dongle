@@ -196,6 +196,13 @@ void tdongle_memory_note(unsigned o,size_t n,int f){}
 static void gateway_dns_domains_refresh(void){}
 static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
 tdongle_temperature tdongle_temperature_snapshot(void){return (tdongle_temperature){.valid=true,.current_tenths=550,.peak_tenths=600,.sampled_at_ms=1000,.samples=7,.changed_at_ms=500,.age_ms=2500};}
+#include "../main/wifi_link.h"
+static wifi_link_events wifi_link_stats={.connects=2,.disconnects=1,.beacon_timeouts=1,.last_reason=200,.last_disconnect_rssi=-85,.last_disconnect_ms=777};
+static bool wifi_link_up=true;
+static wifi_link_info wifi_link_read(void){
+    if(!wifi_link_up)return (wifi_link_info){.phy=WIFI_LINK_PHY_UNKNOWN,.ps=WIFI_LINK_PS_UNKNOWN,.secondary=WIFI_LINK_SECOND_UNKNOWN};
+    return (wifi_link_info){.connected=true,.rssi_valid=true,.rssi=-61,.channel=11,.secondary=2,.phy=WIFI_LINK_PHY_HT40,.bw_cfg_mhz=40,.ap_bw_mhz=40,.ap_modes=WIFI_LINK_AP_B|WIFI_LINK_AP_G|WIFI_LINK_AP_N,.ps=0,.tx_power_valid=true,.tx_power_qdbm=80};
+}
 #include "status_stream.inc"
 #undef calloc
 #undef strlcpy
@@ -245,6 +252,15 @@ int main(void) {
                                "net_io")
                ->valueint == 101);
     assert(!strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(m, "derp_link"), "state")->valuestring, "ready"));
+    {   /* Wi-Fi link visibility is additive: new object, existing fields untouched, no BSSID/SSID in it. */
+        cJSON *wl = cJSON_GetObjectItem(root, "wifi_link");
+        assert(wl && cJSON_IsTrue(cJSON_GetObjectItem(wl, "connected")) && cJSON_GetObjectItem(wl, "rssi_dbm")->valueint == -61);
+        assert(cJSON_GetObjectItem(wl, "channel")->valueint == 11 && !strcmp(cJSON_GetObjectItem(wl, "secondary")->valuestring, "below"));
+        assert(!strcmp(cJSON_GetObjectItem(wl, "phy")->valuestring, "HT40") && !strcmp(cJSON_GetObjectItem(wl, "ap_modes")->valuestring, "bgn"));
+        assert(cJSON_GetObjectItem(wl, "beacon_timeouts")->valueint == 1 && cJSON_GetObjectItem(wl, "last_disconnect_reason")->valueint == 200);
+        assert(!cJSON_GetObjectItem(wl, "ssid") && !cJSON_GetObjectItem(wl, "bssid"));
+        assert(cJSON_IsBool(cJSON_GetObjectItem(root, "wifi")) && cJSON_GetObjectItem(root, "firmware") && cJSON_GetObjectItem(root, "saved_wifi"));
+    }
     {   /* the shared runtime's decision inputs and the pool are reported */
         cJSON *adm = cJSON_GetObjectItem(root, "admission");
         assert(adm && cJSON_GetObjectItem(adm, "required_bytes")->valueint == 90000 &&
@@ -336,5 +352,15 @@ int main(void) {
     root = cJSON_Parse(r.output);
     assert(root &&
            cJSON_GetArraySize(cJSON_GetObjectItem(root, "members")) == 0);
+    cJSON_Delete(root);
+    wifi_link_up = false;   /* not associated: the object is still there, says so, and carries no radio fields */
+    r = (httpd_req_t){0};
+    assert(status(&r) == 0);
+    root = cJSON_Parse(r.output);
+    {
+        cJSON *wl = cJSON_GetObjectItem(root, "wifi_link");
+        assert(wl && cJSON_IsFalse(cJSON_GetObjectItem(wl, "connected")) && !cJSON_GetObjectItem(wl, "rssi_dbm") && !cJSON_GetObjectItem(wl, "channel"));
+        assert(cJSON_GetObjectItem(wl, "disconnects")->valueint == 1 && cJSON_GetObjectItem(root, "firmware"));
+    }
     cJSON_Delete(root);
 }

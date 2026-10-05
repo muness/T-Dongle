@@ -23,6 +23,7 @@ static int tud_mounted(void){return mounted;}
 static int tud_ready(void){return ready;}
 static uint64_t esp_timer_get_time(void){return 1234000;}
 static unsigned esp_get_free_heap_size(void){return 219640;}
+#define rssi_text (online?"-61":"unknown")
 int main(void){char reply[768];tdongle_temperature t={.valid=true,.current_tenths=553,.peak_tenths=600};
 for(tailnet=0;tailnet<2;tailnet++)for(online=0;online<2;online++)for(mounted=0;mounted<2;mounted++)for(ready=0;ready<2;ready++){
 ''' + formatter + '''fputs(reply,stdout);fputs("done>\\r\\n\\f",stdout);}return 0;}

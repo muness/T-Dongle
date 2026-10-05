@@ -9,8 +9,8 @@
 #include "tdongle_pm.h"
 extern void mgmt_write(const char *s);
 #ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
-#define MEMORY_COMMANDS "memory [guard N|bench], members, cpu, "
-#define MEMORY_FEATURE ",memory_diagnostics"
+#define MEMORY_COMMANDS "memory [guard N|bench], members, cpu, wifistats [reset|dump], "
+#define MEMORY_FEATURE ",memory_diagnostics,wifi_stats"
 #else
 #define MEMORY_COMMANDS ""
 #define MEMORY_FEATURE ""
