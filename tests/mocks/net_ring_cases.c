@@ -503,6 +503,9 @@ static void test_reclaim_for_admission(void) {
     drain_all();
 }
 
+/* Idle shrink is staged: each worker pass frees at most one chunk. */
+static void shrink_passes(int n) { for (int i = 0; i < n; i++) tx_worker_step(); }
+
 static void test_idle_shrink(void) {
     ring_reset(cfg_with(3, 10));
     ntb_credit = 0; grow_to(23);
@@ -515,6 +518,10 @@ static void test_idle_shrink(void) {
     assert(stats().chunks == 10 && stats().shrink_events == 0);
     atomic_fetch_add(&mock_tick, 1);
     tx_worker_step();
+    st = stats();
+    /* Staged: one chunk per pass, the highest first, so a burst of frees never hits the heap at once. */
+    assert(st.chunks == 9 && st.shrink_events == 1 && !s_tx.chunk[9].mem && s_tx.chunk[8].mem);
+    shrink_passes(9);
     st = stats();
     assert(st.chunks == 0 && st.shrink_events == 10 && heap_live_blocks == 1 && st.ring_bytes == 3 * 1524);
     assert(st.reclaim_events == 0);                    /* idle is not an admission reclaim */
@@ -529,7 +536,7 @@ static void test_idle_shrink(void) {
     ntb_credit = 0;
     for (int i = 0; i < 4; i++) assert(send_len(1518) == ESP_OK);
     atomic_fetch_add(&mock_tick, IDLE_MS + 10);
-    tx_worker_step();
+    shrink_passes(12);
     st = stats();
     assert(st.chunks == 1 && st.shrink_events == 9 && s_tx.chunk[0].mem && !s_tx.chunk[1].mem);
     /* Frames in flight keep their chunk however long it has been. */
@@ -540,7 +547,7 @@ static void test_idle_shrink(void) {
     drain_all();
     /* An empty open slab inside a chunk does not pin it. */
     atomic_fetch_add(&mock_tick, IDLE_MS + 10);
-    tx_worker_step();
+    shrink_passes(2);
     assert(stats().chunks == 0 && heap_live_blocks == 1);
     check_invariants();
 
@@ -550,8 +557,9 @@ static void test_idle_shrink(void) {
     for (int round = 0; round < 8; round++) {
         atomic_fetch_add(&mock_tick, 400);
         assert(send_len(500) == ESP_OK); pump();
-        assert(round < 4 || s_tx.chunk[0].mem == NULL);   /* 2000 ticks idle: gone */
+        assert(round >= 4 || stats().shrink_events == 0);  /* before 2000 ticks idle nothing goes */
     }
+    shrink_passes(10);
     assert(stats().chunks == 0 && stats().shrink_events == 10);
     /* Growth after a shrink works (the slots are free again). */
     ntb_credit = 0; grow_to(23);
@@ -886,6 +894,113 @@ static void test_soak(void) {
     soak_once(8, 12, 100000);
 }
 
+/* ---- hardening: heap-walk cost, churn hysteresis, teardown during growth, one PM mechanism ---- */
+static int hook_begin, hook_end, hook_open;
+static void pm_begin_hook(void *ctx) { assert(!in_crit && !in_producer); assert(ctx == &hook_open); assert(!hook_open); hook_open = 1; hook_begin++; }
+static void pm_end_hook(void *ctx) { assert(!in_crit && !in_producer); assert(ctx == &hook_open); assert(hook_open); hook_open = 0; hook_end++; }
+static void deinit_in_grow(void) { tinyusb_net_deinit(); }
+
+static void test_hardening(void) {
+    /* Refusals back off exponentially, a growth resets it; the cheap O(1) free-size check runs before the heap walk. */
+    ring_reset(cfg_with(3, 10));
+    heap_total = (long)heap_live_bytes + FLOOR_FREE;      /* far below the floor */
+    atomic_store(&largest_calls, 0);
+    fill_pressure(3); tx_worker_step();
+    assert(stats().grow_denied_heap == 1 && atomic_load(&largest_calls) == 0);   /* no walk for a total that already fails */
+    uint32_t denied = 1;
+    static const unsigned waits[] = { 100, 200, 400, 800, 1600, 1600 };
+    for (unsigned i = 0; i < sizeof(waits) / sizeof(waits[0]); i++) {
+        atomic_fetch_add(&mock_tick, waits[i] - 1);
+        (void)send_len(1518); tx_worker_step();
+        assert(stats().grow_denied_heap == denied);        /* one tick early: still backing off */
+        atomic_fetch_add(&mock_tick, 1);
+        (void)send_len(1518); tx_worker_step();
+        assert(stats().grow_denied_heap == ++denied);
+    }
+    heap_total = 200000;
+    atomic_fetch_add(&mock_tick, 1600);
+    (void)send_len(1518); tx_worker_step();
+    assert(stats().grow_events >= 1);
+    drain_all();
+    /* after a growth the back-off starts again at 100 ms */
+    heap_total = (long)heap_live_bytes + FLOOR_FREE;
+    ntb_credit = 0;
+    for (int i = 0; i < 40; i++) (void)send_len(1518);     /* fill whatever exists, then the next growth is refused */
+    tx_worker_step();
+    uint32_t d0 = stats().grow_denied_heap;
+    atomic_fetch_add(&mock_tick, 100);
+    (void)send_len(1518); tx_worker_step();
+    assert(stats().grow_denied_heap == d0 + 1);
+    drain_all();
+
+    /* Largest-block floor: a walk happens (before and after the allocation) only when the total allows a growth. */
+    ring_reset(cfg_with(3, 10));
+    atomic_store(&largest_calls, 0);
+    fill_pressure(3); tx_worker_step();
+    assert(stats().grow_events == 1 && atomic_load(&largest_calls) == 2);
+    drain_all();
+
+    /* Bursts every 5 s with a 10 s idle period: the chunks stay, the heap is not cycled (the 2 s default would
+     * free and re-allocate all ten chunks per burst). */
+    tinyusb_net_tx_config_t c = cfg_with(3, 10); c.idle_ms = 10000;
+    ring_reset(c);
+    ntb_credit = 0; grow_to(23); drain_all();
+    long mallocs = atomic_load(&malloc_calls);
+    for (int burst = 0; burst < 8; burst++) {
+        atomic_fetch_add(&mock_tick, 5000);
+        tx_worker_step();
+        ntb_credit = 0; grow_to(23); drain_all();
+    }
+    tinyusb_net_tx_stats_t st = stats();
+    assert(st.shrink_events == 0 && st.chunks == 10 && atomic_load(&malloc_calls) == mallocs && st.dropped_full == 0);
+    /* a quiet spell longer than the idle period gives the memory back, one chunk per pass */
+    atomic_fetch_add(&mock_tick, 10000);
+    shrink_passes(1);
+    assert(stats().chunks == 9);
+    shrink_passes(12);
+    assert(stats().chunks == 0 && stats().shrink_events == 10 && heap_live_blocks == 1);
+    check_invariants();
+
+    /* Teardown while a growth is allocating: the chunk is discarded, nothing is published after deinit. */
+    ring_reset(cfg_with(3, 10));
+    malloc_hook = deinit_in_grow;
+    fill_pressure(3); tx_worker_step();
+    st = stats();
+    assert(st.grow_events == 0 && st.grow_raced == 1 && st.chunks == 0 && heap_live_blocks == 1);
+    assert(tinyusb_net_tx_ring_start(&(tinyusb_net_tx_config_t){ .base_frames = 3, .max_chunks = 10, .priority = 5, .core = 0,
+        .floor_free = FLOOR_FREE, .floor_largest = FLOOR_LARGEST, .idle_ms = IDLE_MS, .gate = gate_cb }) == ESP_OK);
+    drain_all();
+
+    /* One PM mechanism: with hooks the ring takes no lock of its own and the hooks alternate begin/end. */
+    c = cfg_with(3, 10); c.pm_begin = pm_begin_hook; c.pm_end = pm_end_hook; c.pm_ctx = &hook_open;
+    hook_begin = hook_end = hook_open = 0;
+    ring_reset(c);
+#if CONFIG_PM_ENABLE
+    assert(s_tx.pm == NULL && pm_acquires == 0);          /* no lock of its own when the caller supplies the mechanism */
+#endif
+    ntb_credit = 0;
+    assert(send_len(400) == ESP_OK); pump();
+    assert(hook_begin == 1 && hook_end == 0 && hook_open);
+    for (int i = 0; i < 6; i++) { assert(send_len(400) == ESP_OK); tx_worker_step(); }
+    assert(hook_begin == 1);                              /* one hold for the whole burst */
+    ntb_credit = -1; in_complete(); tx_worker_step();
+    assert(hook_begin == 1 && hook_end == 1 && !hook_open && stats().pm_held == 0 && stats().pm_acquired == 1);
+    ntb_credit = 0;                                       /* link loss with frames queued ends the hold too */
+    assert(send_len(400) == ESP_OK); pump();
+    assert(hook_open);
+    usb_ready = 0; tinyusb_net_tx_ring_link_down(); tx_worker_step(); run_deferred(); tx_worker_step();
+    assert(!hook_open && hook_begin == 2 && hook_end == 2);
+    usb_ready = 1;
+    assert(send_len(400) == ESP_OK); pump();             /* and teardown */
+    tinyusb_net_deinit(); tx_worker_step();
+    assert(!hook_open && hook_begin == hook_end);
+    /* the same hooks twice is a no-op restart, a different set is refused */
+    assert(tinyusb_net_tx_ring_start(&c) == ESP_OK);
+    c.pm_end = NULL; assert(tinyusb_net_tx_ring_start(&c) == ESP_ERR_INVALID_STATE);
+    tinyusb_net_config_t ncfg = {.free_tx_buffer = released_ring};     /* deinit cleared the sync-path callbacks */
+    assert(tinyusb_net_init(&ncfg) == ESP_OK);
+}
+
 int main(void) {
     tinyusb_net_config_t cfg = {.free_tx_buffer = released_ring};
     assert(tinyusb_net_init(&cfg) == ESP_OK);
@@ -896,6 +1011,7 @@ int main(void) {
     test_growth_denied();
     test_reclaim_for_admission();
     test_idle_shrink();
+    test_hardening();
     test_exactly_once_and_triggers();
     test_sync_and_ring_share_the_pipe();
     test_link_loss();

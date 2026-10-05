@@ -228,7 +228,8 @@ esp_err_t tinyusb_net_send_sync(void *buffer, uint16_t len, void *buff_free_arg,
 #define TX_WORKER_STACK   1536u      // above the IDF IPC task (1280), which does the same queue calls
 #define TX_LINK_POLL_MS   200u       // while frames are queued: notice a link that went away silently
 #define TX_HOUSEKEEP_MS  500u        // while elastic chunks exist: idle check
-#define TX_GROW_RETRY_MS  100u       // after a refused growth
+#define TX_GROW_RETRY_MS  100u       // after a refused growth (doubles per consecutive refusal)
+#define TX_GROW_RETRY_MAX_MS 1600u
 #define TX_IDLE_DEFAULT_MS 2000u
 #define TX_HEAP_BLOCK_SLACK 16u      // allocator header, charged against the floor
 _Static_assert(TX_REC_MAX == TX_SLAB_BYTES, "a slab holds exactly one maximum record");
@@ -262,6 +263,7 @@ static struct {
     bool blocked;                   // last drain stopped on can_xmit() == false
     // ---- worker only ----
     uint32_t grow_retry;            // tick before which a refused growth is not retried
+    uint32_t grow_backoff;          // ms of the last refusal's back-off, 0 after a growth
     // ---- anywhere ----
     _Atomic uint16_t gen;           // link generation
     _Atomic bool down_seen;         // USB was not ready on the last look
@@ -400,8 +402,9 @@ static void tx_commit_locked(unsigned s, uint32_t need)
 /* Few free slabs and room for another chunk: ask the worker to grow. */
 static bool tx_pressure_locked(void)
 {
-    return s_tx.chunks_present < s_tx.cfg.max_chunks &&
-           (unsigned)__builtin_popcount(s_tx.alloc_mask) <= TX_GROW_HEADROOM;
+    // popcount(mask) <= 1 without a libgcc call inside the critical section: clearing the lowest set bit leaves nothing
+    _Static_assert(TX_GROW_HEADROOM == 1u, "the pressure test below is written for one free slab");
+    return s_tx.chunks_present < s_tx.cfg.max_chunks && (s_tx.alloc_mask & (s_tx.alloc_mask - 1u)) == 0u;
 }
 
 /* Consumer, under the lock: the oldest committed record, or false when there is none. */
@@ -560,10 +563,14 @@ static void tx_housekeeping(void)
         retired = tx_retire_all_locked(TX_WHY_RECLAIM);
     } else {
         tx_compact_locked();
-        for (unsigned c = 0; c < TX_MAX_CHUNKS; c++) {
+        // Staged: one idle chunk per pass, highest index first (the one the lowest-first allocator touched last), so a
+        // chunk that was just given back is not followed by nine more frees in the same instant. With the long idle
+        // period this keeps bursty traffic from cycling the heap.
+        for (unsigned c = TX_MAX_CHUNKS; c-- > 0;) {
             tx_chunk_t *ch = &s_tx.chunk[c];
             if (ch->mem && !ch->retiring && ch->used == 0 && (int32_t)(now - ch->last_use) >= (int32_t)idle) {
                 tx_retire_chunk_locked(c, TX_WHY_IDLE);
+                break;
             }
         }
     }
@@ -574,10 +581,15 @@ static void tx_housekeeping(void)
     tx_reap();
 }
 
+/* A refusal backs off exponentially (100 ms, 200, ... 1.6 s), reset by the next successful growth: while the heap is
+ * the problem, a sustained burst must not make the worker walk the heap (heap_caps_get_largest_free_block holds the
+ * heap lock for the length of the walk) ten times a second. */
 static void tx_deny(_Atomic uint32_t *counter, uint32_t now)
 {
     atomic_fetch_add_explicit(counter, 1, memory_order_relaxed);
-    s_tx.grow_retry = now + pdMS_TO_TICKS(TX_GROW_RETRY_MS);
+    s_tx.grow_backoff = s_tx.grow_backoff ? (s_tx.grow_backoff < TX_GROW_RETRY_MAX_MS ? s_tx.grow_backoff * 2u : s_tx.grow_backoff)
+                                          : TX_GROW_RETRY_MS;
+    s_tx.grow_retry = now + pdMS_TO_TICKS(s_tx.grow_backoff);
 }
 
 /* Worker. Add chunks while the producer is close to running out of slabs and the heap can afford it. */
@@ -599,13 +611,14 @@ static void tx_try_grow(void)
             tx_deny(&s_tx.deny_gate, now);
             return;
         }
-        size_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
-        if (largest < s_tx.cfg.floor_largest) {
-            tx_deny(&s_tx.deny_largest, now);
-            return;
-        }
+        // The O(1) total first; the largest-block query walks the heap with its lock held, so it only runs when the
+        // total already allows a growth.
         if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < TX_CHUNK_BYTES + TX_HEAP_BLOCK_SLACK + s_tx.cfg.floor_free) {
             tx_deny(&s_tx.deny_heap, now);
+            return;
+        }
+        if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) < s_tx.cfg.floor_largest) {
+            tx_deny(&s_tx.deny_largest, now);
             return;
         }
         uint8_t *mem = heap_caps_malloc(TX_CHUNK_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
@@ -647,6 +660,7 @@ static void tx_try_grow(void)
             atomic_fetch_add_explicit(&s_tx.grow_raced, 1, memory_order_relaxed);
             return;
         }
+        s_tx.grow_backoff = 0;
         atomic_fetch_add_explicit(&s_tx.grow_events, 1, memory_order_relaxed);
     }
 }
@@ -828,26 +842,46 @@ bool __wrap_netd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, 
 /* ---- worker ---- */
 
 /* The worker is the only context that acquires or releases the CPU-frequency lock, so the pair cannot interleave.
- * Both edges of pm_want notify it. */
+ * Both edges of pm_want notify it. The mechanism is the caller's when it supplies pm_begin/pm_end (the gateway binds
+ * them to a tdongle_pm_burst_t, ADR 0016: one PM mechanism, with its depth accounting and /status counters); only a
+ * caller that supplies none gets this component's own ESP_PM_CPU_FREQ_MAX lock. */
 static void tx_pm_reconcile(void)
 {
+    bool hooks = s_tx.cfg.pm_begin != NULL && s_tx.cfg.pm_end != NULL;
 #if CONFIG_PM_ENABLE
-    if (s_tx.pm == NULL) {
+    if (!hooks && s_tx.pm == NULL) {
         return;
     }
+#else
+    if (!hooks) {
+        return;
+    }
+#endif
     bool want = atomic_load_explicit(&s_tx.pm_want, memory_order_acquire);
     bool held = atomic_load_explicit(&s_tx.pm_held, memory_order_relaxed);
     if (want && !held) {
-        if (esp_pm_lock_acquire(s_tx.pm) == ESP_OK) {
-            atomic_store_explicit(&s_tx.pm_held, true, memory_order_relaxed);
-            atomic_fetch_add_explicit(&s_tx.pm_acquired, 1, memory_order_relaxed);
+        if (hooks) {
+            s_tx.cfg.pm_begin(s_tx.cfg.pm_ctx);
         }
+#if CONFIG_PM_ENABLE
+        else if (esp_pm_lock_acquire(s_tx.pm) != ESP_OK) {
+            return;
+        }
+#endif
+        atomic_store_explicit(&s_tx.pm_held, true, memory_order_relaxed);
+        atomic_fetch_add_explicit(&s_tx.pm_acquired, 1, memory_order_relaxed);
     } else if (!want && held) {
-        esp_pm_lock_release(s_tx.pm);
+        if (hooks) {
+            s_tx.cfg.pm_end(s_tx.cfg.pm_ctx);
+        }
+#if CONFIG_PM_ENABLE
+        else {
+            esp_pm_lock_release(s_tx.pm);
+        }
+#endif
         atomic_store_explicit(&s_tx.pm_held, false, memory_order_relaxed);
         atomic_fetch_add_explicit(&s_tx.pm_released, 1, memory_order_relaxed);
     }
-#endif
 }
 
 static TickType_t tx_worker_wait(void)
@@ -893,7 +927,8 @@ esp_err_t tinyusb_net_tx_ring_start(const tinyusb_net_tx_config_t *cfg)
     if (s_tx.base != NULL) {
         ESP_RETURN_ON_FALSE(s_tx.cfg.base_frames == cfg->base_frames && s_tx.cfg.max_chunks == cfg->max_chunks &&
                             s_tx.cfg.floor_free == cfg->floor_free && s_tx.cfg.floor_largest == cfg->floor_largest &&
-                            s_tx.cfg.gate == cfg->gate && s_tx.cfg.idle_ms == cfg->idle_ms,
+                            s_tx.cfg.gate == cfg->gate && s_tx.cfg.idle_ms == cfg->idle_ms &&
+                            s_tx.cfg.pm_begin == cfg->pm_begin && s_tx.cfg.pm_end == cfg->pm_end,
                             ESP_ERR_INVALID_STATE, TAG, "TX ring already configured differently");
         atomic_store(&s_tx.enabled, true);
         return ESP_OK;
@@ -901,7 +936,7 @@ esp_err_t tinyusb_net_tx_ring_start(const tinyusb_net_tx_config_t *cfg)
     uint8_t *base = heap_caps_malloc(cfg->base_frames * TX_SLAB_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     ESP_RETURN_ON_FALSE(base, ESP_ERR_NO_MEM, TAG, "Failed to allocate TX ring");
 #if CONFIG_PM_ENABLE
-    if (esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "usb_tx", &s_tx.pm) != ESP_OK) {
+    if (cfg->pm_begin == NULL && esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "usb_tx", &s_tx.pm) != ESP_OK) {
         s_tx.pm = NULL;
         ESP_LOGW(TAG, "no CPU-frequency lock: transmit runs at the current frequency");
     }
@@ -1001,6 +1036,7 @@ void tinyusb_net_deinit(void)
     if (s_tx.base != NULL) {
         TX_ENTER();
         uint32_t n = tx_discard_locked();
+        s_tx.epoch++;                   // a growth that allocated before this and publishes after it is discarded
         tx_retire_all_locked(TX_WHY_RECLAIM);
         TX_EXIT();
         atomic_fetch_add_explicit(&s_tx.flushed, n, memory_order_relaxed);

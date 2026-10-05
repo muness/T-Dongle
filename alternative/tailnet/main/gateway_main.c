@@ -48,7 +48,7 @@
  * the elastic part first), but these two are what a join already in progress and HTTP/control recovery cannot do without. */
 #define GATEWAY_USB_TX_FLOOR_FREE (ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES)
 #define GATEWAY_USB_TX_FLOOR_LARGEST ML_ADM_LARGEST_BLOCK
-#define GATEWAY_USB_TX_IDLE_MS 2000u
+#define GATEWAY_USB_TX_IDLE_MS 10000u
 /* Reclaim for admission waits for chunks that still hold frames: a full ring drains at 875 B/ms (7 Mbit/s). */
 #define GATEWAY_USB_TX_RECLAIM_WAIT_MS 150u
 /* Boot-heap neutrality (ADR 0015): before the ring the IN NTBs held 2 x 6,400 B. The permanent ring, its

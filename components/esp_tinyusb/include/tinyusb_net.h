@@ -156,9 +156,15 @@ typedef struct {
     int core;                    /*!< worker core (tskNO_AFFINITY for none) */
     size_t floor_free;           /*!< free internal heap that must remain after a growth */
     size_t floor_largest;        /*!< largest free internal block that must exist before AND after a growth */
-    uint32_t idle_ms;            /*!< a chunk unused this long is freed (0: 2000) */
+    uint32_t idle_ms;            /*!< a chunk unused this long is freed, one chunk per 500 ms pass, highest first (0: 2000) */
     bool (*gate)(void *ctx);     /*!< true while growth is forbidden and idle chunks must go (negotiation); may be NULL */
     void *gate_ctx;
+    /** CPU-frequency hold while frames are queued. Both NULL: the ring takes its own ESP_PM_CPU_FREQ_MAX lock
+     *  (CONFIG_PM_ENABLE). Both set: they are called from the worker task only, strictly alternating begin/end
+     *  (begin on empty to non-empty, end on non-empty to empty or link loss), with no lock of the ring held. */
+    void (*pm_begin)(void *ctx);
+    void (*pm_end)(void *ctx);
+    void *pm_ctx;
 } tinyusb_net_tx_config_t;
 
 /**

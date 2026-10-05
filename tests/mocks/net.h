@@ -100,7 +100,8 @@ static int malloc_fail;
 static _Atomic long malloc_calls;                /* allocation attempts (the cheap refusals must not even try) */
 static void (*malloc_hook)(void);              /* runs inside heap_caps_malloc: "something else happens during a growth" */
 static size_t heap_caps_get_free_size(int caps){(void)caps;assert(!in_crit);return (size_t)(atomic_load(&heap_total) - atomic_load(&heap_live_bytes));}
-static size_t heap_caps_get_largest_free_block(int caps){(void)caps;assert(!in_crit);return atomic_load(&mock_largest);}
+static _Atomic long largest_calls;                /* heap walks: the worker must not make them casually */
+static size_t heap_caps_get_largest_free_block(int caps){(void)caps;assert(!in_crit);atomic_fetch_add(&largest_calls,1);return atomic_load(&mock_largest);}
 static void *heap_caps_malloc(size_t n,int caps){
     (void)caps;assert(!in_crit&&!in_producer);
     if (malloc_hook) { void (*h)(void) = malloc_hook; malloc_hook = NULL; h(); }
