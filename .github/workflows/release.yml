@@ -1,37 +1,91 @@
 name: release
 # Push a tag like v0.2.0 to build the firmware, attach it to a GitHub release and publish the
 # browser flash page (site/index.html) to GitHub Pages from the gh-pages branch.
+# workflow_dispatch builds only (dry_run defaults to true); it publishes nothing unless it is run
+# from a v* tag with dry_run=false.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and verify only; skip the GitHub release and Pages publish
+        type: boolean
+        default: true
 permissions:
   contents: write
 concurrency:
   group: release-pages
   cancel-in-progress: false
 jobs:
-  release:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, linux, x64, linux-general]
+  build:
+    # Prepared ESP-IDF v5.5.5 fleet runner when LOCAL_LINUX_CI_ENABLED is true, as in build.yml;
+    # otherwise a GitHub-hosted runner that bootstraps the pinned IDF.
+    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/T-Dongle' && fromJSON('["self-hosted","linux","x64","builder:d14d43a864db3537e8e9"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
+    env:
+      PREPARED_IDF: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/T-Dongle' }}
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y git wget flex bison gperf python3-venv cmake ninja-build ccache libffi-dev libssl-dev libusb-1.0-0
-      - run: tools/bootstrap.sh
-      - name: Build and test
+      - id: ver
         shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dryrun"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - if: env.PREPARED_IDF != 'true'
+        run: sudo apt-get update && sudo apt-get install -y git wget flex bison gperf python3-venv cmake ninja-build ccache libffi-dev libssl-dev libusb-1.0-0
+      - if: env.PREPARED_IDF != 'true'
+        run: tools/bootstrap.sh
+      - name: Build and test (hosted, bootstrapped ESP-IDF)
+        if: env.PREPARED_IDF != 'true'
+        shell: bash
+        run: |
+          VERSION='${{ steps.ver.outputs.version }}'
           . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
           tools/test.sh
           TDONGLE_VERSION="$VERSION" tools/build.sh full
           python3 tools/site.py "dist/tdongle-$VERSION-full" "$VERSION" site-out
+      - name: Build and test (prepared ESP-IDF v5.5.5 runner)
+        if: env.PREPARED_IDF == 'true'
+        shell: bash
+        run: |
+          set -e
+          VERSION='${{ steps.ver.outputs.version }}'
+          # Tools are baked into the approved runner; no Docker socket, image pull or download.
+          git config --global --add safe.directory /opt/esp/idf
+          . /opt/esp/idf/export.sh
+          idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
+          echo "IDF_PATH=$IDF_PATH commit=$(git -C "$IDF_PATH" rev-parse HEAD)"
+          tools/test.sh
+          TDONGLE_VERSION="$VERSION" tools/build.sh full
+          python3 tools/site.py "dist/tdongle-$VERSION-full" "$VERSION" site-out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ steps.ver.outputs.version }}
+          path: |
+            dist/tdongle-${{ steps.ver.outputs.version }}-full.tar.gz
+            dist/tdongle-${{ steps.ver.outputs.version }}-full.tar.gz.sha256
+            dist/tdongle-${{ steps.ver.outputs.version }}-full/
+            site-out/
+  publish:
+    # Publishing never runs for a branch dispatch or a dry run, only for a v* tag.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.dry_run == false)
+    runs-on: [self-hosted, linux, x64, linux-general]
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.build.outputs.version }}
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" --title "T-Dongle $GITHUB_REF_NAME" --generate-notes \
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "T-Dongle $GITHUB_REF_NAME" --generate-notes \
             "dist/tdongle-$VERSION-full.tar.gz" "dist/tdongle-$VERSION-full.tar.gz.sha256" \
             "dist/tdongle-$VERSION-full/app.bin#app.bin (0x20000)" \
             "dist/tdongle-$VERSION-full/bootloader.bin#bootloader.bin (0x0)" \
