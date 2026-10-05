@@ -21,6 +21,11 @@ static void wifi_link_event_disconnected(const wifi_event_sta_disconnected_t *d)
 /* Reads the driver; safe from any task. Fields whose call fails stay "unknown" instead of reading as zero. */
 static wifi_link_info wifi_link_read(void) {
     wifi_link_info l = {.phy = WIFI_LINK_PHY_UNKNOWN, .ps = WIFI_LINK_PS_UNKNOWN, .secondary = WIFI_LINK_SECOND_UNKNOWN};
+    /* Selection state is plain ints written under members_lock; a torn read can only show the previous value. */
+    int current = wifi_current;
+    l.selected_slot = current >= 0 && current < 8 ? (uint8_t)(current + 1) : 0;
+    l.pinned = wifi_pinned.slot >= 0;
+    l.pin_failed_slot = (uint8_t)wifi_pinned.failed_slot;
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK) return l;   /* not associated */
     l.connected = true;

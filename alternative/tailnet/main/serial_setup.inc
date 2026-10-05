@@ -40,8 +40,10 @@ bool gateway_serial_command(const char *line) {
   memset(&profile,0,sizeof(profile));
  }else if(!strncmp(line,"use ",4)){
   char *end;long slot=strtol(line+4,&end,10);
-  if(*end || slot<1 || slot>(long)wifi_saved.count || !wifi_ready)mgmt_write("ERR Invalid saved network\r\n");
-  else {wifi_config_t candidate={0};memcpy(candidate.sta.ssid,wifi_saved.profiles[slot-1].ssid,strlen(wifi_saved.profiles[slot-1].ssid));strlcpy((char*)candidate.sta.password,wifi_saved.profiles[slot-1].password,64);wifi_scan_pauses_reconnect=true;esp_wifi_disconnect();if(esp_wifi_set_config(WIFI_IF_STA,&candidate)==ESP_OK){wifi_config=candidate;wifi_current=slot-1;esp_wifi_connect();}wifi_scan_pauses_reconnect=false;}
+  int result=*end?-1:wifi_use_profile(slot);
+  if(result==0){snprintf(reply,sizeof(reply),"OK switching to %ld\r\n",slot);mgmt_write(reply);}
+  else if(result==-2)mgmt_write("ERR Wi-Fi driver refused the network; previous setting kept\r\n");
+  else mgmt_write("ERR Invalid saved network\r\n");
  }else{char *end;long slot=strtol(line+4,&end,10);if(*end || slot<1 || slot>(long)wifi_saved.count || !wifi_save_profile(wifi_saved.profiles[slot-1].ssid,"",true))mgmt_write("ERR Saved network could not be removed\r\n");else mgmt_write("OK deleted\r\n");}
  xSemaphoreGive(members_lock);return true;
 }

@@ -4,6 +4,7 @@ static volatile bool wifi_rescan=true;
 static unsigned wifi_revision;
 static int wifi_current=-1;
 static uint32_t wifi_retry_after[8];
+static wifi_pin wifi_pinned=WIFI_PIN_INIT;   /* the network `use N` chose, kept against roaming; guarded by members_lock */
 static bool wifi_load_profiles(void){
     size_t n=sizeof(wifi_saved);esp_err_t e=nvs_get_blob(store,"wifi_profiles",&wifi_saved,&n);
     if(e==ESP_ERR_NVS_NOT_FOUND){
@@ -37,7 +38,7 @@ static bool wifi_save_at(const char *ssid,const char *password,bool remove,int s
     if(remove){memmove(&candidate.profiles[i],&candidate.profiles[i+1],(candidate.count-i-1)*sizeof(wifi_profile));memset(&candidate.profiles[--candidate.count],0,sizeof(wifi_profile));}
     else {strlcpy(candidate.profiles[i].ssid,ssid,33);strlcpy(candidate.profiles[i].password,password,64);if(i==candidate.count)candidate.count++;}
     if(nvs_set_blob(store,"wifi_profiles",&candidate,sizeof(candidate))!=ESP_OK || nvs_commit(store)!=ESP_OK)return false;
-    wifi_saved=candidate;wifi_revision++;wifi_current=-1;memset(wifi_retry_after,0,sizeof(wifi_retry_after));
+    wifi_saved=candidate;wifi_revision++;wifi_current=-1;wifi_pin_clear(&wifi_pinned);memset(wifi_retry_after,0,sizeof(wifi_retry_after));
     wifi_rescan=true;
     return true;
 }
@@ -57,7 +58,7 @@ static void wifi_maintain(void){
         wifi_ap_record_t ap;bool connected=esp_wifi_sta_get_ap_info(&ap)==ESP_OK;
         int current=-1;int16_t signal[8];for(unsigned i=0;i<8;i++)signal[i]=-127;
         if(connected)for(unsigned i=0;i<count;i++)if(!strncmp(profiles[i].ssid,(char*)ap.ssid,32)){current=i;signal[i]=ap.rssi;}
-        if(connected && current>=0 && ap.rssi>-75 && !forced){memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);return;}
+        if(connected && current>=0 && ap.rssi>-75 && !forced && (wifi_pinned.slot<0 || current==wifi_pinned.slot)){memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);return;}
         if(!count){esp_wifi_disconnect();memset(&wifi_config,0,sizeof(wifi_config));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);return;}
         if(!connected)esp_wifi_disconnect();
         wifi_scan_config_t scan={.show_hidden=true,.scan_type=WIFI_SCAN_TYPE_ACTIVE,.scan_time.active={.min=40,.max=100}};
@@ -66,11 +67,11 @@ static void wifi_maintain(void){
         if(result==ESP_OK){while(esp_wifi_scan_get_ap_record(&ap)==ESP_OK)for(unsigned i=0;i<count;i++)if(!strncmp(profiles[i].ssid,(char*)ap.ssid,32)&&ap.rssi>signal[i])signal[i]=ap.rssi;esp_wifi_clear_ap_list();}
         uint32_t now=(uint32_t)(esp_timer_get_time()/1000);
         for(unsigned i=0;i<count;i++)if((int32_t)(wifi_retry_after[i]-now)>0)signal[i]=-127;
-        int selected=wifi_pick(signal,count,current,connected);
+        xSemaphoreTake(members_lock,portMAX_DELAY);   /* the pin belongs to members_lock; a `use` that raced the scan bumped the revision */
+        if(revision!=wifi_revision){xSemaphoreGive(members_lock);memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);wifi_rescan=true;return;}
+        int selected=wifi_pin_pick(&wifi_pinned,signal,count,current,connected);
         /* Hidden/unseen networks get bounded round-robin attempts when offline. */
         if(selected<0 && !connected && count)for(unsigned n=0;n<count;n++){unsigned i=(hidden_cursor++)%count;if((int32_t)(wifi_retry_after[i]-now)<=0){selected=i;break;}}
-        xSemaphoreTake(members_lock,portMAX_DELAY);
-        if(revision!=wifi_revision){xSemaphoreGive(members_lock);memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);wifi_rescan=true;return;}
         if(selected>=0){
             wifi_config_t candidate={0};memcpy(candidate.sta.ssid,profiles[selected].ssid,strlen(profiles[selected].ssid));memcpy(candidate.sta.password,profiles[selected].password,strlen(profiles[selected].password));
             candidate.sta.scan_method=WIFI_ALL_CHANNEL_SCAN;candidate.sta.sort_method=WIFI_CONNECT_AP_BY_SIGNAL;
@@ -79,4 +80,23 @@ static void wifi_maintain(void){
         }
         xSemaphoreGive(members_lock);
         memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);
+}
+/* `use N`: switch to saved network N (1-based) and keep it. Caller holds members_lock. Returns 0 when the switch was
+ * started (the join itself is asynchronous: wifi_link reports join=joining/connected/failed), -1 for a bad slot or no
+ * Wi-Fi, -2 when the driver refused the configuration (the previous pin and network are left as they were). */
+static int wifi_use_profile(long slot){
+    if(slot<1 || slot>(long)wifi_saved.count || !wifi_ready)return -1;
+    const wifi_profile *p=&wifi_saved.profiles[slot-1];
+    wifi_config_t candidate={0};memcpy(candidate.sta.ssid,p->ssid,strlen(p->ssid));strlcpy((char*)candidate.sta.password,p->password,64);
+    candidate.sta.scan_method=WIFI_ALL_CHANNEL_SCAN;candidate.sta.sort_method=WIFI_CONNECT_AP_BY_SIGNAL;
+    wifi_scan_pauses_reconnect=true;esp_wifi_disconnect();
+    int result=-2;
+    if(esp_wifi_set_config(WIFI_IF_STA,&candidate)==ESP_OK){
+        wifi_config=candidate;wifi_current=(int)slot-1;wifi_pin_set(&wifi_pinned,(int)slot-1);
+        wifi_retry_after[slot-1]=0;wifi_revision++;   /* a scan already in flight must not override this choice */
+        esp_wifi_connect();result=0;
+    }
+    wifi_scan_pauses_reconnect=false;
+    memset(&candidate,0,sizeof(candidate));
+    return result;
 }

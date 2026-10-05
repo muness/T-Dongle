@@ -95,6 +95,9 @@ static UBaseType_t uxTaskGetSystemState(TaskStatus_t *t, UBaseType_t n, uint32_t
     return 3;
 }
 static BaseType_t xTaskGetCoreID(TaskHandle_t h) { return (uintptr_t)h == 3 ? 0x7fffffff : (int)((uintptr_t)h - 1); }
+static int wifi_current = 1;   /* slot 2 selected and pinned: the report shows the user's choice */
+#include "wifi_policy.h"
+static wifi_pin wifi_pinned = {1, 0, 0};
 #include "json_writer.inc"
 #include "wifi_link.inc"
 #include "memory_diagnostics.inc"

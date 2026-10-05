@@ -30,7 +30,18 @@ typedef struct {
     uint8_t ps;              /* wifi_ps_type_t, or WIFI_LINK_PS_UNKNOWN */
     bool tx_power_valid;
     int8_t tx_power_qdbm;    /* maximum transmit power, quarter dBm */
+    uint8_t selected_slot;   /* saved network being used, 1-based, 0 none (the slot number, never its name) */
+    bool pinned;             /* chosen with `use N` and kept against roaming */
+    uint8_t pin_failed_slot; /* a pinned network that failed to join and was given up, 1-based, 0 none */
 } wifi_link_info;
+enum { WIFI_LINK_JOIN_CONNECTED, WIFI_LINK_JOIN_JOINING, WIFI_LINK_JOIN_FAILED, WIFI_LINK_JOIN_DISCONNECTED };
+static inline unsigned wifi_link_join_state(const wifi_link_info *l) {
+    return l->connected ? WIFI_LINK_JOIN_CONNECTED : l->pinned ? WIFI_LINK_JOIN_JOINING : l->pin_failed_slot ? WIFI_LINK_JOIN_FAILED : WIFI_LINK_JOIN_DISCONNECTED;
+}
+static inline const char *wifi_link_join_name(unsigned j) {
+    static const char *const names[] = {"connected", "joining", "failed", "disconnected"};
+    return j < 4 ? names[j] : "disconnected";
+}
 
 /* Cumulative event counters, written by the Wi-Fi event handler (word sized, single writer). */
 typedef struct {
@@ -77,7 +88,7 @@ static inline const char *wifi_link_rssi_text(const wifi_link_info *l, char out[
 }
 
 /* Worst case: every number at its widest. Callers size buffers with these. */
-enum { WIFI_LINK_JSON_MAX = 400, WIFI_LINK_LINE_MAX = 300 };
+enum { WIFI_LINK_JSON_MAX = 480, WIFI_LINK_LINE_MAX = 380 };
 
 /* The "wifi_link" object body for /status and the diagnostics report: returns the length, or 0 when it did not
  * fit (the caller then omits it; a half object never leaves this function). Includes the surrounding braces. */
@@ -85,7 +96,8 @@ static inline size_t wifi_link_json(char *out, size_t cap, const wifi_link_info 
     if (!out || !cap) return 0;
     char modes[6];
     wifi_link_modes_text(l->ap_modes, modes);
-    int n = snprintf(out, cap, "{\"connected\":%s,", l->connected ? "true" : "false");
+    int n = snprintf(out, cap, "{\"connected\":%s,\"join\":\"%s\",\"selected_slot\":%u,\"pinned\":%s,\"pin_failed_slot\":%u,", l->connected ? "true" : "false",
+                     wifi_link_join_name(wifi_link_join_state(l)), (unsigned)l->selected_slot, l->pinned ? "true" : "false", (unsigned)l->pin_failed_slot);
     if (n < 0 || (size_t)n >= cap) { out[0] = 0; return 0; }
     size_t used = (size_t)n;
     if (l->connected) {
@@ -114,14 +126,16 @@ static inline size_t wifi_link_line(char *out, size_t cap, const wifi_link_info 
         char rssi[5];
         char power[8] = "unknown";
         if (l->tx_power_valid) snprintf(power, sizeof(power), "%d", (int)l->tx_power_qdbm);
-        n = snprintf(out, cap, "wifi_link connected=1 rssi_dbm=%s channel=%u secondary=%s phy=%s bandwidth_cfg_mhz=%u ap_bandwidth_mhz=%u "
+        n = snprintf(out, cap, "wifi_link connected=1 join=%s selected=%u pinned=%d pin_failed=%u rssi_dbm=%s channel=%u secondary=%s phy=%s bandwidth_cfg_mhz=%u ap_bandwidth_mhz=%u "
                      "ap_modes=%s power_save=%s tx_power_qdbm=%s connects=%lu disconnects=%lu beacon_timeouts=%lu last_disconnect_reason=%u\r\n",
+                     wifi_link_join_name(wifi_link_join_state(l)), (unsigned)l->selected_slot, l->pinned, (unsigned)l->pin_failed_slot,
                      wifi_link_rssi_text(l, rssi), (unsigned)l->channel, wifi_link_secondary_name(l->secondary),
                      wifi_link_phy_name(l->phy), (unsigned)l->bw_cfg_mhz, (unsigned)l->ap_bw_mhz, modes,
                      wifi_link_ps_name(l->ps), power, (unsigned long)e->connects, (unsigned long)e->disconnects,
                      (unsigned long)e->beacon_timeouts, (unsigned)e->last_reason);
     } else
-        n = snprintf(out, cap, "wifi_link connected=0 connects=%lu disconnects=%lu beacon_timeouts=%lu last_disconnect_reason=%u\r\n",
+        n = snprintf(out, cap, "wifi_link connected=0 join=%s selected=%u pinned=%d pin_failed=%u connects=%lu disconnects=%lu beacon_timeouts=%lu last_disconnect_reason=%u\r\n",
+                     wifi_link_join_name(wifi_link_join_state(l)), (unsigned)l->selected_slot, l->pinned, (unsigned)l->pin_failed_slot,
                      (unsigned long)e->connects, (unsigned long)e->disconnects, (unsigned long)e->beacon_timeouts, (unsigned)e->last_reason);
     if (n < 0 || (size_t)n >= cap) { out[0] = 0; return 0; }
     return (size_t)n;

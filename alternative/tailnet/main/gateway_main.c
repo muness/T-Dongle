@@ -538,7 +538,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
         online = false;
         wifi_link_event_disconnected((const wifi_event_sta_disconnected_t *)data);
         if(!gateway_tailnet_mode())tdongle_l2_link(false);
-        if(!wifi_scan_pauses_reconnect && wifi_current>=0)
+        if(!wifi_scan_pauses_reconnect && wifi_current>=0 && wifi_pinned.slot!=wifi_current)
             wifi_retry_after[wifi_current]=(uint32_t)(esp_timer_get_time()/1000)+60000;
         /* Worker rescans with backoff; never reconnect recursively here. */
     }

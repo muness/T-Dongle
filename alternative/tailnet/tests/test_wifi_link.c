@@ -9,11 +9,13 @@
 static wifi_link_info link_full(void) {
     return (wifi_link_info){.connected = true, .rssi_valid = true, .rssi = -61, .channel = 6, .secondary = 1, .phy = WIFI_LINK_PHY_HT40,
                             .bw_cfg_mhz = 40, .ap_bw_mhz = 40, .ap_modes = WIFI_LINK_AP_B | WIFI_LINK_AP_G | WIFI_LINK_AP_N, .ps = 0,
-                            .tx_power_valid = true, .tx_power_qdbm = 78};
+                            .tx_power_valid = true, .tx_power_qdbm = 78,
+                            .selected_slot = 2, .pinned = true};
 }
 static wifi_link_info link_widest(void) {
     return (wifi_link_info){.connected = true, .rssi_valid = true, .rssi = -128, .channel = 255, .secondary = 2, .phy = WIFI_LINK_PHY_VHT20,
-                            .bw_cfg_mhz = 255, .ap_bw_mhz = 255, .ap_modes = 255, .ps = 2, .tx_power_valid = true, .tx_power_qdbm = -128};
+                            .bw_cfg_mhz = 255, .ap_bw_mhz = 255, .ap_modes = 255, .ps = 2, .tx_power_valid = true, .tx_power_qdbm = -128,
+                            .selected_slot = 255, .pinned = true, .pin_failed_slot = 255};
 }
 static char captured[8][WS_LINE_MAX];
 static unsigned captured_count;
@@ -49,6 +51,16 @@ static void rssi_text(void) {
         char *end; assert(strtol(t, &end, 10) == r && !*end);
     }
 }
+static void join_states(void) {
+    wifi_link_info l = {0};
+    assert(wifi_link_join_state(&l) == WIFI_LINK_JOIN_DISCONNECTED && !strcmp(wifi_link_join_name(wifi_link_join_state(&l)), "disconnected"));
+    l.pinned = true; assert(!strcmp(wifi_link_join_name(wifi_link_join_state(&l)), "joining"));
+    l.connected = true; assert(!strcmp(wifi_link_join_name(wifi_link_join_state(&l)), "connected"));
+    l = (wifi_link_info){.pin_failed_slot = 3}; assert(!strcmp(wifi_link_join_name(wifi_link_join_state(&l)), "failed"));
+    char out[WIFI_LINK_JSON_MAX]; wifi_link_events e = {0};
+    assert(wifi_link_json(out, sizeof(out), &l, &e) && strstr(out, "\"join\":\"failed\"") && strstr(out, "\"pin_failed_slot\":3"));
+    assert(!strcmp(wifi_link_join_name(99), "disconnected"));
+}
 static void events(void) {
     wifi_link_events e = {0};
     wifi_link_note_connect(&e);
@@ -65,12 +77,12 @@ static void json_exact(void) {
     wifi_link_events e = {.connects = 3, .disconnects = 2, .beacon_timeouts = 1, .last_disconnect_ms = 9000, .last_reason = 200, .last_disconnect_rssi = -85};
     size_t n = wifi_link_json(out, sizeof(out), &l, &e);
     assert(n == strlen(out) && n > 0);
-    assert(!strcmp(out, "{\"connected\":true,\"rssi_dbm\":-61,\"channel\":6,\"secondary\":\"above\",\"phy\":\"HT40\",\"bandwidth_cfg_mhz\":40,"
+    assert(!strcmp(out, "{\"connected\":true,\"join\":\"connected\",\"selected_slot\":2,\"pinned\":true,\"pin_failed_slot\":0,\"rssi_dbm\":-61,\"channel\":6,\"secondary\":\"above\",\"phy\":\"HT40\",\"bandwidth_cfg_mhz\":40,"
                         "\"ap_bandwidth_mhz\":40,\"ap_modes\":\"bgn\",\"power_save\":\"none\",\"tx_power_qdbm\":78,\"connects\":3,\"disconnects\":2,"
                         "\"beacon_timeouts\":1,\"last_disconnect_reason\":200,\"last_disconnect_rssi_dbm\":-85,\"last_disconnect_uptime_ms\":9000}"));
     l = (wifi_link_info){.phy = WIFI_LINK_PHY_UNKNOWN, .ps = WIFI_LINK_PS_UNKNOWN, .secondary = WIFI_LINK_SECOND_UNKNOWN};
     n = wifi_link_json(out, sizeof(out), &l, &e);
-    assert(n && !strcmp(out, "{\"connected\":false,\"connects\":3,\"disconnects\":2,\"beacon_timeouts\":1,\"last_disconnect_reason\":200,"
+    assert(n && !strcmp(out, "{\"connected\":false,\"join\":\"disconnected\",\"selected_slot\":0,\"pinned\":false,\"pin_failed_slot\":0,\"connects\":3,\"disconnects\":2,\"beacon_timeouts\":1,\"last_disconnect_reason\":200,"
                              "\"last_disconnect_rssi_dbm\":-85,\"last_disconnect_uptime_ms\":9000}"));
     l = link_full(); l.rssi_valid = false; l.tx_power_valid = false; l.phy = WIFI_LINK_PHY_UNKNOWN; l.ps = WIFI_LINK_PS_UNKNOWN;
     n = wifi_link_json(out, sizeof(out), &l, &e);
@@ -101,13 +113,13 @@ static void line_exact(void) {
     wifi_link_events e = {.connects = 1};
     size_t n = wifi_link_line(out, sizeof(out), &l, &e);
     assert(n == strlen(out));
-    assert(!strcmp(out, "wifi_link connected=1 rssi_dbm=-61 channel=6 secondary=above phy=HT40 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=40 ap_modes=bgn "
+    assert(!strcmp(out, "wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-61 channel=6 secondary=above phy=HT40 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=40 ap_modes=bgn "
                         "power_save=none tx_power_qdbm=78 connects=1 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0\r\n"));
     /* Must not look like the Android status line (^mode=...) so an extra line never confuses its multiline matcher. */
     assert(strncmp(out, "mode=", 5) != 0);
     wifi_link_info down = {0};
     n = wifi_link_line(out, sizeof(out), &down, &e);
-    assert(n && !strcmp(out, "wifi_link connected=0 connects=1 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0\r\n"));
+    assert(n && !strcmp(out, "wifi_link connected=0 join=disconnected selected=0 pinned=0 pin_failed=0 connects=1 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0\r\n"));
     l = link_widest();
     e = (wifi_link_events){UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT16_MAX, -128};
     char big[1024];
@@ -158,7 +170,7 @@ static void copy_macros(void) {
     assert(pool.err == 65535 && pool.avail == 5 && pool.illegal == 1);
 }
 int main(void) {
-    names(); rssi_text(); events(); json_exact(); json_bounds(); line_exact(); stats_lines(); copy_macros();
+    names(); rssi_text(); join_states(); events(); json_exact(); json_bounds(); line_exact(); stats_lines(); copy_macros();
     puts("wifi_link: names, rssi tokens, event counters, JSON/line exact text, widest-value bounds, truncation and lwIP counter lines passed");
     return 0;
 }

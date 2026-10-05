@@ -109,7 +109,7 @@ assert [x["kind"] for x in before[:2]] == ["wifi_link", "lwip_stats"], before
 assert all(x["schema"] == 1 and x["uptime_ms"] == 123456 for x in before)
 link = before[0]["link"]
 assert before[0]["driver_counters"] == "not_exposed"
-assert link == {"connected": True, "rssi_dbm": -64, "channel": 6, "secondary": "above", "phy": "HT40", "bandwidth_cfg_mhz": 40,
+assert link == {"connected": True, "join": "connected", "selected_slot": 2, "pinned": True, "pin_failed_slot": 0, "rssi_dbm": -64, "channel": 6, "secondary": "above", "phy": "HT40", "bandwidth_cfg_mhz": 40,
                 "ap_bandwidth_mhz": 40, "ap_modes": "bgn", "power_save": "none", "tx_power_qdbm": 78, "connects": 2, "disconnects": 2,
                 "beacon_timeouts": 1, "last_disconnect_reason": 8, "last_disconnect_rssi_dbm": -50, "last_disconnect_uptime_ms": 5000}, link
 assert before[1]["enabled"] == 1 and before[1]["counter_bits"] == 16
