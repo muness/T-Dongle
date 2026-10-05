@@ -3,6 +3,8 @@
 # chip reboots into the ROM download mode (its console is only reliably alive shortly after a
 # boot, so a plain unplug/replug while this is running is enough), then writes the package.
 # Usage: tools/flash.sh [variant] [seconds-to-wait]   (user-authorized writes only)
+# Targets exactly one dongle by chip MAC: TDONGLE_SERIAL=30EDA0D788BC (or 30:ED:...) when more
+# than one T-Dongle is attached. Other Espressif boards on the host are never selected.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 variant="${1:-full}"; wait_s="${2:-120}"; dir="dist/tdongle-0.1.0-$variant"
