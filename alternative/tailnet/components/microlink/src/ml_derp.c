@@ -48,6 +48,15 @@ static const char *TAG = "ml_derp";
  * esp_crt_bundle_attach() installs and that ml_derp_tls.c chains to. */
 extern int esp_crt_verify_callback(void *buf, mbedtls_x509_crt *crt, int depth, uint32_t *flags);
 static int derp_trust_attach(void *conf) { return esp_crt_bundle_attach(conf) == ESP_OK ? 0 : -1; }
+/* The bundle esp_crt_bundle_attach() trusts: the one embedded by CONFIG_MBEDTLS_CERTIFICATE_BUNDLE (nothing in the
+ * firmware calls esp_crt_bundle_set). A presented certificate equal to one of its entries is that trust anchor
+ * (ml_derp_tls.c "Trust anchor match"); this is what skips the RSA-4096 cross-signature check on ISRG Root X2. */
+extern const uint8_t x509_crt_imported_bundle_bin_start[] asm("_binary_x509_crt_bundle_start");
+extern const uint8_t x509_crt_imported_bundle_bin_end[]   asm("_binary_x509_crt_bundle_end");
+static bool derp_is_trust_anchor(const mbedtls_x509_crt *crt) {
+    return ml_derp_bundle_has_anchor(x509_crt_imported_bundle_bin_start,
+                                     (size_t)(x509_crt_imported_bundle_bin_end - x509_crt_imported_bundle_bin_start), crt);
+}
 
 /* DISCO magic bytes: "TS" + sparkles emoji UTF-8 */
 static const uint8_t DISCO_MAGIC[6] = { 'T', 'S', 0xf0, 0x9f, 0x92, 0xac };
@@ -410,7 +419,8 @@ static int xport_tls_setup(microlink_t *ml, struct derp_xport *xp) {
                                 MBEDTLS_SSL_PRESET_DEFAULT);
     /* The server must prove it is the DERP node named in the map (see ml_derp_tls.h). A configuration
      * failure means no connection at all. */
-    static const ml_derp_trust_t trust = { .attach = derp_trust_attach, .trust = esp_crt_verify_callback };
+    static const ml_derp_trust_t trust = { .attach = derp_trust_attach, .trust = esp_crt_verify_callback,
+                                         .is_anchor = derp_is_trust_anchor };
     int cfg_ret = ml_derp_tls_configure(&ml->derp.ssl_conf, &xp->verify, &xp->cert, xp->host, &trust);
     if (cfg_ret != 0) {
         char why[160];

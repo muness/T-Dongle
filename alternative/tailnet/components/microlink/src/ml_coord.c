@@ -278,6 +278,34 @@ static int hex_to_bytes32(const char *hex, uint8_t out[32]) {
     return 0;
 }
 
+/* Depth of nested JSON containers a control-plane document may have before it is parsed. cJSON recurses once per
+ * level on THIS task's stack (64 B a level on xtensa, CJSON_NESTING_LIMIT 32 in the build), so a hostile body can
+ * otherwise claim 2 KB of the coord stack: /key is fetched over plain HTTP for an http:// login server, so anyone on
+ * the path can write it. The real documents are shallow (/key: 1 level, RegisterResponse: 3), so the bound is well
+ * above them and well below the build's limit; it is what the coord stack budget in microlink_internal.h counts.
+ * The scan treats every '{' and '[' outside a string as a level, which is at least what cJSON will descend into
+ * (a string is skipped exactly as JSON ends it: an unescaped quote), so a document it accepts cannot recurse deeper. */
+#define ML_JSON_DEPTH_KEY       4
+#define ML_JSON_DEPTH_REGISTER  16
+static bool json_nesting_within(const char *text, size_t length, unsigned max_depth) {
+    unsigned depth = 0;
+    bool in_string = false;
+    for (size_t i = 0; i < length; i++) {
+        char c = text[i];
+        if (in_string) {
+            if (c == '\\') i++;                  /* the escaped character cannot end the string */
+            else if (c == '"') in_string = false;
+        } else if (c == '"') {
+            in_string = true;
+        } else if (c == '{' || c == '[') {
+            if (++depth > max_depth) return false;
+        } else if ((c == '}' || c == ']') && depth) {
+            depth--;
+        }
+    }
+    return true;
+}
+
 /* Parse the /key?v=<ML_CTRL_PROTOCOL_VER> HTTP response (already NUL-terminated).
  * Skips HTTP headers, handles chunked transfer encoding, decodes the JSON
  * "publicKey":"mkey:<64 hex>" field, and hex-decodes the 32-byte Noise pubkey
@@ -310,6 +338,10 @@ static int parse_pubkey_response(const char *resp, uint8_t pubkey_out[32]) {
     }
 
     /* Parse JSON: {"legacyPublicKey":"mkey:...","publicKey":"mkey:<64 hex>"} */
+    if (!json_nesting_within(body, strlen(body), ML_JSON_DEPTH_KEY)) {
+        ESP_LOGE(TAG, "fetch_server_pubkey: JSON nested deeper than %d levels", ML_JSON_DEPTH_KEY);
+        return -1;
+    }
     cJSON *root = cJSON_Parse(body);
     if (!root) {
         ESP_LOGE(TAG, "fetch_server_pubkey: JSON parse failed; body='%s'", body);
@@ -1197,6 +1229,11 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     } else if (json_offset < 0) {
         ESP_LOGW(TAG, "No '{' found in RegisterResponse data");
 
+        return -1;
+    }
+
+    if (!json_nesting_within(parse_start, parse_len, ML_JSON_DEPTH_REGISTER)) {
+        ESP_LOGW(TAG, "RegisterResponse JSON nested deeper than %d levels", ML_JSON_DEPTH_REGISTER);
         return -1;
     }
 

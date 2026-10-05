@@ -1,6 +1,6 @@
 # Per-membership byte recovery plan (second membership on a no-PSRAM ESP32-S3)
 
-Branch `overhaul/p2-bytes-research`, from `origin/overhaul/p2-shared-runtime` (PR #30, `b0d9628`). Date 2026-10-05. Read-only research: no firmware file was edited and no hardware was touched.
+Branch `overhaul/p2-bytes-research`, from `origin/overhaul/p2-shared-runtime` (PR #30, `b0d9628`). Date 2026-10-05. Read-only research: no firmware file was edited and no hardware was touched. Implemented since: R2 (DERP trust-anchor match) and the R3 sizing review, which keeps the coord stack at 8,704 B, in `docs/adr/0016-derp-trust-anchor-match-and-coord-stack.md`.
 
 **Method.** `idf.py -B build-bytes build` (ESP-IDF 5.5.5, `sdkconfig.defaults`) for the effective config; struct layouts from `xtensa-esp32s3-elf-gdb -batch -ex 'ptype /o ...'` on an object compiled with the firmware's own flags (`evidence/xtensa_microlink_sizeof.c`); lwIP struct sizes the same way; `nm --size-sort` on the ELF for statics; a host mbedTLS 3.6.6 handshake against live DERP servers with an allocation counter and per-phase accounting (`evidence/host_derp_verify_phases.c`). **Not measured on the board.** Host numbers are 64-bit and overstate struct-heavy allocations; big-integer (RSA) buffers are the same size on both. Everything labelled "estimate" is arithmetic over those sources.
 
