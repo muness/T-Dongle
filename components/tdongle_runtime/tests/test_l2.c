@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "tdongle_l2.h"
+#include "tdongle_aqm.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
@@ -501,6 +502,7 @@ static void test_tuning(void) {
     check_identities();
 }
 
+
 /* The radio's dwell: a frame that waited for room is counted, with how long. */
 static void test_room_wait_stats(void) {
     uint8_t f[200]; frame(f, 200, peer, mac, 1);
@@ -546,7 +548,6 @@ static void codel_on(unsigned target_us, unsigned interval_ms) {
 static void saturate(unsigned frames, unsigned step_us, const uint8_t *f, uint16_t len, bool tcp_ecn_check) {
     (void)tcp_ecn_check;
     for (unsigned i = 0; i < frames; i++) {
-        atomic_store(&l2.held, true);                 /* the host is waiting for room: the pipe is full */
         host_in(f, len);
         advance_us(step_us);
         pump();
@@ -593,14 +594,108 @@ static void test_codel(void) {
     check_identities();
     /* The pipe finds slack: the signal falls to zero and CoDel leaves its dropping state; the next full spell starts a new interval. */
     n = ipv4_frame(f, 0, 17, 100, false);
-    atomic_store(&l2.held, false); atomic_store(&l2.busy_continues, false);      /* nobody was waiting: the pipe went idle */
-    advance_us(5000); host_in(f, n); pump();                                      /* a new busy period starts with this frame */
+    atomic_store(&l2.held, false);
+    advance_us(10000);                                                            /* a gap longer than the host-idle threshold: the host had nothing queued */
+     host_in(f, n); pump();                                      /* a new busy period starts with this frame */
     unsigned before = stats().h2w_codel_drop;
     saturate(20, 2000, f, n, false);                                             /* 40 ms full: under the interval again */
     assert(stats().h2w_codel_drop == before);
     /* Retuning restarts the controller. */
     codel_on(1000, 50);
     saturate(10, 2000, f, n, false);
+    check_identities();
+}
+
+/* The host's busy period: gaps between its datagrams (unheld) end it, a hold continues it, the threshold is tunable. */
+static unsigned signals_with_spacing(unsigned spacing_us, bool held_each, unsigned frames) {
+    uint8_t f[200];
+    const uint16_t n = ipv4_frame(f, 0, 17, 100, false);
+    start(); tdongle_l2_link(true);
+    codel_on(1000, 20);
+    for (unsigned i = 0; i < frames; i++) {
+        if (held_each) atomic_store(&l2.hold_pending, true);
+        host_in(f, n);
+        pump();
+        advance_us(spacing_us);
+    }
+    return stats().h2w_codel_signals;
+}
+static void test_busy_period(void) {
+    assert(signals_with_spacing(7000, false, 400) == 0);            /* gaps over the 6 ms idle threshold: the host keeps going idle, no standing queue */
+    assert(signals_with_spacing(5000, false, 400) > 3);             /* no gap over it: back-to-back, a standing backlog */
+    assert(signals_with_spacing(6000, false, 400) > 3);             /* exactly the threshold is not a gap */
+    assert(signals_with_spacing(7000, true, 400) > 3);              /* the same sparse arrivals, each one a held datagram coming back: the host was waiting for us */
+    tdongle_l2_tuning_t t;
+    start(); tdongle_l2_get_tuning(&t);
+    t.host_idle_us = 2000; t.codel = true; t.codel_target_us = 1000; t.codel_interval_ms = 20;
+    assert(tdongle_l2_set_tuning(&t) == ESP_OK);
+    uint8_t f[200]; const uint16_t n = ipv4_frame(f, 0, 17, 100, false);
+    tdongle_l2_link(true);
+    for (unsigned i = 0; i < 400; i++) { host_in(f, n); pump(); advance_us(5000); }
+    assert(stats().h2w_codel_signals == 0);                         /* 5 ms spacing is a gap when the threshold is 2 ms */
+    t.host_idle_us = TDONGLE_L2_HOST_IDLE_US_MIN - 1; assert(tdongle_l2_set_tuning(&t) == ESP_ERR_INVALID_ARG);
+    t.host_idle_us = TDONGLE_L2_HOST_IDLE_US_MAX + 1; assert(tdongle_l2_set_tuning(&t) == ESP_ERR_INVALID_ARG);
+    /* A busy stretch ends the moment the host leaves a gap: the signal falls and the controller stops acting. */
+    start(); tdongle_l2_link(true); codel_on(1000, 20);
+    for (unsigned i = 0; i < 100; i++) { host_in(f, n); pump(); advance_us(3000); }
+    const unsigned busy = stats().h2w_codel_signals;
+    assert(busy > 3);
+    advance_us(20000);
+    for (unsigned i = 0; i < 200; i++) { host_in(f, n); pump(); advance_us(9000); }
+    assert(stats().h2w_codel_signals == busy);
+    check_identities();
+}
+
+/* What the ingress counts about ECN, always, and what a real stack's frames look like. These are assembled from the RFC 793/3168 field layouts and the
+ * header shapes macOS and Linux emit (IP options absent, TCP data offset 8 with timestamps; SYN carrying ECE|CWR; ECT(0) on data, not-ECT on SYN and pure ACK),
+ * not a capture from a machine. */
+static uint16_t tcp_frame(uint8_t *f, bool v6, unsigned tos, unsigned flags, unsigned payload) {
+    memset(f, 0, 1600);
+    memcpy(f, peer, 6); memcpy(f + 6, mac, 6);
+    unsigned ihl = 20, l4;
+    if (!v6) {
+        f[12] = 0x08; f[13] = 0x00; f[14] = 0x45; f[15] = (uint8_t)tos; l4 = 14 + ihl;
+        const unsigned total = ihl + 32 + payload; f[16] = (uint8_t)(total >> 8); f[17] = (uint8_t)total; f[20] = 0x40; f[22] = 64; f[23] = 6;
+    } else {
+        f[12] = 0x86; f[13] = 0xdd; f[14] = (uint8_t)(0x60 | (tos >> 4)); f[15] = (uint8_t)((tos & 15) << 4); l4 = 14 + 40;
+        f[18] = (uint8_t)((32 + payload) >> 8); f[19] = (uint8_t)(32 + payload); f[20] = 6; f[21] = 64;
+    }
+    f[l4] = 0xc3; f[l4 + 1] = 0x50; f[l4 + 2] = 0x14; f[l4 + 3] = 0x51; f[l4 + 12] = 0x80; f[l4 + 13] = (uint8_t)flags;        /* data offset 8 words */
+    return (uint16_t)(l4 + 32 + payload);
+}
+static void test_ecn_counters(void) {
+    uint8_t f[1600];
+    start(); tdongle_l2_link(true);
+    uint16_t n = tcp_frame(f, false, 0x00, 0xc2, 0);        /* SYN, ECE, CWR: an ECN-setup SYN, itself not-ECT, exempt (setup) */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT && tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYN_ECN_SETUP);
+    host_in(f, n); pump();
+    n = tcp_frame(f, false, 0x02, 0x18, 1000);               /* data: PSH|ACK, ECT(0) */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); host_in(f, n); pump();
+    n = tcp_frame(f, false, 0x00, 0x10, 0);                  /* pure ACK: not-ECT */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_NOT_ECT); host_in(f, n); pump();
+    n = tcp_frame(f, false, 0x03, 0x18, 500);                /* already CE */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CE); host_in(f, n); pump();
+    n = tcp_frame(f, true, 0x02, 0x18, 1000);                /* IPv6 data, ECT(0) */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); host_in(f, n); pump();
+    n = tcp_frame(f, true, 0x01, 0x18, 1000);                /* IPv6 data, ECT(1) */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); host_in(f, n); pump();
+    n = tcp_frame(f, true, 0x00, 0xc2, 0); assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYN_ECN_SETUP); host_in(f, n); pump();
+    memset(f, 0, 60); memcpy(f, peer, 6); memcpy(f + 6, mac, 6); f[12] = 0x08; f[13] = 0x06; host_in(f, 60); pump();       /* ARP */
+    tdongle_l2_stats_t s = stats();
+    assert(s.h2w_ecn_capable == 3 && s.h2w_ecn_not_ect == 1 && s.h2w_ecn_ce == 1 && s.h2w_ecn_exempt == 2 && s.h2w_ecn_not_ip == 1 && s.h2w_syn_ecn_setup == 2);
+    /* A SYN-ACK from the server (ECE, no CWR) is counted on the way to the host; one with CWR is not an accept. */
+    n = tcp_frame(f, false, 0x00, 0x52, 0);                  /* SYN|ACK|ECE */
+    assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYNACK_ECN_ACCEPT);
+    memcpy(f, mac, 6); memcpy(f + 6, peer, 6);
+    wifi_in(f, n);
+    n = tcp_frame(f, false, 0x00, 0xd2, 0);                  /* SYN|ACK|ECE|CWR */
+    assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_OTHER);
+    assert(stats().w2h_synack_ecn == 1);
+    /* IPv4 with options: the TCP header starts after the longer IP header, and everything is still found. */
+    n = tcp_frame(f, false, 0x02, 0x18, 100);
+    memmove(f + 14 + 24, f + 14 + 20, n - 14 - 20); memset(f + 14 + 20, 0, 4); f[14] = 0x46; n += 4;
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE);
+    f[14 + 24 + 13] = 0xc2; assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYN_ECN_SETUP);
     check_identities();
 }
 
@@ -624,6 +719,8 @@ int main(void) {
     test_rx_race();
     test_tuning();
     test_codel();
+    test_busy_period();
+    test_ecn_counters();
     test_room_wait_stats();
     test_tick_scale();
     free(l2.slots);

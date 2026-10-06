@@ -163,3 +163,25 @@ static inline void tdongle_ecn_mark_ce(uint8_t *f) {
         f[15] = (uint8_t)(f[15] | 0x30u);                                              /* ECN bits are bits 5..4 of the second byte of the header */
     }
 }
+
+/* ECN negotiation, for diagnosis (the board's first CoDel sweep marked nothing: was ECN ever negotiated through this path?). RFC 3168: an initiator asks with
+ * SYN+ECE+CWR, a server that accepts answers SYN+ACK+ECE (CWR clear). Anything else: 0. IPv4 and IPv6 without extension headers. */
+typedef enum { TDONGLE_TCP_OTHER = 0, TDONGLE_TCP_SYN_ECN_SETUP, TDONGLE_TCP_SYNACK_ECN_ACCEPT } tdongle_tcp_ecn_syn_t;
+static inline tdongle_tcp_ecn_syn_t tdongle_tcp_ecn_syn(const uint8_t *f, uint16_t len) {
+    if (len < 14u) return TDONGLE_TCP_OTHER;
+    const unsigned type = ((unsigned)f[12] << 8) | f[13];
+    unsigned flags;
+    if (type == 0x0800 && len >= 14u + 20u && (f[14] >> 4) == 4) {
+        const unsigned ihl = (unsigned)(f[14] & 0x0f) * 4u;
+        if (ihl < 20u || f[23] != 6 || 14u + ihl + 14u > len || (((f[20] & 0x1f) << 8) | f[21])) return TDONGLE_TCP_OTHER;
+        flags = f[14 + ihl + 13];
+    } else if (type == 0x86dd && len >= 14u + 40u + 14u && (f[14] >> 4) == 6 && f[20] == 6) {
+        flags = f[14 + 40 + 13];
+    } else {
+        return TDONGLE_TCP_OTHER;
+    }
+    const bool syn = flags & 0x02, ack = flags & 0x10, ece = flags & 0x40, cwr = flags & 0x80;
+    if (syn && !ack && ece && cwr) return TDONGLE_TCP_SYN_ECN_SETUP;
+    if (syn && ack && ece && !cwr) return TDONGLE_TCP_SYNACK_ECN_ACCEPT;
+    return TDONGLE_TCP_OTHER;
+}

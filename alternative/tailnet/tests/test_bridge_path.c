@@ -513,20 +513,20 @@ static void test_status_lines(void) {
     /* The serial lines: one per section, every field present (none was dropped for length), each line within the buffer, none an old line. */
     serial_used = 0; serial_out[0] = 0;
     bridge_status_lines();
-    static const char *const sections[] = {"link", "to_host", "to_wifi", "rx_class", "usb_ring", "timing", "wifi_tx"};
+    static const char *const sections[] = {"link", "to_host", "to_wifi", "ecn", "rx_class", "usb_ring", "timing", "wifi_tx"};
     unsigned lines = 0, fields = 0;
     for (char *line = serial_out; *line;) {
         char *end = strstr(line, "\r\n");
         assert(end && (size_t)(end - line) < BRIDGE_LINE_MAX - 2);
-        assert(!strncmp(line, "bridge_", 7) && lines < 7 && !strncmp(line + 7, sections[lines], strlen(sections[lines])));
+        assert(!strncmp(line, "bridge_", 7) && lines < 8 && !strncmp(line + 7, sections[lines], strlen(sections[lines])));
         for (char *p = line; p < end; p++) if (*p == '=') fields++;
         lines++;
         line = end + 2;
     }
-    assert(lines == 7 && fields == seen_n);
+    assert(lines == 8 && fields == seen_n);
     assert(strstr(serial_out, "bridge_to_host frames=") && strstr(serial_out, " ring_full=") && strstr(serial_out, " last_tx_error=") && strstr(serial_out, "bridge_wifi_tx installed=1"));
     /* The diagnostics report, built the way memory_diagnostics.inc builds it, is the same set. */
-    assert(seen_n == 3 + 8 + 20 + 9 + 12 + 15 + 12);
+    assert(seen_n == 3 + 8 + 20 + 7 + 9 + 12 + 15 + 12);
 }
 
 
@@ -537,23 +537,23 @@ static void test_bridge_tune(void) {
     restart_sequences();
     wifi_connect();
     tune("");
-    assert(strstr(serial_out, "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=0 target_us=5000 interval_ms=100") &&
-           strstr(serial_out, "bridgetune_bounds q=1..8 resume=0..q-1 inflight=4..16 ring=0..12 sojourn_ms=5..190 codel=0..1 target_us=500..50000 interval_ms=20..1000"));
-    tune("q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50");
-    assert(strstr(serial_out, "bridgetune q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50") && !strstr(serial_out, "ERR"));
+    assert(strstr(serial_out, "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=0 target_us=5000 interval_ms=100 idle_us=6000") &&
+           strstr(serial_out, "bridgetune_bounds q=1..8 resume=0..q-1 inflight=4..16 ring=0..12 sojourn_ms=5..190 codel=0..1 target_us=500..50000 interval_ms=20..1000 idle_us=500..50000"));
+    tune("q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50 idle_us=4000");
+    assert(strstr(serial_out, "bridgetune q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50 idle_us=4000") && !strstr(serial_out, "ERR"));
     tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
     assert(t.queue_limit == 5 && t.resume_depth == 2 && t.sojourn_ms == 60 && t.codel && t.codel_target_us == 3000 && t.codel_interval_ms == 50 &&
            wifi_pins_tx_limit_now() == 8 && tinyusb_net_tx_ring_max_chunks() == 3);
     assert(ring_stats().max_bytes == (BRIDGE_RING_BASE + 3 * TINYUSB_NET_TX_CHUNK_SLABS) * TINYUSB_NET_TX_SLAB_BYTES);
     /* Partial commands change only what they name. */
     tune("inflight=5");
-    assert(strstr(serial_out, "q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50"));
+    assert(strstr(serial_out, "q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50 idle_us=4000"));
     /* Every rejection leaves everything as it was, even when only one field is bad. */
     const char *bad[] = {"q=0", "q=9", "resume=5", "inflight=3", "inflight=17", "ring=13", "sojourn_ms=4", "sojourn_ms=191", "codel=2", "target_us=499", "target_us=50001",
-                         "interval_ms=19", "interval_ms=1001", "q=2 sojourn_ms=1", "q=2 codel=1 interval_ms=5", "bogus=1", "prio=1", "q", "q=", "q=x", "=3", "q=3 q"};
+                         "interval_ms=19", "interval_ms=1001", "idle_us=499", "idle_us=50001", "q=2 sojourn_ms=1", "q=2 codel=1 interval_ms=5", "bogus=1", "prio=1", "q", "q=", "q=x", "=3", "q=3 q"};
     for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         tune(bad[i]);
-        assert(strstr(serial_out, "ERR bridgetune:") && strstr(serial_out, "bridgetune q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50"));
+        assert(strstr(serial_out, "ERR bridgetune:") && strstr(serial_out, "bridgetune q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50 idle_us=4000"));
         tdongle_l2_get_tuning(&t);
         assert(t.queue_limit == 5 && t.sojourn_ms == 60 && t.codel_target_us == 3000 && wifi_pins_tx_limit_now() == 5 && tinyusb_net_tx_ring_max_chunks() == 3);
     }
@@ -661,7 +661,7 @@ static void soak(unsigned seed, long total, bool dfs, unsigned steps, unsigned t
         else if (rnd(3) == 0) {                         /* any tuning, within bounds, mid-flight */
             bridge_tune_t t = {.q = 1 + rnd(TDONGLE_L2_HOST_SLOTS), .inflight = GATEWAY_WIFI_TX_BAND_MAX + rnd(GATEWAY_WIFI_TX_POOL - GATEWAY_WIFI_TX_BAND_MAX + 1),
                                .ring = rnd(TINYUSB_NET_TX_MAX_CHUNKS + 1), .sojourn_ms = TDONGLE_L2_SOJOURN_MS_MIN + rnd(TDONGLE_L2_SOJOURN_MS_MAX - TDONGLE_L2_SOJOURN_MS_MIN + 1),
-                               .codel = rnd(2), .target_us = TDONGLE_L2_CODEL_TARGET_US_MIN + rnd(5000), .interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MIN + rnd(200)};
+                               .idle_us = TDONGLE_L2_HOST_IDLE_US_MIN + rnd(10000), .codel = rnd(2), .target_us = TDONGLE_L2_CODEL_TARGET_US_MIN + rnd(5000), .interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MIN + rnd(200)};
             t.resume = rnd(t.q);
             assert(bridge_tune_apply(&t) == NULL);
         }           /* a USB reset: the class driver forgets what it held */

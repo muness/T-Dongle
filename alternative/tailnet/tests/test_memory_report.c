@@ -137,12 +137,12 @@ void tdongle_l2_stats(tdongle_l2_stats_t *s) {
     *s = (tdongle_l2_stats_t){.linked = true, .link_changes = 5, .worker_stack_free = 1900,
         .w2h_frames = 100, .w2h_forwarded = 90, .w2h_invalid = 2, .w2h_own_mac = 3, .w2h_link_down = 1, .w2h_usb_not_ready = 1, .w2h_ring_full = 3, .w2h_raced = 1, .pm_notes = 50, .pm_note_us_sum = 900, .pm_note_us_max = 400, .h2w_wait_us_sum = 5000, .h2w_wait_us_max = 800, .h2w_tx_us_sum = 3000, .h2w_tx_us_max = 120,
         .h2w_frames = 76, .h2w_queued = 70, .h2w_invalid = 1, .h2w_foreign_mac = 2, .h2w_link_down = 3, .h2w_held = 9, .h2w_resumes = 8,
-        .h2w_codel_signals = 9, .h2w_ce_marked = 5, .h2w_codel_drop = 4, .h2w_codel_count = 3, .h2w_signal_us_sum = 40000, .h2w_signal_us_max = 12000, .h2w_room_waits = 7, .h2w_room_wait_us_sum = 7000, .h2w_room_wait_us_max = 1500, .h2w_sent = 58, .h2w_stale = 4, .h2w_sojourn_drop = 2, .h2w_link_down_queued = 2, .h2w_tx_failed = 3, .h2w_tx_retries = 11, .h2w_last_tx_error = -1,
+        .h2w_ecn_not_ect = 11, .h2w_ecn_capable = 22, .h2w_ecn_ce = 3, .h2w_ecn_exempt = 4, .h2w_ecn_not_ip = 5, .h2w_syn_ecn_setup = 2, .w2h_synack_ecn = 1, .h2w_codel_signals = 9, .h2w_ce_marked = 5, .h2w_codel_drop = 4, .h2w_codel_count = 3, .h2w_signal_us_sum = 40000, .h2w_signal_us_max = 12000, .h2w_room_waits = 7, .h2w_room_wait_us_sum = 7000, .h2w_room_wait_us_max = 1500, .h2w_sent = 58, .h2w_stale = 4, .h2w_sojourn_drop = 2, .h2w_link_down_queued = 2, .h2w_tx_failed = 3, .h2w_tx_retries = 11, .h2w_last_tx_error = -1,
         .h2w_queue_depth = 1, .h2w_queue_high_water = 9};
 }
 /* the run-time knobs (bridgetune): the setters the command calls */
 #define GATEWAY_BRIDGE_TUNE 1
-static tdongle_l2_tuning_t tuning = {.queue_limit = 3, .resume_depth = 1, .sojourn_ms = 100, .codel = false, .codel_target_us = 5000, .codel_interval_ms = 100};
+static tdongle_l2_tuning_t tuning = {.queue_limit = 3, .resume_depth = 1, .sojourn_ms = 100, .codel = false, .codel_target_us = 5000, .codel_interval_ms = 100, .host_idle_us = 6000};
 esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *t) { tuning = *t; return ESP_OK; }
 void tdongle_l2_get_tuning(tdongle_l2_tuning_t *t) { *t = tuning; }
 static unsigned ring_chunks = 10;
