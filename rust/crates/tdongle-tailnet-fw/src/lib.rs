@@ -7,8 +7,8 @@
 //! ```text
 //!  firmware image                                   tailnet runtime
 //!  --------------                                   ---------------
-//!  implements  Platform, Storage, UsbFrames,   -->  tdongle_tailnet_runtime::run(...)   (one async fn: spawn it on the thread executor)
-//!              WifiLink (embassy-net-driver)
+//!  implements  Platform, Storage, UsbFrames,   -->  Shared::new(platform, storage, ..) in a StaticCell, then
+//!              WifiLink (embassy-net-driver)        tdongle_tailnet_runtime::run(shared, net, usb, wifi)  (one async fn: spawn it on the thread executor)
 //!  calls       dyn TailnetApi  <------------------  registered by the runtime (`Registry::api()`), usable from the HTTP server and the console
 //! ```
 //!
@@ -17,7 +17,7 @@
 //! 1. Boot exactly as for bridge mode (rule 13: USB and console first, rescue `arm()` first, watchdogs, safe mode). Tailnet mode must not be reachable
 //!    from safe mode.
 //! 2. `Mode::Tailnet` replaces `Mode::WifiBridge` in the mode enum; the NVS `mode` byte is the C's (`tn_settings/mode`), see [`Mode`].
-//! 3. Build the pieces below, then `spawn(tdongle_tailnet_runtime::run(platform, storage, usb, wifi, &SHARED))`. The runtime never blocks the executor
+//! 3. Build the pieces below. `Platform` and `Storage` are moved into `Shared` (so the synchronous `TailnetApi` can reach them from any task), then `spawn(tdongle_tailnet_runtime::run(shared, net, usb, wifi))`. The runtime never blocks the executor
 //!    and never calls a radio function from interrupt context; the Wi-Fi driver's own task keeps running in the image.
 //! 4. The setup page's member actions and `/status` go through [`TailnetApi`], serial lines through [`TailnetApi::serial_command`]; the image only
 //!    carries bytes.
@@ -106,6 +106,10 @@ pub trait UsbFrames {
     fn set_carrier(&mut self, up: bool);
 }
 
+/// **Documentation of the Wi-Fi contract; the runtime does not bound on it.** The runtime consumes the radio through its own `net_embassy::LinkGen` (the
+/// association generation) and `wifi::WifiRaw` (`tdongle-tailnet-wifimux`, the NAPT passthrough); implement this trait on the firmware's driver wrapper
+/// if it helps, then adapt it to those two.
+///
 /// The Wi-Fi station as an Ethernet-medium `embassy-net-driver` (frames in and out with the STA MAC), plus the link facts the runtime needs. The image
 /// owns association, roaming, ranking and the saved networks; the runtime only uses the data path.
 pub trait WifiLink: embassy_net_driver::Driver {

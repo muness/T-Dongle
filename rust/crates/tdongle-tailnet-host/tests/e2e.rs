@@ -656,6 +656,7 @@ fn direct_path_falls_back_to_derp_after_the_trust_lapses() {
     println!("direct -> DERP: first echo through the relay {:.1}s after the UDP cut (trust 60 s); direct sends before the cut: {d0}", first_ok.as_secs_f64());
     assert!(first_ok < Duration::from_secs(90), "the fallback took {first_ok:?}");
     assert!(gw.sent().0 > derp_before, "the packets went through DERP");
-    assert_eq!(gw.member_status(id).unwrap().direct_paths, 0);
+    // the per-peer pass that clears the direct flag runs once a second (the C's `disco_periodic_probes`): allow for one tick
+    wait_until("direct flag cleared by the next tick", 5, || gw.member_status(id).unwrap().direct_paths == 0);
     gw.check_engine();
 }

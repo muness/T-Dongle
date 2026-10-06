@@ -33,4 +33,40 @@ The specification is the C implementation: `alternative/tailnet/components/micro
 
 Every parser has a proptest and a deterministic mini-fuzz in `cargo test` and a libfuzzer target (`rust/fuzz`); all are `#![forbid(unsafe_code)]`.
 
-(The decisions below, the interop results and the per-membership RAM table follow.)
+## Decisions
+
+1. **One engine, sans-IO; one set of async tasks for every membership.** The C's thread per control task, shared net/DERP/wg tasks and stacks become one joined embassy future (`tdongle-tailnet-runtime`). Stacks are gone, so per-membership RAM is buffers, futures and records, not stacks.
+2. **No heap in the runtime.** Everything is a static or part of the one joined future; admission compares the C's dynamic requirement (16,384 + 13,500 + 2,800 B) with the free heap the image still has, and `charge_static_bytes` exists for the conservative reading.
+3. **One shared 16,640 B TLS record lease** for all DERP connections, serialised by the negotiation token (phase B), as the C's single 17,408 B block floor.
+4. **The seam is `tdongle-tailnet-fw`**: `Platform`, `Storage`, `UsbFrames` in; `TailnetApi` out (`Shared` implements it). The image carries bytes only.
+5. **Backpressure, not loss** (ADR 0023 of the Rust port): the runtime stops reading sockets and the host's USB endpoint rather than dropping what it accepted.
+6. **Divergences from the C** are listed in the runtime crate docs (no STUN probe before the first negotiation, split stop, IPv4 only, one workspace per slot until the diet lands).
+
+## Interop (M-host, real Tailscale code)
+
+`rust/tools/tailnet-interop` is a Go program built on Tailscale's own `testcontrol` (control, ts2021 Noise over HTTP/2 on :80), `derpserver` behind a self-signed TLS listener (the DERP node advertised with a `sha256-raw` pin), a `stun` responder and optional `tsnet` nodes. The Rust gateway (runtime + engine over a tokio `Net`, a fake USB host and a fake Wi-Fi) runs against it:
+
+* `interop_ts2021`: `/key`, ts2021 upgrade, register (with and without auth key), streaming map, endpoint update, keepalive, server-dropped stream, wrong control key (clean Noise failure).
+* `e2e` (12 tests, ~170 s in one run): DERP-only end to end (DHCP, DNS alias, MagicDNS, TCP echo through WireGuard to a real tsnet peer), direct path discovery and move, throughput over DERP and direct, two memberships on two control servers, PeersChanged/Removed deltas, member actions under traffic without leaks, Wi-Fi bounce, control restart, STUN endpoint report, direct to DERP fallback after the 60 s trust lapses, admission refusals, passthrough without a membership, and a soak (100 s default, `TAILNET_SOAK_SECS=600` for ten minutes; the 600 s run held its model heap floor, queue high-water marks and RSS flat).
+
+## RAM
+
+Static RAM of the runtime, xtensa build (M-elf from `-Zprint-type-sizes`, `size-table.sh`; M-host where marked). **Before the diet:**
+
+| Item | Bytes |
+|---|---|
+| control + DERP + UDP futures, per membership | 4,568 + 17,600 + 3,632 |
+| `Slot` static (ctl `Workspace` 19,928, UDP queue, DERP queue, status 1,152, identity 352) | 26,832 |
+| engine `Member<8>` record (M-host) | 9,752 |
+| embassy socket buffers (`GatewayBuffers::PER_MEMBER`) | 23,744 |
+| **per membership** | **about 86,100** |
+| fixed: `Shared` without slots/engine members, joined fixed futures, DNS socket buffers | about 80,300 |
+| TLS record lease (shared, inside `Shared`) | 16,668 |
+| **N = 1 / 2 / 3** | **166 KB / 253 KB / 339 KB** |
+
+The C measured on the board (ADR 0013): first membership 62.9 KB, each further 39.4 KB, about 107 KB free after boot, and N = 2 did not fit. The first Rust cut is therefore over the C by 2.2x per membership and cannot share DRAM with the bridge image's 182 KB `.bss` and 192 KB heap. This is a measured defect of the first cut, not a design limit: the `ctl` workspace (one per slot for a long poll that never ends), the DERP future (TLS handshake staging per slot although the token already serialises phase B), the TCP windows and the engine's resident per-peer state are all poolable. The diet results follow; N = 2 and N = 3 projections are computed from them against the heap floor (29,884 B).
+
+Projection rule (EST until measured on the board): free DRAM after the image's own `.bss` and Wi-Fi heap use `F` must satisfy `static(N) + heap floor 29,884 + Wi-Fi/USB heap <= F`; `static(N) = fixed + N * per_membership`.
+
+(RAM diet results, board measurements and the final N = 2 / N = 3 table are appended below as they are measured.)
+
