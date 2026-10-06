@@ -776,6 +776,39 @@ static void test_link_loss(void) {
     assert(delivered_frames == 1);
 }
 
+/* tinyusb_net_tx_ring_flush(): the producer's own source changed (the transparent bridge's Wi-Fi link). Queued frames are stale, frames queued
+ * after the call are not, and it never blocks. */
+static void test_producer_flush(void) {
+    ring_reset(cfg_with(3, 10));
+    ntb_credit = 0; grow_to(6); pump();
+    assert(s_tx.frames_queued == 6 && s_tx.gen == 0);
+    uint32_t flushed = s_tx.flushed;
+    notify_count = 0;
+    in_producer = 1;                                     /* the bridge calls it from its event task: it must not wait or defer */
+    tinyusb_net_tx_ring_flush();
+    in_producer = 0;
+    assert(s_tx.gen == 1 && notify_count == 1);          /* the generation moved and the worker was woken to flush */
+    ntb_credit = -1;
+    delivered_seq = next_seq;                            /* the stale frames are never observed */
+    assert(send_len(300) == ESP_OK);                     /* a frame after the call carries the new generation */
+    pump(); in_complete(); pump();
+    assert(delivered_frames == 1 && s_tx.flushed == flushed + 6 && s_tx.frames_queued == 0);
+    check_pm(); check_invariants();
+    /* On an empty ring it is harmless; frames after it are delivered. */
+    tinyusb_net_tx_ring_flush();
+    delivered_seq = next_seq;
+    assert(send_len(300) == ESP_OK);
+    pump(); in_complete(); pump();
+    assert(delivered_frames == 2 && s_tx.gen == 2 && s_tx.flushed == flushed + 6);
+    /* A stopped ring ignores it. */
+    tinyusb_net_deinit();
+    uint16_t gen = s_tx.gen;
+    tinyusb_net_tx_ring_flush();
+    assert(s_tx.gen == gen);
+    tinyusb_net_config_t ncfg = {.free_tx_buffer = released_ring};
+    assert(tinyusb_net_init(&ncfg) == ESP_OK);
+}
+
 #if CONFIG_PM_ENABLE
 /* The CPU-frequency lock follows the queue: acquired by the worker after the first frame, released by the worker
  * after the last one left, never doubled, and not touched by producer or consumer. */
@@ -1089,6 +1122,7 @@ int main(void) {
     test_exactly_once_and_triggers();
     test_sync_and_ring_share_the_pipe();
     test_link_loss();
+    test_producer_flush();
     test_drain_evidence_and_priority();
 #if CONFIG_PM_ENABLE
     test_pm_lock();

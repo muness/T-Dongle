@@ -234,6 +234,16 @@ void tinyusb_net_tx_elastic_kick(void);
 /** @brief The USB link went away (detach): frames queued so far are stale and are flushed. Any task context. */
 void tinyusb_net_tx_ring_link_down(void);
 
+/**
+ * @brief The source of the queued frames changed (the bridge's Wi-Fi link dropped or came back): discard what is queued
+ *
+ * Bumps the link generation (the mechanism a USB detach uses): frames committed before this call are discarded by the next drain,
+ * counted in `flushed_link_down`, and never reach the host; frames committed after it are unaffected. Never blocks, any task
+ * context. A frame being committed concurrently with the call may fall on either side, which is the right answer for a frame that
+ * was received while the link was changing.
+ */
+void tinyusb_net_tx_ring_flush(void);
+
 /** @brief Snapshot the transmit-ring counters */
 void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out);
 

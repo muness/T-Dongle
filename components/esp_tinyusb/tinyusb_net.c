@@ -179,7 +179,8 @@ esp_err_t tinyusb_net_send_sync(void *buffer, uint16_t len, void *buff_free_arg,
  *   The producer, tinyusb_net_tx_ring_link_down() and the worker bump the
  *   generation the first time they find USB not ready, so frames queued before
  *   a cable pull are discarded by the next drain instead of being delivered to
- *   the next host.
+ *   the next host. tinyusb_net_tx_ring_flush() is the same bump requested by the
+ *   producer's own side (the transparent bridge's Wi-Fi link changed).
  * - Full ring: no free slab and no room in the open one: the new frame is
  *   dropped and counted (tail drop); lwIP/TCP treat it as ordinary loss.
  * - Drain triggers, both in the TinyUSB task: a deferred do_drain requested by
@@ -731,6 +732,17 @@ void tinyusb_net_tx_ring_link_down(void)
     if (s_tx.worker && atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {
         tx_note_link_down();
         xTaskNotifyGive(s_tx.worker);       // the worker queues a drain, which discards the stale frames
+    }
+}
+
+/* The path the frames come from changed (the transparent bridge's Wi-Fi association dropped or came back): everything queued so far
+ * belongs to the previous one. The same generation mechanism as a USB detach, requested by the producer's own side instead of
+ * discovered by it: bump the generation and let the worker queue a drain, which discards the older records (counted as flushed). */
+void tinyusb_net_tx_ring_flush(void)
+{
+    if (s_tx.worker && atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {
+        atomic_fetch_add_explicit(&s_tx.gen, 1, memory_order_release);
+        xTaskNotifyGive(s_tx.worker);
     }
 }
 

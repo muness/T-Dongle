@@ -23,7 +23,11 @@ typedef uint32_t TickType_t;
 #define BIT0 1
 #define pdTRUE 1
 #define portMAX_DELAY ((TickType_t)0xFFFFFFFFu)
-#define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
+/* The tick the host tests model: 1 ms by default, 10 ms (CONFIG_FREERTOS_HZ=100, the firmware's) with -DTEST_TICK_MS=10. */
+#ifndef TEST_TICK_MS
+#define TEST_TICK_MS 1
+#endif
+#define pdMS_TO_TICKS(ms) ((TickType_t)((ms) / TEST_TICK_MS))
 #define ESP_RETURN_ON_FALSE(a,e,...) do {if(!(a))return e;}while(0)
 #define ESP_LOGW(...) do { assert(!in_crit); } while (0)
 typedef void *TaskHandle_t;
