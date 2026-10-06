@@ -24,6 +24,7 @@ embassy-usb-synopsys-otg = "0.4"
 tdongle-usb-out = { path = "../../crates/tdongle-usb-out" }
 
 [patch.crates-io]
+esp-hal = { path = "../../vendor/esp-hal" }
 embassy-usb-synopsys-otg = { path = "../../vendor/embassy-usb-synopsys-otg" }
 
 [features]

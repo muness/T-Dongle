@@ -46,6 +46,7 @@ esp-storage = { version = "0.10", features = ["esp32s3", "embedded-storage"] }
 embedded-storage = "0.3"
 
 [patch.crates-io]
+esp-hal = { path = "../../vendor/esp-hal" }
 embassy-usb-synopsys-otg = { path = "../../vendor/embassy-usb-synopsys-otg" }
 
 [features]

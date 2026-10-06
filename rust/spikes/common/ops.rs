@@ -20,6 +20,7 @@ pub fn enter_bootloader() -> ! {
     const RTC_CNTL_OPTION1_REG: *mut u32 = (0x6000_8000usize + 0x12C) as *mut u32;
     // SAFETY: fixed, always-mapped RTC_CNTL register on the ESP32-S3 (TRM RTC_CNTL_OPTION1_REG); read-modify-write of one bit, single task.
     unsafe { RTC_CNTL_OPTION1_REG.write_volatile(RTC_CNTL_OPTION1_REG.read_volatile() | 1) };
+    tdongle_rescue::disarm();
     esp_hal::system::software_reset()
 }
 

@@ -270,6 +270,8 @@ pub fn boot_status<W: Write>(out: &mut W) {
         stage: crate::guard::current_stage().name(),
         previous_stage,
         previous_panic: state.map_or("", |s| s.boot.previous.panic_text()),
+        rwdt: crate::rescue::rwdt_snapshot(),
+        supervisor: crate::rescue::supervisor_stats(),
         rescue_state: rescue.state,
         rescue_count: rescue.count,
         previous_hang: state.map_or("", |s| s.boot.previous.hang.as_str()),

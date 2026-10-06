@@ -161,3 +161,48 @@ fn the_test_plan_of_the_board_in_the_model() {
     w = armed_word(h);
     assert_eq!(bootloader_decision(w, false), BootDecision::DownloadMode, "the second selftest in a row lands in ROM mode");
 }
+
+mod rwdt_registers {
+    use tdongle_rescue::rwdt::*;
+
+    #[test]
+    fn the_value_written_to_wdtconfig0_is_exactly_this() {
+        // EN | STG0=3 | CPU_RESET_LENGTH=7 | SYS_RESET_LENGTH=7 | PROCPU_RESET_EN | APPCPU_RESET_EN | PAUSE_IN_SLP, everything else 0
+        assert_eq!(config0(Action::ResetDigital), 0xB007_EE00);
+    }
+
+    #[test]
+    fn stage_actions_and_their_scope() {
+        assert_eq!(config0(Action::ResetIncludingRtc), 0x8000_0000 | (4 << 28) | 0x0007_EE00);
+        assert_eq!(config0(Action::ResetIncludingRtc), 0xC007_EE00);
+        assert!(Action::ResetDigital.keeps_rtc() && !Action::ResetIncludingRtc.keeps_rtc());
+        assert_eq!(Action::ResetDigital.reset_reason(), Some(9), "RTCWDT_SYS_RESET");
+        assert_eq!(Action::ResetIncludingRtc.reset_reason(), Some(16), "RTCWDT_RTC_RESET: what the first two releases produced (SysRtcWdt)");
+        assert_eq!(Action::from_config0(0xB007_EE00), Some(Action::ResetDigital));
+    }
+
+    #[test]
+    fn what_boot_status_will_show_for_each_armed_state() {
+        let good = Snapshot { config: [config0(Action::ResetDigital), 1_000_000, 0, 0, 0] };
+        assert!(good.enabled() && good.safe_for_rescue() && !good.flashboot());
+        // the esp-hal `enable()` clobber: it rewrites WDTCONFIG0 with stage 0 = 4 whatever was set before
+        let clobbered = Snapshot { config: [config0(Action::ResetIncludingRtc), 1_000_000, 0, 0, 0] };
+        assert!(clobbered.enabled() && !clobbered.safe_for_rescue());
+        // disabled (what `esp_hal::init` did) and flash-boot protection still on (before the bootloader clears it)
+        assert!(!Snapshot { config: [0, 0, 0, 0, 0] }.safe_for_rescue());
+        assert!(Snapshot { config: [config0(Action::ResetDigital) | (1 << 12), 0, 0, 0, 0] }.flashboot());
+        // an action that does not reset is not a rescue
+        assert!(!Snapshot { config: [config0(Action::Interrupt), 0, 0, 0, 0] }.safe_for_rescue());
+        assert_eq!(RTC_CNTL_BASE + WDTCONFIG0, 0x6000_8098);
+        assert_eq!(RTC_CNTL_BASE + WDTWPROTECT, 0x6000_80B0);
+        assert_eq!(RTC_CNTL_BASE + STORE0, 0x6000_8050);
+    }
+
+    #[test]
+    fn the_only_selftest_visible_difference_between_the_two_actions_is_the_scope() {
+        for a in [Action::ResetDigital, Action::ResetIncludingRtc] {
+            assert!(a.reset_reason().is_some());
+        }
+        assert_eq!(config0(Action::ResetDigital) ^ config0(Action::ResetIncludingRtc), (3 ^ 4) << 28);
+    }
+}

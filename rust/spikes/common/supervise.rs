@@ -25,6 +25,15 @@ pub static CONSOLE_FROZEN: AtomicBool = AtomicBool::new(false);
 /// A spawner of the thread executor, for `selftest spin`.
 pub static THREAD_SPAWNER: OnceLock<SendSpawner> = OnceLock::new();
 
+/// The supervisor's own counters (`boot-status` `sup`): a supervisor that stopped, or one that never feeds, shows here without a debugger.
+pub static SUP_TICKS: AtomicU32 = AtomicU32::new(0);
+pub static SUP_FEEDS: AtomicU32 = AtomicU32::new(0);
+
+/// `[ticks, feeds, thread pulse, console pulse]`.
+pub fn stats() -> [u32; 4] {
+    [SUP_TICKS.load(Ordering::Relaxed), SUP_FEEDS.load(Ordering::Relaxed), PULSE_THREAD.load(Ordering::Relaxed), PULSE_CONSOLE.load(Ordering::Relaxed)]
+}
+
 /// The console task calls this at the top of its loop: it proves the console is polled, and `selftest console` parks it for good.
 pub async fn console_alive() {
     PULSE_CONSOLE.fetch_add(1, Ordering::Relaxed);
@@ -56,9 +65,11 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
     let mut marked = false;
     loop {
         let now = Instant::now().as_millis();
+        SUP_TICKS.fetch_add(1, Ordering::Relaxed);
         match watch.check(now, [PULSE_THREAD.load(Ordering::Relaxed), PULSE_CONSOLE.load(Ordering::Relaxed)]) {
             Verdict::Healthy => {
                 dogs.feed();
+                SUP_FEEDS.fetch_add(1, Ordering::Relaxed);
                 if healthy.observe(now, USB_CONFIGURED.load(Ordering::Relaxed)) && !marked {
                     tdongle_rescue::mark_healthy();
                     guard::mark_stable(safe_mode);

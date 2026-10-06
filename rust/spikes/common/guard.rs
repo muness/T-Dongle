@@ -136,6 +136,8 @@ pub fn boot_status<W: Write>(w: &mut W, firmware: &str, elf: &[u8; 32], state: &
             previous_panic: state.boot.previous.panic_text(),
             previous_hang: state.boot.previous.hang.as_str(),
             previous_op: state.boot.previous.op.as_str(),
+            rwdt: tdongle_rescue::rwdt_snapshot().config,
+            supervisor: crate::supervise::stats(),
             rescue_state: rescue.state,
             rescue_count: rescue.count,
             safe_mode: state.boot.safe_mode,

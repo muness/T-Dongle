@@ -13,6 +13,8 @@
 #![cfg_attr(not(feature = "hal"), forbid(unsafe_code))]
 #![deny(missing_docs)]
 
+pub mod rwdt;
+
 /// The marker in the top half of the word.
 pub const MAGIC: u32 = 0xD0E5;
 /// The app has started and has not yet proven itself.
@@ -216,4 +218,4 @@ pub fn bootloader_decision(store0: u32, power_on: bool) -> BootDecision {
 #[cfg(feature = "hal")]
 mod hw;
 #[cfg(feature = "hal")]
-pub use hw::{arm, deliberate_reset, demote, feed, irqoff, mark_healthy, report, spin};
+pub use hw::{arm, deliberate_reset, demote, disarm, feed, irqoff, mark_healthy, report, rwdt_snapshot, spin};

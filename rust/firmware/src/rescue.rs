@@ -17,6 +17,8 @@ static HANDED_COUNT: AtomicU32 = AtomicU32::new(0);
 static STATE: AtomicU32 = AtomicU32::new(0);
 static PULSE_MAIN: AtomicU32 = AtomicU32::new(0);
 static PULSE_CONSOLE: AtomicU32 = AtomicU32::new(0);
+static SUP_TICKS: AtomicU32 = AtomicU32::new(0);
+static SUP_FEEDS: AtomicU32 = AtomicU32::new(0);
 static CONSOLE_FROZEN: AtomicBool = AtomicBool::new(false);
 
 fn read() -> u32 {
@@ -53,6 +55,18 @@ pub fn arm() {
     });
 }
 
+/// Switch the RTC watchdog off before a deliberate entry into ROM download mode: the loader must not be reset by a watchdog armed for the app.
+pub fn disarm() {
+    with_rwdt(|ctx| {
+        // SAFETY: as in `arm`.
+        unsafe {
+            sys::wdt_hal_write_protect_disable(ctx);
+            sys::wdt_hal_disable(ctx);
+            sys::wdt_hal_write_protect_enable(ctx);
+        }
+    });
+}
+
 /// `RWDT_HAL_CONTEXT_DEFAULT()`: the RTC watchdog context.
 fn with_rwdt(f: impl FnOnce(*mut sys::wdt_hal_context_t)) {
     // SAFETY: a zeroed context is initialised below to the RTC watchdog instance and the RTC_CNTL register block, exactly as the macro does.
@@ -72,6 +86,21 @@ fn feed() {
             sys::wdt_hal_write_protect_enable(ctx);
         }
     });
+}
+
+/// What the RTC watchdog really has configured (`WDTCONFIG0..4`), for `boot-status`.
+pub fn rwdt_snapshot() -> [u32; 5] {
+    let mut config = [0u32; 5];
+    for (i, c) in config.iter_mut().enumerate() {
+        // SAFETY: fixed, always-mapped RTC_CNTL registers; plain volatile reads.
+        *c = unsafe { ((tdongle_rescue::rwdt::RTC_CNTL_BASE + tdongle_rescue::rwdt::WDTCONFIG0 + 4 * i) as *const u32).read_volatile() };
+    }
+    config
+}
+
+/// `[ticks, feeds, main pulse, console pulse]` for `boot-status`.
+pub fn supervisor_stats() -> [u32; 4] {
+    [SUP_TICKS.load(Ordering::Relaxed), SUP_FEEDS.load(Ordering::Relaxed), PULSE_MAIN.load(Ordering::Relaxed), PULSE_CONSOLE.load(Ordering::Relaxed)]
 }
 
 /// The manager (main task) made progress.
@@ -124,9 +153,11 @@ fn supervise() {
     let mut marked = false;
     loop {
         let now = u64::from(crate::sys::now_ms());
+        SUP_TICKS.fetch_add(1, Ordering::Relaxed);
         match watch.check(now, [PULSE_MAIN.load(Ordering::Relaxed), PULSE_CONSOLE.load(Ordering::Relaxed)]) {
             Verdict::Healthy => {
                 feed();
+                SUP_FEEDS.fetch_add(1, Ordering::Relaxed);
                 if healthy.observe(now, crate::usb::task::mounted()) && !marked {
                     write(word(HEALTHY, 0));
                     STATE.store(u32::from(HEALTHY), Ordering::Relaxed);

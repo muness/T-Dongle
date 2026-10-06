@@ -32,6 +32,9 @@ esp-storage = { version = "0.10", features = ["esp32s3", "embedded-storage"] }
 embedded-storage = "0.3"
 esp-wifi-sys-esp32s3 = "0.3"
 
+[patch.crates-io]
+esp-hal = { path = "../../vendor/esp-hal" }
+
 [profile.release]
 opt-level = "s"
 lto = "fat"

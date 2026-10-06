@@ -30,6 +30,10 @@ pub struct BootStatus<'a> {
     pub rescue_state: &'a str,
     /// Consecutive unhealthy boots the bootloader counted before this one.
     pub rescue_count: u8,
+    /// `RTC_CNTL_WDTCONFIG0..4` as read back: what the RTC watchdog really has armed.
+    pub rwdt: [u32; 5],
+    /// The supervisor's own counters: checks made, watchdog feeds, and the two heartbeats it sees (`ticks`, `feeds`, `thread`, `console`). A supervisor that stopped shows here.
+    pub supervisor: [u32; 4],
     /// Milliseconds since boot.
     pub uptime_ms: u64,
     /// Free heap in bytes, if the image can tell.
@@ -74,6 +78,19 @@ pub fn write_boot_status<W: Write>(w: &mut W, s: &BootStatus<'_>) -> fmt::Result
     json_str(w, s.previous_hang)?;
     w.write_str(",\"previous_op\":")?;
     json_str(w, s.previous_op)?;
+    write!(
+        w,
+        ",\"rwdt\":{{\"cfg0\":\"{:#010x}\",\"hold\":{},\"cfg2\":\"{:#x}\",\"cfg3\":\"{:#x}\",\"cfg4\":\"{:#x}\",\"enabled\":{},\"action\":{},\"flashboot\":{}}}",
+        s.rwdt[0],
+        s.rwdt[1],
+        s.rwdt[2],
+        s.rwdt[3],
+        s.rwdt[4],
+        s.rwdt[0] >> 31 != 0,
+        (s.rwdt[0] >> 28) & 7,
+        (s.rwdt[0] >> 12) & 1 != 0
+    )?;
+    write!(w, ",\"sup\":{{\"ticks\":{},\"feeds\":{},\"thread\":{},\"console\":{}}}", s.supervisor[0], s.supervisor[1], s.supervisor[2], s.supervisor[3])?;
     write!(w, ",\"rescue\":{{\"state\":")?;
     json_str(w, s.rescue_state)?;
     write!(w, ",\"count\":{}}}", s.rescue_count)?;

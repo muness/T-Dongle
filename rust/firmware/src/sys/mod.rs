@@ -57,6 +57,7 @@ pub fn restart() -> ! {
 /// Reboot into the ROM download mode (`REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT); esp_rom_software_reset_system()`), the
 /// serial `bootloader` command: how `tools/flash.sh` gets a board without the button.
 pub fn reboot_to_rom_download() -> ! {
+    crate::rescue::disarm();
     // SAFETY: RTC_CNTL_OPTION1_REG is a valid, always-mapped RTC control register on the ESP32-S3; setting FORCE_DOWNLOAD_BOOT only changes
     // what the next software reset boots into, and the reset follows immediately.
     unsafe {
