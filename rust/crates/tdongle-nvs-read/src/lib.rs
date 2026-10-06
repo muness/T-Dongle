@@ -193,7 +193,11 @@ enum Want {
     Chunk(u8),
 }
 
+/// Newest-wins order of two items: page sequence number, page, entry.
+type Rank = (u32, u32, usize);
+
 struct Found {
+    rank: Rank,
     item: Item,
     /// Partition offset of the first data entry (the one after the header entry).
     data_at: u32,
@@ -223,7 +227,7 @@ impl<F: Flash> Nvs<F> {
     /// # Errors
     /// [`Error::Flash`] or [`Error::TypeMismatch`].
     pub fn get_u8(&mut self, namespace: &str, key: &str) -> Result<Option<u8>, Error<F::Error>> {
-        let Some(found) = self.lookup(namespace, key)? else { return Ok(None) };
+        let Some(found) = self.lookup(namespace, key, None)? else { return Ok(None) };
         if found.item.ty == T_U8 { Ok(Some(found.item.data[0])) } else { Err(Error::TypeMismatch) }
     }
 
@@ -232,7 +236,7 @@ impl<F: Flash> Nvs<F> {
     /// # Errors
     /// [`Error::Flash`] or [`Error::TypeMismatch`].
     pub fn blob_len(&mut self, namespace: &str, key: &str) -> Result<Option<usize>, Error<F::Error>> {
-        let Some(found) = self.lookup(namespace, key)? else { return Ok(None) };
+        let Some(found) = self.lookup(namespace, key, None)? else { return Ok(None) };
         match found.item.ty {
             T_BLOB => Ok(Some(found.item.var_len())),
             T_BLOB_IDX => Ok(Some(le32(&found.item.data[0..4]) as usize)),
@@ -247,7 +251,24 @@ impl<F: Flash> Nvs<F> {
     /// [`Error::TooSmall`] if `out` is shorter than the blob, [`Error::Corrupt`] if its data fails verification,
     /// [`Error::TypeMismatch`] or [`Error::Flash`].
     pub fn get_blob(&mut self, namespace: &str, key: &str, out: &mut [u8]) -> Result<Option<usize>, Error<F::Error>> {
-        let Some(found) = self.lookup(namespace, key)? else { return Ok(None) };
+        // The newest version can be a write cut in the middle (the C code erases it when it loads the page); the version it was about to
+        // replace is still there then, so an unreadable newest version falls back to the next older one.
+        let mut below = None;
+        let mut failed = false;
+        loop {
+            let Some(found) = self.lookup(namespace, key, below)? else { return if failed { Err(Error::Corrupt) } else { Ok(None) } };
+            let rank = found.rank;
+            match self.blob_at(found, key, out) {
+                Err(Error::Corrupt) => {
+                    below = Some(rank);
+                    failed = true;
+                }
+                other => return other,
+            }
+        }
+    }
+
+    fn blob_at(&mut self, found: Found, key: &str, out: &mut [u8]) -> Result<Option<usize>, Error<F::Error>> {
         match found.item.ty {
             T_BLOB => {
                 let len = found.item.var_len();
@@ -268,7 +289,7 @@ impl<F: Flash> Nvs<F> {
                 let key = key.as_bytes();
                 let mut done = 0usize;
                 for i in 0..count {
-                    let chunk = self.find(ns, key, Want::Chunk(start + i))?.ok_or(Error::Corrupt)?;
+                    let chunk = self.find(ns, key, Want::Chunk(start + i), None)?.ok_or(Error::Corrupt)?;
                     let len = chunk.item.var_len();
                     let end = done.checked_add(len).filter(|&e| e <= total).ok_or(Error::Corrupt)?;
                     let dst = out.get_mut(done..end).ok_or(Error::Corrupt)?;
@@ -287,37 +308,45 @@ impl<F: Flash> Nvs<F> {
     /// # Errors
     /// [`Error::Corrupt`] if the data CRC fails, [`Error::TypeMismatch`] if the newest item is not a string, [`Error::Flash`].
     pub fn has_str(&mut self, namespace: &str, key: &str) -> Result<bool, Error<F::Error>> {
-        let Some(found) = self.lookup(namespace, key)? else { return Ok(false) };
-        if found.item.ty != T_SZ {
-            return Err(Error::TypeMismatch);
+        let mut below = None;
+        let mut failed = false;
+        loop {
+            let Some(found) = self.lookup(namespace, key, below)? else { return if failed { Err(Error::Corrupt) } else { Ok(false) } };
+            if found.item.ty != T_SZ {
+                return Err(Error::TypeMismatch);
+            }
+            let (mut crc, mut at, mut left) = (0xffff_ffff, found.data_at, found.item.var_len());
+            let mut buf = [0u8; ENTRY_SIZE];
+            while left > 0 {
+                let n = left.min(ENTRY_SIZE);
+                self.flash.read(at, &mut buf[..n]).map_err(Error::Flash)?;
+                crc = crc32(crc, &buf[..n]);
+                at += ENTRY_SIZE as u32;
+                left -= n;
+            }
+            if crc == found.item.var_crc() {
+                return Ok(true);
+            }
+            below = Some(found.rank);
+            failed = true;
         }
-        let (mut crc, mut at, mut left) = (0xffff_ffff, found.data_at, found.item.var_len());
-        let mut buf = [0u8; ENTRY_SIZE];
-        while left > 0 {
-            let n = left.min(ENTRY_SIZE);
-            self.flash.read(at, &mut buf[..n]).map_err(Error::Flash)?;
-            crc = crc32(crc, &buf[..n]);
-            at += ENTRY_SIZE as u32;
-            left -= n;
-        }
-        if crc == found.item.var_crc() { Ok(true) } else { Err(Error::Corrupt) }
     }
 
-    fn lookup(&mut self, namespace: &str, key: &str) -> Result<Option<Found>, Error<F::Error>> {
+    fn lookup(&mut self, namespace: &str, key: &str, below: Option<Rank>) -> Result<Option<Found>, Error<F::Error>> {
         let (ns, key) = (namespace.as_bytes(), key.as_bytes());
         if key.is_empty() || key.len() > MAX_KEY || ns.is_empty() || ns.len() > MAX_KEY {
             return Ok(None);
         }
-        let Some(entry) = self.find(0, ns, Want::Primary)? else { return Ok(None) };
+        let Some(entry) = self.find(0, ns, Want::Primary, None)? else { return Ok(None) };
         let index = entry.item.data[0];
         if entry.item.ty != T_U8 || index == 0 || index == 0xff {
             return Ok(None);
         }
-        self.find(index, key, Want::Primary)
+        self.find(index, key, Want::Primary, below)
     }
 
     /// The newest valid item with this namespace index and key: highest page sequence number, then highest page, then highest entry.
-    fn find(&mut self, ns: u8, key: &[u8], want: Want) -> Result<Option<Found>, Error<F::Error>> {
+    fn find(&mut self, ns: u8, key: &[u8], want: Want, below: Option<Rank>) -> Result<Option<Found>, Error<F::Error>> {
         let mut best: Option<((u32, u32, usize), Found)> = None;
         for page in 0..self.pages {
             let base = page * PAGE_SIZE;
@@ -351,8 +380,8 @@ impl<F: Flash> Nvs<F> {
                         Want::Chunk(c) => item.ty == T_BLOB_DATA && item.chunk == c,
                     };
                 let rank = (seq, page, i);
-                if wanted && best.as_ref().is_none_or(|(r, _)| rank > *r) {
-                    best = Some((rank, Found { item, data_at: at + ENTRY_SIZE as u32 }));
+                if wanted && below.is_none_or(|b| rank < b) && best.as_ref().is_none_or(|(r, _)| rank > *r) {
+                    best = Some((rank, Found { rank, item, data_at: at + ENTRY_SIZE as u32 }));
                 }
                 i += usize::from(item.span).max(1);
             }

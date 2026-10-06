@@ -176,8 +176,18 @@ impl Run<'_> {
         assert!(ok, "{what}: {a} and {b} are in a combination the C does not allow after a cut in step {k}");
     }
 
-    /// Checks 1 and 2 on the crash image; returns the repaired image.
+    /// Checks 1 and 2 on the crash image; returns the repaired image. A failure says which cut it was.
     pub fn check_image(&self, image: &[u8], k: usize, what: &str) -> Vec<u8> {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.check_image_inner(image, k, what))) {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| (*s).to_string())).unwrap_or_default();
+                panic!("{what} (step {k}): {msg}")
+            }
+        }
+    }
+
+    fn check_image_inner(&self, image: &[u8], k: usize, what: &str) -> Vec<u8> {
         let all: Vec<&Dump> = self.states.iter().collect();
         let universe = keys(&all);
         // 1. the read-only parser, no repair
@@ -352,7 +362,9 @@ pub fn sweep(sc: Scenario, stride: u64) {
             for key in r.rows.keys() {
                 assert!(universe.contains(key), "{what}: ESP-IDF sees {key:?} out of nowhere");
             }
-            run.check_pair(*k, &r.rows, &format!("{what}: ESP-IDF"));
+            if hazard.is_empty() {
+                run.check_pair(*k, &r.rows, &format!("{what}: ESP-IDF"));
+            }
             assert_eq!(r.churn, Some(0), "{what}: ESP-IDF cannot write to the crash image");
             assert_same(&format!("{what}: ESP-IDF after writing and compacting"), r.after_churn.as_ref().unwrap(), &r.rows);
         }

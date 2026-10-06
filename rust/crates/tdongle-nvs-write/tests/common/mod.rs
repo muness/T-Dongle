@@ -72,7 +72,7 @@ fn dump_impl<F: Flash>(nvs: &mut Nvs<F>, strict: bool) -> Dump {
             Kind::Blob => {
                 let n = nvs.value_len(&ns, &key).unwrap().unwrap();
                 let mut b = vec![0u8; n];
-                assert_eq!(nvs.get_blob(&ns, &key, &mut b).unwrap(), Some(n), "{ns}/{key}");
+                assert_eq!(nvs.get_blob(&ns, &key, &mut b).unwrap_or_else(|e| panic!("{ns}/{key} ({n} bytes): {e:?}")), Some(n), "{ns}/{key}");
                 b
             }
             Kind::Str => {

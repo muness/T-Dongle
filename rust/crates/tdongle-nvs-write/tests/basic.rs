@@ -155,3 +155,29 @@ fn the_engine_is_small() {
     eprintln!("size_of::<Nvs<_>>() = {size}");
     assert!(size <= 700, "{size}");
 }
+
+/// A write cut in the middle of its data can still look complete (the state bits of a half-written entry are themselves written by an
+/// earlier repair, and a cut in *that* write can leave them "written"): the newest string then fails its CRC. The version it was about to
+/// replace is still on flash and must be the current one, for the reader, for mount and for the getters.
+#[test]
+fn a_damaged_newest_string_falls_back_to_the_previous_one() {
+    let mut nvs = fresh();
+    nvs.set_str("n", "s", "the old value").unwrap();
+    nvs.set_u8("n", "other", 5).unwrap();
+    // the new string is 2 entries (72 units); the cut lands just before the erase of the old one
+    nvs.flash_mut().arm(72, tdongle_nvs_write::Tear::Prefix);
+    assert!(nvs.set_str("n", "s", "the NEW value!").is_err());
+    let mut image = nvs.flash().data.clone();
+    // damage the new string's data without touching its states
+    let at = image.windows(14).position(|w| w == b"the NEW value!").unwrap();
+    image[at + 4] ^= 0x01; // NEW -> clears one bit only (NOR: bits go 1 -> 0)
+    assert!(image.windows(14).all(|w| w != b"the NEW value!"));
+    let mut r = Reader::new(SliceFlash(&image), SIZE);
+    assert!(r.has_str("n", "s").unwrap(), "the reader falls back to the old string");
+    let mut again = Nvs::open(SimFlash::from_image(image), SIZE).unwrap();
+    let mut out = [0u8; 40];
+    assert_eq!(again.get_str("n", "s", &mut out).unwrap(), Some(13));
+    assert_eq!(&out[..13], b"the old value");
+    assert_eq!(again.get_u8("n", "other").unwrap(), Some(5));
+    assert_eq!(again.flash().violations, 0);
+}

@@ -797,6 +797,19 @@ impl<F: Flash> Nvs<F> {
         Ok(data.is_empty() || crc == it.var_crc())
     }
 
+    /// Whether the data entries of a variable-length item match its data CRC (streamed, 32 bytes at a time).
+    fn var_ok(&mut self, loc: &Loc) -> R<bool, F> {
+        let len = loc.item.var_len();
+        let mut buf = [0u8; ENTRY_SIZE];
+        let mut crc = 0xffff_ffff;
+        for k in 0..len.div_ceil(ENTRY_SIZE) {
+            let n = (len - k * ENTRY_SIZE).min(ENTRY_SIZE);
+            self.rd(eaddr(loc.page, loc.idx + 1 + k), &mut buf[..n])?;
+            crc = crc32(crc, &buf[..n]);
+        }
+        Ok(crc == loc.item.var_crc())
+    }
+
     // ---- mount ------------------------------------------------------------------------------------------------------------------
 
     fn classify(&mut self, p: usize) -> R<Class, F> {
@@ -890,8 +903,15 @@ impl<F: Flash> Nvs<F> {
                     continue;
                 }
                 if let Some(j) = dup {
-                    hashes[j] = NO_HASH;
-                    self.erase_entry_and_span(p, j)?;
+                    // The later item replaces the earlier one, if it is whole: a string or chunk cut in the middle of its data can still
+                    // look complete, and then the earlier version is the one to keep.
+                    if is_var(item.ty()) && !self.var_ok(&Loc { page: p, idx: i, item })? {
+                        hashes[i] = NO_HASH;
+                        self.erase_entry_and_span(p, i)?;
+                    } else {
+                        hashes[j] = NO_HASH;
+                        self.erase_entry_and_span(p, j)?;
+                    }
                     table = self.table(p)?;
                 }
                 i += span;
@@ -988,13 +1008,24 @@ impl<F: Flash> Nvs<F> {
     fn supersede_last_item(&mut self) -> R<(), F> {
         let last = self.cur();
         let table = self.table(last)?;
-        let mut item = None;
+        let mut found = None;
         let mut i = 0;
         while let Some((idx, it)) = self.next_live(last, &table, i)? {
             i = idx + it.advance();
-            item = Some(it);
+            found = Some((idx, it));
         }
-        let Some(item) = item else { return Ok(()) };
+        let Some((last_idx, item)) = found else { return Ok(()) };
+        if matches!(item.ty(), T_SZ | T_BLOB | T_BLOB_DATA) {
+            // The last write may have been cut in the middle of its data and still look complete (the entry-state bits of a half-written
+            // entry are themselves written in the repair of an earlier mount, and a power cut in *that* write can leave them "written").
+            // Its CRC says; if it fails the item is erased, and the previous version of the key, which is only erased after the new one
+            // is complete, is current again.
+            let loc = Loc { page: last, idx: last_idx, item };
+            if !self.var_ok(&loc)? {
+                self.erase_entry_and_span(last, last_idx)?;
+                return Ok(());
+            }
+        }
         for k in 0..self.n_order - 1 {
             let p = usize::from(self.order[k]);
             if self.info[p].state == PState::Freeing {
@@ -1662,17 +1693,22 @@ impl<F: Flash> Nvs<F> {
     /// # Errors
     /// [`Error::TooSmall`] when `out` cannot hold the string and its NUL, [`Error::TypeMismatch`], [`Error::Corrupt`], [`Error::Flash`].
     pub fn get_str(&mut self, namespace: &str, key: &str, out: &mut [u8]) -> R<Option<usize>, F> {
-        let Some(loc) = self.get_item(namespace, key)? else { return Ok(None) };
-        if loc.item.ty() != T_SZ {
-            return Err(Error::TypeMismatch);
-        }
-        let len = loc.item.var_len();
-        let dst = out.get_mut(..len).ok_or(Error::TooSmall)?;
-        if !self.read_var(&loc, dst)? {
+        loop {
+            let Some(loc) = self.get_item(namespace, key)? else { return Ok(None) };
+            if loc.item.ty() != T_SZ {
+                return Err(Error::TypeMismatch);
+            }
+            let len = loc.item.var_len();
+            let dst = out.get_mut(..len).ok_or(Error::TooSmall)?;
+            if self.read_var(&loc, dst)? {
+                return Ok(Some(len.saturating_sub(1)));
+            }
+            // A damaged newest item is erased; an older version of the key (only erased once the newest was complete) is current again.
             self.erase_entry_and_span(loc.page, loc.idx)?;
-            return Err(Error::Corrupt);
+            if self.get_item(namespace, key)?.is_none() {
+                return Err(Error::Corrupt);
+            }
         }
-        Ok(Some(len.saturating_sub(1)))
     }
 
     /// The length of the string (without NUL) or blob, from the item header only.
@@ -1695,12 +1731,31 @@ impl<F: Flash> Nvs<F> {
     /// # Errors
     /// [`Error::TooSmall`], [`Error::TypeMismatch`], [`Error::Corrupt`], [`Error::Flash`].
     pub fn get_blob(&mut self, namespace: &str, key: &str, out: &mut [u8]) -> R<Option<usize>, F> {
-        let Some(loc) = self.get_item(namespace, key)? else { return Ok(None) };
+        // A damaged newest version is erased (as IDF does) and, when an older version of the key is still there (it is only erased once the
+        // newest is complete), that one is read instead.
+        loop {
+            let Some(loc) = self.get_item(namespace, key)? else { return Ok(None) };
+            match self.read_blob_at(&loc, key, out) {
+                Err(Error::Corrupt) => {
+                    if loc.item.ty() == T_BLOB_IDX {
+                        self.erase_multipage(&loc, None)?;
+                    } else {
+                        self.erase_entry_and_span(loc.page, loc.idx)?;
+                    }
+                    if self.get_item(namespace, key)?.is_none() {
+                        return Err(Error::Corrupt);
+                    }
+                }
+                other => return other,
+            }
+        }
+    }
+
+    fn read_blob_at(&mut self, loc: &Loc, key: &str, out: &mut [u8]) -> R<Option<usize>, F> {
         match loc.item.ty() {
             T_BLOB => {
                 let dst = out.get_mut(..loc.item.var_len()).ok_or(Error::TooSmall)?;
-                if !self.read_var(&loc, dst)? {
-                    self.erase_entry_and_span(loc.page, loc.idx)?;
+                if !self.read_var(loc, dst)? {
                     return Err(Error::Corrupt);
                 }
                 Ok(Some(loc.item.var_len()))
@@ -1730,12 +1785,7 @@ impl<F: Flash> Nvs<F> {
                     }
                     done += len;
                 }
-                if ok && done == total {
-                    Ok(Some(total))
-                } else {
-                    self.erase_multipage(&loc, None)?;
-                    Err(Error::Corrupt)
-                }
+                if ok && done == total { Ok(Some(total)) } else { Err(Error::Corrupt) }
             }
             _ => Err(Error::TypeMismatch),
         }
