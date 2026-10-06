@@ -23,6 +23,7 @@ pub mod clock;
 pub mod command;
 pub mod console;
 pub mod memory_log;
+pub mod out;
 pub mod pm_report;
 pub mod reply;
 pub mod status;

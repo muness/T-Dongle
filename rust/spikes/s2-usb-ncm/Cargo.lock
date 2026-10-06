@@ -1491,6 +1491,7 @@ dependencies = [
  "static_cell",
  "tdongle-boot-guard",
  "tdongle-rescue",
+ "tdongle-serial",
  "tdongle-usb-out",
 ]
 
@@ -1684,7 +1685,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-aqm"
+version = "0.3.0-dev"
+
+[[package]]
 name = "tdongle-boot-guard"
+version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-bridge"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-aqm",
+ "tdongle-spsc",
+]
+
+[[package]]
+name = "tdongle-nvs-format"
 version = "0.3.0-dev"
 
 [[package]]
@@ -1694,6 +1711,26 @@ dependencies = [
  "critical-section",
  "esp-hal",
 ]
+
+[[package]]
+name = "tdongle-serial"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-bridge",
+ "tdongle-nvs-format",
+ "tdongle-traffic",
+]
+
+[[package]]
+name = "tdongle-spsc"
+version = "0.3.0-dev"
+dependencies = [
+ "loom",
+]
+
+[[package]]
+name = "tdongle-traffic"
+version = "0.3.0-dev"
 
 [[package]]
 name = "tdongle-usb-out"

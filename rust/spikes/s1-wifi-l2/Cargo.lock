@@ -1634,6 +1634,7 @@ dependencies = [
  "tdongle-nvs-read",
  "tdongle-rescue",
  "tdongle-saved",
+ "tdongle-serial",
  "tdongle-wifi-policy",
 ]
 
@@ -1827,8 +1828,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-aqm"
+version = "0.3.0-dev"
+
+[[package]]
 name = "tdongle-boot-guard"
 version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-bridge"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-aqm",
+ "tdongle-spsc",
+]
 
 [[package]]
 name = "tdongle-nvs-format"
@@ -1854,6 +1867,26 @@ dependencies = [
  "tdongle-nvs-read",
  "tdongle-wifi-policy",
 ]
+
+[[package]]
+name = "tdongle-serial"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-bridge",
+ "tdongle-nvs-format",
+ "tdongle-traffic",
+]
+
+[[package]]
+name = "tdongle-spsc"
+version = "0.3.0-dev"
+dependencies = [
+ "loom",
+]
+
+[[package]]
+name = "tdongle-traffic"
+version = "0.3.0-dev"
 
 [[package]]
 name = "tdongle-wifi-policy"

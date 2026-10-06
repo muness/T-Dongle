@@ -73,11 +73,9 @@ impl<'d, D: Driver<'d>> AcmReader<'d, D> {
 impl<'d, D: Driver<'d>> AcmWriter<'d, D> {
     /// Write bytes in 64 B packets; a ZLP terminates a transfer that ends on a packet boundary.
     pub async fn write_all(&mut self, data: &[u8]) -> Result<(), EndpointError> {
-        for chunk in data.chunks(64) {
-            self.write_ep.write(chunk).await?;
-        }
-        if !data.is_empty() && data.len() % 64 == 0 {
-            self.write_ep.write(&[]).await?;
+        // `tdongle_serial::out::packets` (host-tested for every length): 64-byte packets, the last one shorter, and the zero-length packet that ends a transfer that is a multiple of 64.
+        for packet in tdongle_serial::out::packets(data, 64) {
+            self.write_ep.write(packet).await?;
         }
         Ok(())
     }

@@ -22,6 +22,7 @@ embassy-sync = "0.8"
 embassy-usb = { version = "0.6", default-features = false }
 static_cell = "2.1"
 critical-section = "1"
+tdongle-serial = { path = "../../crates/tdongle-serial" }
 tdongle-rescue = { path = "../../crates/tdongle-rescue", features = ["hal"] }
 tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
 tdongle-saved = { path = "../../crates/tdongle-saved" }

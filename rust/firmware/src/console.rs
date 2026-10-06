@@ -38,7 +38,7 @@ static QUEUES: OnceLock<Queues> = OnceLock::new();
 static READER: SingleContext<LineReader> = SingleContext::new();
 
 thread_local! {
-    /// The control task waits (up to 300 ms) for room in the output queue, so boot reports do not silently lose chunks; every other task queues
+    /// The control task waits (up to 2 s) for room in the output queue, so boot reports do not silently lose chunks; every other task queues
     /// with a zero wait, as `mgmt_write` does, because the TinyUSB task must never block.
     static MAY_WAIT: Cell<bool> = const { Cell::new(false) };
 }
@@ -52,12 +52,14 @@ pub fn mgmt_write(text: &str) {
 /// never reordered; a full queue drops the chunk (and, for every task but the control task, does not wait).
 pub fn mgmt_write_bytes(text: &[u8]) {
     let Some(queues) = QUEUES.get() else { return };
-    let wait = if MAY_WAIT.with(Cell::get) { ms_to_ticks(300) } else { 0 };
+    let wait = if MAY_WAIT.with(Cell::get) { ms_to_ticks(2000) } else { 0 };
     for piece in tdongle_serial::console::mgmt_chunks(text) {
         let mut chunk = [0u8; MGMT_CHUNK_MAX + 1];
         chunk[..piece.len()].copy_from_slice(piece);
         if queues.output.send_back(chunk, wait).is_err() {
-            return; // the queue's own error: nothing to do but drop (counted nowhere in C either)
+            // Not silent: the host stopped reading for the whole wait (the control task waits up to 2 s per chunk), or this is a task that must not block.
+            log::warn!("console output chunk dropped: the output queue stayed full");
+            return;
         }
     }
 }

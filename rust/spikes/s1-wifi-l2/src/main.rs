@@ -209,19 +209,8 @@ async fn usb_task(mut dev: SendDevice) -> ! {
     dev.0.run().await
 }
 
-struct Line<const N: usize> {
-    buf: [u8; N],
-    len: usize,
-}
-impl<const N: usize> core::fmt::Write for Line<N> {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        let b = s.as_bytes();
-        let n = b.len().min(N - self.len);
-        self.buf[self.len..self.len + n].copy_from_slice(&b[..n]);
-        self.len += n;
-        Ok(())
-    }
-}
+/// One reply. 2 KiB holds the longest line; an overflow is marked in the output, never silent (`tdongle_serial::out`).
+type Line = tdongle_serial::out::LineBuf<2048>;
 
 fn counters_line(l: &mut impl core::fmt::Write) {
     let st = critical_section::with(|cs| *STATS.borrow_ref(cs));
@@ -235,7 +224,7 @@ fn counters_line(l: &mut impl core::fmt::Write) {
 }
 
 async fn reply(port: &mut acm::Acm<'static, Drv>, text: &[u8]) {
-    let _ = embassy_time::with_timeout(Duration::from_millis(500), port.write_all(text)).await;
+    let _ = embassy_time::with_timeout(Duration::from_millis(2000), port.write_all(text)).await;
 }
 
 #[embassy_executor::task]
@@ -260,7 +249,7 @@ async fn console_task(port: SendPort, state: &'static guard::State) -> ! {
                 if c == b'\r' || c == b'\n' {
                     if n > 0 {
                         let cmd = core::str::from_utf8(&line[..n]).unwrap_or("").trim();
-                        let mut l = Line::<400> { buf: [0; 400], len: 0 };
+                        let mut l = Line::new();
                         match cmd {
                             "status" => {
                                 let linked = LINKED.load(Ordering::Relaxed);
@@ -302,7 +291,7 @@ async fn console_task(port: SendPort, state: &'static guard::State) -> ! {
                             }
                         }
                         let _ = l.write_str("\r\n");
-                        reply(&mut port, &l.buf[..l.len]).await;
+                        reply(&mut port, l.finish()).await;
                         n = 0;
                     }
                 } else if n < line.len() {
@@ -502,9 +491,9 @@ async fn main(spawner: Spawner) -> ! {
         }
         if last_report.elapsed() >= Duration::from_secs(5) {
             last_report = Instant::now();
-            let mut l = Line::<400> { buf: [0; 400], len: 0 };
+            let mut l = Line::new();
             counters_line(&mut l);
-            println!("{} rssi={:?}", core::str::from_utf8(&l.buf[..l.len]).unwrap_or(""), controller.rssi().ok());
+            println!("{} rssi={:?}", core::str::from_utf8(l.as_bytes()).unwrap_or(""), controller.rssi().ok());
         }
         yield_now().await;
     }
