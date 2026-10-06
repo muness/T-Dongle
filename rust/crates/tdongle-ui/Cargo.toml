@@ -1,0 +1,17 @@
+[package]
+name = "tdongle-ui"
+description = "The device UI as pure state machines: button debounce, menu, status LED, display settings, setup boot, health counters, the UI poll."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-traffic = { path = "../tdongle-traffic" }
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
