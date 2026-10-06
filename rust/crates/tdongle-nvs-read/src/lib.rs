@@ -337,6 +337,13 @@ impl<F: Flash> Nvs<F> {
                     i += 1;
                     continue;
                 };
+                // A string or blob chunk whose data entries are not all in the written state was cut in the middle of its write (or of its
+                // erase): the C code erases it when it loads the page, so an older value of the key is still the current one.
+                let var = matches!(item.ty, T_SZ | T_BLOB | T_BLOB_DATA);
+                if var && (i + 1..i + usize::from(item.span)).any(|j| (bitmap[j / 4] >> ((j % 4) * 2)) & 3 != 2) {
+                    i += 1;
+                    continue;
+                }
                 let wanted = item.ns == ns
                     && item.key_is(key)
                     && match want {
