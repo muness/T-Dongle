@@ -13,7 +13,9 @@ mod guard;
 mod supervise;
 mod settings;
 mod l2;
+mod dhcp;
 mod pm;
+mod setup;
 mod ui;
 mod acm;
 mod ncm;
@@ -155,6 +157,8 @@ static SINK_BYTES: AtomicU32 = AtomicU32::new(0);
 static SOURCE_FRAMES: AtomicU32 = AtomicU32::new(0);
 static SOURCE_BYTES: AtomicU32 = AtomicU32::new(0);
 
+static USB_NETWORK_RX: Signal<CriticalSectionRawMutex, tdongle_setup::boot::UsbNetwork> = Signal::new();
+static USB_NETWORK_TX: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static RING_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static HOUSEKEEP_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static WORKER_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
@@ -729,7 +733,7 @@ async fn main(spawner: Spawner) -> ! {
         })
         .unwrap(),
     );
-    spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, spawner, bridge, worker, state.boot.safe_mode).unwrap());
+    spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, peripherals.RNG, peripherals.ADC1, spawner, bridge, worker, state.boot.safe_mode).unwrap());
     loop {
         Timer::after_secs(3600).await;
     }
@@ -740,6 +744,8 @@ async fn main(spawner: Spawner) -> ! {
 async fn init_task(
     wifi: esp_hal::peripherals::WIFI<'static>,
     flash: esp_hal::peripherals::FLASH<'static>,
+    rng: esp_hal::peripherals::RNG<'static>,
+    adc: esp_hal::peripherals::ADC1<'static>,
     spawner: Spawner,
     bridge: &'static Bridge<FwEnv>,
     worker: tdongle_bridge::Worker<'static, FwEnv>,
@@ -767,7 +773,27 @@ async fn init_task(
             None
         }
     };
-    let Some(loaded) = loaded else { return };
+    // ---- what kind of boot is this? (`setup_boot_early` + `gateway_startup_sequence`): setup when asked for over a software reset, or when nothing is saved ----
+    let words = guard::setup_take();
+    let software = matches!(esp_hal::system::reset_reason(), Some(esp_hal::rtc_cntl::SocResetReason::CoreSw));
+    let store_ok = loaded.is_some();
+    let networks_saved = loaded.as_ref().is_none_or(|l| !l.saved.list().is_empty()); // an unreadable store counts as "has networks" (a damaged store never opens an access point by itself)
+    let decision = tdongle_setup::boot::SetupBoot::decide(software, words[0], words[1], words[2], networks_saved, store_ok);
+    let boot = tdongle_setup::boot::Boot::decide(decision, false);
+    let Some(loaded) = loaded else {
+        // no settings: the bridge cannot choose a network, but the USB side stays a plain bridge boot
+        if let tdongle_setup::boot::Boot::Bridge(b) = &boot {
+            USB_NETWORK_RX.signal(b.usb_network());
+        }
+        return;
+    };
+    SAVED.lock(|c| *c.borrow_mut() = Some(loaded));
+    let boot = match boot {
+        tdongle_setup::boot::Boot::Setup(setup_boot) => setup::run(setup_boot, wifi, rng, adc, spawner).await,
+        tdongle_setup::boot::Boot::Tailnet(_) => return, // not built yet: uninhabited
+        tdongle_setup::boot::Boot::Bridge(b) => b,
+    };
+    USB_NETWORK_RX.signal(boot.usb_network());
 
     // ---- Wi-Fi (S1) ----
     guard::stage(Stage::RadioInit);
@@ -800,7 +826,6 @@ async fn init_task(
     spawner.spawn(worker_task(worker).unwrap());
     spawner.spawn(pm::timer_task().unwrap());
     pm::start();
-    SAVED.lock(|c| *c.borrow_mut() = Some(loaded));
     link_loop(&mut controller, bridge).await
 }
 
@@ -1089,6 +1114,9 @@ async fn usb_task(mut dev: SendDevice) -> ! {
 /// NTB packet until `rx_resume` (RESUME_SIG) fires: the OUT endpoint is not re-armed, the host is NAKed.
 #[embassy_executor::task]
 async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer<'static, FwEnv>) -> ! {
+    // the USB network belongs to a bridge boot: a setup boot never gets the capability, so these tasks never run (ADR 0001 rule 3)
+    let _network = USB_NETWORK_RX.wait().await;
+    USB_NETWORK_TX.signal(());
     loop {
         if rx.wait_connection().await.is_err() {
             continue;
@@ -1148,6 +1176,7 @@ async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer
 /// Wi-Fi -> host: the ring drains into one NTB per datagram (no IN aggregation yet).
 #[embassy_executor::task]
 async fn usb_tx_task(tx: SendTx) -> ! {
+    USB_NETWORK_TX.wait().await;
     let mut tx = tx.0;
     let mut seq = 0u32;
     let mut next = Instant::now();
@@ -1330,6 +1359,18 @@ fn scan_text(out: &mut String) {
     let _ = write!(out, "scan_done seen={} listed={} seq={}\r\n", seen, count, seq);
 }
 
+/// The rows of the last scan as the setup page lists them: SSID (32 byte field), signal, not open.
+fn scan_rows(mut f: impl FnMut(&[u8; 32], i32, bool)) {
+    let n = critical_section::with(|cs| SCAN_TABLE.borrow_ref(cs).count);
+    for i in 0..n {
+        let row = critical_section::with(|cs| SCAN_TABLE.borrow_ref(cs).rows[i]);
+        let mut ssid = [0u8; 32];
+        let len = usize::from(row.ssid_len).min(32);
+        ssid[..len].copy_from_slice(&row.ssid[..len]);
+        f(&ssid, i32::from(row.bss.rssi), row.auth != 0);
+    }
+}
+
 /// The strongest access point of the joined network's SSID in the latest scan table.
 fn best_from_latest_scan() -> Option<Bss> {
     let selected = SELECTED.load(Ordering::Relaxed);
@@ -1416,8 +1457,10 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         }
         None => (0, None, [0u8; 8]),
     });
+    let setup_name_bytes = setup::ap_name();
+    let setup_name = core::str::from_utf8(&setup_name_bytes).unwrap_or("").trim_end_matches('\0');
     let snap = Snapshot {
-        mode: Mode::Adapter,
+        mode: if setup::ACTIVE.load(Ordering::Relaxed) { Mode::Setup } else { Mode::Adapter },
         wifi_current: if linked { SELECTED.load(Ordering::Relaxed) } else { -1 },
         online: linked,
         firmware: FIRMWARE,
@@ -1446,8 +1489,8 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
             let d = critical_section::with(|cs| STORED.borrow(cs).get()).map(|x| x.display).unwrap_or_default();
             DisplayState { brightness: d.brightness, rotation: d.rotation, dim_seconds: d.dim_seconds, page: 0 }
         },
-        setup_ap_name: "",
-        setup_seconds_left: 0,
+        setup_ap_name: &setup_name,
+        setup_seconds_left: if setup::ACTIVE.load(Ordering::Relaxed) { setup::session().seconds_left(Instant::now().as_millis() as u32) } else { 0 },
         traffic: Traffic {
             counters: tdongle_traffic_reading(),
             down_kbps: 0,
@@ -1746,6 +1789,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 let d = critical_section::with(|cs| STORED.borrow(cs).get()).map(|x| x.display).unwrap_or_default();
                 let _ = reply::write_display(&mut s, d.brightness, d.rotation, d.dim_seconds);
             }
+            Command::Use(SlotArg::Number(_)) if setup::ACTIVE.load(Ordering::Relaxed) => s.push_str(reply::USE_SETUP_OPEN),
             Command::Use(SlotArg::Number(n)) => {
                 let count = SAVED.lock(|c| c.borrow().as_ref().map_or(0, |l| l.saved.list().len())) as i32;
                 if (1..=count).contains(&n) {
@@ -1768,7 +1812,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 if restart {
                     out(wr, &text, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
-                    tdongle_rescue::deliberate_reset()
+                    setup::restart(tdongle_setup::boot::Request::Enter, 0)
                 }
                 s.push_str(&text);
             }
@@ -1783,6 +1827,35 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                     tdongle_rescue::deliberate_reset()
                 }
                 s.push_str(&text);
+            }
+            Command::Setup(arg) => {
+                use tdongle_serial::command::SetupArg;
+                let slot = match arg {
+                    SetupArg::Open => Some(0u8),
+                    SetupArg::Slot(n) => Some(n),
+                    SetupArg::Invalid => None,
+                };
+                match slot {
+                    None => s.push_str(reply::SETUP_USAGE),
+                    Some(_) if guard::safe_mode_now() => s.push_str(reply::SETUP_RECOVERY),
+                    Some(n) if setup::ACTIVE.load(Ordering::Relaxed) => {
+                        setup::preselect(n);
+                        s.push_str(reply::SETUP_ALREADY_OPEN);
+                    }
+                    Some(n) => {
+                        out(wr, reply::SETUP_RESTARTING, 500).await;
+                        Timer::after(Duration::from_millis(300)).await;
+                        setup::restart(tdongle_setup::boot::Request::Enter, u32::from(n))
+                    }
+                }
+            }
+            Command::Cancel => {
+                if setup::ACTIVE.load(Ordering::Relaxed) {
+                    out(wr, reply::CANCEL_LEAVING, 500).await;
+                    Timer::after(Duration::from_millis(300)).await;
+                    setup::restart(tdongle_setup::boot::Request::Leave, 0)
+                }
+                s.push_str(reply::CANCEL_NOOP);
             }
             Command::Reboot => {
                 guard::leave_safe_mode();

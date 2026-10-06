@@ -1525,6 +1525,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-dhcp"
+version = "0.3.0-dev"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "tdongle-lcd"
 version = "0.3.0-dev"
 dependencies = [

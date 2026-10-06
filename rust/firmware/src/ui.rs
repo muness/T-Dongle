@@ -327,6 +327,9 @@ pub async fn ui_task(hw: Hardware) -> ! {
         let ssid_text = core::str::from_utf8(&ssid[..ssid_len]).unwrap_or("");
         let active_name = if active_slot >= 1 { names[(active_slot - 1) as usize] } else { Text::new() };
         let connected = crate::CONNECTED_NOW.load(Ordering::Relaxed);
+        let setup_active = crate::setup::ACTIVE.load(Ordering::Relaxed);
+        let setup_name_bytes = crate::setup::ap_name();
+        let setup_session = Session::start(crate::setup::START_MS.load(Ordering::Relaxed));
         let heap = esp_alloc::HEAP.free() as u32;
         let snapshot = Snapshot {
             bridge: true,
@@ -336,6 +339,7 @@ pub async fn ui_task(hw: Hardware) -> ! {
             active_slot,
             active_name: active_name.as_str(),
             ssid: ssid_text,
+            setup_ap_name: core::str::from_utf8(&setup_name_bytes).unwrap_or("").trim_end_matches('\0'),
             usb: crate::ALT.load(Ordering::Relaxed) != 0,
             usb_configured: crate::CONFIGURED.load(Ordering::Relaxed),
             usb_suspended: false,
@@ -356,9 +360,9 @@ pub async fn ui_task(hw: Hardware) -> ! {
         let lookup = |slot: u32| -> Option<&str> { names.get((slot as usize).wrapping_sub(1)).map(Text::as_str) };
         let inputs = Inputs {
             button_down: down,
-            setup_active: false,
-            setup_session: Session::inactive(),
-            wifi_ready: connected,
+            setup_active,
+            setup_session: if setup_active { setup_session } else { Session::inactive() },
+            wifi_ready: if setup_active { crate::setup::AP_UP.load(Ordering::Relaxed) } else { connected },
             saved_count,
             display,
             snapshot: Some(snapshot),
@@ -439,6 +443,18 @@ async fn dispatch(cmd: Command) {
             if restart {
                 Timer::after_millis(300).await;
                 tdongle_rescue::deliberate_reset()
+            }
+        }
+        Command::Setup => {
+            if !crate::setup::ACTIVE.load(Ordering::Relaxed) && !crate::guard::safe_mode_now() {
+                Timer::after_millis(300).await;
+                crate::setup::restart(tdongle_setup::boot::Request::Enter, 0)
+            }
+        }
+        Command::Cancel => {
+            if crate::setup::ACTIVE.load(Ordering::Relaxed) {
+                Timer::after_millis(300).await;
+                crate::setup::restart(tdongle_setup::boot::Request::Leave, 0)
             }
         }
         other => crate::ui_command(other),
