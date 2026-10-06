@@ -36,6 +36,7 @@ tdongle-tailnet-status = { path = "../crates/tdongle-tailnet-status" }
 tdongle-tailnet-tls = { path = "../crates/tdongle-tailnet-tls" }
 tdongle-tailnet-types = { path = "../crates/tdongle-tailnet-types" }
 tdongle-tailnet-usbnet = { path = "../crates/tdongle-tailnet-usbnet" }
+tdongle-tailnet-engine = { path = "../crates/tdongle-tailnet-engine", features = ["fuzzing"] }
 tdongle-tailnet-wg = { path = "../crates/tdongle-tailnet-wg" }
 
 [[bin]]
@@ -293,5 +294,23 @@ doc = false
 [[bin]]
 name = "tailnet_usbnet_napt"
 path = "fuzz_targets/tailnet_usbnet_napt.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_engine_derp"
+path = "fuzz_targets/tailnet_engine_derp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_engine_script"
+path = "fuzz_targets/tailnet_engine_script.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_engine_udp"
+path = "fuzz_targets/tailnet_engine_udp.rs"
 test = false
 doc = false

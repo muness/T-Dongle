@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6073584508f30f074c741412f0834e09b08fa8398f98886a43ba8dd80363194e # shrinks to script = [63, 0, 0, 0, 9, 187, 0, 14, 140, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 1, 7, 0, 0, 0, 98, 0, 0, 0, 0, 0, 9, 0, 90, 0, 1, 60, 0, 0, 120, 0, 0, 96, 203, 0, 0, 173, 103, 0, 0, 0, 0, 0, 133, 0, 0, 0, 24, 0, 0, 13, 0, 0, 224, 63, 0, 0, 0, 133, 0, 0, 125, 98, 0, 0, 0, 0, 0, 72, 0, 0, 0, 187, 0, 0, 1, 200, 0, 0, 35, 0, 0, 0, 14, 0, 199, 30, 12, 0, 1, 0, 188, 41, 1, 70, 90, 150, 0, 0, 0, 1, 0, 44, 1, 1, 68, 0, 0, 4, 32, 0, 0, 4, 0, 0, 14, 182, 0, 0, 0, 0, 0, 0, 0, 0, 29, 0, 0, 0, 0, 0, 61, 0, 0, 0, 0, 0, 5, 0, 0, 0, 2, 112, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65, 0, 0, 0, 0, 0, 7, 0, 0, 0, 78, 0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
