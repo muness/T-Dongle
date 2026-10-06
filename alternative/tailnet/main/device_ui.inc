@@ -26,8 +26,8 @@ static StaticSemaphore_t ui_lock_storage;
 static RTC_NOINIT_ATTR health_counters health_rtc;
 static uint32_t reset_reason_at_boot;
 bool gateway_display_state(lcd_state *s);   /* defined with the tailnet admission code below */
-extern bool control_submit(const char *line);
 extern unsigned gateway_usb_health(unsigned index);
+extern bool control_submit(const char *line);   /* for the HTTP handlers (the setup page's Done); the front panel uses ui_submit */
 
 /* ---- APA102: one pixel, bit-banged (GPIO39 clock, GPIO40 data). A frame is about 50 microseconds of GPIO writes. */
 static void led_write(led_rgb color) {
@@ -55,15 +55,24 @@ static esp_err_t ui_start(void) {
     return e;
 }
 
-/* ---- What a button gesture does: the same commands the serial console takes, so the two cannot disagree. */
+/* ---- What a button gesture does: the same commands the serial console takes, so the two cannot disagree. Handed to the control task's loop through
+ * a 20 byte slot, not control_submit: that copies into a 512 byte stack buffer, on top of this frame, on a 4 KB stack. */
+static char ui_pending[20];   /* the command a gesture chose, taken by the control task's loop (same task) */
+bool gateway_ui_take_command(char *out, size_t size) {
+    if (!ui_pending[0]) return false;
+    strlcpy(out, ui_pending, size);
+    ui_pending[0] = 0;
+    return true;
+}
+static void ui_submit(const char *command) { if (!ui_pending[0]) strlcpy(ui_pending, command, sizeof(ui_pending)); }
 static void ui_run(menu_action a) {
     char command[16];
     switch (a.kind) {
-    case MENU_ACTION_SETUP: control_submit("setup"); break;
-    case MENU_ACTION_CANCEL_SETUP: control_submit("cancel"); break;
-    case MENU_ACTION_USE: snprintf(command, sizeof(command), "use %u", a.slot); control_submit(command); break;
-    case MENU_ACTION_RESET: control_submit("reset"); break;
-    case MENU_ACTION_CONFIRM_RESET: control_submit("confirm-reset"); break;
+    case MENU_ACTION_SETUP: ui_submit("setup"); break;
+    case MENU_ACTION_CANCEL_SETUP: ui_submit("cancel"); break;
+    case MENU_ACTION_USE: snprintf(command, sizeof(command), "use %u", a.slot); ui_submit(command); break;
+    case MENU_ACTION_RESET: ui_submit("reset"); break;
+    case MENU_ACTION_CONFIRM_RESET: ui_submit("confirm-reset"); break;
     default: break;
     }
 }
@@ -124,9 +133,12 @@ static bool ui_compose(uint32_t now, bool dim, lcd_view *view) {
                              .last_reason = (uint16_t)wifi_link_stats.last_reason};
     if (ui.menu.open) {
         menu_context context = {.setup_active = setup_active, .saved_count = setup_active ? 0 : wifi_saved.count};
-        char rows[MENU_ROWS][MENU_ROW_CHARS + 1];
-        menu_render(&ui.menu, &context, ui_name_of, NULL, rows);
-        lcd_compose_rows(view, (const char (*)[27])rows, ui.menu.confirm);
+        /* Straight into the view's own rows (the same 5 x 27 bytes): no second buffer on the control task's stack. */
+        _Static_assert(sizeof(view->row) == MENU_ROWS * (MENU_ROW_CHARS + 1), "menu rows are the view's rows");
+        memset(view, 0, sizeof(*view));
+        menu_render(&ui.menu, &context, ui_name_of, NULL, view->row);
+        view->layout = LCD_LAYOUT_ROWS;
+        view->attention = ui.menu.confirm;
     } else
         lcd_compose(&st, GATEWAY_VERSION, view);
     (void)dim;

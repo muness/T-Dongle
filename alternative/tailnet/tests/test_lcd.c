@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 static void frame(const char *folder,const char *name,const lcd_state *s) {
-    lcd_view view;lcd_compose(s,"0.2.21",&view);assert(strlen(view.title)<=13);assert(strlen(view.detail)<=26);assert(strlen(view.hint)<=26);
+    lcd_view view;lcd_compose(s,"0.2.21",&view);if(view.layout==LCD_LAYOUT_STATUS){assert(strlen(view.title)<=13);assert(strlen(view.detail)<=26);assert(strlen(view.hint)<=26);}
     if(!folder)return;char path[512];snprintf(path,sizeof(path),"%s/%s.ppm",folder,name);FILE *f=fopen(path,"wb");assert(f);fprintf(f,"P6\n160 80\n255\n");
     for(unsigned y=0;y<80;y++){uint16_t pixels[160];lcd_render_row(&view,y,pixels);for(unsigned x=0;x<160;x++){unsigned v=pixels[x];unsigned char rgb[3]={((v>>11)&31)*255/31,((v>>5)&63)*255/63,(v&31)*255/31};fwrite(rgb,1,3,f);}}fclose(f);
 }
@@ -94,8 +94,8 @@ int main(int argc,char **argv) {
         memset(state.ssid,'W',32);memset(state.ap_ssid,'A',15);memset(state.active_name,'n',24);
         for(unsigned page=0;page<LCD_PAGES;page++)for(unsigned view=0;view<3;view++){
             state.page=page;state.health_view=view;lcd_compose(&state,"1234567890123456789",&v);
-            assert(strlen(v.title)<=13 && strlen(v.detail)<=26 && strlen(v.hint)<=26 && strlen(v.extra)<=26 && strlen(v.footer)<=26);
-            for(unsigned r=0;r<LCD_ROWS;r++)assert(strlen(v.row[r])<=26);
+            if(v.layout==LCD_LAYOUT_STATUS)assert(strlen(v.title)<=13 && strlen(v.detail)<=26 && strlen(v.hint)<=26 && strlen(v.extra)<=26 && strlen(v.footer)<=26);
+            else for(unsigned r=0;r<LCD_ROWS;r++)assert(strlen(v.row[r])<=26);   /* the layouts share storage */
         }
     }
     /* Scanline canaries for both layouts and the graph. */

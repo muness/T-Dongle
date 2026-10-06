@@ -33,8 +33,10 @@ typedef struct {
 } lcd_state;
 typedef enum { LCD_LAYOUT_STATUS = 0, LCD_LAYOUT_ROWS } lcd_layout;
 typedef struct {
-    char title[14], detail[27], hint[27], extra[27], footer[27];   /* LCD_LAYOUT_STATUS */
-    char row[LCD_ROWS][27];                                        /* LCD_LAYOUT_ROWS; row[0] is the heading */
+    union {   /* one layout at a time: the struct is on the control task's stack and in a static copy of what is on the glass */
+        struct { char title[14], detail[27], hint[27], extra[27], footer[27]; };   /* LCD_LAYOUT_STATUS */
+        char row[LCD_ROWS][27];                                                    /* LCD_LAYOUT_ROWS; row[0] is the heading */
+    };
     uint8_t bars[LCD_BARS];
     bool attention;
     uint8_t layout, bar_count;

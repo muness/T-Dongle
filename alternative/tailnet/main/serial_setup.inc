@@ -2,9 +2,19 @@
 extern void mgmt_write(const char *s);
 static bool factory_reset_armed;
 static uint32_t factory_reset_until_ms;
-bool gateway_serial_command(const char *line) {
- char reply[768];
- if(!strcmp(line,"status")){
+/* `profile JSON`, in a function of its own: its parsed profile (124 B) and reply line are on the control task's stack only while it runs, not in the
+ * frame every command pays (tools/check-control-stack.py). Caller holds members_lock. */
+__attribute__((noinline)) static void serial_profile(const char *json){
+ profile_t profile;int slot;char reply[64];
+ if(!profile_parse_json(json,&slot,&profile) || slot>(int)wifi_saved.count)mgmt_write("ERR Refresh saved networks before editing\r\n");
+ else if(wifi_save_with(profile.ssid,profile.pass,profile.name,profile.priority,false,slot)){snprintf(reply,sizeof(reply),"OK saved to slot %d; setup stays open\r\n",slot+1);mgmt_write(reply);}
+ else mgmt_write("ERR Wi-Fi could not be saved\r\n");
+ memset(&profile,0,sizeof(profile));
+}
+/* `status`, in a function of its own: its 448 B line buffer (status line one is about 420 B) and the printf under it are on the control task's stack only
+ * while it runs (tools/check-control-stack.py). */
+__attribute__((noinline)) static void serial_status(void){
+ char reply[448];
   tdongle_temperature t=tdongle_temperature_snapshot();
   wifi_link_info link=wifi_link_read();char rssi_buffer[5];const char *rssi_text=wifi_link_rssi_text(&link,rssi_buffer);
   /* Android parses the chip_temperature line with an end-anchored regex that stops after errors=: extra fields live on the
@@ -20,8 +30,55 @@ bool gateway_serial_command(const char *line) {
   snprintf(reply,sizeof(reply),"setup active=%d ap=%s seconds_left=%lu\r\n",setup_active?1:0,setup_active?setup_ap_name:"-",(unsigned long)setup_session_seconds_left(&setup_clock,(uint32_t)(esp_timer_get_time()/1000)));mgmt_write(reply);
   {traffic_counters c=traffic_read();snprintf(reply,sizeof(reply),"traffic down_bytes=%lu up_bytes=%lu down_frames=%lu up_frames=%lu down_kbps=%lu up_kbps=%lu usb_resets=%u control_stack_free_bytes=%u\r\n",(unsigned long)c.down_bytes,(unsigned long)c.up_bytes,(unsigned long)c.down_frames,(unsigned long)c.up_frames,(unsigned long)ui.traffic.down_kbps,(unsigned long)ui.traffic.up_kbps,gateway_usb_health(8),(unsigned)uxTaskGetStackHighWaterMark(NULL));mgmt_write(reply);}   /* the control task's lowest free stack so far: status runs on it */
   for(unsigned i=0;i<tdongle_memory_count();i++){tdongle_memory_record m=tdongle_memory_get(i);snprintf(reply,sizeof(reply),"memory_pressure uptime_ms=%lu operation=%lu requested=%lu free=%lu minimum=%lu largest=%lu failed=%lu\r\n",(unsigned long)m.uptime_ms,(unsigned long)m.operation,(unsigned long)m.requested,(unsigned long)m.free_bytes,(unsigned long)m.minimum_bytes,(unsigned long)m.largest_bytes,(unsigned long)m.failed);mgmt_write(reply);}
-  return true;
- }
+
+}
+/* `scan`: its AP record (about 120 B), scan configuration and line buffer on the control task's stack only while it runs. */
+__attribute__((noinline)) static void serial_scan(void){
+ char reply[128];
+  if(!wifi_ready || xSemaphoreTake(wifi_scan_lock,0)!=pdTRUE){mgmt_write("ERR Scan busy\r\n");return;}
+  wifi_scan_pauses_reconnect=true;bool connected=online;if(!connected)esp_wifi_disconnect();
+  wifi_scan_config_t config={.show_hidden=false,.scan_type=WIFI_SCAN_TYPE_ACTIVE,.scan_time.active={.min=40,.max=100}};
+  esp_err_t result=esp_wifi_scan_start(&config,true);wifi_ap_record_t ap;unsigned count=0;
+  if(result==ESP_OK)while(count<12 && esp_wifi_scan_get_ap_record(&ap)==ESP_OK){char ssid[33];memcpy(ssid,ap.ssid,32);ssid[32]=0;for(char *c=ssid;*c;c++)if((unsigned char)*c<32 || (unsigned char)*c>126)*c='?';snprintf(reply,sizeof(reply),"ssid=%s rssi=%d auth=%d\r\n",ssid,ap.rssi,ap.authmode);mgmt_write(reply);count++;}
+  else {mgmt_write("ERR Scan failed; retry shortly\r\n");}
+  esp_wifi_clear_ap_list();wifi_scan_pauses_reconnect=false;wifi_rescan=!connected;xSemaphoreGive(wifi_scan_lock);
+
+}
+/* list, profile, use, del: the saved-network commands, in a function of their own (control task stack, see tools/check-control-stack.py). */
+__attribute__((noinline)) static void serial_networks(const char *line){
+ char reply[160];
+ if(xSemaphoreTake(members_lock,pdMS_TO_TICKS(100))!=pdTRUE){mgmt_write("ERR Settings busy\r\n");return;}
+ if(!strcmp(line,"list"))for(unsigned i=0;i<wifi_saved.count;i++){snprintf(reply,sizeof(reply),"%u%s name=%.24s ssid=%s priority=%u\r\n",i+1,wifi_current==(int)i?"*":"",wifi_meta.slot[i].name,wifi_saved.profiles[i].ssid,(unsigned)wifi_meta.slot[i].priority);mgmt_write(reply);}
+ else if(!strncmp(line,"profile ",8)){
+  serial_profile(line+8);
+ }else if(!strncmp(line,"use ",4)){
+  char *end;long slot=strtol(line+4,&end,10);
+  /* Not during a setup boot: the one radio belongs to the access point, and joining a network would move it off its channel under the phone. */
+  int result=*end?-1:setup_active?-3:wifi_use_profile(slot);
+  if(result==0){
+   /* v0.1.1: `use N` also makes N the preferred network, kept across restarts. The switch is already under way; a failed write only costs the preference. */
+   bool kept=wifi_set_preferred((int)slot-1);
+   snprintf(reply,sizeof(reply),kept?"OK switching to %ld\r\n":"OK switching to %ld (preference not saved)\r\n",slot);mgmt_write(reply);}
+  else if(result==-2)mgmt_write("ERR Wi-Fi driver refused the network; previous setting kept\r\n");
+  else if(result==-3)mgmt_write("ERR Not available while setup is open; finish with Done or cancel first\r\n");
+  else mgmt_write("ERR Invalid saved network\r\n");
+ }else{char *end;long slot=strtol(line+4,&end,10);if(*end || slot<1 || slot>(long)wifi_saved.count || !wifi_save_profile(wifi_saved.profiles[slot-1].ssid,"",true))mgmt_write("ERR Saved network could not be removed\r\n");else mgmt_write("OK deleted\r\n");}
+ xSemaphoreGive(members_lock);
+}
+/* v0.1.1: display BRIGHTNESS ROTATION DIM_SECONDS; without arguments, the current values (control task stack: its own function). */
+__attribute__((noinline)) static void serial_display(const char *line){
+ char reply[96];
+  /* v0.1.1: display BRIGHTNESS ROTATION DIM_SECONDS. Without arguments, the current values. */
+  if(!line[7]){snprintf(reply,sizeof(reply),"display brightness=%u rotation=%u dim_seconds=%u\r\n",(unsigned)display_settings.brightness,(unsigned)display_settings.rotation,(unsigned)display_settings.dim_seconds);mgmt_write(reply);return;}
+  ui_settings next;
+  if(!ui_settings_parse(line+8,&next))mgmt_write("ERR display: brightness 5..100 rotation 0|1 dim 10..3600 seconds\r\n");
+  else if(!display_save(&next))mgmt_write("ERR Storage save failed\r\n");
+  else mgmt_write("OK display saved\r\n");
+  return;
+
+}
+bool gateway_serial_command(const char *line) {
+ if(!strcmp(line,"status")){serial_status();return true;}
  if(!strncmp(line,"mode ",5)){
   tdongle_mode selected;
   if(!tdongle_mode_parse(line+5,&selected)){mgmt_write("ERR Invalid mode\r\n");return true;}
@@ -30,24 +87,8 @@ bool gateway_serial_command(const char *line) {
   if(result!=ESP_OK){mgmt_write("ERR Mode was not saved\r\n");return true;}
   mgmt_write("OK mode saved; restarting\r\ndone>\r\n");vTaskDelay(pdMS_TO_TICKS(300));esp_restart();return true;
  }
- if(!strcmp(line,"scan")){
-  if(!wifi_ready || xSemaphoreTake(wifi_scan_lock,0)!=pdTRUE){mgmt_write("ERR Scan busy\r\n");return true;}
-  wifi_scan_pauses_reconnect=true;bool connected=online;if(!connected)esp_wifi_disconnect();
-  wifi_scan_config_t config={.show_hidden=false,.scan_type=WIFI_SCAN_TYPE_ACTIVE,.scan_time.active={.min=40,.max=100}};
-  esp_err_t result=esp_wifi_scan_start(&config,true);wifi_ap_record_t ap;unsigned count=0;
-  if(result==ESP_OK)while(count<12 && esp_wifi_scan_get_ap_record(&ap)==ESP_OK){char ssid[33];memcpy(ssid,ap.ssid,32);ssid[32]=0;for(char *c=ssid;*c;c++)if((unsigned char)*c<32 || (unsigned char)*c>126)*c='?';snprintf(reply,sizeof(reply),"ssid=%s rssi=%d auth=%d\r\n",ssid,ap.rssi,ap.authmode);mgmt_write(reply);count++;}
-  else {mgmt_write("ERR Scan failed; retry shortly\r\n");}
-  esp_wifi_clear_ap_list();wifi_scan_pauses_reconnect=false;wifi_rescan=!connected;xSemaphoreGive(wifi_scan_lock);return true;
- }
- if(!strncmp(line,"display",7) && (!line[7] || line[7]==' ')){
-  /* v0.1.1: display BRIGHTNESS ROTATION DIM_SECONDS. Without arguments, the current values. */
-  if(!line[7]){snprintf(reply,sizeof(reply),"display brightness=%u rotation=%u dim_seconds=%u\r\n",(unsigned)display_settings.brightness,(unsigned)display_settings.rotation,(unsigned)display_settings.dim_seconds);mgmt_write(reply);return true;}
-  ui_settings next;
-  if(!ui_settings_parse(line+8,&next))mgmt_write("ERR display: brightness 5..100 rotation 0|1 dim 10..3600 seconds\r\n");
-  else if(!display_save(&next))mgmt_write("ERR Storage save failed\r\n");
-  else mgmt_write("OK display saved\r\n");
-  return true;
- }
+ if(!strcmp(line,"scan")){serial_scan();return true;}
+ if(!strncmp(line,"display",7) && (!line[7] || line[7]==' ')){serial_display(line);return true;}
  if(!strcmp(line,"setup") || !strncmp(line,"setup ",6)){
   /* Restart into the setup access point (v0.1.1). `setup N` offers saved network N for replacement on the page. */
   unsigned slot=0;
@@ -76,24 +117,5 @@ bool gateway_serial_command(const char *line) {
   mgmt_write("OK factory reset; restarting into setup\r\ndone>\r\n");vTaskDelay(pdMS_TO_TICKS(300));setup_restart(SETUP_REQUEST_ENTER,0);return true;
  }
  if(strcmp(line,"list") && strncmp(line,"profile ",8) && strncmp(line,"del ",4) && strncmp(line,"use ",4))return false;
- if(xSemaphoreTake(members_lock,pdMS_TO_TICKS(100))!=pdTRUE){mgmt_write("ERR Settings busy\r\n");return true;}
- if(!strcmp(line,"list"))for(unsigned i=0;i<wifi_saved.count;i++){snprintf(reply,sizeof(reply),"%u%s name=%.24s ssid=%s priority=%u\r\n",i+1,wifi_current==(int)i?"*":"",wifi_meta.slot[i].name,wifi_saved.profiles[i].ssid,(unsigned)wifi_meta.slot[i].priority);mgmt_write(reply);}
- else if(!strncmp(line,"profile ",8)){
-  profile_t profile;int slot;
-  if(!profile_parse_json(line+8,&slot,&profile) || slot>(int)wifi_saved.count)mgmt_write("ERR Refresh saved networks before editing\r\n");
-  else if(wifi_save_with(profile.ssid,profile.pass,profile.name,profile.priority,false,slot)){snprintf(reply,sizeof(reply),"OK saved to slot %d; setup stays open\r\n",slot+1);mgmt_write(reply);}else {mgmt_write("ERR Wi-Fi could not be saved\r\n");}
-  memset(&profile,0,sizeof(profile));
- }else if(!strncmp(line,"use ",4)){
-  char *end;long slot=strtol(line+4,&end,10);
-  /* Not during a setup boot: the one radio belongs to the access point, and joining a network would move it off its channel under the phone. */
-  int result=*end?-1:setup_active?-3:wifi_use_profile(slot);
-  if(result==0){
-   /* v0.1.1: `use N` also makes N the preferred network, kept across restarts. The switch is already under way; a failed write only costs the preference. */
-   bool kept=wifi_set_preferred((int)slot-1);
-   snprintf(reply,sizeof(reply),kept?"OK switching to %ld\r\n":"OK switching to %ld (preference not saved)\r\n",slot);mgmt_write(reply);}
-  else if(result==-2)mgmt_write("ERR Wi-Fi driver refused the network; previous setting kept\r\n");
-  else if(result==-3)mgmt_write("ERR Not available while setup is open; finish with Done or cancel first\r\n");
-  else mgmt_write("ERR Invalid saved network\r\n");
- }else{char *end;long slot=strtol(line+4,&end,10);if(*end || slot<1 || slot>(long)wifi_saved.count || !wifi_save_profile(wifi_saved.profiles[slot-1].ssid,"",true))mgmt_write("ERR Saved network could not be removed\r\n");else mgmt_write("OK deleted\r\n");}
- xSemaphoreGive(members_lock);return true;
+ serial_networks(line);return true;
 }

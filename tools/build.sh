@@ -34,6 +34,7 @@ fi
 idf.py -B "$build" -D "SDKCONFIG=$PWD/$build/sdkconfig" -D "SDKCONFIG_DEFAULTS=$defaults" -D IDF_TARGET=esp32s3 build size
 python3 tools/check_build.py "$build" "$variant"
 python3 alternative/tailnet/tools/check-startup-stack.py "$build"
+python3 alternative/tailnet/tools/check-control-stack.py "$build"
 if [[ $depth == 0 ]]; then
  python3 tools/package.py "$build" "$variant"
 fi

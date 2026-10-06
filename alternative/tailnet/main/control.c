@@ -20,7 +20,8 @@ extern bool gateway_online(void);
 extern int wg_crypto_bench_run(void (*write)(const char *line));
 /* The `pm` command: the clock now, the scaling state and every CPU-max lock, then IDF's own lock table (heap buffer, truncated). An idle
  * gateway reports cpu_mhz=80 here; after a transfer the held_us counters have moved. See ADR 0016. */
-static void pm_report(void) {
+/* noinline: its 1 KB of locals would otherwise sit in command_task's frame for every command, not just `pm` (the control task has a 4 KB stack). */
+__attribute__((noinline)) static void pm_report(void) {
     tdongle_pm_status_t pm;
     char line[200];
     tdongle_pm_status(&pm);
@@ -75,7 +76,7 @@ static void command_task(void *arg) {
     char line[512];
     for (;;) {
         gateway_display_tick();
-        if (xQueueReceive(commands, line, pdMS_TO_TICKS(UI_POLL_MS)) != pdTRUE)
+        if (!gateway_ui_take_command(line, sizeof(line)) && xQueueReceive(commands, line, pdMS_TO_TICKS(UI_POLL_MS)) != pdTRUE)
             continue;
         if (!strcmp(line, "help"))
             mgmt_write(gateway_tailnet_mode()?
