@@ -1,11 +1,11 @@
 //! [`DerpTransport`]: the byte stream under the DERP link, and its TLS implementation.
 
 use crate::cert_name::DerpCert;
+use crate::etls::{Aes128GcmSha256, TlsConfig, TlsConnection, TlsContext, TlsError};
 use crate::tls::{DerpProvider, DerpVerifier};
 use crate::verify::{Reject, TrustAnchor, TrustedBy, clock_valid};
 use core::cell::Cell;
 use embedded_io_async::{Read, Write};
-use embedded_tls::{Aes128GcmSha256, TlsConfig, TlsConnection, TlsContext, TlsError};
 use tdongle_tailnet_types::Entropy;
 
 /// The read record buffer a TLS connection pins for its whole life: one maximal TLS 1.3 record (16,384 plaintext + 256). The server picks the

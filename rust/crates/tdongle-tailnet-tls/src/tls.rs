@@ -1,12 +1,12 @@
-//! The `embedded-tls` plug-ins: the DERP trust policy as a [`TlsVerifier`](embedded_tls::TlsVerifier) and an entropy adapter.
+//! The `embedded-tls` plug-ins: the DERP trust policy as a `TlsVerifier` and an entropy adapter.
 
 use crate::cert_name::DerpCert;
 use crate::der::KeyKind;
+use crate::etls::{Aes128GcmSha256, CertificateEntryRef, CertificateRef, CertificateVerifyRef, CryptoProvider, SignatureScheme, TlsError, TlsVerifier};
 use crate::rsa::{self, Hash as RsaHash, PublicKey};
 use crate::verify::{Accepted, MAX_CHAIN, Reject, TrustAnchor, VerifyConfig, verify_chain};
 use core::cell::Cell;
 use embedded_io_async::{ErrorType, Read, Write};
-use embedded_tls::{Aes128GcmSha256, CertificateEntryRef, CertificateRef, CertificateVerifyRef, CryptoProvider, SignatureScheme, TlsError, TlsVerifier};
 use p256::ecdsa::signature::Verifier;
 use rand_core::{CryptoRng, RngCore};
 use sha2::{Digest, Sha256};
@@ -182,7 +182,7 @@ impl CryptoProvider for DerpProvider<'_> {
     type CipherSuite = Aes128GcmSha256;
     type Signature = NoSignature;
 
-    fn rng(&mut self) -> impl embedded_tls::CryptoRngCore {
+    fn rng(&mut self) -> impl crate::etls::CryptoRngCore {
         &mut self.rng
     }
 

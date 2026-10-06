@@ -19,7 +19,8 @@
 //!
 //! Memory (see [`STATE_BYTES`]): the connection pins one read record buffer ([`READ_RECORD_BYTES`], 16,640) and one write buffer
 //! ([`WRITE_RECORD_BYTES`]) for its whole life; the handshake allocates nothing. No `alloc` anywhere. Cargo feature `p384` (default) adds P-384 and
-//! SHA-384/512 (about 190 KB of xtensa flash) for the ECDSA chain.
+//! SHA-384/512 (about 190 KB of xtensa flash) for the ECDSA chain. Cargo feature `lease` swaps in the vendored, patched `embedded-tls`
+//! (`rust/vendor/embedded-tls/PATCH.md`) and adds [`lease`]: connections that pin no read buffer and share one 16,640 B buffer record by record.
 #![no_std]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -27,8 +28,17 @@
 #[cfg(test)]
 extern crate std;
 
+#[cfg(not(any(feature = "stock", feature = "lease")))]
+compile_error!("enable feature `stock` (embedded-tls from crates.io) or `lease` (the vendored, patched copy)");
+#[cfg(all(feature = "stock", not(feature = "lease")))]
+pub(crate) use embedded_tls as etls;
+#[cfg(feature = "lease")]
+pub(crate) use embedded_tls_lease as etls;
+
 pub mod cert_name;
 mod der;
+#[cfg(feature = "lease")]
+pub mod lease;
 mod rsa;
 pub mod tls;
 pub mod transport;
@@ -39,6 +49,10 @@ pub use transport::{DerpTransport, READ_RECORD_BYTES, TlsDerp, WRITE_RECORD_BYTE
 pub use verify::{
     Accepted, DEFAULT_ANCHORS, FAST_ANCHORS, ISRG_ROOT_X1, ISRG_ROOT_X2, ISRG_ROOT_YE, ISRG_ROOT_YR, Reject, TrustAnchor, TrustedBy, VerifyConfig, verify_chain,
 };
+
+/// `size_of` of a [`lease::LeasedTlsDerp`] (feature `lease`): the whole live connection state, with no read buffer pinned (host build).
+#[cfg(feature = "lease")]
+pub const LEASED_STATE_BYTES: usize = core::mem::size_of::<lease::LeasedTlsDerp<'static, tls::NullIo, embassy_sync::blocking_mutex::raw::NoopRawMutex>>();
 
 /// `size_of` of the state a live DERP connection owns besides its two record buffers (host build; the xtensa figure is in the ADR).
 pub const STATE_BYTES: usize = core::mem::size_of::<transport::TlsDerp<'static, tls::NullIo>>();

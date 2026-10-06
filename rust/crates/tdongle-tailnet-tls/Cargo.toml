@@ -12,7 +12,11 @@ workspace = true
 
 [dependencies]
 tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
-embedded-tls = { version = "0.19", default-features = false }
+embedded-tls = { version = "0.19", default-features = false, optional = true }
+# Feature `lease`: the same crate with the record buffer made per-record (rust/vendor/embedded-tls/PATCH.md).
+embedded-tls-lease = { package = "embedded-tls", path = "../../vendor/embedded-tls", default-features = false, optional = true }
+embassy-sync = { version = "0.8", optional = true }
+embassy-futures = { version = "0.1", optional = true }
 embedded-io-async = "0.7"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa"] }
 p384 = { version = "0.13", default-features = false, features = ["ecdsa"], optional = true }
@@ -21,7 +25,11 @@ rand_core = { version = "0.6", default-features = false }
 subtle = { version = "2.6", default-features = false }
 
 [features]
-default = ["p384"]
+default = ["p384", "stock"]
+# embedded-tls 0.19 from crates.io (pins its read record buffer for the connection's life). Off + `lease`: only the vendored patched copy is used.
+stock = ["dep:embedded-tls"]
+# The shared record-buffer lease: `LeasedTlsDerp` pins no read buffer; see `lease`.
+lease = ["dep:embedded-tls-lease", "dep:embassy-sync", "dep:embassy-futures"]
 # ECDSA P-384 and everything that needs SHA-384/512 (RSA signatures with SHA-384/512, RSA-PSS-SHA384/512). Costs about 130 KB (p384) + 45 KB (sha512) of
 # xtensa flash. The Go derper serves a TLS 1.3-only client its RSA chain, which needs none of it; the ECDSA chain (Let's Encrypt X2/YE) does.
 p384 = ["dep:p384"]
@@ -31,4 +39,5 @@ tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-u
 sha2 = { version = "0.10", default-features = false }
 proptest = { version = "1", default-features = false, features = ["std"] }
 embassy-futures = "0.1"
+embassy-sync = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
