@@ -1,0 +1,12 @@
+/Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/xtensa-esp32s3-none-elf/release/deps/sdio-df33aa24317756d0.d: /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/lib.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/common.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/emmc.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/sd.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/sdio.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/spi.rs
+
+/Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/xtensa-esp32s3-none-elf/release/deps/libsdio-df33aa24317756d0.rlib: /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/lib.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/common.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/emmc.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/sd.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/sdio.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/spi.rs
+
+/Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/xtensa-esp32s3-none-elf/release/deps/libsdio-df33aa24317756d0.rmeta: /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/lib.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/common.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/emmc.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/sd.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/sdio.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/spi.rs
+
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/lib.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/common.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/emmc.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/sd.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/sdio.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sdio-0.5.2/src/spi.rs:

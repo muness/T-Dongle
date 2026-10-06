@@ -76,7 +76,7 @@ const WIFI_TX_QUEUE: usize = 6;
 const WIFI_RX_QUEUE: usize = 8;
 /// Heap: 64 KiB reclaimed (post-bootloader DRAM) + this regular region.
 const HEAP_RECLAIMED: usize = 64 * 1024;
-const HEAP_REGULAR: usize = 48 * 1024;
+const HEAP_REGULAR: usize = 60 * 1024; // +12 KiB: the ring's 8 permanent slots moved from .bss into the heap (elastic ring, ADR 0023)
 const CPU_MHZ: u32 = 240;
 
 type Drv = UsbDriver<'static>;
@@ -111,6 +111,22 @@ static RING_SENT: AtomicU32 = AtomicU32::new(0);
 static RING_FULL: AtomicU32 = AtomicU32::new(0);
 static RING_NOT_READY: AtomicU32 = AtomicU32::new(0);
 static RING_FLUSHED: AtomicU32 = AtomicU32::new(0);
+/// Ring growth and the Wi-Fi burst shape (the next board run explains residual TCP-down retransmits with these): how deep the ring got, how many frames the radio delivered back to
+/// back (gaps under 2 ms), how many datagrams went into each IN NTB.
+static RING_GROWS: AtomicU32 = AtomicU32::new(0);
+static RING_SHRINKS: AtomicU32 = AtomicU32::new(0);
+static RING_GROW_DENIED: AtomicU32 = AtomicU32::new(0);
+static RING_CAP: AtomicU32 = AtomicU32::new(0);
+static LAST_BUSY_MS: AtomicU32 = AtomicU32::new(0);
+static RX_LAST_US: AtomicU32 = AtomicU32::new(0);
+static RX_BURST_LEN: AtomicU32 = AtomicU32::new(0);
+static RX_BURST_MAX: AtomicU32 = AtomicU32::new(0);
+static RX_BURSTS_GE4: AtomicU32 = AtomicU32::new(0);
+static NTB_IN_COUNT: AtomicU32 = AtomicU32::new(0);
+static NTB_IN_FRAMES: AtomicU32 = AtomicU32::new(0);
+static NTB_IN_FRAMES_MAX: AtomicU32 = AtomicU32::new(0);
+/// Datagrams per IN NTB: 1, 2, 3 to 4, 5 to 8.
+static NTB_IN_HIST: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
 static RING_HIGH: AtomicU32 = AtomicU32::new(0);
 static RING_WRITE_ERR: AtomicU32 = AtomicU32::new(0);
 static DOWN_BYTES: AtomicU32 = AtomicU32::new(0);
@@ -139,53 +155,125 @@ static SOURCE_FRAMES: AtomicU32 = AtomicU32::new(0);
 static SOURCE_BYTES: AtomicU32 = AtomicU32::new(0);
 
 static RING_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+static HOUSEKEEP_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static WORKER_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static RESUME_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 // ---- Wi-Fi -> host: bounded drop-tail ring of whole frames (the C's slab ring, simplified) ----
-const RING_SLOTS: usize = 8;
+/// The Wi-Fi to host frame ring, ADR 0023: 8 permanent slots and up to 10 elastic chunks of 2, 28 in all (`tdongle_usb_out::elastic`), the C ring's capacity. Slots are heap boxes; only the
+/// housekeeping task (thread executor) allocates or frees them, never the producer in the Wi-Fi task, which just copies into a free one under a short critical section.
+const MAX_SLOTS: usize = tdongle_usb_out::elastic::MAX_SLOTS;
+const BASE_SLOTS: usize = tdongle_usb_out::elastic::BASE_SLOTS;
+const RING_SLOTS: usize = BASE_SLOTS;
 
 struct RingSlot {
     len: u16,
     data: [u8; MTU],
 }
 struct Ring {
-    slots: [RingSlot; RING_SLOTS],
+    store: [Option<alloc::boxed::Box<RingSlot>>; MAX_SLOTS],
+    /// FIFO of slot ids.
+    queue: [u8; MAX_SLOTS],
     head: usize,
     count: usize,
+    /// Stack of free slot ids.
+    free: [u8; MAX_SLOTS],
+    free_count: usize,
+    /// Slots allocated now.
+    cap: usize,
 }
 impl Ring {
-    const EMPTY: RingSlot = RingSlot { len: 0, data: [0; MTU] };
     const fn new() -> Self {
-        Self { slots: [Self::EMPTY; RING_SLOTS], head: 0, count: 0 }
+        Self { store: [const { None }; MAX_SLOTS], queue: [0; MAX_SLOTS], head: 0, count: 0, free: [0; MAX_SLOTS], free_count: 0, cap: 0 }
+    }
+    /// Add a slot (id `id`, box already allocated) to the free list.
+    fn add_slot(&mut self, id: usize, slot: alloc::boxed::Box<RingSlot>) {
+        self.store[id] = Some(slot);
+        self.free[self.free_count] = id as u8;
+        self.free_count += 1;
+        self.cap += 1;
     }
     fn push(&mut self, frame: &[u8]) -> bool {
-        if self.count == RING_SLOTS {
+        if self.free_count == 0 {
             return false;
         }
-        let i = (self.head + self.count) % RING_SLOTS;
-        self.slots[i].data[..frame.len()].copy_from_slice(frame);
-        self.slots[i].len = frame.len() as u16;
+        self.free_count -= 1;
+        let id = usize::from(self.free[self.free_count]);
+        let Some(slot) = self.store[id].as_mut() else { return false };
+        slot.data[..frame.len()].copy_from_slice(frame);
+        slot.len = frame.len() as u16;
+        self.queue[(self.head + self.count) % MAX_SLOTS] = id as u8;
         self.count += 1;
         RING_HIGH.fetch_max(self.count as u32, Ordering::Relaxed);
         true
     }
-    fn pop_into(&mut self, out: &mut [u8; MTU]) -> Option<usize> {
+    /// Length of the oldest frame.
+    fn front_len(&self) -> Option<usize> {
         if self.count == 0 {
             return None;
         }
-        let s = &self.slots[self.head];
-        let n = s.len as usize;
-        out[..n].copy_from_slice(&s.data[..n]);
-        self.head = (self.head + 1) % RING_SLOTS;
-        self.count -= 1;
-        Some(n)
+        self.store[usize::from(self.queue[self.head])].as_ref().map(|s| usize::from(s.len))
+    }
+    /// Move the oldest frames into the NTB while they fit (up to 8 datagrams, 3,200 bytes). Returns how many.
+    fn pop_into_ntb(&mut self, ntb: &mut tdongle_usb_out::ntb_in::NtbBuilder<{ ncm::NTB_IN_MAX }>) -> usize {
+        let mut moved = 0;
+        while let Some(len) = self.front_len() {
+            let Some(room) = ntb.slot(len) else { break };
+            let id = usize::from(self.queue[self.head]);
+            if let Some(slot) = self.store[id].as_ref() {
+                room.copy_from_slice(&slot.data[..len]);
+            }
+            ntb.commit(len);
+            self.head = (self.head + 1) % MAX_SLOTS;
+            self.count -= 1;
+            self.free[self.free_count] = id as u8;
+            self.free_count += 1;
+            moved += 1;
+        }
+        moved
     }
     fn flush(&mut self) -> usize {
         let n = self.count;
-        self.count = 0;
-        self.head = 0;
+        while self.count > 0 {
+            let id = self.queue[self.head];
+            self.free[self.free_count] = id;
+            self.free_count += 1;
+            self.head = (self.head + 1) % MAX_SLOTS;
+            self.count -= 1;
+        }
         n
+    }
+    /// Take two free elastic slots out of the ring (ids at or above the base), for the housekeeping task to free. `None` if two are not free.
+    fn take_chunk(&mut self) -> Option<[alloc::boxed::Box<RingSlot>; 2]> {
+        let mut found = [0usize; 2];
+        let mut n = 0;
+        for i in (0..self.free_count).rev() {
+            if usize::from(self.free[i]) >= BASE_SLOTS && n < 2 {
+                found[n] = i;
+                n += 1;
+            }
+        }
+        if n < 2 {
+            return None;
+        }
+        // remove the higher index first so the lower one stays valid
+        found.sort_unstable_by(|a, b| b.cmp(a));
+        let mut out = [None, None];
+        for (k, &i) in found.iter().enumerate() {
+            let id = usize::from(self.free[i]);
+            self.free[i] = self.free[self.free_count - 1];
+            self.free_count -= 1;
+            out[k] = self.store[id].take();
+            self.cap -= 1;
+        }
+        match out {
+            [Some(a), Some(b)] => Some([a, b]),
+            _ => None,
+        }
+    }
+    /// The first id at or above the base that has no box, for growth.
+    fn next_free_id(&self) -> Option<usize> {
+        (BASE_SLOTS..MAX_SLOTS).find(|&i| self.store[i].is_none())
     }
 }
 static RING: CsMutex<RefCell<Ring>> = CsMutex::new(RefCell::new(Ring::new()));
@@ -211,7 +299,27 @@ impl Env for FwEnv {
         if frame.is_empty() || frame.len() > MTU {
             return RingSend::Invalid;
         }
-        if critical_section::with(|cs| RING.borrow_ref_mut(cs).push(frame)) {
+        // the shape of the Wi-Fi bursts: frames within 2 ms of each other belong to one burst (an A-MPDU delivers its subframes back to back)
+        let now = Instant::now().as_micros() as u32;
+        let gap = now.wrapping_sub(RX_LAST_US.swap(now, Ordering::Relaxed));
+        let burst = if gap < 2_000 { RX_BURST_LEN.fetch_add(1, Ordering::Relaxed) + 1 } else {
+            RX_BURST_LEN.store(1, Ordering::Relaxed);
+            1
+        };
+        RX_BURST_MAX.fetch_max(burst, Ordering::Relaxed);
+        if burst == 4 {
+            RX_BURSTS_GE4.fetch_add(1, Ordering::Relaxed);
+        }
+        let (accepted, busy) = critical_section::with(|cs| {
+            let mut r = RING.borrow_ref_mut(cs);
+            let ok = r.push(frame);
+            (ok, r.free_count <= tdongle_usb_out::elastic::GROW_HEADROOM + 1)
+        });
+        if busy {
+            LAST_BUSY_MS.store(Instant::now().as_millis() as u32, Ordering::Relaxed);
+            HOUSEKEEP_SIG.signal(());
+        }
+        if accepted {
             RING_ENQ.fetch_add(1, Ordering::Relaxed);
             RING_SIG.signal(());
             RingSend::Accepted
@@ -505,6 +613,15 @@ async fn main(spawner: Spawner) -> ! {
     static INT_EXEC: StaticCell<InterruptExecutor<1>> = StaticCell::new();
     let int_spawner = INT_EXEC.init(InterruptExecutor::new(peripherals.FROM_CPU_INTR1)).start(Priority::Priority3);
 
+    // the ring's permanent slots (8), allocated once; the housekeeping task adds and removes the elastic chunks
+    critical_section::with(|cs| {
+        let mut r = RING.borrow_ref_mut(cs);
+        for id in 0..BASE_SLOTS {
+            r.add_slot(id, alloc::boxed::Box::new(RingSlot { len: 0, data: [0; MTU] }));
+        }
+        RING_CAP.store(r.cap as u32, Ordering::Relaxed);
+    });
+
     // ---- the bridge (no radio needed yet: the interface is filled in by `init_task`) ----
     let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or([0; 6]); // STA MAC = base MAC
     static BRIDGE: StaticCell<Bridge<FwEnv>> = StaticCell::new();
@@ -571,7 +688,8 @@ async fn main(spawner: Spawner) -> ! {
     supervise::THREAD_SPAWNER.get_or_init(|| spawner.make_send());
     spawner.spawn(supervise::thread_pulse_task().unwrap());
     spawner.spawn(usb_rx_task(rx, producer).unwrap());
-    spawner.spawn(usb_tx_task(tx).unwrap());
+    int_spawner.spawn(usb_tx_task(SendTx(tx)).unwrap());
+    spawner.spawn(ring_housekeeping_task().unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
     spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, spawner, bridge, worker, state.boot.safe_mode).unwrap());
     loop {
@@ -953,20 +1071,23 @@ async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer
 
 /// Wi-Fi -> host: the ring drains into one NTB per datagram (no IN aggregation yet).
 #[embassy_executor::task]
-async fn usb_tx_task(mut tx: NcmSender) -> ! {
+async fn usb_tx_task(tx: SendTx) -> ! {
+    let mut tx = tx.0;
     let mut seq = 0u32;
     let mut next = Instant::now();
     loop {
         if USB_MODE.load(Ordering::Relaxed) == USB_SOURCE {
-            // `usb source`: broadcast dummy frames on IN (measures device -> host alone)
-            let body = tx.body_mut();
-            body[..SOURCE_FRAME].fill(0);
-            body[0..6].fill(0xff);
-            body[6..12].copy_from_slice(&[0x02, 0x54, 0x44, 0x53, 0x33, 0x01]);
-            body[12..14].copy_from_slice(&0x88b5u16.to_be_bytes());
-            body[14..18].copy_from_slice(&seq.to_be_bytes());
-            match tx.send_prepared(SOURCE_FRAME).await {
-                Ok(()) => {
+            // `usb source`: broadcast dummy frames on IN (measures device -> host alone), one datagram per NTB as in the S2 measurement (7.41 Mbit/s)
+            if let Some(room) = tx.ntb().slot(SOURCE_FRAME) {
+                room.fill(0);
+                room[0..6].fill(0xff);
+                room[6..12].copy_from_slice(&[0x02, 0x54, 0x44, 0x53, 0x33, 0x01]);
+                room[12..14].copy_from_slice(&0x88b5u16.to_be_bytes());
+                room[14..18].copy_from_slice(&seq.to_be_bytes());
+                tx.ntb().commit(SOURCE_FRAME);
+            }
+            match tx.send_ntb().await {
+                Ok(_) => {
                     seq = seq.wrapping_add(1);
                     SOURCE_FRAMES.fetch_add(1, Ordering::Relaxed);
                     SOURCE_BYTES.fetch_add(SOURCE_FRAME as u32, Ordering::Relaxed);
@@ -988,28 +1109,99 @@ async fn usb_tx_task(mut tx: NcmSender) -> ! {
             continue;
         }
         next = Instant::now();
-        let n = loop {
+        // Everything the radio delivered while the last NTB was on the wire goes into the next one (up to 8 datagrams, 3,200 bytes): one transfer per burst, not per frame.
+        let moved = loop {
             if USB_MODE.load(Ordering::Relaxed) == USB_SOURCE {
                 break 0;
             }
-            if let Some(n) = critical_section::with(|cs| RING.borrow_ref_mut(cs).pop_into(tx.body_mut())) {
-                break n;
+            let moved = critical_section::with(|cs| RING.borrow_ref_mut(cs).pop_into_ntb(tx.ntb()));
+            if moved != 0 {
+                break moved;
             }
             let _ = with_timeout(Duration::from_millis(50), RING_SIG.wait()).await; // wake regularly to notice a mode change
         };
-        if n == 0 {
+        if moved == 0 {
             continue;
         }
-        match tx.send_prepared(n).await {
-            Ok(()) => {
-                RING_SENT.fetch_add(1, Ordering::Relaxed);
-                DOWN_FRAMES.fetch_add(1, Ordering::Relaxed);
-                DOWN_BYTES.fetch_add(n as u32, Ordering::Relaxed);
+        match tx.send_ntb().await {
+            Ok((frames, bytes)) => {
+                RING_SENT.fetch_add(frames as u32, Ordering::Relaxed);
+                DOWN_FRAMES.fetch_add(frames as u32, Ordering::Relaxed);
+                DOWN_BYTES.fetch_add(bytes as u32, Ordering::Relaxed);
+                NTB_IN_COUNT.fetch_add(1, Ordering::Relaxed);
+                NTB_IN_FRAMES.fetch_add(frames as u32, Ordering::Relaxed);
+                NTB_IN_FRAMES_MAX.fetch_max(frames as u32, Ordering::Relaxed);
+                NTB_IN_HIST[match frames {
+                    0 | 1 => 0,
+                    2 => 1,
+                    3 | 4 => 2,
+                    _ => 3,
+                }]
+                .fetch_add(1, Ordering::Relaxed);
             }
             Err(_) => {
                 RING_WRITE_ERR.fetch_add(1, Ordering::Relaxed);
                 Timer::after_millis(1).await; // endpoint disabled: do not spin
             }
+        }
+    }
+}
+
+/// The IN sender, moved to the interrupt executor so a Wi-Fi burst is on the wire within microseconds of `rx_cb` (the thread executor runs the bridge worker and can be busy).
+/// `NcmSender` is not `Send` only because the driver's endpoint types are not marked so; after the move nothing else uses it.
+struct SendTx(NcmSender);
+
+// SAFETY: single owner after the move; the endpoint is touched only by `usb_tx_task`.
+unsafe impl Send for SendTx {}
+
+/// Grows and shrinks the frame ring (the only code that allocates or frees its slots), in the thread executor.
+#[embassy_executor::task]
+async fn ring_housekeeping_task() -> ! {
+    use tdongle_usb_out::elastic::{self, Step};
+    loop {
+        let _ = with_timeout(Duration::from_millis(100), HOUSEKEEP_SIG.wait()).await;
+        let (used, cap) = critical_section::with(|cs| {
+            let r = RING.borrow_ref(cs);
+            (r.count, r.cap)
+        });
+        let now = Instant::now().as_millis() as u32;
+        let idle = now.wrapping_sub(LAST_BUSY_MS.load(Ordering::Relaxed));
+        match elastic::step(used, cap, elastic::CHUNK_SLOTS * core::mem::size_of::<RingSlot>(), esp_alloc::HEAP.free(), idle) {
+            Step::Grow => {
+                let a = alloc::boxed::Box::new(RingSlot { len: 0, data: [0; MTU] });
+                let b = alloc::boxed::Box::new(RingSlot { len: 0, data: [0; MTU] });
+                let added = critical_section::with(|cs| {
+                    let mut r = RING.borrow_ref_mut(cs);
+                    match (r.next_free_id(), a, b) {
+                        (Some(i), a, b) => {
+                            r.add_slot(i, a);
+                            let j = r.next_free_id().unwrap_or(i);
+                            r.add_slot(j, b);
+                            RING_CAP.store(r.cap as u32, Ordering::Relaxed);
+                            true
+                        }
+                        _ => false,
+                    }
+                });
+                if added {
+                    RING_GROWS.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            Step::Shrink => {
+                let chunk = critical_section::with(|cs| {
+                    let mut r = RING.borrow_ref_mut(cs);
+                    let c = r.take_chunk();
+                    RING_CAP.store(r.cap as u32, Ordering::Relaxed);
+                    c
+                });
+                if chunk.is_some() {
+                    RING_SHRINKS.fetch_add(1, Ordering::Relaxed); // the boxes drop here, outside the critical section
+                }
+            }
+            Step::DeniedHeap => {
+                RING_GROW_DENIED.fetch_add(1, Ordering::Relaxed);
+            }
+            Step::None => {}
         }
     }
 }
@@ -1125,14 +1317,17 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
     let _ = write_status(out, &snap);
 
     let ring = RingReport {
-        ring_bytes: (RING_SLOTS * MTU) as u32,
+        ring_bytes: RING_CAP.load(Ordering::Relaxed) * MTU as u32,
         high_water_slabs: RING_HIGH.load(Ordering::Relaxed),
         enqueued_frames: RING_ENQ.load(Ordering::Relaxed),
         sent_frames: RING_SENT.load(Ordering::Relaxed),
         dropped_full: RING_FULL.load(Ordering::Relaxed),
         dropped_link_down: RING_NOT_READY.load(Ordering::Relaxed),
         flushed_link_down: RING_FLUSHED.load(Ordering::Relaxed),
-        max_bytes: (RING_SLOTS * MTU) as u32,
+        max_bytes: (MAX_SLOTS * MTU) as u32,
+        grow_events: RING_GROWS.load(Ordering::Relaxed),
+        shrink_events: RING_SHRINKS.load(Ordering::Relaxed),
+        grow_denied_heap: RING_GROW_DENIED.load(Ordering::Relaxed),
         ..Default::default()
     };
     let rx = RxClassReport {
@@ -1183,6 +1378,34 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         l2::TX_DRIVER_ERR.load(Ordering::Relaxed),
         l2::TX_LAST_ERR.load(Ordering::Relaxed),
         SCAN_SEEN.load(Ordering::Relaxed)
+    );
+    // the download path: ring depth, Wi-Fi burst shape and IN NTB aggregation (explain TCP-down retransmits with these)
+    let (used, cap) = critical_section::with(|cs| {
+        let r = RING.borrow_ref(cs);
+        (r.count, r.cap)
+    });
+    let ntbs = NTB_IN_COUNT.load(Ordering::Relaxed);
+    let frames = NTB_IN_FRAMES.load(Ordering::Relaxed);
+    let _ = write!(
+        out,
+        "s3_ring cap={} used={} high={} full={} grows={} shrinks={} grow_denied={} rx_burst_max={} rx_bursts_ge4={} ntb_in={} ntb_in_frames={} ntb_in_frames_max={} ntb_hist_1_2_4_8={}/{}/{}/{} avg_x100={}\r\n",
+        cap,
+        used,
+        RING_HIGH.load(Ordering::Relaxed),
+        RING_FULL.load(Ordering::Relaxed),
+        RING_GROWS.load(Ordering::Relaxed),
+        RING_SHRINKS.load(Ordering::Relaxed),
+        RING_GROW_DENIED.load(Ordering::Relaxed),
+        RX_BURST_MAX.load(Ordering::Relaxed),
+        RX_BURSTS_GE4.load(Ordering::Relaxed),
+        ntbs,
+        frames,
+        NTB_IN_FRAMES_MAX.load(Ordering::Relaxed),
+        NTB_IN_HIST[0].load(Ordering::Relaxed),
+        NTB_IN_HIST[1].load(Ordering::Relaxed),
+        NTB_IN_HIST[2].load(Ordering::Relaxed),
+        NTB_IN_HIST[3].load(Ordering::Relaxed),
+        if ntbs == 0 { 0 } else { frames * 100 / ntbs }
     );
     // where the radio is: the access point it joined and the strongest one the scan saw for the chosen SSID (they must agree unless the driver chose otherwise)
     let (joined, best) = critical_section::with(|cs| (*BSS_JOINED.borrow_ref(cs), *BSS_BEST.borrow_ref(cs)));

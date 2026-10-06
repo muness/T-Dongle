@@ -10,6 +10,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use embassy_usb::Builder;
 use embassy_usb::driver::{Direction, Driver, Endpoint, EndpointAddress, EndpointError, EndpointIn};
 use embassy_usb::types::{InterfaceNumber, StringIndex};
+use tdongle_usb_out::ntb_in::NtbBuilder;
 use tdongle_usb_out::{NtbCollector, Step};
 
 pub const USB_CLASS_CDC: u8 = 0x02;
@@ -26,7 +27,6 @@ pub const NTB_IN_MAX: usize = 3200;
 const SIG_NTH: u32 = 0x484d_434e;
 const SIG_NDP_NO_FCS: u32 = 0x304d_434e;
 const SIG_NDP_WITH_FCS: u32 = 0x314d_434e;
-const OUT_HEADER_LEN: usize = 28;
 
 // Class requests (CDC NCM 1.0, table 6-2)
 pub const REQ_SEND_ENCAPSULATED_COMMAND: u8 = 0x00;
@@ -119,7 +119,7 @@ pub fn build<'d, D: Driver<'d>>(builder: &mut Builder<'d, D>, mps: u16) -> (NcmI
 impl<'d, D: Driver<'d>> Ncm<'d, D> {
     pub fn split(self, ntb: &'d mut [u8; NTB_OUT_MAX]) -> (Sender<'d, D>, Receiver<'d, D>) {
         (
-            Sender { write_ep: self.write_ep, seq: 0, buf: [0; OUT_HEADER_LEN + MAX_DATAGRAM] },
+            Sender { write_ep: self.write_ep, seq: 0, ntb: NtbBuilder::new() },
             Receiver {
                 comm_if: self.comm_if,
                 comm_ep: self.comm_ep,
@@ -136,50 +136,33 @@ impl<'d, D: Driver<'d>> Ncm<'d, D> {
 pub struct Sender<'d, D: Driver<'d>> {
     write_ep: D::EndpointIn,
     seq: u16,
-    buf: [u8; OUT_HEADER_LEN + MAX_DATAGRAM],
+    ntb: NtbBuilder<NTB_IN_MAX>,
 }
 
-const MAX_DATAGRAM: usize = 1514;
+pub const MAX_DATAGRAM: usize = 1514;
 
 impl<'d, D: Driver<'d>> Sender<'d, D> {
-    /// Same NTB-16 framing as upstream: 12 B NTH + 16 B NDP (one datagram), data at offset 28. Upstream builds only
-    /// the first 64-byte packet in a stack buffer; here the whole NTB is assembled in `buf` (1.5 KB) and handed to
-    /// `EndpointIn::write_transfer`, the driver-level hook that a multi-packet-capable driver can override.
-    /// Awaits until the IN endpoint FIFO has room for every 64 B packet, i.e. until the host polls IN.
-    pub async fn write_packet(&mut self, data: &[u8]) -> Result<(), EndpointError> {
-        if data.len() > MAX_DATAGRAM {
-            return Err(EndpointError::BufferOverflow);
-        }
-        self.body_mut()[..data.len()].copy_from_slice(data);
-        self.send_prepared(data.len()).await
+    /// The NTB under construction. The Wi-Fi->host ring copies frames straight into it (`NtbBuilder::slot` / `commit`): up to 8 datagrams and 3,200 bytes per NTB, the way TinyUSB
+    /// packs them (`tdongle_usb_out::ntb_in`, host-tested against an independent parser of the layout).
+    pub fn ntb(&mut self) -> &mut NtbBuilder<NTB_IN_MAX> {
+        &mut self.ntb
     }
 
-    /// The datagram area of the NTB under construction (S3: the Wi-Fi->host ring copies straight into it, no staging copy).
-    pub fn body_mut(&mut self) -> &mut [u8; MAX_DATAGRAM] {
-        (&mut self.buf[OUT_HEADER_LEN..OUT_HEADER_LEN + MAX_DATAGRAM]).try_into().unwrap()
-    }
-
-    /// Write the NTH/NDP for a datagram of `len` bytes already placed with [`body_mut`](Self::body_mut) and send the NTB.
-    pub async fn send_prepared(&mut self, len: usize) -> Result<(), EndpointError> {
+    /// Send what the builder holds as one NTB and start a new one. Returns `(datagrams, bytes)`. Awaits until the IN endpoint has taken every 64 B packet; a ZLP follows an NTB
+    /// whose length is a multiple of 64.
+    pub async fn send_ntb(&mut self) -> Result<(usize, usize), EndpointError> {
         let seq = self.seq;
         self.seq = self.seq.wrapping_add(1);
-        let total = len + OUT_HEADER_LEN;
-        let h = &mut self.buf;
-        h[0..4].copy_from_slice(&SIG_NTH.to_le_bytes());
-        h[4..6].copy_from_slice(&12u16.to_le_bytes());
-        h[6..8].copy_from_slice(&seq.to_le_bytes());
-        h[8..10].copy_from_slice(&(total as u16).to_le_bytes());
-        h[10..12].copy_from_slice(&12u16.to_le_bytes());
-        h[12..16].copy_from_slice(&SIG_NDP_NO_FCS.to_le_bytes());
-        h[16..18].copy_from_slice(&16u16.to_le_bytes());
-        h[18..20].copy_from_slice(&0u16.to_le_bytes()); // next NDP
-        h[20..22].copy_from_slice(&(OUT_HEADER_LEN as u16).to_le_bytes());
-        h[22..24].copy_from_slice(&(len as u16).to_le_bytes());
-        h[24..28].copy_from_slice(&[0; 4]); // terminator entry
+        let frames = self.ntb.count();
+        let bytes = self.ntb.finish(seq).len();
         TX_NTBS.fetch_add(1, Ordering::Relaxed);
         // needs_zlp = true: a ZLP is added when the NTB length is a multiple of the max packet size.
-        self.write_ep.write_transfer(&self.buf[..total], true).await
+        let Self { write_ep, ntb, .. } = self;
+        let sent = write_ep.write_transfer(ntb.as_bytes(bytes), true).await;
+        self.ntb.clear();
+        sent.map(|()| (frames, bytes))
     }
+
 }
 
 /// What the class needs from an OUT endpoint that takes whole transfers (`embassy-usb-synopsys-otg` with the multi-packet patch): one completed hardware transfer and

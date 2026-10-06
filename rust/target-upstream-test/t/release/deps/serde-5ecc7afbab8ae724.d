@@ -1,0 +1,14 @@
+/Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/release/deps/serde-5ecc7afbab8ae724.d: /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/release/build/serde-5c52191be0ffe38a/out/private.rs
+
+/Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/release/deps/libserde-5ecc7afbab8ae724.rlib: /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/release/build/serde-5c52191be0ffe38a/out/private.rs
+
+/Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/release/deps/libserde-5ecc7afbab8ae724.rmeta: /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/release/build/serde-5c52191be0ffe38a/out/private.rs
+
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs:
+/Users/muness1/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs:
+/Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/release/build/serde-5c52191be0ffe38a/out/private.rs:
+
+# env-dep:OUT_DIR=/Users/muness1/src/tdongle-rust/rust/target-upstream-test/t/release/build/serde-5c52191be0ffe38a/out

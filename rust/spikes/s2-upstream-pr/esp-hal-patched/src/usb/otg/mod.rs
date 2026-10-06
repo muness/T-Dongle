@@ -98,6 +98,26 @@ mod fs_pins;
 #[cfg(usb_otg_driver_supported)]
 pub use fs_pins::{UsbFsDm, UsbFsDp};
 
+/// INSTRUMENTATION (s2-upstream-pr): duration and rate of the OTG device interrupt handler, read by the image's supervisor.
+pub mod isr_stats {
+    use core::sync::atomic::{AtomicU32, Ordering};
+    /// Interrupts handled.
+    pub static COUNT: AtomicU32 = AtomicU32::new(0);
+    /// Longest handler run, microseconds.
+    pub static MAX_US: AtomicU32 = AtomicU32::new(0);
+    /// Time of the last interrupt, microseconds since boot (wrapping u32).
+    pub static LAST_US: AtomicU32 = AtomicU32::new(0);
+    pub(crate) fn record(t0: crate::time::Instant) {
+        let now = crate::time::Instant::now();
+        let us = (now - t0).as_micros() as u32;
+        COUNT.fetch_add(1, Ordering::Relaxed);
+        if us > MAX_US.load(Ordering::Relaxed) {
+            MAX_US.store(us, Ordering::Relaxed);
+        }
+        LAST_US.store(now.duration_since_epoch().as_micros() as u32, Ordering::Relaxed);
+    }
+}
+
 pub mod embassy_usb_device;
 pub mod embassy_usb_host;
 
@@ -145,7 +165,10 @@ impl<'d> USB_FS<'d> {
         #[handler(priority = Priority::max())]
         pub(crate) fn otg_fs_device_interrupt() {
             let state = USB_FS::device_state();
+            // INSTRUMENTATION (s2-upstream-pr): time the driver's interrupt handler.
+            let t0 = crate::time::Instant::now();
             unsafe { on_interrupt(Otg::from_ptr(USB_FS::PTR.cast_mut().cast::<()>()), &state) }
+            isr_stats::record(t0);
         }
 
         #[handler(priority = Priority::max())]

@@ -17,6 +17,9 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod elastic;
+pub mod ntb_in;
+
 /// A packet did not fit the transfer buffer: it is discarded and the transfer is dropped when it ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Overflow;
