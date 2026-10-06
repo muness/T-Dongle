@@ -23,8 +23,7 @@ tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
 
 [patch.crates-io]
 # Upstream PR https://github.com/embassy-rs/embassy/pull/7191 (fork muness/embassy, branch synopsys-otg-multi-packet-out), pinned to its head commit.
-# The PR driver is built on embassy main, whose embassy-sync (CriticalSectionRawMutex: Copy) and embassy-usb-driver are NOT the released 0.8.0 / 0.2.2, so the
-# whole family must come from the same checkout (a mix does not compile).
+# The PR driver is built on embassy main (embassy-sync with CriticalSectionRawMutex: Copy etc.), so the whole family comes from the same checkout.
 embassy-usb-synopsys-otg = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
 embassy-usb-driver = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
 embassy-sync = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
@@ -33,6 +32,7 @@ embassy-net-driver-channel = { git = "https://github.com/muness/embassy", rev = 
 embassy-time = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
 embassy-time-driver = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
 embassy-time-queue-utils = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+# Copy of rust/vendor/esp-hal (RTC watchdog kept armed through init) plus the OTG glue edits for the PR driver (see FINDINGS.md); the S1/S2/S3 builds keep rust/vendor/esp-hal.
 esp-hal = { path = "esp-hal-patched" }
 
 [features]

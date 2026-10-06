@@ -20,6 +20,37 @@ Not run on hardware. Image: `rust/spikes/dist/s2-upstream-app.bin` (app-only, DI
 * `Config` is `#[non_exhaustive]`: fine via `Default` + field assignment, but esp-hal re-exports it, so it cannot be built with struct syntax by users.
 * Generic `RawMutex + Copy` bound: esp-hal hardcodes `CriticalSectionRawMutex` and needs the new `new(mutex)` arguments; the `Copy` bound requires unreleased embassy-sync, which blocks a release of the driver until embassy-sync ships.
 * `tx_fifo_count` is a required public field with no default; esp-hal has to know it per chip (it was implicit before).
+
+## Rebuild 2 (after the rescue fix, 5a70a28)
+Rebased on the current `s2-usb-ncm`. `esp-hal-patched` is now a copy of `rust/vendor/esp-hal` (RTC watchdog kept armed through `init`; `arm()` writes WDTCONFIG0 last), so S1/S2/S3 still use
+`rust/vendor/esp-hal` and the released 0.4.0 driver; only this spike uses the copy. The glue edits are the same three listed above.
+
+### Why the first image (fb118e3) reset-looped: NOT established
+It was built on the pre-fix rescue, so its resets were additionally invisible (RTC domain wiped, boot counter lost). Reading the PR driver for a cause found none:
+* all `mutex.lock` bodies are short register read-modify-writes; the only waits are `wait_for` (10 ms deadline with `embassy-time`, which esp-hal's `host` feature enables, verified with `cargo tree -f '{f}'`) and they are not
+  called with the lock held except `abort_in_endpoint` (<= 10 ms each) and `flush_tx_fifo`. `abort_out_endpoint` (about 1.2 ms, needs the ISR) runs outside the lock, as documented.
+* `read`/`read_multi`/`read_transfer` are `poll_fn` over atomics, so a `select` with a 500 ms timer that drops them loses nothing; the console loop's heartbeat is therefore independent of the driver.
+* The ISR handles `OUT_DATA_DONE` and drains the RX FIFO in a bounded loop; no storm path was found.
+So a deadlock or long critical section in the PR driver is **not supported by the source**. What the board output must tell: `boot-status` now prints `previous_hang`/`previous_op`, the RWDT registers and the supervisor
+counters (`sup ticks/feeds`). `previous_hang=thread|console` = a heartbeat stopped (name the executor); `sup ticks` frozen = the interrupt executor (supervisor + USB + console) was starved (spin in `Bus::poll`, ISR storm, a long
+critical section); ticks advancing with feeds frozen = a heartbeat verdict; ticks and feeds advancing yet a reset = the RWDT configuration, not the driver. Run `boot-status` right after a reset to decide.
+
+## Adaptations needed (feedback for the PR)
+1. **The whole embassy family must come from the PR checkout.** The driver is on embassy main: it needs `embassy-sync` where `CriticalSectionRawMutex: Copy` (released 0.8.0 lacks it:
+   `E0277` on every `M: RawMutex + Copy` bound), so `[patch.crates-io]` takes `embassy-usb-synopsys-otg`, `-usb-driver`, `-sync`, `-usb`, `-net-driver-channel`, `-time`, `-time-driver`,
+   `-time-queue-utils` from the one git rev (patching only sync breaks the released `embassy-net-driver-channel` 0.4.0, hence usb and net-driver-channel too). The driver alone cannot be dropped into a graph on released crates.
+2. **esp-hal 1.2.2 glue does not compile** (local copy `esp-hal-patched`, stock 1.2.2 plus 3 edits in `src/usb/otg/`):
+   * `embassy_usb_device.rs`: `OtgInstance` has a new required field `tx_fifo_count`; set to `state.endpoint_count() as u8` (7 on the S3 FS core), the old behaviour of one TX FIFO per endpoint slot.
+   * `mod.rs` (x4): `StateStorage::new()` / `HostStateStorage::new()` now take the mutex value, `StateStorage::new(CriticalSectionRawMutex::new())` (plus the import).
+3. **Spike code**: `Config::bulk_out_transfer_bytes = 3200` replaces `out_transfer_bytes[4]`; `ncm.rs` `read_ntb` calls the stock `EndpointOut::read_transfer` into the 3200 B NTB buffer; `read_chunk`, the `ReadTransfer` trait,
+   `NtbCollector` and the `tdongle-usb-out` dependency and the `stock-out` feature are gone. A zero-length result is skipped (see below). `EP_OUT_BYTES` = 64 + 2 x 3200 (see below).
+
+## API notes for the PR / esp-hal users
+* `bulk_out_transfer_bytes` is global to all bulk OUT endpoints and each takes that many bytes of `ep_out_buffer`: the CDC-ACM data OUT endpoint also gets 3200 B (two NTB-sized slices, 6.4 KB, for one useful one). A per-endpoint setting (by address or via `alloc_endpoint_out`) would fit composite devices.
+* `read_transfer` ends only on a short packet or a full buffer. An NTB of exactly the buffer size (3200 = 50 x 64) returns with no short packet; its ZLP then arrives as a separate `Ok(0)` transfer that the class must skip. Documenting this (or consuming the ZLP) would help; the vendored `read_chunk` returned a `short` flag instead.
+* `Config` is `#[non_exhaustive]`: fine via `Default` + field assignment, but esp-hal re-exports it, so it cannot be built with struct syntax by users.
+* Generic `RawMutex + Copy` bound: esp-hal hardcodes `CriticalSectionRawMutex` and needs the new `new(mutex)` arguments; the `Copy` bound requires unreleased embassy-sync, which blocks a release of the driver until embassy-sync ships.
+* `tx_fifo_count` is a required public field with no default; esp-hal has to know it per chip (it was implicit before).
 # S2 (no_std): embassy-usb CDC-ACM + CDC-NCM on the ESP32-S3 OTG at full speed
 
 Verdict: WORKS WITH CAVEATS. Built, image header verified (DIO / 40 MHz / 16 MB), descriptors byte-identical to the C firmware's on the host.

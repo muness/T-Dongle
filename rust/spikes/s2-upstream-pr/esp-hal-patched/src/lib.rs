@@ -770,7 +770,10 @@ pub fn init(config: Config) -> Peripherals {
     #[cfg(soc_has_swd_watchdog)]
     rtc.swd.disable();
 
-    rtc.rwdt.disable();
+    // PATCH (tdongle rescue): do NOT disable the RTC watchdog here. The (rescue) bootloader armed it with a digital-core-only reset and about 30 s; leaving it counting
+    // means a hang anywhere in the start-up that follows, before `tdongle_rescue::arm()` re-arms it as the first statement after `init`, is still caught by hardware.
+    // Every image that uses this crate calls `tdongle_rescue::arm()` first (tools/check_rescue_first.py), which sets its own timeout and the supervisor feeds it.
+    let _ = &mut rtc.rwdt;
 
     #[cfg(timergroup_timg0)]
     crate::timer::timg::Wdt::<crate::peripherals::TIMG0<'static>>::new().disable();
