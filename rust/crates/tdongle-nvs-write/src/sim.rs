@@ -42,6 +42,8 @@ pub struct SimFlash {
     pub spent: u64,
     /// Number of sector erases issued.
     pub erases: u64,
+    /// Erases per sector (wear).
+    pub sector_erases: Vec<u32>,
     /// Number of write calls.
     pub write_calls: u64,
     /// Writes that tried to turn a 0 bit into a 1 (impossible on NOR; must stay 0).
@@ -67,7 +69,7 @@ impl SimFlash {
     /// A flash holding `image` (a fresh power-up).
     #[must_use]
     pub fn from_image(image: Vec<u8>) -> Self {
-        Self { data: image, spent: 0, erases: 0, write_calls: 0, violations: 0, misaligned: 0, fail_at: None, tear: Tear::Prefix, dead: false, rng: 0x9e37_79b9_7f4a_7c15 }
+        Self { sector_erases: vec![0; image.len() / 4096], data: image, spent: 0, erases: 0, write_calls: 0, violations: 0, misaligned: 0, fail_at: None, tear: Tear::Prefix, dead: false, rng: 0x9e37_79b9_7f4a_7c15 }
     }
 
     /// Cut the power after `budget` more units, leaving the interrupted operation as `tear` says.
@@ -161,6 +163,7 @@ impl Flash for SimFlash {
         }
         let paid = self.left().map_or(Self::ERASE_UNITS, |l| l.min(Self::ERASE_UNITS)) as usize;
         self.erases += 1;
+        self.sector_erases[sector as usize] += 1;
         for b in &mut self.data[start..start + paid] {
             *b = 0xff;
         }

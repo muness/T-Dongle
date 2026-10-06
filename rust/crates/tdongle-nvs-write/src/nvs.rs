@@ -414,6 +414,26 @@ impl<F: Flash> Nvs<F> {
         Ok(Stats { pages: self.pages, free_pages: self.n_free, used_entries: used, erases: self.erases })
     }
 
+    /// Erase the pages that failed validation at mount (a header cut in the middle of its write, a blank page that is not blank).
+    /// ESP-IDF keeps such pages until it runs out of free pages (for diagnostics) and the engine does the same, so this is optional; call
+    /// it after a mount that found damage if the partition should be clean for external tools (IDF's `nvs_tool.py -i` reports them).
+    /// Returns how many pages it erased.
+    ///
+    /// # Errors
+    /// [`Error::Broken`], [`Error::Flash`].
+    pub fn scrub(&mut self) -> R<usize, F> {
+        self.live()?;
+        let mut n = 0;
+        for k in 0..self.n_free {
+            let p = usize::from(self.free[k]);
+            if self.info[p].state == PState::Corrupt {
+                self.erase_page(p)?;
+                n += 1;
+            }
+        }
+        Ok(n)
+    }
+
     fn live(&self) -> R<(), F> {
         if self.broken { Err(Error::Broken) } else { Ok(()) }
     }
@@ -1511,29 +1531,33 @@ impl<F: Flash> Nvs<F> {
         }
     }
 
-    /// `nvs_erase_all`: erase every item of the namespace, page by page, entry by entry; the namespace itself stays. Nothing to do (and no
-    /// error) when the namespace does not exist.
+    /// `nvs_erase_all`: erase every item of the namespace; the namespace itself stays. Nothing to do (and no error) when the namespace does
+    /// not exist. IDF walks the pages entry by entry, which can erase a blob's chunks before its index and leave the key half-erased if the
+    /// power goes; this version erases everything that is not a chunk first (indexes make a blob disappear in one step), then the chunks
+    /// (now orphans, which mount would erase anyway), so every key is either whole or gone at any instant.
     ///
     /// # Errors
     /// [`Error::Flash`].
     pub fn erase_namespace(&mut self, namespace: &str) -> R<(), F> {
         self.live()?;
         let Some(ns) = self.namespace(namespace, false)? else { return Ok(()) };
-        for k in 0..self.n_order {
-            let p = usize::from(self.order[k]);
-            loop {
-                let table = self.table(p)?;
-                let mut i = 0;
-                let mut hit = None;
-                while let Some((idx, it)) = self.next_live(p, &table, i)? {
-                    i = idx + it.advance();
-                    if it.ns() == ns {
-                        hit = Some(idx);
-                        break;
+        for chunks in [false, true] {
+            for k in 0..self.n_order {
+                let p = usize::from(self.order[k]);
+                loop {
+                    let table = self.table(p)?;
+                    let mut i = 0;
+                    let mut hit = None;
+                    while let Some((idx, it)) = self.next_live(p, &table, i)? {
+                        i = idx + it.advance();
+                        if it.ns() == ns && (it.ty() == T_BLOB_DATA) == chunks {
+                            hit = Some(idx);
+                            break;
+                        }
                     }
+                    let Some(idx) = hit else { break };
+                    self.erase_entry_and_span(p, idx)?;
                 }
-                let Some(idx) = hit else { break };
-                self.erase_entry_and_span(p, idx)?;
             }
         }
         Ok(())
