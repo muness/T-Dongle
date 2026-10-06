@@ -5,9 +5,8 @@ Copy of `s2-usb-ncm` that replaces the vendored `embassy-usb-synopsys-otg` with 
 Not run on hardware. Image: `rust/spikes/dist/s2-upstream-app.bin` (app-only, DIO/40m/16MB).
 
 ## Adaptations needed (feedback for the PR)
-1. **The whole embassy family must come from the PR checkout.** The driver is on embassy main: it needs `embassy-sync` where `CriticalSectionRawMutex: Copy` (released 0.8.0 lacks it:
-   `E0277` on every `M: RawMutex + Copy` bound), so `[patch.crates-io]` takes `embassy-usb-synopsys-otg`, `-usb-driver`, `-sync`, `-usb`, `-net-driver-channel`, `-time`, `-time-driver`,
-   `-time-queue-utils` from the one git rev (patching only sync breaks the released `embassy-net-driver-channel` 0.4.0, hence usb and net-driver-channel too). The driver alone cannot be dropped into a graph on released crates.
+1. **The PR driver needs embassy main's `embassy-sync`** (`CriticalSectionRawMutex: Copy`, unreleased; released 0.8.0 gives `E0277` on every `RawMutex + Copy` bound), plus main's `embassy-usb-driver`, and then main's
+   `embassy-net-driver-channel` and `embassy-usb` (the released ones do not compile against that `embassy-sync` / have a different API). See "Rebuild 3" for what must NOT come from git (time crates, executor).
 2. **esp-hal 1.2.2 glue does not compile** (local copy `esp-hal-patched`, stock 1.2.2 plus 3 edits in `src/usb/otg/`):
    * `embassy_usb_device.rs`: `OtgInstance` has a new required field `tx_fifo_count`; set to `state.endpoint_count() as u8` (7 on the S3 FS core), the old behaviour of one TX FIFO per endpoint slot.
    * `mod.rs` (x4): `StateStorage::new()` / `HostStateStorage::new()` now take the mutex value, `StateStorage::new(CriticalSectionRawMutex::new())` (plus the import).
@@ -21,36 +20,27 @@ Not run on hardware. Image: `rust/spikes/dist/s2-upstream-app.bin` (app-only, DI
 * Generic `RawMutex + Copy` bound: esp-hal hardcodes `CriticalSectionRawMutex` and needs the new `new(mutex)` arguments; the `Copy` bound requires unreleased embassy-sync, which blocks a release of the driver until embassy-sync ships.
 * `tx_fifo_count` is a required public field with no default; esp-hal has to know it per chip (it was implicit before).
 
-## Rebuild 2 (after the rescue fix, 5a70a28)
-Rebased on the current `s2-usb-ncm`. `esp-hal-patched` is now a copy of `rust/vendor/esp-hal` (RTC watchdog kept armed through `init`; `arm()` writes WDTCONFIG0 last), so S1/S2/S3 still use
-`rust/vendor/esp-hal` and the released 0.4.0 driver; only this spike uses the copy. The glue edits are the same three listed above.
+## Rebuild 3: the reset loop was our version mixing, not the PR driver (cause found by reading the lock file; board confirmation pending)
+Board result of d99685a: boots, console answers a few seconds, then `CoreRtcWdt` every 5-6 s with no `previous_hang`/`previous_op`; the same supervisor with the 0.4.0 driver feeds fine.
+**Cause (strongly indicated, not yet seen on the board):** to make the PR driver's `embassy-time` path dependency resolve I had patched `embassy-time`, `-time-driver` and `-time-queue-utils` to the git rev.
+`Cargo.lock` then held TWO `embassy-executor-timer-queue`: 0.1.0 (crates.io, used by the released `embassy-executor` 0.10.0) and 0.1.1 (git, used by the git `embassy-time-queue-utils`).
+They are not interchangeable: 0.1.0 finds a task's timer item through `extern "Rust" fn __embassy_time_queue_item_from_waker`, 0.1.1 through a `unitrait` (`TimerQueueItemProvider`) that
+only the git executor registers. The executor 0.10.0 kept the old symbol, so the git queue never reaches the executor's timer items: timers do not fire. Supervisor tick (500 ms timer), thread pulse and every
+`Timer::after` then stop, the supervisor never feeds, never records a hang (it is not running), and the RTC watchdog fires after its 10 s. USB itself (interrupts, no timers) kept working for the first seconds, as seen.
+It has nothing to do with the PR driver's locking: this is mixing crates.io `embassy-executor` with git `embassy-time-*`. `embassy-time-driver` 0.2.2 is unchanged in the git rev except tick-rate tables (`tick.rs`).
+**Fix:** do not patch the time crates or the executor. Now: crates.io `embassy-time` / `-time-driver` / `-time-queue-utils` / `-executor` (one `embassy-executor-timer-queue` 0.1.0 in the lock), git `embassy-sync`,
+`embassy-usb-driver`, `embassy-net-driver-channel`, `embassy-futures`, and local copies of the PR's `embassy-usb-synopsys-otg` (`upstream-otg`, `src/` byte-identical to the PR commit, checked with `diff -r`) and of
+`embassy-usb` from the same commit (`upstream-usb`, needed because main's `embassy-net-driver-channel` API differs from the one released `embassy-usb` 0.6.0 uses); in both copies only Cargo.toml changed
+(path deps replaced by version requirements so that the patches above decide where they resolve).
+**For the PR:** none of this is caused by the driver, but its `Cargo.toml` (`embassy-time` as a path dependency in `host`/`embassy-time` features) makes a downstream project that patches only the driver to git pull in `embassy-time` from git,
+and with it the executor/timer-queue mismatch above; esp-hal users cannot take the driver without the rest of main.
 
-### Why the first image (fb118e3) reset-looped: NOT established
-It was built on the pre-fix rescue, so its resets were additionally invisible (RTC domain wiped, boot counter lost). Reading the PR driver for a cause found none:
-* all `mutex.lock` bodies are short register read-modify-writes; the only waits are `wait_for` (10 ms deadline with `embassy-time`, which esp-hal's `host` feature enables, verified with `cargo tree -f '{f}'`) and they are not
-  called with the lock held except `abort_in_endpoint` (<= 10 ms each) and `flush_tx_fifo`. `abort_out_endpoint` (about 1.2 ms, needs the ISR) runs outside the lock, as documented.
-* `read`/`read_multi`/`read_transfer` are `poll_fn` over atomics, so a `select` with a 500 ms timer that drops them loses nothing; the console loop's heartbeat is therefore independent of the driver.
-* The ISR handles `OUT_DATA_DONE` and drains the RX FIFO in a bounded loop; no storm path was found.
-So a deadlock or long critical section in the PR driver is **not supported by the source**. What the board output must tell: `boot-status` now prints `previous_hang`/`previous_op`, the RWDT registers and the supervisor
-counters (`sup ticks/feeds`). `previous_hang=thread|console` = a heartbeat stopped (name the executor); `sup ticks` frozen = the interrupt executor (supervisor + USB + console) was starved (spin in `Bus::poll`, ISR storm, a long
-critical section); ticks advancing with feeds frozen = a heartbeat verdict; ticks and feeds advancing yet a reset = the RWDT configuration, not the driver. Run `boot-status` right after a reset to decide.
+### Instrumentation in this image (for the next board run)
+`boot-status` ends with `previous_sup=[sup ticks embassy_ms hw_ms last_feed_ms pulse_thread pulse_console] [thread ticks embassy_ms hw_ms] [otg_irq n max_us last_hw_ms]` (the previous boot's last values, RTC fast memory) and
+`now_otg_irq=[n max_us last_hw_ms] hw_ms`. The supervisor (interrupt executor) and the thread pulse (thread executor) write their records every tick; `hw_ms` is the hardware timer, `embassy_ms` the embassy-time clock, so a dead
+embassy-time alarm looks like ticks stalled while `hw_ms` of the last write is far behind the reset, and a starved executor like one writer stopping before the other. `otg_irq` is the duration (max) and count of the OTG interrupt
+handler, measured inside the patched esp-hal. `src/supervise.rs` is the common supervisor copied with the hooks; `src/instr.rs` holds the record. The `boot-status` cut-off is fixed by taking the current S2 sources (`LineBuf`).
 
-## Adaptations needed (feedback for the PR)
-1. **The whole embassy family must come from the PR checkout.** The driver is on embassy main: it needs `embassy-sync` where `CriticalSectionRawMutex: Copy` (released 0.8.0 lacks it:
-   `E0277` on every `M: RawMutex + Copy` bound), so `[patch.crates-io]` takes `embassy-usb-synopsys-otg`, `-usb-driver`, `-sync`, `-usb`, `-net-driver-channel`, `-time`, `-time-driver`,
-   `-time-queue-utils` from the one git rev (patching only sync breaks the released `embassy-net-driver-channel` 0.4.0, hence usb and net-driver-channel too). The driver alone cannot be dropped into a graph on released crates.
-2. **esp-hal 1.2.2 glue does not compile** (local copy `esp-hal-patched`, stock 1.2.2 plus 3 edits in `src/usb/otg/`):
-   * `embassy_usb_device.rs`: `OtgInstance` has a new required field `tx_fifo_count`; set to `state.endpoint_count() as u8` (7 on the S3 FS core), the old behaviour of one TX FIFO per endpoint slot.
-   * `mod.rs` (x4): `StateStorage::new()` / `HostStateStorage::new()` now take the mutex value, `StateStorage::new(CriticalSectionRawMutex::new())` (plus the import).
-3. **Spike code**: `Config::bulk_out_transfer_bytes = 3200` replaces `out_transfer_bytes[4]`; `ncm.rs` `read_ntb` calls the stock `EndpointOut::read_transfer` into the 3200 B NTB buffer; `read_chunk`, the `ReadTransfer` trait,
-   `NtbCollector` and the `tdongle-usb-out` dependency and the `stock-out` feature are gone. A zero-length result is skipped (see below). `EP_OUT_BYTES` = 64 + 2 x 3200 (see below).
-
-## API notes for the PR / esp-hal users
-* `bulk_out_transfer_bytes` is global to all bulk OUT endpoints and each takes that many bytes of `ep_out_buffer`: the CDC-ACM data OUT endpoint also gets 3200 B (two NTB-sized slices, 6.4 KB, for one useful one). A per-endpoint setting (by address or via `alloc_endpoint_out`) would fit composite devices.
-* `read_transfer` ends only on a short packet or a full buffer. An NTB of exactly the buffer size (3200 = 50 x 64) returns with no short packet; its ZLP then arrives as a separate `Ok(0)` transfer that the class must skip. Documenting this (or consuming the ZLP) would help; the vendored `read_chunk` returned a `short` flag instead.
-* `Config` is `#[non_exhaustive]`: fine via `Default` + field assignment, but esp-hal re-exports it, so it cannot be built with struct syntax by users.
-* Generic `RawMutex + Copy` bound: esp-hal hardcodes `CriticalSectionRawMutex` and needs the new `new(mutex)` arguments; the `Copy` bound requires unreleased embassy-sync, which blocks a release of the driver until embassy-sync ships.
-* `tx_fifo_count` is a required public field with no default; esp-hal has to know it per chip (it was implicit before).
 # S2 (no_std): embassy-usb CDC-ACM + CDC-NCM on the ESP32-S3 OTG at full speed
 
 Verdict: WORKS WITH CAVEATS. Built, image header verified (DIO / 40 MHz / 16 MB), descriptors byte-identical to the C firmware's on the host.

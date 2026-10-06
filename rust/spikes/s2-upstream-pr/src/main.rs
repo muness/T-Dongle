@@ -7,7 +7,7 @@
 mod ops;
 #[path = "../../common/guard.rs"]
 mod guard;
-#[path = "../../common/supervise.rs"]
+mod instr;
 mod supervise;
 mod acm;
 mod ncm;
@@ -182,6 +182,7 @@ static STATE: embassy_sync::once_lock::OnceLock<guard::State> = embassy_sync::on
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     let state = STATE.get_or_init(guard::begin);
+    instr::begin();
     let peripherals = esp_hal::init(esp_hal::Config::default());
     tdongle_rescue::arm();
     let timg0 = TimerGroup::new(peripherals.TIMG0);
@@ -474,6 +475,8 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
             let mut l = Line::new();
             if let Some(state) = STATE.try_get() {
                 guard::boot_status(&mut l, "s2-upstream-pr", ESP_APP_DESC.app_elf_sha256(), state, Instant::now().as_millis(), None);
+                instr::write_previous(&mut l);
+                instr::write_now(&mut l);
             }
             reply(port, format_args!("{}", core::str::from_utf8(l.as_bytes()).unwrap_or(""))).await
         }

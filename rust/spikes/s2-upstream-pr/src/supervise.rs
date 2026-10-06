@@ -1,3 +1,4 @@
+//! (s2-upstream-pr copy of rust/spikes/common/supervise.rs with `crate::instr` hooks added.)
 //! Progress supervision and the rescue self-tests, shared by the esp-hal images. Included with `#[path = "../../common/supervise.rs"] mod supervise;`.
 //!
 //! Two executors (the console and USB device in an interrupt-mode one, everything else in the thread executor), a heartbeat in each, and a supervisor in the
@@ -28,6 +29,7 @@ pub static THREAD_SPAWNER: OnceLock<SendSpawner> = OnceLock::new();
 /// The supervisor's own counters (`boot-status` `sup`): a supervisor that stopped, or one that never feeds, shows here without a debugger.
 pub static SUP_TICKS: AtomicU32 = AtomicU32::new(0);
 pub static SUP_FEEDS: AtomicU32 = AtomicU32::new(0);
+pub static LAST_FEED_MS: AtomicU32 = AtomicU32::new(0);
 
 /// `[ticks, feeds, thread pulse, console pulse]`.
 pub fn stats() -> [u32; 4] {
@@ -46,6 +48,7 @@ pub async fn console_alive() {
 pub async fn thread_pulse_task() -> ! {
     loop {
         PULSE_THREAD.fetch_add(1, Ordering::Relaxed);
+        crate::instr::thread(PULSE_THREAD.load(Ordering::Relaxed), Instant::now().as_millis() as u32);
         Timer::after_millis(500).await;
     }
 }
@@ -66,10 +69,12 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
     loop {
         let now = Instant::now().as_millis();
         SUP_TICKS.fetch_add(1, Ordering::Relaxed);
+        crate::instr::sup(SUP_TICKS.load(Ordering::Relaxed), now as u32, LAST_FEED_MS.load(Ordering::Relaxed), PULSE_THREAD.load(Ordering::Relaxed), PULSE_CONSOLE.load(Ordering::Relaxed));
         match watch.check(now, [PULSE_THREAD.load(Ordering::Relaxed), PULSE_CONSOLE.load(Ordering::Relaxed)]) {
             Verdict::Healthy => {
                 dogs.feed();
                 SUP_FEEDS.fetch_add(1, Ordering::Relaxed);
+                LAST_FEED_MS.store(now as u32, Ordering::Relaxed);
                 if healthy.observe(now, USB_CONFIGURED.load(Ordering::Relaxed)) && !marked {
                     tdongle_rescue::mark_healthy();
                     guard::mark_stable(safe_mode);
