@@ -219,3 +219,12 @@ pub fn safe_mode_now() -> bool {
 }
 
 static SAFE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// A restart on purpose (`setup`, `cancel`, Done, `mode`, `reboot`, `confirm-reset`, the setup timeout): take this boot's unstable count back, then reset. Only watchdog, panic and
+/// unplanned resets count toward safe mode.
+pub fn planned_reset() -> ! {
+    let mut rec = load();
+    rec.planned_restart();
+    store(&rec);
+    tdongle_rescue::deliberate_reset()
+}

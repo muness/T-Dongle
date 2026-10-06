@@ -442,7 +442,7 @@ async fn dispatch(cmd: Command) {
             let (_, restart) = crate::settings::confirm_reset().await;
             if restart {
                 Timer::after_millis(300).await;
-                tdongle_rescue::deliberate_reset()
+                crate::guard::planned_reset()
             }
         }
         Command::Setup => {

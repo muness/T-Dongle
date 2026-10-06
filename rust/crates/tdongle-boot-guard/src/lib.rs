@@ -305,6 +305,13 @@ impl Record {
         }
     }
 
+    /// This boot is about to end on purpose (`setup`, `cancel`, the page's Done, `mode`, `reboot`, `confirm-reset`, the setup timeout): take back the unstable count
+    /// [`Self::begin_boot`] added for it, so a restart someone asked for never counts as a failed boot. Only watchdog, panic and unplanned resets leave the count standing.
+    /// The history of earlier real failures is kept (it is one less than before this boot, never cleared), and a safe-mode boot stays in safe mode.
+    pub fn planned_restart(&mut self) {
+        self.unstable_boots = self.unstable_boots.saturating_sub(1);
+    }
+
     /// Clear the failure history (the console's `normal`, and before a deliberate reset such as `bootloader`).
     pub fn leave_safe_mode(&mut self) {
         self.clear();

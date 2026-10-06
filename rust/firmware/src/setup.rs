@@ -65,7 +65,7 @@ pub fn preselect(n: u8) {
 pub fn restart(request: Request, preselect: u32) -> ! {
     let (m, r, s) = tdongle_setup::boot::request_words(request, preselect);
     crate::guard::setup_set([m, r, s]);
-    tdongle_rescue::deliberate_reset()
+    crate::guard::planned_reset()
 }
 
 /// A page action or the console asked to leave setup.

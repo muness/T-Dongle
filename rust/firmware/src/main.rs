@@ -1773,7 +1773,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             guard::leave_safe_mode();
             out(wr, "leaving safe mode: resetting\r\n", 500).await;
             Timer::after(Duration::from_millis(200)).await;
-            tdongle_rescue::deliberate_reset()
+            crate::guard::planned_reset()
         }
         "bootloader" => {
             guard::leave_safe_mode(); // a deliberate reset is not a failed boot
@@ -1850,7 +1850,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 if restart {
                     out(wr, &text, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
-                    tdongle_rescue::deliberate_reset()
+                    crate::guard::planned_reset()
                 }
                 s.push_str(&text);
             }
@@ -1887,7 +1887,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 guard::leave_safe_mode();
                 out(wr, reply::REBOOT_OK, 500).await;
                 Timer::after(Duration::from_millis(200)).await;
-                tdongle_rescue::deliberate_reset()
+                crate::guard::planned_reset()
             }
             _ => {
                 let _ = reply::write_unknown(&mut s, false);
