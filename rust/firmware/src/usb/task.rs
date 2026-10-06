@@ -50,7 +50,7 @@ pub fn start() -> Result<(), EspError> {
     .set()
     .map_err(|_| EspError::from_infallible::<{ sys::ESP_ERR_NO_MEM }>())?;
     let spawned = std::thread::Builder::new().name("TinyUSB".into()).stack_size(STACK_BYTES).spawn(device_task);
-    ThreadSpawnConfiguration::default().set().ok();
+    crate::sys::reset_thread_spawn_defaults();
     spawned.map_err(|_| EspError::from_infallible::<{ sys::ESP_ERR_NO_MEM }>())?;
     if notify_take(ms_to_ticks(5000)) == 0 {
         return Err(EspError::from_infallible::<{ sys::ESP_ERR_TIMEOUT }>());

@@ -15,7 +15,8 @@ use core::cell::Cell;
 use core::sync::atomic::{AtomicU32, Ordering::Relaxed};
 use std::alloc::System;
 
-/// Who an allocation is for.
+/// Who an allocation is for. Phase 3 (the tailnet runtime) tags with these; phase 1 allocates under `Other` only.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Owner {
@@ -41,6 +42,7 @@ thread_local! {
     static CURRENT: Cell<u8> = const { Cell::new(0) };
 }
 
+#[allow(dead_code)]
 /// Run `f` with allocations attributed to `owner`.
 pub fn with_owner<R>(owner: Owner, f: impl FnOnce() -> R) -> R {
     let previous = CURRENT.with(|c| c.replace(owner as u8));
@@ -176,6 +178,7 @@ pub fn total() -> Reading {
     read(&TOTAL)
 }
 
+#[allow(dead_code)]
 /// One owner's allocations.
 pub fn owner(owner: Owner) -> Reading {
     read(&OWNED[owner as usize])

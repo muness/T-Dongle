@@ -1,0 +1,27 @@
+[package]
+name = "s1-wifi-l2"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
+esp-radio = { version = "=1.0.0-beta.1", features = ["esp32s3", "wifi", "unstable"] }
+esp-rtos = { version = "0.4", features = ["esp32s3", "esp-radio", "esp-alloc"] }
+esp-alloc = { version = "0.11", features = ["esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
+esp-println = { version = "0.18", features = ["esp32s3"] }
+esp-backtrace = { version = "0.20", features = ["esp32s3", "panic-handler", "println"] }
+embassy-futures = "0.1"
+esp-wifi-sys-esp32s3 = "0.3"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 1
+
+[profile.dev]
+opt-level = "s"

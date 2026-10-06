@@ -153,7 +153,9 @@ pub fn start() {
         Ok(id) => Some(id),
         Err(error) => error.failed_id(),
     };
-    let _ = BURSTS.set(Bursts { usb_tx });
+    if BURSTS.set(Bursts { usb_tx }).is_err() {
+        log::warn!("power management started twice");
+    }
 }
 
 /// The ring worker's CPU-max hold begins (`usb_tx_pm_begin`): worker only, strictly alternating with [`usb_tx_end`].

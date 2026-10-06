@@ -62,3 +62,11 @@ pub fn read_sta_mac() -> [u8; 6] {
     debug_assert_eq!(result, sys::ESP_OK);
     mac
 }
+
+/// Put the thread-spawn defaults back after a task was started with its own name, priority and core (`ThreadSpawnConfiguration` is a global
+/// that the next `std::thread::spawn` would otherwise inherit). A failure is logged: it would silently mis-prioritise later threads.
+pub fn reset_thread_spawn_defaults() {
+    if let Err(error) = esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration::default().set() {
+        log::warn!("could not reset the thread spawn defaults: {error}");
+    }
+}

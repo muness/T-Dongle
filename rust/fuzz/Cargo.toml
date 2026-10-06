@@ -1,0 +1,42 @@
+[package]
+name = "tdongle-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# A separate workspace: libfuzzer needs nightly and sanitizer flags that must not leak into the firmware build.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tdongle-aqm = { path = "../crates/tdongle-aqm" }
+tdongle-serial = { path = "../crates/tdongle-serial" }
+tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
+tdongle-usb-descriptors = { path = "../crates/tdongle-usb-descriptors" }
+
+[[bin]]
+name = "ecn_classify"
+path = "fuzz_targets/ecn_classify.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "command_line"
+path = "fuzz_targets/command_line.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "profile_json"
+path = "fuzz_targets/profile_json.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "saved_blobs"
+path = "fuzz_targets/saved_blobs.rs"
+test = false
+doc = false

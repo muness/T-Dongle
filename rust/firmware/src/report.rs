@@ -186,8 +186,7 @@ pub fn pm<W: Write>(out: &mut W) {
 }
 
 /// `list`.
-pub fn list<W: Write>(out: &mut W) {
-    let _ = out;
+pub fn list<W: Write>(_out: &mut W) {
     let Some(wifi) = wifi::get() else { return };
     let Some(selection) = wifi.lock_selection(Duration::from_millis(100)) else {
         mgmt_write(reply::SETTINGS_BUSY);

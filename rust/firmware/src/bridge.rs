@@ -184,7 +184,7 @@ pub fn start(mac: [u8; 6]) -> Result<(), &'static str> {
     .set()
     .map_err(|_| "could not configure the forwarder")?;
     let spawned = std::thread::Builder::new().name("l2_wifi".into()).stack_size(BRIDGE_TASK_STACK).spawn(move || forward(worker));
-    ThreadSpawnConfiguration::default().set().ok();
+    crate::sys::reset_thread_spawn_defaults();
     spawned.map_err(|_| "could not start the forwarder")?;
     Ok(())
 }

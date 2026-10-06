@@ -44,8 +44,9 @@ fn main() {
 
     // The settings are read first and only read: see `settings`.
     let settings = settings::load();
-    let _ = STORED_MODE.set(settings.mode);
-    let _ = report::DISPLAY.set(settings.display);
+    if STORED_MODE.set(settings.mode).is_err() || report::DISPLAY.set(settings.display).is_err() {
+        log::warn!("settings were published twice");
+    }
     let boot = boot::Boot::decide(&settings);
 
     // Frequency scaling (ADR 0016, 0023): 240 MHz while forwarding work is pending, 80 MHz when idle. A failure leaves the fixed boot frequency.

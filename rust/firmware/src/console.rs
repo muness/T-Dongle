@@ -72,6 +72,11 @@ impl Write for Out {
     }
 }
 
+/// The sinks here never fail (a full queue drops, like C), so a formatting result carries no information.
+fn infallible(result: fmt::Result) {
+    debug_assert!(result.is_ok());
+}
+
 /// The TinyUSB task: bytes from the CDC port.
 pub fn feed(bytes: &[u8]) {
     // SAFETY: only the TinyUSB task calls this (`usb::cdc::tud_cdc_rx_cb`).
@@ -97,7 +102,7 @@ pub fn feed(bytes: &[u8]) {
 pub fn on_line_state(dtr: bool) {
     if dtr {
         let mut out = Out;
-        let _ = tdongle_serial::console::write_greeting(&mut out, false, crate::VERSION);
+        infallible(tdongle_serial::console::write_greeting(&mut out, false, crate::VERSION));
     }
 }
 
@@ -120,7 +125,7 @@ fn spawn(name: &'static core::ffi::CStr, stack: usize, priority: u8, body: fn())
         .set()
         .map_err(|_| "could not configure a console task")?;
     let spawned = std::thread::Builder::new().name(name.to_string_lossy().into_owned()).stack_size(stack).spawn(body);
-    ThreadSpawnConfiguration::default().set().ok();
+    crate::sys::reset_thread_spawn_defaults();
     spawned.map(|_| ()).map_err(|_| "could not start a console task")
 }
 
@@ -170,8 +175,8 @@ const NOT_YET: &str = "ERR Not available in the Rust port yet (phase 2: setup, d
 fn dispatch(line: &str) {
     let mut out = Out;
     match Command::parse(line) {
-        Command::Help => drop(reply::write_help(&mut out, false, "")),
-        Command::Capabilities => drop(reply::write_capabilities(&mut out, false, "")),
+        Command::Help => infallible(reply::write_help(&mut out, false, "")),
+        Command::Capabilities => infallible(reply::write_capabilities(&mut out, false, "")),
         Command::Pm => crate::report::pm(&mut out),
         Command::Status => crate::report::status(&mut out),
         Command::List => crate::report::list(&mut out),
@@ -189,7 +194,7 @@ fn dispatch(line: &str) {
             std::thread::sleep(std::time::Duration::from_millis(200));
             crate::sys::reboot_to_rom_download();
         }
-        Command::Unknown => drop(reply::write_unknown(&mut out, false)),
+        Command::Unknown => infallible(reply::write_unknown(&mut out, false)),
         Command::Display(_)
         | Command::Setup(_)
         | Command::Cancel

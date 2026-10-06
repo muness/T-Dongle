@@ -19,7 +19,9 @@ static TEXTS: OnceLock<Texts> = OnceLock::new();
 pub fn install(identity: Identity) {
     let serial = mac_text(identity.station_mac);
     // In bridge mode the NCM MAC the host adopts is the station MAC itself, so the serial and the MAC string are the same twelve digits.
-    let _ = TEXTS.set(Texts { product: identity.product, serial });
+    if TEXTS.set(Texts { product: identity.product, serial }).is_err() {
+        log::warn!("USB identity installed twice");
+    }
 }
 
 /// The one buffer `tud_descriptor_string_cb` returns a pointer into. TinyUSB reads it after the callback returns, until the transfer is

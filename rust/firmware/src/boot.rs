@@ -58,7 +58,8 @@ impl BridgeBoot {
 }
 
 impl TailnetBoot {
-    /// The tailnet gateway owns the USB network (its lwIP netif).
+    /// The tailnet gateway owns the USB network (its lwIP netif). Phase 3.
+    #[allow(dead_code)]
     #[must_use]
     pub fn usb_network(&self) -> UsbNetwork {
         match self.0 {}

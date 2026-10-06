@@ -158,7 +158,7 @@ pub fn start() -> Result<(), &'static str> {
     .set()
     .map_err(|_| "could not configure the worker")?;
     let spawned = std::thread::Builder::new().name("usb_txq".into()).stack_size(USB_TX_WORKER_STACK).spawn(worker);
-    ThreadSpawnConfiguration::default().set().ok();
+    crate::sys::reset_thread_spawn_defaults();
     spawned.map_err(|_| "could not start the transmit ring worker")?;
     Ok(())
 }

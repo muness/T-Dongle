@@ -2,6 +2,13 @@
 //! `held` flag BEFORE it looks at the queue again; the worker releases a slot and then swaps the flag away and resumes. Every interleaving must end with
 //! every offered frame taken, no datagram stranded behind a hold nobody will answer (the lost wake-up the C tests could only argue about).
 //!
+//! **Known limit, found by running it:** loom models `SeqCst` as acquire/release (its documentation says so), and this handshake is a store-buffering
+//! (Dekker) pattern that is only correct under sequential consistency: the producer stores `held` then reads `tail`; the worker stores `tail` then
+//! reads `held`. Loom therefore reports a deadlock in an execution that real SeqCst atomics (and the Xtensa `memw`-fenced code the compiler emits for
+//! them) forbid. The test is kept, `#[ignore]`d, as the executable statement of the property; the property itself is checked by
+//! `tests/sc_handshake.rs`, an exhaustive enumeration of every interleaving of the protocol's steps under sequential consistency, and the data-race
+//! freedom of the slots is what `tdongle-spsc/tests/loom_spsc.rs` checks with loom proper.
+//!
 //! Run: `RUSTFLAGS="--cfg loom" cargo test -p tdongle-bridge --test loom_hold_resume --release`.
 #![cfg(loom)]
 
@@ -40,7 +47,6 @@ impl Env for Signals {
         self.wake.notify_all();
     }
     fn wifi_tx(&self, _frame: &[u8], _context: &TaskContext) -> Result<(), TxError> {
-        eprintln!("W send");
         self.state.lock().unwrap().sent += 1;
         Ok(())
     }
@@ -49,7 +55,6 @@ impl Env for Signals {
     }
     fn wait_retry(&self, _context: &TaskContext) {}
     fn rx_resume(&self, _context: &TaskContext) {
-        eprintln!("W resume");
         self.state.lock().unwrap().resumed = true;
         self.wake.notify_all();
     }
@@ -66,6 +71,7 @@ fn frame() -> [u8; 60] {
 }
 
 #[test]
+#[ignore = "loom treats SeqCst as acquire/release and cannot express this store-buffering handshake; see the module documentation"]
 fn a_held_datagram_is_always_offered_again() {
     // The bridge's queue (12 KB of slots) is built by value: give the model's first thread a stack that can hold it.
     loom::model(|| thread::Builder::new().stack_size(512 * 1024).spawn(scenario).unwrap().join().unwrap());
@@ -87,9 +93,7 @@ fn scenario() {
                 let mut producer = bridge.producer().unwrap();
                 for _ in 0..FRAMES {
                     loop {
-                        let o = producer.host(&frame());
-                        eprintln!("P {o:?} depth {}", bridge.stats().h2w_queue_depth);
-                        match o {
+                        match producer.host(&frame()) {
                             HostOutcome::Queued => break,
                             HostOutcome::Hold => {
                                 // The class driver keeps the datagram and offers it again ONLY after a resume: it does not poll. A resume that
@@ -123,9 +127,7 @@ fn scenario() {
                         state.work = 0;
                         state.done
                     };
-                    eprintln!("W wake finished={finished}");
-                    let n = worker.drain();
-                    eprintln!("W drained {n}");
+                    worker.drain();
                     if finished {
                         break;
                     }
