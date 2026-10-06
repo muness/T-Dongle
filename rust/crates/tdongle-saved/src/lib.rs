@@ -105,3 +105,36 @@ pub fn credentials(saved: &SavedNetworks, slot: usize) -> Option<(&str, &str)> {
     let p = saved.list().get(slot)?;
     Some((core::str::from_utf8(p.ssid_bytes()).ok()?, core::str::from_utf8(p.password_bytes()).ok()?))
 }
+
+/// One access point as a scan reports it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bss {
+    /// The BSSID.
+    pub bssid: [u8; 6],
+    /// The primary channel.
+    pub channel: u8,
+    /// Signal in dBm.
+    pub rssi: i8,
+}
+
+impl Bss {
+    /// Usable by the C rule (`USABLE_DBM`, -85 dBm), judged on this access point, not on its SSID: one SSID is often several access points, and a far one must not
+    /// make the network look usable (or a near one look unusable).
+    #[must_use]
+    pub const fn usable(&self) -> bool {
+        self.rssi as i16 >= tdongle_wifi_policy::rank::USABLE_DBM
+    }
+}
+
+/// The strongest access point of `ssid` in a scan (`scan` yields `(ssid, bssid, channel, rssi)` for every access point): the one the driver joins with `WIFI_ALL_CHANNEL_SCAN`
+/// and `WIFI_CONNECT_AP_BY_SIGNAL` (the C station configuration). Ties keep the first. `None` if the SSID was not seen.
+#[must_use]
+pub fn strongest_bss<'a>(ssid: &[u8], scan: impl Iterator<Item = (&'a [u8], [u8; 6], u8, i8)>) -> Option<Bss> {
+    let mut best: Option<Bss> = None;
+    for (s, bssid, channel, rssi) in scan {
+        if s == ssid && best.is_none_or(|b| rssi > b.rssi) {
+            best = Some(Bss { bssid, channel, rssi });
+        }
+    }
+    best
+}

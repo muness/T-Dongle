@@ -27,7 +27,7 @@ fn every_firmware_command_in_help_is_parsed_and_the_text_has_no_extras() {
 #[test]
 fn the_spike_help_lists_list_and_what_the_spike_has() {
     assert!(SPIKE_S3_COMMANDS.contains(&"list"));
-    for entry in SPIKE_S3_COMMANDS.iter().filter(|e| ["status", "list", "capabilities", "boot-status", "bootloader", "help"].contains(e)) {
+    for entry in SPIKE_S3_COMMANDS.iter().filter(|e| ["status", "list", "scan", "capabilities", "boot-status", "bootloader", "help"].contains(e)) {
         assert_ne!(Command::parse(entry), Command::Unknown, "{entry}");
     }
     let mut text = String::new();

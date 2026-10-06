@@ -192,3 +192,29 @@ pub fn link_read() -> Info {
     }
     l
 }
+
+/// The access point the driver joined (`esp_wifi_sta_get_ap_info`), for comparison with the one the scan said was strongest.
+pub fn joined_bss() -> Option<tdongle_saved::Bss> {
+    // SAFETY: a plain driver query into a zeroed, correctly sized out-parameter.
+    unsafe {
+        let mut ap: sys::wifi_ap_record_t = core::mem::zeroed();
+        if sys::esp_wifi_sta_get_ap_info(&mut ap) != sys::ESP_OK as i32 {
+            return None;
+        }
+        Some(tdongle_saved::Bss { bssid: ap.bssid, channel: ap.primary, rssi: ap.rssi })
+    }
+}
+
+/// Bridge mode turns 802.11k and v on (`c->sta.rm_enabled = c->sta.btm_enabled = wifi_roaming_assist()`): esp-radio zeroes those bitfields, so set them on the
+/// station configuration it applied (the C sets them in the same `wifi_config_t` before `esp_wifi_set_config`).
+pub fn roaming_assist() {
+    // SAFETY: plain driver calls with a zeroed, correctly sized `wifi_config_t`.
+    unsafe {
+        let mut c: sys::wifi_config_t = core::mem::zeroed();
+        if sys::esp_wifi_get_config(sys::wifi_interface_t_WIFI_IF_STA, &mut c) == sys::ESP_OK as i32 {
+            c.sta.set_rm_enabled(1);
+            c.sta.set_btm_enabled(1);
+            let _ = sys::esp_wifi_set_config(sys::wifi_interface_t_WIFI_IF_STA, &mut c); // a failure leaves roaming assist off, which only costs roaming
+        }
+    }
+}

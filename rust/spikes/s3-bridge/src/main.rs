@@ -42,6 +42,9 @@ use esp_hal::usb::otg::Usb;
 use esp_hal::usb::otg::embassy_usb_device::{Config as OtgConfig, Driver as UsbDriver};
 use esp_println::println;
 use esp_radio::wifi::Protocols;
+use esp_radio::wifi::scan::ScanTypeConfig;
+use esp_radio::wifi::sta::ScanMethod;
+use tdongle_saved::Bss;
 use esp_radio::wifi::scan::ScanConfig;
 use esp_radio::wifi::{
     AuthenticationMethodConfig, Bandwidth, Config, ControllerConfig, PowerSaveMode, WifiController,
@@ -411,6 +414,31 @@ static CONNECTED_NOW: AtomicBool = AtomicBool::new(false);
 static SCAN_SEEN: AtomicU32 = AtomicU32::new(0);
 static SCAN_SIGNAL: [AtomicI32; 8] = [const { AtomicI32::new(-127) }; 8];
 
+/// The last scan, strongest first (`scan`, and the `s3_bss` line), the access point chosen for the slot being joined and the one the driver actually joined.
+const BSS_TABLE: usize = 32;
+#[derive(Clone, Copy)]
+struct BssRow {
+    ssid: [u8; 33],
+    ssid_len: u8,
+    bss: Bss,
+    auth: u8,
+}
+const NO_ROW: BssRow = BssRow { ssid: [0; 33], ssid_len: 0, bss: Bss { bssid: [0; 6], channel: 0, rssi: 0 }, auth: 0 };
+struct ScanTable {
+    rows: [BssRow; BSS_TABLE],
+    count: usize,
+    seen: usize,
+    seq: u32,
+}
+static SCAN_TABLE: CsMutex<RefCell<ScanTable>> = CsMutex::new(RefCell::new(ScanTable { rows: [NO_ROW; BSS_TABLE], count: 0, seen: 0, seq: 0 }));
+static BSS_BEST: CsMutex<RefCell<Option<Bss>>> = CsMutex::new(RefCell::new(None));
+static BSS_JOINED: CsMutex<RefCell<Option<Bss>>> = CsMutex::new(RefCell::new(None));
+/// Console `bss pin on|off`: pin the BSSID and channel of the strongest usable access point in the station config. Off (default) is the C: all-channel scan, join by signal.
+static PIN_BSS: AtomicBool = AtomicBool::new(false);
+/// Console `scan`: ask the link task to scan now, wait for the table.
+static SCAN_REQ: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+static SCAN_DONE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
+
 /// What the init task could not do, for the console (`init`): the console stays up whatever happens here.
 static INIT_NOTE: CsMutex<RefCell<guard::heapless_str::Text>> = CsMutex::new(RefCell::new(guard::heapless_str::Text::new()));
 
@@ -596,6 +624,87 @@ async fn init_task(
 // Wi-Fi link supervision (scan, join the best saved network, wait for disconnect, bridge.link)
 // ======================================================================================================================
 
+/// An all-channel active scan (40 to 100 ms a channel, hidden SSIDs shown, as C `wifi_maintain`), recorded for `scan` and the `s3_bss` line. Wakes a console waiting on it.
+async fn scan_all(controller: &mut WifiController<'static>) -> Result<alloc::vec::Vec<esp_radio::wifi::ap::AccessPointInfo>, &'static str> {
+    guard::stage(Stage::Scan);
+    SCAN_REQ.reset();
+    let config = ScanConfig::default()
+        .with_show_hidden(true)
+        .with_scan_type(ScanTypeConfig::Active { min: esp_hal::time::Duration::from_millis(40), max: esp_hal::time::Duration::from_millis(100) })
+        .with_max(64);
+    let result = match with_timeout(Duration::from_secs(15), controller.scan_async(&config)).await {
+        Ok(Ok(aps)) => Ok(aps),
+        Ok(Err(_)) => Err("scan failed"),
+        Err(_) => Err("scan timed out"),
+    };
+    if let Ok(aps) = &result {
+        critical_section::with(|cs| {
+            let mut t = SCAN_TABLE.borrow_ref_mut(cs);
+            let mut order: heapless_order::Order = heapless_order::Order::new();
+            for (i, a) in aps.iter().enumerate() {
+                order.push(i, a.signal_strength);
+            }
+            t.count = 0;
+            t.seen = aps.len();
+            t.seq = t.seq.wrapping_add(1);
+            for &i in order.sorted() {
+                if t.count == BSS_TABLE {
+                    break;
+                }
+                let a = &aps[i];
+                let mut row = NO_ROW;
+                let name = a.ssid.as_str().as_bytes();
+                row.ssid[..name.len()].copy_from_slice(name);
+                row.ssid_len = name.len() as u8;
+                row.bss = Bss { bssid: a.bssid, channel: a.channel, rssi: a.signal_strength };
+                row.auth = a.auth_method.map_or(0xff, |m| m as u8);
+                let n = t.count;
+                t.rows[n] = row;
+                t.count += 1;
+            }
+        });
+        SCAN_SEEN.store(aps.len() as u32, Ordering::Relaxed);
+    }
+    SCAN_DONE.signal(());
+    result
+}
+
+/// Indices of up to 64 scan results ordered strongest first, without allocating.
+mod heapless_order {
+    pub struct Order {
+        idx: [usize; 64],
+        rssi: [i8; 64],
+        n: usize,
+    }
+    impl Order {
+        pub const fn new() -> Self {
+            Self { idx: [0; 64], rssi: [0; 64], n: 0 }
+        }
+        pub fn push(&mut self, i: usize, rssi: i8) {
+            if self.n < 64 {
+                self.idx[self.n] = i;
+                self.rssi[self.n] = rssi;
+                self.n += 1;
+            }
+        }
+        pub fn sorted(&mut self) -> &[usize] {
+            // insertion sort, strongest first, stable
+            for a in 1..self.n {
+                let (i, r) = (self.idx[a], self.rssi[a]);
+                let mut b = a;
+                while b > 0 && self.rssi[b - 1] < r {
+                    self.idx[b] = self.idx[b - 1];
+                    self.rssi[b] = self.rssi[b - 1];
+                    b -= 1;
+                }
+                self.idx[b] = i;
+                self.rssi[b] = r;
+            }
+            &self.idx[..self.n]
+        }
+    }
+}
+
 async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>, loaded: tdongle_nvs_format::load::Loaded) -> ! {
     // SAFETY: this is the link supervisor task; it may block and is not a driver callback.
     let ctx = unsafe { TaskContext::assume() };
@@ -603,25 +712,28 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
     loop {
         // Strongest saved network that a scan (hidden SSIDs included) sees; none seen: try the saved list in order (directed probes find hidden ones).
         guard::stage(Stage::Scan);
-        let scan = with_timeout(Duration::from_secs(8), controller.scan_async(&ScanConfig::default().with_show_hidden(true).with_max(40))).await;
-        let slot = match scan {
-            Ok(Ok(aps)) => {
+        let scan = scan_all(controller).await;
+        let mut best_bss: Option<Bss> = None;
+        let slot = match &scan {
+            Ok(aps) => {
                 let signal = tdongle_saved::signals(&loaded.saved, aps.iter().map(|a| (a.ssid.as_str().as_bytes(), a.signal_strength)));
-                SCAN_SEEN.store(aps.len() as u32, Ordering::Relaxed);
                 for (i, v) in signal.iter().enumerate() {
                     SCAN_SIGNAL[i].store(*v as i32, Ordering::Relaxed);
                 }
-                tdongle_saved::choose(&loaded, &signal)
+                let chosen = tdongle_saved::choose(&loaded, &signal);
+                if let Some(slot) = chosen {
+                    // the strongest access point of that SSID: what the all-channel, by-signal join selects, and what `bss pin on` pins
+                    let ssid = loaded.saved.list()[slot].ssid_bytes();
+                    best_bss = tdongle_saved::strongest_bss(ssid, aps.iter().map(|a| (a.ssid.as_str().as_bytes(), a.bssid, a.channel, a.signal_strength)));
+                }
+                chosen
             }
-            Ok(Err(_)) => {
-                init_note("scan failed");
-                None
-            }
-            Err(_) => {
-                init_note("scan timed out");
+            Err(why) => {
+                init_note(why);
                 None
             }
         };
+        critical_section::with(|cs| *BSS_BEST.borrow_ref_mut(cs) = best_bss);
         let count = loaded.saved.list().len();
         let slot = slot.unwrap_or_else(|| {
             next = (next + 1) % count;
@@ -640,7 +752,13 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
             continue;
         };
         println!("joining saved network slot {}", slot);
-        if controller.set_config(&Config::Station(StationConfig::default().with_ssid(ssid_t).with_authentication(auth))).is_err() {
+        // The C station configuration (`wifi_fill_station`): all-channel scan, join by signal. esp-radio's default is the FAST scan, which joins the first access point
+        // that answers: on the board that was a far BSS of the right SSID (-88 dBm, channel 1) while the C joined -50 on channel 11.
+        let mut station = StationConfig::default().with_ssid(ssid_t).with_authentication(auth).with_scan_method(ScanMethod::AllChannels);
+        if let (true, Some(b)) = (PIN_BSS.load(Ordering::Relaxed), best_bss.filter(Bss::usable)) {
+            station = station.with_bssid(b.bssid).with_channel(b.channel);
+        }
+        if controller.set_config(&Config::Station(station)).is_err() {
             init_note("set_config failed");
             Timer::after_secs(2).await;
             continue;
@@ -648,6 +766,7 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
         if controller.set_protocols(Protocols::default()).is_err() {
             init_note("set_protocols failed"); // default is b/g/n: never LR
         }
+        l2::roaming_assist(); // bridge mode: 802.11k/v on, as C (`wifi_roaming_assist`)
         guard::stage(Stage::Connect);
         match with_timeout(Duration::from_secs(30), controller.connect_async()).await {
             Ok(Ok(info)) => {
@@ -661,10 +780,14 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 l2::link_changed(); // the driver cleared its queues when the link came up
                 SELECTED.store(slot as i32, Ordering::Relaxed);
                 CONNECTED_NOW.store(true, Ordering::Relaxed);
+                critical_section::with(|cs| *BSS_JOINED.borrow_ref_mut(cs) = l2::joined_bss());
                 bridge.link(true, &ctx);
                 loop {
-                    match select(controller.wait_for_disconnect_async(), Timer::after_secs(2)).await {
-                        Either::First(r) => {
+                    match select(select(controller.wait_for_disconnect_async(), SCAN_REQ.wait()), Timer::after_secs(2)).await {
+                        Either::First(Either::Second(())) => {
+                            let _ = scan_all(controller).await; // a console `scan` while connected
+                        }
+                        Either::First(Either::First(r)) => {
                             DISCONNECTS.fetch_add(1, Ordering::Relaxed);
                             println!("disconnected: {:?}", r.is_ok());
                             let _ = &LAST_REASON; // reason code: DisconnectedInfo field not mapped in the spike
@@ -859,6 +982,45 @@ async fn out(w: &'static Mutex<NoopRawMutex, AcmWriter>, s: &str, timeout_ms: u6
     let _ = with_timeout(Duration::from_millis(timeout_ms), g.write_all(s.as_bytes())).await;
 }
 
+/// `scan`: every access point of the last scan, strongest first (C `scan` prints `ssid= rssi= auth=`; the BSSID and channel are added), then a summary.
+fn scan_text(out: &mut String) {
+    critical_section::with(|cs| {
+        let t = SCAN_TABLE.borrow_ref(cs);
+        let joined = *BSS_JOINED.borrow_ref(cs);
+        let connected = CONNECTED_NOW.load(Ordering::Relaxed);
+        for row in &t.rows[..t.count] {
+            let ssid: String = row.ssid[..usize::from(row.ssid_len)].iter().map(|&b| if (32..127).contains(&b) { b as char } else { '?' }).collect();
+            let b = row.bss.bssid;
+            let slot = SAVED.lock(|c| {
+                c.borrow().as_ref().and_then(|l| l.saved.list().iter().position(|p| p.ssid_bytes() == &row.ssid[..usize::from(row.ssid_len)]))
+            });
+            let _ = write!(
+                out,
+                "ssid={} bssid={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} channel={} rssi={} auth={} usable={}",
+                ssid, b[0], b[1], b[2], b[3], b[4], b[5], row.bss.channel, row.bss.rssi, row.auth, u8::from(row.bss.usable())
+            );
+            if let Some(i) = slot {
+                let _ = write!(out, " saved={}", i + 1);
+            }
+            if connected && joined.is_some_and(|j| j.bssid == row.bss.bssid) {
+                out.push_str(" joined=1");
+            }
+            out.push_str("\r\n");
+        }
+        let _ = write!(out, "scan_done seen={} listed={} seq={}\r\n", t.seen, t.count, t.seq);
+    });
+}
+
+fn bssid_text(b: Option<Bss>, out: &mut String) {
+    match b {
+        Some(b) => {
+            let x = b.bssid;
+            let _ = write!(out, "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} channel={} rssi={}", x[0], x[1], x[2], x[3], x[4], x[5], b.channel, b.rssi);
+        }
+        None => out.push_str("none channel=0 rssi=0"),
+    }
+}
+
 fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
     let st = bridge.stats();
     let none: [Record; 0] = [];
@@ -974,6 +1136,18 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         l2::TX_LAST_ERR.load(Ordering::Relaxed),
         SCAN_SEEN.load(Ordering::Relaxed)
     );
+    // where the radio is: the access point it joined and the strongest one the scan saw for the chosen SSID (they must agree unless the driver chose otherwise)
+    let (joined, best) = critical_section::with(|cs| (*BSS_JOINED.borrow_ref(cs), *BSS_BEST.borrow_ref(cs)));
+    out.push_str("s3_bss joined=");
+    bssid_text(if CONNECTED_NOW.load(Ordering::Relaxed) { joined } else { None }, out);
+    out.push_str(" best=");
+    bssid_text(best, out);
+    let _ = write!(
+        out,
+        " match={} pin={} scan_method=all_channel\r\n",
+        u8::from(joined.is_some() && best.is_some() && joined.map(|j| j.bssid) == best.map(|b| b.bssid)),
+        u8::from(PIN_BSS.load(Ordering::Relaxed))
+    );
 }
 
 fn tdongle_traffic_reading() -> tdongle_traffic::Reading {
@@ -1035,6 +1209,19 @@ async fn handle(wr: &'static Mutex<NoopRawMutex, AcmWriter>, bridge: &'static Br
                 }
                 None => s.push_str("usage: usb bridge|sink|source RATE_KBPS|max\r\n"),
             }
+        }
+        "scan" => {
+            SCAN_DONE.reset();
+            SCAN_REQ.signal(());
+            if with_timeout(Duration::from_secs(20), SCAN_DONE.wait()).await.is_err() {
+                s.push_str("ERR scan did not finish (radio not started?)\r\n");
+            } else {
+                scan_text(&mut s);
+            }
+        }
+        b if b == "bss pin on" || b == "bss pin off" => {
+            PIN_BSS.store(b.ends_with("on"), Ordering::Relaxed);
+            let _ = write!(s, "bss pin {} (applies to the next join)\r\n", if b.ends_with("on") { "on: BSSID and channel of the strongest usable access point" } else { "off: all-channel scan, join by signal (C)" });
         }
         "init" => {
             let note = critical_section::with(|cs| *INIT_NOTE.borrow_ref(cs));

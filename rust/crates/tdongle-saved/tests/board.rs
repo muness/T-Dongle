@@ -71,3 +71,57 @@ fn a_real_dump_loads() {
     eprintln!("board dump: {:?}", ssids(&l));
     assert!(!l.saved.list().is_empty());
 }
+
+mod bss {
+    use tdongle_saved::{Bss, strongest_bss};
+
+    const NEAR: [u8; 6] = [0x02, 0, 0, 0, 0, 0x11];
+    const FAR: [u8; 6] = [0x02, 0, 0, 0, 0, 0x01];
+    const EXT: [u8; 6] = [0x02, 0, 0, 0, 0, 0x21];
+
+    fn scan<'a>(rows: &'a [(&'a str, [u8; 6], u8, i8)]) -> impl Iterator<Item = (&'a [u8], [u8; 6], u8, i8)> {
+        rows.iter().map(|(s, b, c, r)| (s.as_bytes(), *b, *c, *r))
+    }
+
+    #[test]
+    fn the_strongest_access_point_of_the_ssid_is_chosen_whatever_the_scan_order() {
+        // the board: 217IoT on channel 1 at -88 (the one the first S3 joined), channel 11 at -50, and the extender
+        let rows = [("217IoT", FAR, 1, -88), ("217IoT_EXT", EXT, 6, -67), ("217IoT", NEAR, 11, -50), ("neighbour", [9; 6], 3, -30)];
+        let best = strongest_bss(b"217IoT", scan(&rows)).unwrap();
+        assert_eq!(best, Bss { bssid: NEAR, channel: 11, rssi: -50 });
+        assert!(best.usable());
+        let reversed: Vec<_> = rows.iter().rev().copied().collect();
+        assert_eq!(strongest_bss(b"217IoT", scan(&reversed)), Some(best));
+    }
+
+    #[test]
+    fn usable_is_judged_per_access_point() {
+        let rows = [("217IoT", FAR, 1, -88), ("217IoT", NEAR, 11, -84)];
+        let best = strongest_bss(b"217IoT", scan(&rows)).unwrap();
+        assert_eq!(best.bssid, NEAR);
+        assert!(best.usable(), "-84 is usable");
+        let far_only = strongest_bss(b"217IoT", scan(&rows[..1])).unwrap();
+        assert!(!far_only.usable(), "-88 is not, even though the SSID is saved and seen");
+        assert!(Bss { bssid: NEAR, channel: 1, rssi: -85 }.usable() && !Bss { bssid: NEAR, channel: 1, rssi: -86 }.usable());
+    }
+
+    #[test]
+    fn ties_keep_the_first_and_unseen_ssids_give_none() {
+        let rows = [("217IoT", FAR, 1, -60), ("217IoT", NEAR, 11, -60)];
+        assert_eq!(strongest_bss(b"217IoT", scan(&rows)).unwrap().bssid, FAR);
+        assert_eq!(strongest_bss(b"other", scan(&rows)), None);
+        assert_eq!(strongest_bss(b"217IoT", scan(&[])), None);
+        // an SSID that is a prefix of another is not the same network
+        assert_eq!(strongest_bss(b"217IoT", scan(&[("217IoT_EXT", EXT, 6, -40)])), None);
+    }
+
+    #[test]
+    fn the_ssid_signal_the_ranking_sees_is_its_strongest_access_point() {
+        use tdongle_nvs_read::{Nvs, SliceFlash};
+        let l = tdongle_saved::load(&mut Nvs::new(SliceFlash(include_bytes!("../../tdongle-nvs-read/tests/fixtures/board_v01.bin")), 0x10000)).unwrap();
+        let rows = [("217IoT", FAR, 1, -88), ("217IoT", NEAR, 11, -50)];
+        let signal = tdongle_saved::signals(&l.saved, rows.iter().map(|(s, _, _, r)| (s.as_bytes(), *r)));
+        assert_eq!(signal[0], -50, "slot 0 (217IoT) is read at its strongest access point");
+        assert_eq!(tdongle_saved::choose(&l, &signal), Some(0));
+    }
+}
