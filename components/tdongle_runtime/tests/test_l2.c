@@ -422,6 +422,7 @@ static void test_retry(void) {
     assert(host_in(f, 200) == ESP_OK && pump() == 1 && tx_calls == 2 && stats().h2w_tx_failed == 1);
     check_identities();
     /* The timer cannot be created: the bridge does not start (nothing half built). */
+    free(l2.slots); l2.slots = NULL;                      /* the previous start's queue: the harness frees it (production never stops the bridge) */
     memset(&l2, 0, sizeof(l2)); fail_timer = true;
     tdongle_l2_config_t c = config();
     assert(tdongle_l2_start(mac, &c) == ESP_ERR_NO_MEM && !l2.slots);

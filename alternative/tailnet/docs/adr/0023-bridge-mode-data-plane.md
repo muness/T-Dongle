@@ -248,6 +248,22 @@ Tests: a steady 1,300 B UDP flow at 5 Mbit/s with no holds for 4 s gives zero si
 
 **Expected on the board.** UDP up 4M loss no worse than main's (the controller does not act on a flow with no holds), load ping still improved (the saturating TCP flow is held continuously and signalled after about 105 ms), TCP down unchanged.
 
+**Board result on 87d772f (release image, same session as main).**
+
+| | #45 | main |
+|---|---|---|
+| UDP up 4M loss | **1%** | 14% |
+| UDP up 8M loss | 26% | 22% |
+| UDP down 4M loss | 0% | 10% |
+| UDP down 8M loss (3 reruns) | 3-13% | 26% |
+| TCP up (Mbit/s) | 5.7-6.0 | 5.4-5.7 |
+| TCP down (Mbit/s) | 6.8-7.3 | 3.7-4.3 |
+| load ping (TCP up) | 43 ms | 27 ms |
+
+TCP retransmits per run: 12-43 on #45 against about 200 on main. CoDel fired 577 times, all drops (ECN is not negotiated by this host). No crash; tailnet mode came back up. The three findings above are closed: UDP up 4M loss is now below main's, where the first release A/B had it at 44%.
+
+**Known limitation, and a follow-up.** Load ping with a saturating TCP upload is **43 ms against main's 27 ms**: about 16 ms of host-side queueing remains. The dongle's own contribution is 2-3 ms; the rest is the host's transmit FIFO behind lossless USB backpressure, which the dongle can only shrink through the congestion signal CoDel gives the host's TCP (drops here, marks if ECN were negotiated). Main's lower figure is the same property seen from the other side: it dropped constantly (about 200 TCP retransmits a run against 12-43) and kept the host's window, and so its queue, small, at the price of the loss visible in the table (UDP up 4M 14%, down 4M 10%, TCP down 3.7-4.3 Mbit/s). Follow-up (not in this PR): (1) re-test on a host that negotiates ECN (a Linux or Windows host, or macOS with a different `net.inet.tcp.ecn_*` setting), where `ce_marked` should replace most of the drops and the window cut costs no retransmission; (2) if the gap matters on macOS, a lower CoDel target with a shorter interval for the hold-evidenced period (`bridgetune target_us=2000 interval_ms=50`) is the next point to measure now that the signal no longer misfires on unheld flows; (3) a macOS packet capture of an ECN setup through the bridge to settle whether the SYN is stripped or never sent (`bridge_ecn syn_setup` was 0). Until then the defaults stay RFC 8289's.
+
 ## Board plan (bridge mode; `mode wifi_bridge` over serial, then back to `mode tailnet_gateway`)
 
 Server 192.168.1.2 (`iperf3 -s`), client bound to the bridged interface's IP (en19):
