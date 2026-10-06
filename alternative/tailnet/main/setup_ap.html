@@ -121,11 +121,11 @@ async function scan(again){
  if(r.j.busy)setTimeout(()=>scan(false),1500);
 }
 $('scan').onclick=()=>scan(true);scan(false);
-let nsaved=0,slotTouched=false;f.slot.oninput=()=>{slotTouched=true};
+let nsaved=0,slotTouched=false,savedNets=[];f.slot.oninput=()=>{slotTouched=true};
 async function loadSaved(){
  const r=await api('/wifi-saved');
  if(!r.j||!r.j.networks)return;
- const j=r.j,L=$('savedlist');L.innerHTML='';nsaved=j.networks.length;$('savedbox').hidden=!nsaved;
+ const j=r.j,L=$('savedlist');L.innerHTML='';savedNets=j.networks;nsaved=j.networks.length;$('savedbox').hidden=!nsaved;
  $('cancel').textContent=nsaved?'Done':'Cancel setup';
  j.networks.forEach(n=>{const row=document.createElement('div');row.className='saved';
   const a=document.createElement('span');a.textContent=(n.preferred?'★ ':'')+(n.ssid.startsWith(n.name)?n.ssid:n.name+' ('+n.ssid+')');a.title=n.ssid;
@@ -141,6 +141,8 @@ f.onsubmit=async e=>{
  const d=Object.fromEntries(new FormData(f));
  d.slot=Number(d.slot);d.priority=Number(d.priority);d.action='wifi';
  if(!d.name)d.name=d.ssid.slice(0,24);
+ // Saving over a network that is already saved (a new password) goes to ITS slot, unless the slot was chosen by hand: the dongle keeps one entry per network.
+ const known=savedNets.find(n=>n.ssid===d.ssid);if(known&&!slotTouched)d.slot=known.slot;
  if(d.password&&d.password.length<8){say('Passwords need at least 8 characters. Leave it empty only for an open network.','msg err');$('pw').focus();return}
  if(!/^[ -~]*$/.test(d.ssid+d.name+d.password)){say('Only plain ASCII letters, numbers and symbols are supported for now.','msg err');return}
  $('save').disabled=true;$('save').textContent='Saving...';

@@ -13,7 +13,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-enum { SETUP_BOOT_MAGIC = 0x54444d31u, SETUP_SESSION_MS = 600000u, SETUP_SLOTS = 8 };
+enum { SETUP_BOOT_MAGIC = 0x54444d31u, SETUP_SESSION_MS = 600000u, SETUP_AP_GRACE_MS = 30000u, SETUP_SLOTS = 8 };
 typedef enum { SETUP_REQUEST_NONE = 0, SETUP_REQUEST_ENTER = 1, SETUP_REQUEST_LEAVE = 2 } setup_request;
 
 typedef struct {
@@ -34,6 +34,10 @@ typedef struct { uint32_t started_ms; bool active; } setup_session;
 void setup_session_start(setup_session *s, uint32_t now_ms);
 bool setup_session_expired(const setup_session *s, uint32_t now_ms);
 uint32_t setup_session_seconds_left(const setup_session *s, uint32_t now_ms);
+/* Time to restart into normal mode? The session is over, or the access point is still not up SETUP_AP_GRACE_MS after the boot began: a setup
+ * boot whose access point failed to start (no memory, no radio, the settings or the network layer failed) serves nobody, so it must not sit idle
+ * for the whole session. The session clock starts when the boot decides to run setup, not when the access point comes up. */
+bool setup_session_should_end(const setup_session *s, uint32_t now_ms, bool access_point_up);
 
 /* Access point name: TDongle-XXXXXX from the last three bytes of the station MAC (v0.1.1). out holds at least 15 bytes. */
 void setup_ap_ssid(char *out, unsigned size, const uint8_t mac[6]);

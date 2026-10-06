@@ -42,7 +42,7 @@ static inline int wifi_pick_ranked(const int16_t signal[WIFI_PROFILE_LIMIT], uns
     return best;
 }
 /* Stable ties, 12 dB hysteresis and a weak-current threshold prevent churn. */
-static int wifi_pick(const int16_t signal[WIFI_PROFILE_LIMIT],unsigned count,int current,bool connected){
+static inline int wifi_pick(const int16_t signal[WIFI_PROFILE_LIMIT],unsigned count,int current,bool connected){
     return wifi_pick_ranked(signal, count, current, connected, NULL);
 }
 /* The order in which networks that were not seen (hidden SSIDs, or out of range right now) are tried while offline:

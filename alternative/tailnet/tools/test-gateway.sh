@@ -8,6 +8,7 @@ TD_INC="-I tests -I components/microlink/include -I ../../components/tdongle_run
 python - <<'PYWIFI'
 from pathlib import Path
 s=Path('main/wifi_profiles.inc').read_text();a=s.index('/* Scanning and reconnecting');Path('build-host/wifi_store.inc').write_text(s[:a]);Path('build-host/wifi_worker.inc').write_text(s[a:])
+t=Path('main/setup_ap.inc').read_text();a=t.index('static bool setup_early_has_networks(');b=t.index('\n}\n',a)+3;Path('build-host/setup_early.inc').write_text(t[a:b])
 PYWIFI
 # The saved-network store and worker (wifi_profiles.inc) against an in-memory NVS, with the shared device modules it uses.
 DEVICE_SRC="../../main/wifi_meta.c ../../main/legacy_import.c ../../main/ui_settings.c"
@@ -15,6 +16,9 @@ for name in coord_read wifi_policy wifi_profiles; do
  cc $TD_INC -I ../../main -std=gnu11 -I build-host -fsanitize=address,undefined -g tests/test_${name}.c $DEVICE_SRC -o build-host/test_${name}
  build-host/test_${name}
 done
+# What a boot decides before the settings are open: is anything saved? (setup_ap.inc setup_early_has_networks, the real function)
+cc $TD_INC -I main -I ../../main -I build-host -std=gnu11 -fsanitize=address,undefined -g tests/test_setup_early.c $DEVICE_SRC ../../main/setup_boot.c -o build-host/test_setup_early
+build-host/test_setup_early
 # The front-panel serial commands (serial_setup.inc, the real code): setup, cancel, reset/confirm-reset, display, use, profile/list and the status lines.
 : "${IDF_PATH:?Source ESP-IDF for the same cJSON used by the firmware}"
 cjson="$IDF_PATH/components/json/cJSON"

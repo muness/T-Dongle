@@ -13,6 +13,7 @@
 #include "lwip/sockets.h"
 #include "dhcpserver/dhcpserver.h"
 #include "esp_random.h"
+#include "bootloader_random.h"
 
 static bool setup_active;                  /* this boot is the setup access point */
 static setup_session setup_clock;
@@ -43,7 +44,10 @@ static bool setup_early_has_networks(nvs_handle_t early, bool *store_ok) {
         typeof(wifi_saved) list;   /* 784 B on the main task's stack, which is freed when app_main returns */
         size_t n = sizeof(list);
         esp_err_t e = nvs_get_blob(early, "wifi_profiles", &list, &n);
-        if (e == ESP_OK && n == sizeof(list)) return list.count > 0;
+        if (e == ESP_OK && n == sizeof(list)) {
+            if (list.schema != 1 || list.count > WIFI_PROFILE_LIMIT) { *store_ok = false; return true; }   /* a schema this firmware does not know: unreadable, as wifi_load_profiles judges it */
+            return list.count > 0;
+        }
         if (e != ESP_ERR_NVS_NOT_FOUND) { *store_ok = false; return true; }
         wifi_config_t single;
         size_t m = sizeof(single);
@@ -122,7 +126,18 @@ static void setup_dns_task(void *arg) {
 }
 
 /* ---- The access point. */
+/* True random bytes before the radio runs: esp_random is a pseudo-random sequence until the RF subsystem is on, and the token (and, with
+ * CONFIG_TDONGLE_SETUP_AP_OPEN off, the WPA2 password) must not be guessable. The entropy source is only to be enabled while the RF
+ * subsystem is not initialised, so this runs before esp_wifi_init. */
+static void setup_random(uint8_t *out, size_t n) {
+    bootloader_random_enable();
+    esp_fill_random(out, n);
+    bootloader_random_disable();
+}
 static esp_err_t start_setup(void) {
+    uint8_t random[16 + 16];
+    setup_random(random, sizeof(random));
+    access_token_format(setup_token, random);
     esp_netif_t *ap = esp_netif_create_default_wifi_ap();
     if (!ap) return ESP_ERR_NO_MEM;
     setup_nets_lock = xSemaphoreCreateMutex();
@@ -135,9 +150,6 @@ static esp_err_t start_setup(void) {
     uint8_t mac[6];
     START_TRY(esp_read_mac(mac, ESP_MAC_WIFI_STA));
     setup_ap_ssid(setup_ap_name, sizeof(setup_ap_name), mac);
-    uint8_t random[16];
-    esp_fill_random(random, sizeof(random));
-    access_token_format(setup_token, random);
     wifi_config_t config = {0};
     memcpy(config.ap.ssid, setup_ap_name, strlen(setup_ap_name));
     config.ap.ssid_len = (uint8_t)strlen(setup_ap_name);
@@ -148,26 +160,29 @@ static esp_err_t start_setup(void) {
     config.ap.authmode = WIFI_AUTH_OPEN;
     setup_ap_password[0] = 0;
 #else
-    for (unsigned i = 0; i < 16; i++) setup_ap_password[i] = "abcdefghijkmnpqrstuvwxyz23456789"[esp_random() % 32];
+    for (unsigned i = 0; i < 16; i++) setup_ap_password[i] = "abcdefghijkmnpqrstuvwxyz23456789"[random[16 + i] % 32];
     setup_ap_password[16] = 0;
     memcpy(config.ap.password, setup_ap_password, 16);
     config.ap.authmode = WIFI_AUTH_WPA2_PSK;
     config.ap.pmf_cfg.capable = true;
 #endif
+    memset(random, 0, sizeof(random));
     START_TRY(esp_wifi_set_config(WIFI_IF_AP, &config));
-    START_TRY(esp_wifi_start());
-    wifi_power_save_off();   /* a phone waking from its own power save must not wait for the dongle to wake too */
-    /* Name the dongle as the DNS server in the DHCP offer. No DHCP option 114 (RFC 8910): it must point at an HTTPS API with a valid
-     * certificate, which an address like 192.168.4.1 cannot have; the DNS hijack plus the redirect is what opens the page. */
-    esp_netif_dhcps_stop(ap);
+    /* Name the dongle as the DNS server in the DHCP offer. The options can only be set while the server is stopped, so they are set BEFORE the radio
+     * starts: starting the AP then starts the DHCP server (the default netif handler) with them, and nothing races it. No DHCP option 114
+     * (RFC 8910): it must point at an HTTPS API with a valid certificate, which an address like 192.168.4.1 cannot have; the DNS hijack plus the
+     * redirect is what opens the page. */
+    esp_netif_dhcps_stop(ap);   /* already stopped before the AP starts: ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED is fine */
     esp_netif_dns_info_t dns = {.ip.type = IPADDR_TYPE_V4};
     dns.ip.u_addr.ip4.addr = esp_ip4addr_aton("192.168.4.1");
     esp_netif_set_dns_info(ap, ESP_NETIF_DNS_MAIN, &dns);
     dhcps_offer_t offer = OFFER_DNS;
     esp_netif_dhcps_option(ap, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &offer, sizeof(offer));
-    START_TRY(esp_netif_dhcps_start(ap));
+    START_TRY(esp_wifi_start());
+    wifi_power_save_off();   /* a phone waking from its own power save must not wait for the dongle to wake too */
+    esp_err_t dhcp = esp_netif_dhcps_start(ap);   /* normally started by the AP-start event already */
+    if (dhcp != ESP_OK && dhcp != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) return dhcp;
     if (xTaskCreate(setup_dns_task, "setup_dns", 3072, NULL, 3, NULL) != pdPASS) return ESP_ERR_NO_MEM;
     wifi_ready = true;   /* the Wi-Fi pages of the HTTP server may scan and save */
-    setup_session_start(&setup_clock, (uint32_t)(esp_timer_get_time() / 1000));
     return ESP_OK;
 }

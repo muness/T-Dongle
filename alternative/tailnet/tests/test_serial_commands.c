@@ -103,6 +103,10 @@ static void use_command(void){
  for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);i++){unsigned before=wifi_revision;int preferred=wifi_meta.preferred;assert(run(bad[i]) && says("ERR Invalid saved network") && wifi_revision==before && wifi_meta.preferred==preferred);}
  reject_config=true;assert(run("use 1") && says("ERR Wi-Fi driver refused the network") && wifi_meta.preferred==2);reject_config=false;   /* a refused join does not become the preference */
  wifi_ready=false;assert(run("use 1") && says("ERR Invalid saved network"));wifi_ready=true;
+ /* Not while setup is open: the radio belongs to the access point. */
+ setup_active=true;unsigned before=wifi_revision,joined=joins;int pin=wifi_pinned.slot,preferred=wifi_meta.preferred;
+ assert(run("use 1") && says("ERR Not available while setup is open") && wifi_revision==before && wifi_pinned.slot==pin && wifi_meta.preferred==preferred && joins==joined);
+ setup_active=false;
 }
 static void profile_and_list(void){
  fresh();

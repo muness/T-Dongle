@@ -50,6 +50,17 @@ static void session(void) {
     assert(!setup_session_expired(&s, 0xffffff00u + 599000) && setup_session_expired(&s, 0xffffff00u + 600000));
     assert(setup_session_seconds_left(&s, 0xffffff00u + 1000) == 599);
 }
+static void giving_up(void) {
+    setup_session s = {0};
+    assert(!setup_session_should_end(&s, 1000000, false));                     /* not a setup boot: never */
+    setup_session_start(&s, 1000);
+    assert(!setup_session_should_end(&s, 1000, false) && !setup_session_should_end(&s, 1000 + 29999, false));
+    assert(setup_session_should_end(&s, 1000 + 30000, false));                 /* the access point never came up: leave after the grace period */
+    assert(!setup_session_should_end(&s, 1000 + 30000, true) && !setup_session_should_end(&s, 1000 + 599999, true));   /* up: stay for the session */
+    assert(setup_session_should_end(&s, 1000 + 600000, true));
+    setup_session_start(&s, 0xffffff00u);                                      /* across the 32 bit wrap */
+    assert(!setup_session_should_end(&s, 0xffffff00u + 29999, false) && setup_session_should_end(&s, 0xffffff00u + 30000, false));
+}
 static void access_point_name(void) {
     char ssid[16];
     uint8_t mac[6] = {0x34, 0x85, 0x18, 0xab, 0x0c, 0xf9};
@@ -60,7 +71,7 @@ static void access_point_name(void) {
     assert(strlen(small) == 7);   /* truncated and terminated, never overrun */
 }
 int main(void) {
-    decisions(); request_words(); session(); access_point_name();
+    decisions(); request_words(); session(); giving_up(); access_point_name();
     puts("Setup boot: request survives only a software reset, first plug-in opens setup, leaving never loops, 10 minute session wraps safely");
     return 0;
 }

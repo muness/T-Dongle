@@ -1744,6 +1744,8 @@ void app_main(void) {
     }
     setup_boot_decision boot=setup_boot_early(networks_saved,store_ok);
     setup_active=boot.setup;setup_preselect=boot.preselect;
+    /* The session clock starts here, not when the access point comes up: if that never happens the dongle still leaves setup (setup_session_should_end). */
+    if(setup_active)setup_session_start(&setup_clock,(uint32_t)(esp_timer_get_time()/1000));
 
     /* Frequency scaling for both modes (ADR 0016, 0023): 240 MHz while forwarding work is pending, 80 MHz when idle. The tailnet's tasks
      * hold CPU-max locks while they have work; the transparent bridge notes forwarding activity in its Wi-Fi and USB callbacks and its

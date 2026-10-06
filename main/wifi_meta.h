@@ -35,6 +35,8 @@ void wifi_meta_defaults(wifi_meta_set *set, const char *const ssids[], unsigned 
 void wifi_meta_remove(wifi_meta_set *set, unsigned count, unsigned slot);
 /* Persisted blob for the current list. */
 void wifi_meta_encode(wifi_meta_blob *blob, const char *const ssids[], unsigned count, const wifi_meta_set *set);
-/* Attach the blob's entries to the list by SSID. Returns false (set untouched) when the blob is not a valid current-schema blob
- * (wrong size or schema, unterminated strings, a priority above 100): the caller then falls back to another source or defaults. */
-bool wifi_meta_decode(const void *data, size_t length, const char *const ssids[], unsigned count, wifi_meta_set *set);
+/* Lay the blob over what `set` already holds: only the networks the blob has an entry for take its name and priority (the others keep whatever
+ * `set` had, typically defaults or the v0.1.x values), and its preferred network, present or "none", is authoritative: a blob exists only
+ * because the user acted. Returns false (set untouched) for an invalid blob: wrong size or schema, unterminated strings, a priority above 100.
+ * The firmware starts from wifi_meta_defaults (then the v0.1.x values, if any) and overlays the stored blob. */
+bool wifi_meta_overlay(const void *data, size_t length, const char *const ssids[], unsigned count, wifi_meta_set *set);

@@ -22,6 +22,10 @@ void setup_session_start(setup_session *s, uint32_t now_ms) { s->started_ms = no
 bool setup_session_expired(const setup_session *s, uint32_t now_ms) {
     return s->active && (uint32_t)(now_ms - s->started_ms) >= SETUP_SESSION_MS;
 }
+bool setup_session_should_end(const setup_session *s, uint32_t now_ms, bool access_point_up) {
+    if (!s->active) return false;
+    return setup_session_expired(s, now_ms) || (!access_point_up && (uint32_t)(now_ms - s->started_ms) >= SETUP_AP_GRACE_MS);
+}
 uint32_t setup_session_seconds_left(const setup_session *s, uint32_t now_ms) {
     if (!s->active) return 0;
     uint32_t elapsed = (uint32_t)(now_ms - s->started_ms);

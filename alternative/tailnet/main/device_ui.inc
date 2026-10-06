@@ -106,14 +106,15 @@ static bool ui_compose(uint32_t now, bool dim, lcd_view *view) {
     st.down_frames = ui.traffic.down_frames_total;
     st.up_frames = ui.traffic.up_frames_total;
     traffic_bars(&ui.traffic, st.bars);
-    st.uptime_s = now / 1000;
+    st.uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);   /* the 64 bit clock: `now` wraps after 49.7 days */
     st.wifi_up_s = online && wifi_link_stats.connects ? (uint32_t)(now - wifi_link_stats.last_connect_ms) / 1000 : 0;
     st.connects = wifi_link_stats.connects;
     st.last_reason = wifi_link_stats.last_reason;
     st.usb_resets = gateway_usb_health(8);
     st.heap_free = esp_get_free_heap_size();
     st.heap_min = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL);
-    st.heap_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    /* The largest-block query walks the heap with the allocator locked: only while the one Health view that shows it is on the glass. */
+    st.heap_largest = ui.page == 2 && st.health_view == 1 ? heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) : 0;
     st.reset_reason = reset_reason_at_boot;
     st.boots = health_rtc.boots;
     st.watchdogs = health_rtc.watchdogs;
@@ -122,7 +123,7 @@ static bool ui_compose(uint32_t now, bool dim, lcd_view *view) {
                              .tailnet = !st.bridge, .tailnet_ready = st.ready, .tailnet_failed = st.failed, .tailnet_login = st.login,
                              .last_reason = (uint16_t)wifi_link_stats.last_reason};
     if (ui.menu.open) {
-        menu_context context = {.setup_active = setup_active, .saved_count = wifi_saved.count};
+        menu_context context = {.setup_active = setup_active, .saved_count = setup_active ? 0 : wifi_saved.count};
         char rows[MENU_ROWS][MENU_ROW_CHARS + 1];
         menu_render(&ui.menu, &context, ui_name_of, NULL, rows);
         lcd_compose_rows(view, (const char (*)[27])rows, ui.menu.confirm);
@@ -132,21 +133,22 @@ static bool ui_compose(uint32_t now, bool dim, lcd_view *view) {
     return true;
 }
 void gateway_display_tick(void) {
-    if (!ui.ready || !ui_lock || xSemaphoreTake(ui_lock, 0) != pdTRUE) return;
     uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
-    if (setup_active && setup_session_expired(&setup_clock, now)) {
-        ESP_LOGW("setup", "setup session over after 10 minutes: restarting into normal mode");
-        xSemaphoreGive(ui_lock);
+    /* Before anything that can be unavailable (the panel, the lock): a setup boot always ends, whatever failed to start. */
+    if (setup_active && setup_session_should_end(&setup_clock, now, wifi_ready)) {
+        ESP_LOGW("setup", "leaving setup (%s): restarting into normal mode", wifi_ready ? "the 10 minutes are over" : "the access point did not start");
         setup_restart(SETUP_REQUEST_LEAVE, 0);
     }
+    if (!ui.ready || !ui_lock || xSemaphoreTake(ui_lock, 0) != pdTRUE) return;
     /* Button. A press while the backlight is dimmed only wakes it (the whole gesture is swallowed), as in v0.1.1. */
     bool dim = !setup_active && (uint32_t)(now - ui.last_touch_ms) > (uint32_t)display_settings.dim_seconds * 1000u;
-    button_event_t event = button_update(&ui.button, !gpio_get_level(BOARD_BUTTON), dim, now);
+    /* The 64 bit clock: the button's debounce and hold timers are differences, which a 32 bit millisecond count would break at 49.7 days. */
+    button_event_t event = button_update(&ui.button, !gpio_get_level(BOARD_BUTTON), dim, (uint64_t)(esp_timer_get_time() / 1000));
     if (event != BUTTON_NONE) {
         ui.last_touch_ms = now;
         dim = false;
         ui.redraw = true;
-        menu_context context = {.setup_active = setup_active, .saved_count = wifi_saved.count};
+        menu_context context = {.setup_active = setup_active, .saved_count = setup_active ? 0 : wifi_saved.count};   /* no network switching during setup (see `use`) */
         menu_action action;
         if (event == BUTTON_SHORT) {
             if (!menu_event_handle(&ui.menu, &context, MENU_EVENT_SHORT, now, &action)) ui.page = (ui.page + 1) % LCD_PAGES;

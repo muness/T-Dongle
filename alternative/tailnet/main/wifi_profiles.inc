@@ -28,6 +28,14 @@ static void wifi_apply_legacy_meta(const legacy_import *legacy){
     if(legacy->preferred>=0)for(unsigned i=0;i<wifi_saved.count;i++)
         if(!strcmp(wifi_saved.profiles[i].ssid,legacy->net[legacy->preferred].ssid))wifi_meta.preferred=(int)i;
 }
+/* What the user has done since: the stored metadata (tn_settings/wifi_meta), laid over the defaults and the v0.1.x values. It exists only because
+ * an action wrote it (a save, or `use N` making a network preferred), so for the networks it names it is authoritative, and for the others the
+ * older sources stand: that is what keeps `use 2` after an upgrade from v0.1.1 across a restart even though the list has not been saved yet. */
+static void wifi_overlay_stored_meta(const char *const ssids[]){
+    wifi_meta_blob *blob=malloc(sizeof(*blob));size_t bytes=sizeof(*blob);
+    if(blob && nvs_get_blob(store,"wifi_meta",blob,&bytes)==ESP_OK)wifi_meta_overlay(blob,bytes,ssids,wifi_saved.count,&wifi_meta);
+    free(blob);
+}
 static bool wifi_load_profiles(void){
     size_t n=sizeof(wifi_saved);esp_err_t e=nvs_get_blob(store,"wifi_profiles",&wifi_saved,&n);
     legacy_import *legacy=malloc(sizeof(*legacy));bool have_legacy=legacy && wifi_read_legacy(legacy);
@@ -43,27 +51,33 @@ static bool wifi_load_profiles(void){
         }
         wifi_ssid_list(ssids);wifi_meta_defaults(&wifi_meta,ssids,wifi_saved.count);
         if(have_legacy)wifi_apply_legacy_meta(legacy);
+        wifi_overlay_stored_meta(ssids);
         /* Imported credentials and metadata persist on the next explicit save. */
     }else{
         if(e!=ESP_OK || n!=sizeof(wifi_saved) || wifi_saved.schema!=1 || wifi_saved.count>8)ok=false;
         for(unsigned i=0;ok && i<wifi_saved.count;i++)if(!wifi_saved.profiles[i].ssid[0] || wifi_saved.profiles[i].ssid[32] || wifi_saved.profiles[i].password[63])ok=false;
         if(ok){
             wifi_ssid_list(ssids);wifi_meta_defaults(&wifi_meta,ssids,wifi_saved.count);
-            wifi_meta_blob *blob=malloc(sizeof(*blob));size_t bytes=sizeof(*blob);
-            bool stored=blob && nvs_get_blob(store,"wifi_meta",blob,&bytes)==ESP_OK && wifi_meta_decode(blob,bytes,ssids,wifi_saved.count,&wifi_meta);
-            free(blob);
-            /* No (valid) metadata yet: this list was saved by a build that predates it (the first unified release saved networks
-             * without it), so the v0.1.x settings, if they are still there, are still the user's priorities. */
-            if(!stored && have_legacy)wifi_apply_legacy_meta(legacy);
+            /* A list saved by a build that predates the metadata (the first unified release saved networks without it) has no entries for
+             * its networks: the v0.1.x settings, if they are still there, are still the user's priorities, and what the stored metadata names
+             * wins over them. */
+            if(have_legacy)wifi_apply_legacy_meta(legacy);
+            wifi_overlay_stored_meta(ssids);
         }
     }
     if(legacy){memset(legacy,0,sizeof(*legacy));free(legacy);}
     return ok;
 }
+/* Everything one save works on, on the heap: the control task's 4 KB stack already carries a command line, a reply buffer and the parsed profile
+ * when a serial `profile` gets here, and the candidate list alone is 784 B. About 2.3 KB for the duration of one save. */
+typedef struct {typeof(wifi_saved) list;wifi_meta_set meta;wifi_meta_blob next,previous;} wifi_save_work;
 /* Save, replace or remove one network, with its name and priority (name NULL or empty, priority < 0: keep what it has, or the defaults for a
  * new or replaced network). slot >= 0 targets that slot (it may be one past the end to append); -1 finds the network by SSID. The password
  * and the metadata are written together: metadata first, because it is keyed by SSID and harmless without the list change, then the
- * list, then one commit. Either everything changes or nothing does. */
+ * list, then one commit. Either everything changes or nothing does.
+ *
+ * Replacing a network in the preferred slot keeps that slot preferred (v0.1.1: the preferred slot was a slot, and "change my main network" is
+ * the usual reason to replace it); removing it clears the preference. */
 static bool wifi_save_with(const char *ssid,const char *password,const char *name,int priority,bool remove,int slot){
     unsigned i=0;for(;i<wifi_saved.count;i++)if(!strcmp(wifi_saved.profiles[i].ssid,ssid))break;
     if(slot>=0){if(slot>(int)wifi_saved.count || (i<wifi_saved.count && i!=(unsigned)slot))return false;i=(unsigned)slot;}
@@ -71,32 +85,33 @@ static bool wifi_save_with(const char *ssid,const char *password,const char *nam
     if(!remove && i==8)return false;
     if(!remove && name && name[0] && !wifi_meta_name_valid(name))return false;
     if(!remove && priority>WIFI_META_PRIORITY_MAX)return false;
-    typeof(wifi_saved) candidate=wifi_saved;
-    wifi_meta_set meta=wifi_meta;
-    if(remove){memmove(&candidate.profiles[i],&candidate.profiles[i+1],(candidate.count-i-1)*sizeof(wifi_profile));memset(&candidate.profiles[candidate.count-1],0,sizeof(wifi_profile));wifi_meta_remove(&meta,candidate.count,i);candidate.count--;}
+    wifi_save_work *w=malloc(sizeof(*w));
+    if(!w)return false;
+    w->list=wifi_saved;w->meta=wifi_meta;
+    if(remove){memmove(&w->list.profiles[i],&w->list.profiles[i+1],(w->list.count-i-1)*sizeof(wifi_profile));memset(&w->list.profiles[w->list.count-1],0,sizeof(wifi_profile));wifi_meta_remove(&w->meta,w->list.count,i);w->list.count--;}
     else {
-        bool same=i<candidate.count && !strcmp(candidate.profiles[i].ssid,ssid);
-        strlcpy(candidate.profiles[i].ssid,ssid,33);strlcpy(candidate.profiles[i].password,password,64);
-        if(i==candidate.count)candidate.count++;
-        if(!same)wifi_meta_slot_default(&meta.slot[i],ssid);   /* a different network in this slot: its own name and the default priority */
-        if(name && name[0])strlcpy(meta.slot[i].name,name,sizeof(meta.slot[i].name));
-        if(priority>=0)meta.slot[i].priority=(uint8_t)priority;
+        bool same=i<w->list.count && !strcmp(w->list.profiles[i].ssid,ssid);
+        strlcpy(w->list.profiles[i].ssid,ssid,33);strlcpy(w->list.profiles[i].password,password,64);
+        if(i==w->list.count)w->list.count++;
+        if(!same)wifi_meta_slot_default(&w->meta.slot[i],ssid);   /* a different network in this slot: its own name and the default priority */
+        if(name && name[0])strlcpy(w->meta.slot[i].name,name,sizeof(w->meta.slot[i].name));
+        if(priority>=0)w->meta.slot[i].priority=(uint8_t)priority;
     }
     const char *ssids[WIFI_PROFILE_LIMIT];
-    for(unsigned k=0;k<WIFI_PROFILE_LIMIT;k++)ssids[k]=k<candidate.count?candidate.profiles[k].ssid:"";
-    wifi_meta_blob *blob=malloc(sizeof(*blob)),*previous=malloc(sizeof(*previous));
-    bool ok=blob && previous;size_t old_bytes=sizeof(*previous);
-    bool had_meta=ok && nvs_get_blob(store,"wifi_meta",previous,&old_bytes)==ESP_OK && old_bytes==sizeof(*previous);
-    if(ok){wifi_meta_encode(blob,ssids,candidate.count,&meta);ok=nvs_set_blob(store,"wifi_meta",blob,sizeof(*blob))==ESP_OK;}
-    if(ok && nvs_set_blob(store,"wifi_profiles",&candidate,sizeof(candidate))!=ESP_OK){
+    for(unsigned k=0;k<WIFI_PROFILE_LIMIT;k++)ssids[k]=k<w->list.count?w->list.profiles[k].ssid:"";
+    size_t old_bytes=sizeof(w->previous);
+    bool had_meta=nvs_get_blob(store,"wifi_meta",&w->previous,&old_bytes)==ESP_OK && old_bytes==sizeof(w->previous);
+    wifi_meta_encode(&w->next,ssids,w->list.count,&w->meta);
+    bool ok=nvs_set_blob(store,"wifi_meta",&w->next,sizeof(w->next))==ESP_OK;
+    if(ok && nvs_set_blob(store,"wifi_profiles",&w->list,sizeof(w->list))!=ESP_OK){
         /* Put the previous metadata back (best effort: it is keyed by SSID, so what it holds is correct for the list that stayed). */
-        if(had_meta)nvs_set_blob(store,"wifi_meta",previous,sizeof(*previous));
+        if(had_meta)nvs_set_blob(store,"wifi_meta",&w->previous,sizeof(w->previous));
         ok=false;
     }
-    free(blob);free(previous);
-    if(!ok || nvs_commit(store)!=ESP_OK)return false;
-    wifi_saved=candidate;wifi_meta=meta;wifi_revision++;wifi_current=-1;wifi_pin_clear(&wifi_pinned);memset(wifi_retry_after,0,sizeof(wifi_retry_after));
+    if(!ok || nvs_commit(store)!=ESP_OK){free(w);return false;}
+    wifi_saved=w->list;wifi_meta=w->meta;wifi_revision++;wifi_current=-1;wifi_pin_clear(&wifi_pinned);memset(wifi_retry_after,0,sizeof(wifi_retry_after));
     wifi_rescan=true;
+    free(w);
     return true;
 }
 static bool wifi_save_at(const char *ssid,const char *password,bool remove,int slot){return wifi_save_with(ssid,password,NULL,-1,remove,slot);}
@@ -186,7 +201,11 @@ static void wifi_maintain(void){
         wifi_ap_record_t ap;bool connected=esp_wifi_sta_get_ap_info(&ap)==ESP_OK;
         int current=-1;int16_t signal[8];for(unsigned i=0;i<8;i++)signal[i]=-127;
         if(connected)for(unsigned i=0;i<count;i++)if(!strncmp(profiles[i].ssid,(char*)ap.ssid,32)){current=i;signal[i]=ap.rssi;}
-        if(connected && current>=0 && ap.rssi>-75 && !forced && (wifi_pinned.slot<0 || current==wifi_pinned.slot)){memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);return;}
+        if(connected && current>=0 && ap.rssi>-75 && !forced && (wifi_pinned.slot<0 || current==wifi_pinned.slot)){
+            /* Staying put. A save forgets which network is in use (wifi_current = -1) and this is the only place that ever finds out again while the link
+             * stays up, so the screen's active network and `list`'s star would read "none" until the next reconnect. */
+            xSemaphoreTake(members_lock,portMAX_DELAY);if(revision==wifi_revision)wifi_current=current;xSemaphoreGive(members_lock);
+            memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);return;}
         if(!count){esp_wifi_disconnect();memset(&wifi_config,0,sizeof(wifi_config));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);return;}
         if(!connected)esp_wifi_disconnect();
         wifi_scan_config_t scan={.show_hidden=true,.scan_type=WIFI_SCAN_TYPE_ACTIVE,.scan_time.active={.min=40,.max=100}};
@@ -198,7 +217,8 @@ static void wifi_maintain(void){
         xSemaphoreTake(members_lock,portMAX_DELAY);   /* the pin belongs to members_lock; a `use` that raced the scan bumped the revision */
         if(revision!=wifi_revision){xSemaphoreGive(members_lock);memset(profiles,0,sizeof(profiles));wifi_scan_pauses_reconnect=false;xSemaphoreGive(wifi_scan_lock);wifi_rescan=true;return;}
         int selected=wifi_pin_pick_ranked(&wifi_pinned,signal,count,current,connected,&rank);
-        /* Hidden/unseen networks get bounded round-robin attempts when offline, the preferred and highest-priority ones first. */
+        if(selected<0 && connected && current>=0)wifi_current=current;   /* staying on the network in use */
+        /* Hidden/unseen networks get bounded attempts when offline, one per pass, walking the list in rank order (preferred, then priority, then slot). */
         if(selected<0 && !connected && count){uint8_t order[8];wifi_rank_order(&rank,count,order);for(unsigned n=0;n<count;n++){unsigned i=order[(hidden_cursor++)%count];if((int32_t)(wifi_retry_after[i]-now)<=0){selected=i;break;}}}
         if(selected>=0){
             wifi_config_t candidate;wifi_fill_station(&candidate,&profiles[selected]);

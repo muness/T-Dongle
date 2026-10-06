@@ -85,12 +85,14 @@ bool gateway_serial_command(const char *line) {
   memset(&profile,0,sizeof(profile));
  }else if(!strncmp(line,"use ",4)){
   char *end;long slot=strtol(line+4,&end,10);
-  int result=*end?-1:wifi_use_profile(slot);
+  /* Not during a setup boot: the one radio belongs to the access point, and joining a network would move it off its channel under the phone. */
+  int result=*end?-1:setup_active?-3:wifi_use_profile(slot);
   if(result==0){
    /* v0.1.1: `use N` also makes N the preferred network, kept across restarts. The switch is already under way; a failed write only costs the preference. */
    bool kept=wifi_set_preferred((int)slot-1);
    snprintf(reply,sizeof(reply),kept?"OK switching to %ld\r\n":"OK switching to %ld (preference not saved)\r\n",slot);mgmt_write(reply);}
   else if(result==-2)mgmt_write("ERR Wi-Fi driver refused the network; previous setting kept\r\n");
+  else if(result==-3)mgmt_write("ERR Not available while setup is open; finish with Done or cancel first\r\n");
   else mgmt_write("ERR Invalid saved network\r\n");
  }else{char *end;long slot=strtol(line+4,&end,10);if(*end || slot<1 || slot>(long)wifi_saved.count || !wifi_save_profile(wifi_saved.profiles[slot-1].ssid,"",true))mgmt_write("ERR Saved network could not be removed\r\n");else mgmt_write("OK deleted\r\n");}
  xSemaphoreGive(members_lock);return true;

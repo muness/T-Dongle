@@ -106,6 +106,35 @@ static void profile_blob_format_is_frozen(void){
  typeof(wifi_saved) edited;memcpy(&edited,kv[i].data,sizeof(edited));strcpy(edited.profiles[1].ssid,"Added");strcpy(edited.profiles[1].password,"pass5678");edited.count=2;
  assert(nvs_set_blob(1,"wifi_profiles",&edited,sizeof(edited))==0);forget_ram();assert(wifi_load_profiles() && wifi_saved.count==2 && !strcmp(wifi_meta.slot[0].name,"Home sweet") && wifi_meta.slot[0].priority==70 && wifi_meta.slot[1].priority==50);
 }
+/* `use N` right after an upgrade from v0.1.1 (the list has not been saved yet): the preference is written alone and must survive a restart. */
+static int join_after_scan(void);static void see(const char *ssid,unsigned slot,int rssi);
+static void use_after_upgrade_survives_a_restart(void){
+ reset_world();
+ settings_t o=v011_settings();v011_set(&o,0,"Home","HomeNet","pass1234",30);v011_set(&o,1,"Work","WorkNet","pass5678",80);v011_set(&o,2,"Cafe","CafeNet","pass9999",10);o.preferred=0;old_settings=o;have_old=true;
+ assert(wifi_load_profiles() && wifi_meta.preferred==0);
+ assert(wifi_set_preferred(2) && find("wifi_profiles")<0 && find("wifi_meta")>=0);     /* only the metadata was written */
+ forget_ram();assert(wifi_load_profiles() && wifi_saved.count==3);
+ assert(wifi_meta.preferred==2);                                                         /* the new preference, not the v0.1.1 one */
+ assert(wifi_meta.slot[0].priority==30 && wifi_meta.slot[1].priority==80 && wifi_meta.slot[2].priority==10 && !strcmp(wifi_meta.slot[1].name,"Work"));   /* and the v0.1.1 priorities for networks it does not name */
+ assert(wifi_set_preferred(-1));forget_ram();assert(wifi_load_profiles() && wifi_meta.preferred==-1);   /* "no preference" is a choice too */
+}
+static void replacing_the_preferred_network(void){
+ reset_world();
+ assert(wifi_save_with("Home","pass1234",NULL,50,false,-1) && wifi_save_with("Work","pass5678",NULL,50,false,-1) && wifi_set_preferred(0));
+ assert(wifi_save_with("NewHome","pass0000",NULL,-1,false,0) && wifi_meta.preferred==0 && !strcmp(wifi_saved.profiles[0].ssid,"NewHome"));   /* v0.1.1: the preferred SLOT stays preferred */
+ forget_ram();assert(wifi_load_profiles() && wifi_meta.preferred==0 && !strcmp(wifi_saved.profiles[0].ssid,"NewHome"));
+ assert(wifi_save_profile("NewHome","",true) && wifi_meta.preferred==-1);                   /* removing it clears the preference */
+}
+static void the_network_in_use_is_remembered_across_a_save(void){
+ reset_world();
+ assert(wifi_save_with("Home","pass1234",NULL,-1,false,-1) && wifi_save_with("Work","pass5678",NULL,-1,false,-1));
+ see("Home",0,-50);see("Work",1,-60);
+ assert(join_after_scan()==0);
+ connected=online=true;current_rssi=-50;
+ assert(wifi_save_with("Cafe","pass9999",NULL,-1,false,-1) && wifi_current==-1);          /* a save forgets which network is in use ... */
+ wifi_maintain();assert(wifi_current==0);                                                   /* ... and the next pass, which stays put, finds out again */
+ wifi_current=-1;wifi_rescan=false;test_time+=61000000;current_rssi=-55;wifi_maintain();assert(wifi_current==0);   /* also when it does not even scan (a healthy link) */
+}
 static void saving_with_metadata(void){
  reset_world();
  assert(wifi_save_with("Home","pass1234","Home sweet",70,false,-1) && wifi_saved.count==1 && !strcmp(wifi_meta.slot[0].name,"Home sweet") && wifi_meta.slot[0].priority==70);
@@ -209,7 +238,7 @@ static void early_setup_probe_matches_the_loader(void){
 }
 int main(void){
  original_cases();
- upgrade_is_lossless();in_between_build_keeps_priorities();profile_blob_format_is_frozen();saving_with_metadata();saves_are_all_or_nothing();
+ upgrade_is_lossless();in_between_build_keeps_priorities();use_after_upgrade_survives_a_restart();replacing_the_preferred_network();the_network_in_use_is_remembered_across_a_save();profile_blob_format_is_frozen();saving_with_metadata();saves_are_all_or_nothing();
  preferred_and_priority_choose_the_network();station_configuration();factory_reset();early_setup_probe_matches_the_loader();
  puts("Wi-Fi profiles: v0.1.1 import is lossless, metadata is keyed by SSID and written atomically, priority/preferred choose the network, factory reset forgets everything v0.1.1 stored");
  return 0;

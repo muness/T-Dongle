@@ -43,26 +43,40 @@ void wifi_meta_encode(wifi_meta_blob *blob, const char *const ssids[], unsigned 
     if (set->preferred >= 0 && (unsigned)set->preferred < count) strncpy(blob->preferred_ssid, ssids[set->preferred], WIFI_META_SSID_MAX);
 }
 static bool terminated(const char *s, size_t cap) { return memchr(s, 0, cap) != NULL; }
-bool wifi_meta_decode(const void *data, size_t length, const char *const ssids[], unsigned count, wifi_meta_set *set) {
-    wifi_meta_blob blob;
-    if (!data || length != sizeof(blob) || count > WIFI_META_SLOTS) return false;
-    memcpy(&blob, data, sizeof(blob));
-    if (blob.schema != WIFI_META_SCHEMA || blob.count > WIFI_META_SLOTS || !terminated(blob.preferred_ssid, sizeof(blob.preferred_ssid))) return false;
-    for (unsigned i = 0; i < blob.count; i++)
-        if (!terminated(blob.entry[i].ssid, sizeof(blob.entry[i].ssid)) || !terminated(blob.entry[i].name, sizeof(blob.entry[i].name)) ||
-            blob.entry[i].priority > WIFI_META_PRIORITY_MAX)
+static bool blob_valid(const void *data, size_t length, unsigned count, wifi_meta_blob *blob) {
+    if (!data || length != sizeof(*blob) || count > WIFI_META_SLOTS) return false;
+    memcpy(blob, data, sizeof(*blob));
+    if (blob->schema != WIFI_META_SCHEMA || blob->count > WIFI_META_SLOTS || !terminated(blob->preferred_ssid, sizeof(blob->preferred_ssid))) return false;
+    for (unsigned i = 0; i < blob->count; i++)
+        if (!terminated(blob->entry[i].ssid, sizeof(blob->entry[i].ssid)) || !terminated(blob->entry[i].name, sizeof(blob->entry[i].name)) ||
+            blob->entry[i].priority > WIFI_META_PRIORITY_MAX)
             return false;
-    wifi_meta_set result;
-    wifi_meta_defaults(&result, ssids, count);
-    for (unsigned i = 0; i < count; i++) {
-        for (unsigned j = 0; j < blob.count; j++) {
-            if (strcmp(blob.entry[j].ssid, ssids[i])) continue;
-            if (wifi_meta_name_valid(blob.entry[j].name)) strncpy(result.slot[i].name, blob.entry[j].name, WIFI_META_NAME_MAX);
-            result.slot[i].priority = blob.entry[j].priority;
+    return true;
+}
+/* Apply the entries the blob has onto `result`; slots without an entry are left as they are. */
+static void apply_blob(const wifi_meta_blob *blob, const char *const ssids[], unsigned count, wifi_meta_set *result) {
+    for (unsigned i = 0; i < count; i++)
+        for (unsigned j = 0; j < blob->count; j++) {
+            if (strcmp(blob->entry[j].ssid, ssids[i])) continue;
+            if (wifi_meta_name_valid(blob->entry[j].name)) {
+                memset(result->slot[i].name, 0, sizeof(result->slot[i].name));
+                strncpy(result->slot[i].name, blob->entry[j].name, WIFI_META_NAME_MAX);
+            }
+            result->slot[i].priority = blob->entry[j].priority;
             break;
         }
-        if (blob.preferred_ssid[0] && !strcmp(blob.preferred_ssid, ssids[i])) result.preferred = (int)i;
-    }
+}
+static void apply_preferred(const wifi_meta_blob *blob, const char *const ssids[], unsigned count, wifi_meta_set *result) {
+    result->preferred = -1;
+    for (unsigned i = 0; blob->preferred_ssid[0] && i < count; i++)
+        if (!strcmp(blob->preferred_ssid, ssids[i])) result->preferred = (int)i;
+}
+bool wifi_meta_overlay(const void *data, size_t length, const char *const ssids[], unsigned count, wifi_meta_set *set) {
+    wifi_meta_blob blob;
+    if (!blob_valid(data, length, count, &blob)) return false;
+    wifi_meta_set result = *set;
+    apply_blob(&blob, ssids, count, &result);
+    apply_preferred(&blob, ssids, count, &result);
     *set = result;
     return true;
 }
