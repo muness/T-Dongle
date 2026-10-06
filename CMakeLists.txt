@@ -1,24 +1,24 @@
 cmake_minimum_required(VERSION 3.16)
-option(TDONGLE_LEGACY_BRIDGE "Build the archived transparent bridge implementation" OFF)
-if(NOT TDONGLE_LEGACY_BRIDGE)
- set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/alternative/tailnet/components/microlink" "${CMAKE_CURRENT_LIST_DIR}/alternative/tailnet/components/microlink/components/wireguard_lwip")
- if(NOT DEFINED SDKCONFIG_DEFAULTS)
-  set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/alternative/tailnet/sdkconfig.defaults")
- endif()
- if(NOT DEFINED SDKCONFIG)
-  set(SDKCONFIG "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.unified")
- endif()
+# One firmware: the transparent Wi-Fi bridge and the tailnet gateway, selected at runtime
+# (components/tdongle_runtime mode_store). Gateway sources live under alternative/tailnet.
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/alternative/tailnet/components/microlink" "${CMAKE_CURRENT_LIST_DIR}/alternative/tailnet/components/microlink/components/wireguard_lwip")
+# sdkconfig.defaults (root) pins the board: 16 MB flash, DIO at 40 MHz.
+if(NOT DEFINED SDKCONFIG_DEFAULTS)
+ set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/alternative/tailnet/sdkconfig.defaults;${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults")
 endif()
+if(NOT DEFINED SDKCONFIG)
+ set(SDKCONFIG "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.unified")
+endif()
+# Single version source: the VERSION file, overridden by TDONGLE_VERSION (the release workflow sets it from the git tag).
+# It becomes the ESP-IDF app version and the firmware's reported version (GATEWAY_VERSION, status `firmware=`).
+if(DEFINED ENV{TDONGLE_VERSION} AND NOT "$ENV{TDONGLE_VERSION}" STREQUAL "")
+ set(PROJECT_VER "$ENV{TDONGLE_VERSION}")
+else()
+ file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/VERSION" PROJECT_VER LIMIT_COUNT 1)
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/VERSION")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(MINIMAL_BUILD ON)
-# ESP-IDF expands component CMakeLists in a separate `cmake -P` process to
-# collect requirements; project variables/options are not visible there, only
-# build properties are. Publish the mode as a property for main/CMakeLists.txt.
-if(TDONGLE_LEGACY_BRIDGE)
- idf_build_set_property(TDONGLE_LEGACY_BRIDGE 1)
-else()
- idf_build_set_property(TDONGLE_LEGACY_BRIDGE 0)
-endif()
 # Network input reaches cJSON_Parse (control responses, the /key reply, the DERP
 # map, setup requests) on tasks whose stacks are sized from measurements. cJSON
 # recurses once per nesting level, so the default limit of 1000 lets a hostile
@@ -26,13 +26,9 @@ endif()
 # (tests/test_json_depth.c checks the figure and the stack cost); the projection
 # path already refuses more than 32. tools/test-gateway.sh reads this number.
 set(TDONGLE_CJSON_NESTING_LIMIT 32)
-if(TDONGLE_LEGACY_BRIDGE)
- project(tdongle_adapter VERSION 0.1.0)
-else()
- project(tdongle_unified VERSION 0.2.18)
- target_include_directories(__idf_lwip PRIVATE "${CMAKE_CURRENT_LIST_DIR}/alternative/tailnet/main")
- target_compile_definitions(__idf_lwip PRIVATE ESP_IDF_LWIP_HOOK_FILENAME="gateway_hooks.h")
-endif()
+project(tdongle)
+target_include_directories(__idf_lwip PRIVATE "${CMAKE_CURRENT_LIST_DIR}/alternative/tailnet/main")
+target_compile_definitions(__idf_lwip PRIVATE ESP_IDF_LWIP_HOOK_FILENAME="gateway_hooks.h")
 if(TARGET __idf_json)
  target_compile_definitions(__idf_json PRIVATE CJSON_NESTING_LIMIT=${TDONGLE_CJSON_NESTING_LIMIT})
 endif()

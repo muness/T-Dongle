@@ -13,7 +13,9 @@ _Static_assert((int)WIFI_REASON_BEACON_TIMEOUT == (int)WIFI_LINK_REASON_BEACON_T
 
 static wifi_link_events wifi_link_stats;   /* written only by wifi_event on the event task */
 
-static void wifi_link_event_connected(void) { wifi_link_note_connect(&wifi_link_stats); }
+static void wifi_link_event_connected(const wifi_event_sta_connected_t *c) {
+    wifi_link_note_association(&wifi_link_stats, c ? c->bssid : NULL, (uint32_t)(esp_timer_get_time() / 1000));
+}
 static void wifi_link_event_disconnected(const wifi_event_sta_disconnected_t *d) {
     wifi_link_note_disconnect(&wifi_link_stats, d ? d->reason : 0, d ? d->rssi : 0, (uint32_t)(esp_timer_get_time() / 1000));
 }

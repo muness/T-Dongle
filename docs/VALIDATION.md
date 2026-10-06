@@ -1,3 +1,5 @@
+> **Scope.** This record was taken on the v0.1.x bridge-only firmware (now archived under `legacy/`). The combined firmware has not been re-validated on hardware by this record; see the release notes for the current state.
+
 # Validation record — 2026-09-25
 
 **Implemented**, **compiled**, **host-unit-tested**. **Not tested on T-Dongle hardware, macOS USB networking or TeslaAndroid.** No target was flashed; no Pi network configuration changed. This is a development release for physical validation, not an accepted replacement for the working PIX-LINK yet.

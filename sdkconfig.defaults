@@ -1,36 +1,17 @@
-CONFIG_IDF_TARGET="esp32s3"
-CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+# Board settings layered after alternative/tailnet/sdkconfig.defaults. 16 MB flash is set there.
+# Flash timing: the tested T-Dongle-S3 (Winbond W25Q128) boot-loops at QIO 80 MHz, and ESP-IDF's
+# default for this target is 80 MHz, so pin DIO at 40 MHz explicitly. tools/check_build.py
+# verifies the bootloader and app image headers carry exactly this.
 CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
-CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
-CONFIG_TINYUSB_NET_MODE_NCM=y
-CONFIG_TINYUSB_CDC_ENABLED=y
-CONFIG_TINYUSB_CDC_COUNT=1
-CONFIG_TINYUSB_DESC_MANUFACTURER_STRING="T-Dongle Adapter Project"
-CONFIG_TINYUSB_DESC_PRODUCT_STRING="T-Dongle-S3 NCM"
-CONFIG_ESP_CONSOLE_NONE=y
-CONFIG_ESP_TASK_WDT_PANIC=y
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
-CONFIG_FREERTOS_HZ=1000
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=24
-CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=24
-CONFIG_LV_FONT_MONTSERRAT_10=y
-CONFIG_LV_FONT_DEFAULT_MONTSERRAT_10=y
-CONFIG_LV_MEM_SIZE_KILOBYTES=32
-CONFIG_LV_USE_LOG=n
-CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# Reproducible builds: no compile timestamps in the app image.
 CONFIG_APP_REPRODUCIBLE_BUILD=y
-CONFIG_SPIRAM=n
-CONFIG_ADAPTER_OPEN_SETUP_AP=y
-CONFIG_LV_FONT_MONTSERRAT_16=y
-CONFIG_TINYUSB_NCM_IN_NTB_BUFFS_COUNT=4
-CONFIG_TINYUSB_NCM_IN_NTB_BUFF_MAX_SIZE=6400
-# Roaming: network-assisted only. 802.11k/v lets the controller steer the dongle (the supplicant
-# honours BSS transition requests itself). ESP-IDF's roaming app is gated behind
-# IDF_EXPERIMENTAL_FEATURES, and an RSSI-only roam ping-ponged between two similar-strength APs, so no
-# self-initiated roaming.
+
+# Roaming assist (v0.1.1): 802.11k neighbour reports and 802.11v BSS transition management, so the network can steer the dongle to a
+# better access point (the supplicant honours a BSS transition request by itself). Network-assisted only: ESP-IDF's own roaming app is
+# gated behind IDF_EXPERIMENTAL_FEATURES, and an RSSI-only rule, tried and measured on v0.1.x, ping-ponged between two access points of
+# similar strength. The support is built into both modes; the station asks for it per mode (wifi_roaming_assist() in gateway_main.c:
+# the bridge always, the tailnet gateway only with CONFIG_TDONGLE_WIFI_ROAMING_TAILNET).
 CONFIG_ESP_WIFI_11KV_SUPPORT=y
 CONFIG_ESP_WIFI_RRM_SUPPORT=y
 CONFIG_ESP_WIFI_WNM_SUPPORT=y

@@ -1,6 +1,6 @@
 # Experimental USB multi-tailnet gateway
 
-This separate ESP32-S3 firmware implements USB NCM Ethernet, Wi-Fi upstream, tailnet enrollment, saved independent identities, and concurrent membership contexts. It replaces adapter mode while installed. The original bridge source and `adapter` NVS namespace stay untouched. This build has not yet been qualified on physical hardware; do not treat compilation or host tests as proof of simultaneous traffic on the dongle.
+This is the tailnet gateway half of the single T-Dongle firmware: USB NCM Ethernet, Wi-Fi upstream, tailnet enrollment, saved independent identities, and concurrent membership contexts. It runs when the dongle is in `tailnet_gateway` mode; in `wifi_bridge` mode (the default) the same image runs the transparent bridge instead. Switch with `mode tailnet_gateway` on the serial console or from the companion app. Saved Wi-Fi and identities are kept across switches. This build has not yet been qualified on physical hardware; do not treat compilation or host tests as proof of simultaneous traffic on the dongle.
 
 ## Try it
 
@@ -20,7 +20,7 @@ The setup service accepts USB-subnet clients only, verifies Host/Origin, and req
 
 ## Build and validate
 
-Source the pinned ESP-IDF v5.5.5 environment and run `tools/build-gateway.sh` from this project. It builds the actual gateway, runs router and fragmented HTTP/2 map tests under ASan/UBSan, and packages `dist/` for the companion. The existing `AUDIT.md` and `audit-result.json` describe the historical unmodified runtime baseline, not current active-session memory. No physical flashing is performed by the build script.
+Source the pinned ESP-IDF v5.5.5 environment, run `tools/test-gateway.sh` from this directory for the gateway and runtime host tests (router and fragmented HTTP/2 map tests under ASan/UBSan), and `tools/build.sh` from the repository root to build and package the single firmware. The existing `AUDIT.md` and `audit-result.json` describe the historical unmodified runtime baseline, not current active-session memory. No physical flashing is performed by the build script.
 
 ## Memory and map diagnostics (0.2.1)
 

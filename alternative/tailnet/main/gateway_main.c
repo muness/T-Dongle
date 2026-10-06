@@ -35,6 +35,19 @@
 #include "usb_rx_budget.h"
 #include "wifi_pin_budget.h"
 #include "tcp_window_budget.h"
+#include "legacy_import.h"
+#include "wifi_meta.h"
+#include "ui_settings.h"
+#include "setup_boot.h"
+#include "setup_access.h"
+#include "captive_dns.h"
+#include "scan_list.h"
+#include "menu.h"
+#include "led.h"
+#include "traffic.h"
+#include "health.h"
+#include "driver/gpio.h"
+#include "board.h"
 /* Tunnel-to-USB transmit ring (ADR 0015). Three full frames are permanent (3 x 1524 B, allocated once at USB start,
  * paid for by the two IN NTBs being 3,200 B rather than 6,400 B). On top of that the worker task adds elastic chunks
  * of TINYUSB_NET_TX_CHUNK_SLABS frames, up to GATEWAY_USB_TX_MAX_CHUNKS, while a burst needs them, and gives them back
@@ -131,7 +144,9 @@ static void usb_event(tinyusb_event_t *event, void *arg) {
 static bool online;
 /* SNTP supervision: written by the manager task, read (word sized fields) by /status and the console. */
 static gw_clock_t sntp_clock;
-static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
+/* Bridge until a stored mode (or pre-existing tailnet memberships) says otherwise; see mode_store.c. Also the value used when
+ * the settings namespace does not exist yet (fresh install, upgrade from the original bridge firmware). */
+static tdongle_mode runtime_mode=TDONGLE_WIFI_BRIDGE;
 bool gateway_tailnet_mode(void){return runtime_mode==TDONGLE_TAILNET_GATEWAY;}
 static volatile bool wifi_scan_pauses_reconnect;
 static SemaphoreHandle_t wifi_scan_lock;
@@ -229,6 +244,38 @@ void gateway_diag_membership(uint32_t member_id, uint32_t event, uint32_t detail
 static wifi_config_t wifi_config;
 #include "core.h"
 #include "wifi_policy.h"
+#define START_TRY(call) do {esp_err_t result_=(call);if(result_!=ESP_OK)return result_;}while(0)
+/* No Wi-Fi modem sleep. The IDF default (WIFI_PS_MIN_MODEM) wakes for every DTIM beacon and parks frames at the
+ * access point between them: measured on the board 2026-10-05 it added about 80 ms to the median round trip (ping
+ * p50 126 ms against 48 ms with power save off) and changed throughput not at all. The original bridge does the
+ * same (main/bridge.c). It costs radio idle current, not CPU frequency: DFS and modem sleep are independent here
+ * (light sleep is off). Failure is not fatal: the link works, only slower to answer. */
+static void wifi_power_save_off(void) {
+    esp_err_t e=esp_wifi_set_ps(WIFI_PS_NONE);
+    if(e!=ESP_OK)ESP_LOGW("wifi","esp_wifi_set_ps(NONE) failed: %s; modem sleep stays on",esp_err_to_name(e));
+}
+/* The v0.1.1 radio profile of the transparent bridge: 20 MHz channels (more sensitive than 40 MHz in a crowded 2.4 GHz band, and the USB 1.1
+ * link cannot use the extra rate anyway) and the highest transmit power the driver allows (it clamps to the regulatory limit). The tailnet
+ * gateway keeps the driver defaults it was measured with. Not fatal: the link works either way. */
+static void wifi_radio_profile(void) {
+    if(gateway_tailnet_mode())return;
+    esp_err_t bandwidth=esp_wifi_set_bandwidth(WIFI_IF_STA,WIFI_BW_HT20);
+    esp_err_t power=esp_wifi_set_max_tx_power(84);
+    if(bandwidth!=ESP_OK || power!=ESP_OK)ESP_LOGW("wifi","bridge radio profile not fully applied (bandwidth %s, power %s)",esp_err_to_name(bandwidth),esp_err_to_name(power));
+}
+/* Whether the station asks the network to steer it (802.11k neighbour reports, 802.11v BSS transition requests). The transparent bridge
+ * has always done so (v0.1.1); the tailnet gateway does not, until it is measured on the board (its heap margin is thin and a roam is a
+ * tunnel flap): CONFIG_TDONGLE_WIFI_ROAMING_TAILNET turns it on there. The support itself is built into both modes (sdkconfig.defaults). */
+#ifdef CONFIG_TDONGLE_WIFI_ROAMING_TAILNET
+#define TAILNET_ROAMING_ASSIST true
+#else
+#define TAILNET_ROAMING_ASSIST false
+#endif
+static bool wifi_roaming_assist(void) {
+    return !gateway_tailnet_mode() || TAILNET_ROAMING_ASSIST;
+}
+/* The v0.1.1 station profile (WPA3 SAE, PMF, WPA2 threshold) is the bridge's; the tailnet gateway keeps the configuration #44 shipped and measured. */
+static bool wifi_v011_station_profile(void) { return !gateway_tailnet_mode(); }
 #include "wifi_profiles.inc"
 #include "wifi_link.inc"
 #include "wifi_pins.inc"
@@ -237,6 +284,8 @@ static wifi_config_t wifi_config;
 #endif
 #include "bridge_status.inc"
 void gateway_bridge_status(void){if(!gateway_tailnet_mode())bridge_status_lines();}
+#include "setup_ap.inc"
+#include "device_ui.inc"
 #include "serial_setup.inc"
 
 extern const char setup_html_start[] asm("_binary_setup_html_start");
@@ -388,7 +437,8 @@ static void admission_failed(membership_t *m) {
 #endif
 static bool start_member_holding_token(membership_t *m);
 static void start_member(membership_t *m) {
-    if (!gateway_tailnet_mode() || !m->enabled || m->client || !online)
+    /* Never in a setup boot: the access point owns the radio and the heap, and no tailnet's admission accounts for it (ADR 0024). */
+    if (setup_active || !gateway_tailnet_mode() || !m->enabled || m->client || !online)
         return;
     if (!route_storage_ok) {
         strlcpy(m->error,
@@ -496,6 +546,11 @@ bool gateway_display_state(lcd_state *s) {
     s->wifi=online;s->recovery=gateway_boot_needs_attention();
     if(xSemaphoreTake(members_lock,pdMS_TO_TICKS(10))!=pdTRUE)return false;
     s->saved_wifi=wifi_saved.count!=0;
+    if(wifi_current>=0 && wifi_current<(int)wifi_saved.count){
+        s->active_slot=(unsigned)wifi_current+1;
+        strlcpy(s->active_name,wifi_meta.slot[wifi_current].name,sizeof(s->active_name));
+        if(online)strlcpy(s->ssid,wifi_saved.profiles[wifi_current].ssid,sizeof(s->ssid));
+    }
     gateway_dns_domains_refresh();
     for(membership_t *m=members;m;m=m->next){
         s->saved++;if(!m->enabled)continue;s->enabled++;
@@ -603,7 +658,7 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
             wifi_retry_after[wifi_current]=(uint32_t)(esp_timer_get_time()/1000)+60000;
         /* Worker rescans with backoff; never reconnect recursively here. */
     }
-    if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED)wifi_link_event_connected();
+    if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED)wifi_link_event_connected((const wifi_event_sta_connected_t *)data);
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED)wifi_pins_link_changed();   /* both modes: the driver cleared its TX queues */
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && !gateway_tailnet_mode()){online=true;tdongle_l2_link(true);}
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
@@ -631,6 +686,7 @@ static esp_err_t failure(httpd_req_t *req, const char *message) {
     return json_reply(req, j);
 }
 static bool local_request(httpd_req_t *req);
+static bool endpoint_allowed(httpd_req_t *req, access_endpoint endpoint, access_origin *origin);
 static void wifi_scan_resume(bool was_connected) {
     wifi_scan_pauses_reconnect = false;
     wifi_ap_record_t current = {0};
@@ -638,11 +694,38 @@ static void wifi_scan_resume(bool was_connected) {
         (!was_connected || esp_wifi_sta_get_ap_info(&current) != ESP_OK))
         wifi_rescan=true;
 }
+/* The setup access point's nearby-networks request. The scan runs in its own task and the page polls until `busy` clears; whatever the
+ * last complete scan found is returned meanwhile (setup_ap.inc). */
+static esp_err_t wifi_scan_async(httpd_req_t *req) {
+    char query[32] = {0};
+    bool again = httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK && strstr(query, "again");
+    setup_scan_kick(again);
+    scan_list *list = malloc(sizeof(*list));
+    if (!list) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory returning Wi-Fi scan");
+    bool busy = setup_scan_result(list);
+    cJSON *response = cJSON_CreateObject(), *networks = cJSON_CreateArray();
+    bool ok = response && networks && cJSON_AddBoolToObject(response, "ok", true) && cJSON_AddBoolToObject(response, "busy", busy) &&
+              cJSON_AddItemToObject(response, "networks", networks);
+    if (ok) networks = NULL;   /* owned by response now */
+    for (unsigned i = 0; ok && i < list->count; i++) {
+        cJSON *network = cJSON_CreateObject();
+        ok = network && cJSON_AddStringToObject(network, "ssid", list->entry[i].ssid) && cJSON_AddNumberToObject(network, "rssi", list->entry[i].rssi) &&
+             cJSON_AddBoolToObject(network, "secure", list->entry[i].secure) && cJSON_AddItemToArray(cJSON_GetObjectItem(response, "networks"), network);
+        if (!ok) cJSON_Delete(network);
+    }
+    free(list);
+    if (!ok) {
+        cJSON_Delete(response);
+        cJSON_Delete(networks);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory returning Wi-Fi scan");
+    }
+    return json_reply(req, response);
+}
 static esp_err_t wifi_scan(httpd_req_t *req) {
-    if (!local_request(req))
-        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
-                                   "USB access required");
+    access_origin origin;
+    if (!endpoint_allowed(req, EP_WIFI_SCAN, &origin)) return ESP_OK;
     if (!wifi_ready) return failure(req, "Wi-Fi startup failed; saved diagnostics contain the reason");
+    if (origin == ACCESS_SETUP_AP) return wifi_scan_async(req);
     if (xSemaphoreTake(wifi_scan_lock, 0) != pdTRUE)
         return failure(req, "A Wi-Fi scan is already running");
 
@@ -736,38 +819,90 @@ static esp_err_t wifi_scan(httpd_req_t *req) {
     }
     return json_reply(req, response);
 }
-static bool usb_peer_address(const struct sockaddr *address, socklen_t length) {
-    uint32_t ipv4;
+/* The client's IPv4 address in host byte order. HTTPD uses a dual-stack socket: an IPv4 client may be an IPv4-mapped IPv6 address. */
+static bool peer_ipv4(const struct sockaddr *address, socklen_t length, uint32_t *ipv4) {
+    uint32_t value;
     if (address->sa_family == AF_INET && length >= sizeof(struct sockaddr_in)) {
-        ipv4 = ((const struct sockaddr_in *)address)->sin_addr.s_addr;
+        value = ((const struct sockaddr_in *)address)->sin_addr.s_addr;
     } else if (address->sa_family == AF_INET6 && length >= sizeof(struct sockaddr_in6)) {
         const uint8_t *bytes = (const uint8_t *)&((const struct sockaddr_in6 *)address)->sin6_addr;
         static const uint8_t mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
         if (memcmp(bytes, mapped_prefix, sizeof(mapped_prefix))) return false;
-        memcpy(&ipv4, bytes + 12, sizeof(ipv4));
+        memcpy(&value, bytes + 12, sizeof(value));
     } else return false;
-    return (ntohl(ipv4) & 0xffffff00) == 0xc0a84d00;
+    *ipv4 = ntohl(value);
+    return true;
 }
-static bool local_request(httpd_req_t *req) {
-    /* HTTPD uses a dual-stack socket: IPv4 clients may be IPv4-mapped IPv6. */
+static bool request_peer(httpd_req_t *req, uint32_t *ipv4) {
     struct sockaddr_storage peer = {0};
     socklen_t n = sizeof(peer);
-    if (getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&peer, &n) != 0 ||
-        !usb_peer_address((const struct sockaddr *)&peer, n)) return false;
+    return getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&peer, &n) == 0 && peer_ipv4((const struct sockaddr *)&peer, n, ipv4);
+}
+/* Who is asking (setup_access.h): the USB host, a phone on the setup access point (only during a setup boot), or nobody we serve. */
+static bool request_local(httpd_req_t *req, uint32_t *ipv4) {
+    struct sockaddr_storage local = {0};
+    socklen_t n = sizeof(local);
+    return getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&local, &n) == 0 && peer_ipv4((const struct sockaddr *)&local, n, ipv4);
+}
+static access_origin request_origin(httpd_req_t *req) {
+    uint32_t ipv4 = 0, local = 0;
+    bool known = request_peer(req, &ipv4);
+    bool local_known = request_local(req, &local);
     char host[64], origin[96];
-    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK)
+    bool have_host = httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) == ESP_OK;
+    bool have_origin = httpd_req_get_hdr_value_len(req, "Origin") != 0;
+    if (have_origin && httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) return ACCESS_DENIED;
+    return access_classify(known, ipv4, local_known, local, setup_active, have_host ? host : NULL, have_origin ? origin : NULL);
+}
+/* USB clients only: the status, diagnostics and recovery endpoints, which never answer the setup access point. */
+static bool local_request(httpd_req_t *req) { return request_origin(req) == ACCESS_USB; }
+/* A setup-access-point request carries the per-boot token the page was served with (the page is open to anyone who joins, so the token
+ * is what keeps another web page in the phone's browser from driving it). */
+static bool setup_token_ok(httpd_req_t *req) {
+    char supplied[ACCESS_TOKEN_LENGTH + 8];
+    return httpd_req_get_hdr_value_str(req, "X-Setup-Token", supplied, sizeof(supplied)) == ESP_OK && access_token_equal(supplied, setup_token);
+}
+/* May this request use this endpoint? Sends the refusal itself. */
+static bool endpoint_allowed(httpd_req_t *req, access_endpoint endpoint, access_origin *origin) {
+    *origin = request_origin(req);
+    if (!access_endpoint_allowed(*origin, endpoint)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "USB access required");
         return false;
-    if (strcmp(host, "192.168.77.1") && strcmp(host, "192.168.77.1:80"))
+    }
+    if (*origin == ACCESS_SETUP_AP && endpoint != EP_HOME && !setup_token_ok(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Invalid setup token");
         return false;
-    if (httpd_req_get_hdr_value_len(req, "Origin")) {
-        if (httpd_req_get_hdr_value_str(req, "Origin", origin,
-                                        sizeof(origin)) != ESP_OK)
-            return false;
-        if (strcmp(origin, "http://192.168.77.1") &&
-            strcmp(origin, "http://192.168.77.1:80"))
-            return false;
     }
     return true;
+}
+extern const char setup_ap_html_start[] asm("_binary_setup_ap_html_start");
+/* The setup access point's page: setup_ap.html with this boot's token in place of @@TOKEN@@ (sent in three pieces, no copy). */
+static esp_err_t setup_ap_page(httpd_req_t *req) {
+    const char *marker = strstr(setup_ap_html_start, "@@TOKEN@@");
+    if (!marker) return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Setup page unavailable");
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_set_hdr(req, "X-Content-Type-Options", "nosniff");
+    httpd_resp_set_hdr(req, "X-Frame-Options", "DENY");
+    httpd_resp_set_hdr(req, "Content-Security-Policy",
+                       "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'");
+    esp_err_t e = httpd_resp_send_chunk(req, setup_ap_html_start, marker - setup_ap_html_start);
+    if (e == ESP_OK) e = httpd_resp_send_chunk(req, setup_token, HTTPD_RESP_USE_STRLEN);
+    if (e == ESP_OK) e = httpd_resp_send_chunk(req, marker + 9, HTTPD_RESP_USE_STRLEN);
+    if (e == ESP_OK) e = httpd_resp_send_chunk(req, NULL, 0);
+    return e;
+}
+/* Captive-portal probes (a phone asking for captive.apple.com/hotspot-detect.html, connectivitycheck.gstatic.com/generate_204, ...) and any
+ * other name the DNS hijack sent here: to the one canonical address, so the page always loads from the origin its requests are checked
+ * against. Only for clients of the setup access point. */
+static esp_err_t setup_redirect(httpd_req_t *req, httpd_err_code_t error) {
+    uint32_t ipv4;
+    if (!setup_active || !request_peer(req, &ipv4) || !access_in_setup_subnet(ipv4))
+        return httpd_resp_send_err(req, error, error == HTTPD_404_NOT_FOUND ? "Not found" : "Not available");
+    httpd_resp_set_status(req, "302 Found");
+    httpd_resp_set_hdr(req, "Location", "http://192.168.4.1/");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    return httpd_resp_send(req, NULL, 0);
 }
 static esp_err_t diagnostics(httpd_req_t *req) {
     if (!local_request(req))
@@ -820,10 +955,15 @@ static esp_err_t diagnostics(httpd_req_t *req) {
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 static esp_err_t home(httpd_req_t *req) {
-    if (!local_request(req))
+    access_origin origin = request_origin(req);
+    if (origin == ACCESS_SETUP_AP) return setup_ap_page(req);
+    if (origin != ACCESS_USB) {
+        uint32_t ipv4;
+        if (setup_active && request_peer(req, &ipv4) && access_in_setup_subnet(ipv4)) return setup_redirect(req, HTTPD_404_NOT_FOUND);
         return httpd_resp_send_err(
             req, HTTPD_403_FORBIDDEN,
             "Open this page through USB Ethernet at 192.168.77.1");
+    }
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Security-Policy",
                        "default-src 'self'; script-src 'unsafe-inline'; "
@@ -1185,10 +1325,13 @@ static esp_err_t status(httpd_req_t *req) {
         return ESP_FAIL;
     return httpd_resp_send_chunk(req, NULL, 0);
 }
+static bool wifi_ssid_saved(const char *ssid) {
+    for (unsigned i = 0; i < wifi_saved.count; i++) if (!strcmp(wifi_saved.profiles[i].ssid, ssid)) return true;
+    return false;
+}
 static esp_err_t command(httpd_req_t *req) {
-    if (!local_request(req))
-        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN,
-                                   "USB access required");
+    access_origin origin;
+    if (!endpoint_allowed(req, EP_COMMAND, &origin)) return ESP_OK;
     char type[64];
     if (httpd_req_get_hdr_value_str(req, "Content-Type", type, sizeof(type)) !=
             ESP_OK ||
@@ -1210,6 +1353,11 @@ static esp_err_t command(httpd_req_t *req) {
         return failure(req, "Invalid JSON");
     const char *action = cJSON_GetStringValue(cJSON_GetObjectItem(j, "action"));
     const char *error = NULL;
+    if (!access_action_allowed(origin, access_action_parse(action))) {
+        /* From the open setup access point only the Wi-Fi actions exist: no tailnet memberships (their sign-in keys), no routing mode. */
+        cJSON_Delete(j);
+        return failure(req, origin == ACCESS_SETUP_AP ? "That is not available from the setup network" : "Unknown action");
+    }
     if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
         cJSON_Delete(j);
         return failure(req, "Memberships are busy; retry shortly");
@@ -1226,13 +1374,30 @@ static esp_err_t command(httpd_req_t *req) {
         if(!wifi_ready){xSemaphoreGive(members_lock);cJSON_Delete(j);return failure(req,"Wi-Fi did not start; restart services after saving diagnostics");}
         const char *ssid = cJSON_GetStringValue(cJSON_GetObjectItem(j, "ssid")),
                    *password =
-                       cJSON_GetStringValue(cJSON_GetObjectItem(j, "password"));
+                       cJSON_GetStringValue(cJSON_GetObjectItem(j, "password")),
+                   *name = cJSON_GetStringValue(cJSON_GetObjectItem(j, "name"));
+        cJSON *slot_item = cJSON_GetObjectItem(j, "slot"), *priority_item = cJSON_GetObjectItem(j, "priority");
+        if (!access_may_set_metadata(origin)) { name = NULL; priority_item = NULL; }   /* the open setup network cannot set a name or a priority */
+        int slot = -1, priority = -1;   /* optional: the network's slot (1 to 8) and priority (0 to 100) */
+        bool extras_ok = true;
+        if (slot_item) { extras_ok = cJSON_IsNumber(slot_item) && slot_item->valuedouble == (int)slot_item->valuedouble && slot_item->valueint >= 1 && slot_item->valueint <= WIFI_PROFILE_LIMIT; if (extras_ok) slot = slot_item->valueint - 1; }
+        if (extras_ok && priority_item) { extras_ok = cJSON_IsNumber(priority_item) && priority_item->valuedouble == (int)priority_item->valuedouble && priority_item->valueint >= 0 && priority_item->valueint <= WIFI_META_PRIORITY_MAX; if (extras_ok) priority = priority_item->valueint; }
+        if (extras_ok && name && name[0] && !wifi_meta_name_valid(name)) extras_ok = false;
         if (!ssid || !password || !strlen(ssid) || strlen(ssid) > 32 ||
             strlen(password) > 63)
             error = "Enter a valid Wi-Fi name and password";
+        else if (origin == ACCESS_SETUP_AP && password[0] && strlen(password) < 8)
+            error = "Passwords need at least 8 characters. Leave it empty only for an open network.";
+        else if (!access_may_replace(origin) && (wifi_ssid_saved(ssid) || (slot >= 0 && slot < (int)wifi_saved.count)))
+            error = "That network is already saved. Delete it first to change it: replacing a saved network is not available on the setup network.";
+        else if (!extras_ok)
+            error = "Use a name of up to 24 plain characters, a slot from 1 to 8 and a priority from 0 to 100";
         else {
-            if(!wifi_save_profile(ssid,password,false))error="Could not save Wi-Fi; at most eight networks can be saved";
+            if(!wifi_save_with(ssid,password,name,priority,false,slot))error="Could not save Wi-Fi; at most eight networks can be saved, and a network can only be in one slot";
         }
+    } else if(action && !strcmp(action,"setup_done")) {
+        /* The setup page's Done: restart into normal mode. The restart happens in the control task, after this response is sent. */
+        if(!setup_active || !control_submit("cancel"))error="Setup is not running";
     } else if(action && !strcmp(action,"wifi_remove")) {
         const char *ssid=cJSON_GetStringValue(cJSON_GetObjectItem(j,"ssid"));
         if(!ssid || !wifi_save_profile(ssid,"",true))error="Could not remove that saved network";
@@ -1335,6 +1500,37 @@ static esp_err_t command(httpd_req_t *req) {
     cJSON_AddBoolToObject(ok, "ok", true);
     return json_reply(req, ok);
 }
+/* The saved Wi-Fi networks, without passwords: what the setup pages list and offer to delete or replace. `free` is the slot a new network
+ * would take (the next one), or the slot `setup N` preselected; 0 when all eight are used and none was preselected. */
+static esp_err_t wifi_saved_list(httpd_req_t *req) {
+    access_origin origin;
+    if (!endpoint_allowed(req, EP_WIFI_SAVED, &origin)) return ESP_OK;
+    if (xSemaphoreTake(members_lock, pdMS_TO_TICKS(100)) != pdTRUE) return failure(req, "Settings are busy; retry shortly");
+    cJSON *response = cJSON_CreateObject(), *list = cJSON_CreateArray();
+    bool ok = response && list && cJSON_AddBoolToObject(response, "ok", true) && cJSON_AddItemToObject(response, "networks", list);
+    if (ok) list = NULL;
+    for (unsigned i = 0; ok && i < wifi_saved.count; i++) {
+        cJSON *network = cJSON_CreateObject();
+        /* The open setup network gets what its page needs to list and delete (slot and SSID, the name shown is the SSID) and no more: no priority, no
+         * preference, no name. The SSIDs are the trade: without them the page cannot say what it is deleting (ADR 0024). */
+        bool full = origin == ACCESS_USB;
+        ok = network && cJSON_AddNumberToObject(network, "slot", i + 1) && cJSON_AddStringToObject(network, "name", full ? wifi_meta.slot[i].name : wifi_saved.profiles[i].ssid) &&
+             cJSON_AddStringToObject(network, "ssid", wifi_saved.profiles[i].ssid) &&
+             (!full || (cJSON_AddNumberToObject(network, "priority", wifi_meta.slot[i].priority) && cJSON_AddBoolToObject(network, "preferred", wifi_meta.preferred == (int)i))) &&
+             cJSON_AddItemToArray(cJSON_GetObjectItem(response, "networks"), network);
+        if (!ok) cJSON_Delete(network);
+    }
+    unsigned count = wifi_saved.count, free_slot = count < WIFI_PROFILE_LIMIT ? count + 1 : 0;
+    if (setup_preselect && setup_preselect <= count + 1 && setup_preselect <= WIFI_PROFILE_LIMIT) free_slot = setup_preselect;
+    ok = ok && cJSON_AddNumberToObject(response, "free", free_slot) && cJSON_AddNumberToObject(response, "max", WIFI_PROFILE_LIMIT);
+    xSemaphoreGive(members_lock);
+    if (!ok) {
+        cJSON_Delete(response);
+        cJSON_Delete(list);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory listing Wi-Fi networks");
+    }
+    return json_reply(req, response);
+}
 /* Recovery endpoints never depend on a successful tailnet/Wi-Fi startup. */
 static esp_err_t boot_status(httpd_req_t *req) {
     if(!local_request(req))return httpd_resp_send_err(req,HTTPD_403_FORBIDDEN,"USB access required");
@@ -1343,7 +1539,6 @@ static esp_err_t boot_status(httpd_req_t *req) {
     if(gateway_boot_report(req,status_chunk))return ESP_FAIL;
     return httpd_resp_send_chunk(req,NULL,0);
 }
-#define START_TRY(call) do {esp_err_t result_=(call);if(result_!=ESP_OK)return result_;}while(0)
 static esp_err_t start_usb(void) {
     static char serial[13];
     uint8_t identity_mac[6];
@@ -1354,11 +1549,12 @@ static esp_err_t start_usb(void) {
     static const char language[] = {0x09, 0x04};
     static const char *strings[] = {language,
                                     "T-Dongle Adapter Project",
-                                    "T-Dongle-S3 tailnet gateway",
+                                    NULL,   /* the product string: per mode, below */
                                     serial,
                                     "Management",
                                     "USB network",
                                     ""};
+    strings[2] = gateway_usb_product(gateway_tailnet_mode());
     tinyusb_config_t usb = TINYUSB_DEFAULT_CONFIG();
     usb.task.priority = GATEWAY_TASK_TINYUSB_PRIO;   /* both modes (ADR 0022, 0023): the IN pipe must not wait behind forwarding work */
     usb.event_cb = usb_event;
@@ -1393,7 +1589,9 @@ static esp_err_t start_usb(void) {
 static esp_err_t start_network(void) {
     START_TRY(esp_netif_init());
     START_TRY(esp_event_loop_create_default());
-    if(!gateway_tailnet_mode())return ESP_OK;
+    /* No USB netif in a setup boot, whatever the mode: with CONFIG_LWIP_IP_FORWARD lwIP would forward between the open access point and the USB
+     * subnet, handing the host on the USB side to anyone who joined the setup network (ADR 0024). Setup is configured over the access point only. */
+    if(!gateway_tailnet_mode() || setup_active)return ESP_OK;
     esp_netif_ip_info_t ip = {0};
     IP4_ADDR(&ip.ip, 192, 168, 77, 1);
     ip.gw = ip.ip;
@@ -1433,10 +1631,14 @@ static esp_err_t start_network(void) {
 static esp_err_t start_http(void) {
     httpd_config_t http = HTTPD_DEFAULT_CONFIG();
     http.stack_size = 6144;
-    http.max_uri_handlers = 6;
-    http.max_open_sockets = 2;
+    http.max_uri_handlers = 8;
+    /* The USB page is one browser. A phone on the setup access point opens several connections at once (the captive-portal probe, the
+     * page, a favicon): with fewer slots the live ones are purged and retried, and iOS then waits about a minute. 7 is the 10 sockets of
+     * the default lwIP budget minus the 3 the server keeps for itself (CONFIG_LWIP_MAX_SOCKETS is 20 here; nothing else runs in setup).
+     * A phone waking from its own power save needs the longer ESP-IDF default timeouts: at 2 s a send could abort the page mid-transfer. */
+    http.max_open_sockets = setup_active ? 7 : 2;
     http.lru_purge_enable = true;
-    http.recv_wait_timeout = http.send_wait_timeout = 2;
+    http.recv_wait_timeout = http.send_wait_timeout = setup_active ? 5 : 2;
     httpd_handle_t server;
     START_TRY(httpd_start(&server, &http));
     httpd_uri_t page = {.uri = "/", .method = HTTP_GET, .handler = home},
@@ -1452,9 +1654,15 @@ static esp_err_t start_http(void) {
                 api = {
                     .uri = "/command", .method = HTTP_POST, .handler = command};
     httpd_uri_t boot = {.uri="/boot-status",.method=HTTP_GET,.handler=boot_status};
-    const httpd_uri_t *handlers[]={&page,&state,&diag,&scan,&api,&boot};
+    httpd_uri_t saved = {.uri="/wifi-saved",.method=HTTP_GET,.handler=wifi_saved_list};
+    const httpd_uri_t *handlers[]={&page,&state,&diag,&scan,&api,&boot,&saved};
     for(unsigned i=0;i<sizeof(handlers)/sizeof(handlers[0]);i++) {
         esp_err_t result=httpd_register_uri_handler(server,handlers[i]);
+        if(result!=ESP_OK){httpd_stop(server);return result;}
+    }
+    if(setup_active){
+        /* Everything else that a phone asks this address for goes to the setup page (see setup_redirect). */
+        esp_err_t result=httpd_register_err_handler(server,HTTPD_404_NOT_FOUND,setup_redirect);
         if(result!=ESP_OK){httpd_stop(server);return result;}
     }
     return ESP_OK;
@@ -1470,6 +1678,7 @@ static esp_err_t start_settings(void) {
     esp_err_t result=nvs_get_blob(store,"wifi",&wifi_config,&n);
     if(result!=ESP_ERR_NVS_NOT_FOUND && (result!=ESP_OK || n!=sizeof(wifi_config)))return ESP_ERR_INVALID_STATE;
     if(!wifi_load_profiles())return ESP_ERR_INVALID_STATE;
+    display_load();
     START_TRY(tdongle_mode_load(store,&runtime_mode));
     settings_ok=true;
     gateway_diag_membership(0,GATEWAY_DIAG_BOOT,esp_reset_reason());
@@ -1479,15 +1688,6 @@ static esp_err_t start_directory(void) {return ml_directory_mount()?ESP_OK:ESP_F
 static esp_err_t start_routes(void) {
     extern bool gateway_routes_init(void);
     route_storage_ok=gateway_routes_init();return route_storage_ok?ESP_OK:ESP_FAIL;
-}
-/* No Wi-Fi modem sleep. The IDF default (WIFI_PS_MIN_MODEM) wakes for every DTIM beacon and parks frames at the
- * access point between them: measured on the board 2026-10-05 it added about 80 ms to the median round trip (ping
- * p50 126 ms against 48 ms with power save off) and changed throughput not at all. The original bridge does the
- * same (main/bridge.c). It costs radio idle current, not CPU frequency: DFS and modem sleep are independent here
- * (light sleep is off). Failure is not fatal: the link works, only slower to answer. */
-static void wifi_power_save_off(void) {
-    esp_err_t e=esp_wifi_set_ps(WIFI_PS_NONE);
-    if(e!=ESP_OK)ESP_LOGW("wifi","esp_wifi_set_ps(NONE) failed: %s; modem sleep stays on",esp_err_to_name(e));
 }
 static esp_err_t start_wifi(void) {
     esp_netif_t *sta=NULL;   /* the transparent bridge has no STA netif: frames go through the bridge, not lwIP */
@@ -1512,6 +1712,7 @@ static esp_err_t start_wifi(void) {
     START_TRY(esp_wifi_start());
     wifi_pins_start();
     wifi_power_save_off();
+    wifi_radio_profile();
     wifi_ready=true;
     wifi_rescan=true;
     if(!gateway_tailnet_mode())return ESP_OK;
@@ -1527,7 +1728,11 @@ static esp_err_t start_dns(void) {
 static esp_err_t start_manager(void) {
     return xTaskCreate(manager,"members",4096,NULL,4,NULL)==pdPASS?ESP_OK:ESP_ERR_NO_MEM;
 }
-static esp_err_t start_display(void){return gateway_display_start();}
+static esp_err_t start_display(void){
+    esp_err_t ui_result=ui_start();   /* button and status light work even when the panel does not */
+    esp_err_t panel=gateway_display_start(ui_settings_backlight_percent(&display_settings,false),display_settings.rotation);
+    return panel!=ESP_OK?panel:ui_result;
+}
 static bool start_step(unsigned stage,esp_err_t (*start)(void)) {
     gateway_boot_stage(stage);
     esp_err_t result=start();gateway_boot_result(stage,result);
@@ -1543,13 +1748,30 @@ void app_main(void) {
 #endif
     /* Read only before USB descriptors are created; normal settings startup
      * still validates storage and reports failures without erasing anything. */
-    nvs_handle_t early;
-    if(nvs_flash_init()==ESP_OK && nvs_open("tn_settings",NVS_READONLY,&early)==ESP_OK){tdongle_mode_load(early,&runtime_mode);nvs_close(early);}
+    esp_reset_reason_t reset=esp_reset_reason();
+    reset_reason_at_boot=(uint32_t)reset;
+    health_note_boot(&health_rtc,reset==ESP_RST_POWERON||reset==ESP_RST_BROWNOUT?HEALTH_RESET_COLD:reset==ESP_RST_PANIC?HEALTH_RESET_PANIC:
+                     reset==ESP_RST_TASK_WDT||reset==ESP_RST_INT_WDT||reset==ESP_RST_WDT?HEALTH_RESET_WATCHDOG:HEALTH_RESET_OTHER);
+    /* The same read-only look at the settings also tells whether anything is saved, which decides (with a request left by the previous
+     * run) whether this boot is the setup access point. A missing tn_settings namespace is an upgrade from v0.1.x: only its list counts. */
+    bool store_ok=nvs_flash_init()==ESP_OK,networks_saved=true;
+    if(store_ok){
+        nvs_handle_t early;
+        esp_err_t opened=nvs_open("tn_settings",NVS_READONLY,&early);
+        if(opened==ESP_OK){tdongle_mode_load(early,&runtime_mode);networks_saved=setup_early_has_networks(early,&store_ok);nvs_close(early);}
+        else if(opened==ESP_ERR_NVS_NOT_FOUND)networks_saved=setup_early_has_networks(0,&store_ok);
+        else store_ok=false;
+    }
+    setup_boot_decision boot=setup_boot_early(networks_saved,store_ok);
+    setup_active=boot.setup;setup_preselect=boot.preselect;
+    /* The session clock starts here, not when the access point comes up: if that never happens the dongle still leaves setup (setup_session_should_end). */
+    if(setup_active){setup_session_start(&setup_clock,(uint32_t)(esp_timer_get_time()/1000));setup_failsafe_arm();}
 
     /* Frequency scaling for both modes (ADR 0016, 0023): 240 MHz while forwarding work is pending, 80 MHz when idle. The tailnet's tasks
      * hold CPU-max locks while they have work; the transparent bridge notes forwarding activity in its Wi-Fi and USB callbacks and its
-     * transmit ring holds a lock while frames are queued. A failure leaves the fixed boot frequency (240 MHz). */
-    tdongle_pm_start();
+     * transmit ring holds a lock while frames are queued. A failure leaves the fixed boot frequency (240 MHz). Not in a setup boot: the
+     * access point is the only thing running then (ADR 0024). */
+    if(!setup_active)tdongle_pm_start();
     members_lock=xSemaphoreCreateMutexStatic(&members_mutex);
     wifi_scan_lock=xSemaphoreCreateMutexStatic(&scan_mutex);
     gateway_startup_sequence();

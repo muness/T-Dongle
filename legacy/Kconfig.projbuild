@@ -1,0 +1,14 @@
+menu "T-Dongle-S3 adapter"
+ config ADAPTER_DISPLAY
+  bool "ST7735 status UI"
+  default y
+ config ADAPTER_LED
+  bool "APA102 status LED (fixed board pins)"
+  default y
+ config ADAPTER_OPEN_SETUP_AP
+  bool "Open (passwordless) setup Wi-Fi AP"
+  default y
+  help
+   The temporary setup AP has no password, so anyone in range can open the setup page
+   while setup mode is active (at most 10 minutes). Leave off for a random WPA2 password.
+endmenu

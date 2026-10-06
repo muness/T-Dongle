@@ -81,7 +81,8 @@ static void rx(int itf, cdcacm_event_t *e) {
 }
 static void state(int itf, cdcacm_event_t *e) {
     if (e->line_state_changed_data.dtr)
-        mgmt_write("T-Dongle-S3 tailnet " GATEWAY_VERSION ". Type help. Input is not echoed.\r\n");
+        /* The bridge keeps the v0.1.x greeting prefix ("T-Dongle-S3 adapter"); the gateway has always said "tailnet". */
+        mgmt_write(gateway_tailnet_mode()?"T-Dongle-S3 tailnet " GATEWAY_VERSION ". Type help. Input is not echoed.\r\n":"T-Dongle-S3 adapter " GATEWAY_VERSION ". Type help. Input is not echoed.\r\n");
 }
 esp_err_t console_init(void) {
     output = xQueueCreateStatic(8,128,output_bytes,&output_queue);

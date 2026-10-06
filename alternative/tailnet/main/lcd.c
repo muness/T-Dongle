@@ -6,6 +6,8 @@
 #include "boot_health.h"
 #include "board.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
+#include "ui_settings.h"
 #include "driver/spi_master.h"
 #include "esp_attr.h"
 #include "esp_lcd_panel_io.h"
@@ -19,9 +21,20 @@ static StaticSemaphore_t transfer_storage,lock_storage;
 static DMA_ATTR uint16_t pixels[160];
 static lcd_view previous;
 static bool available,installing;
-extern bool gateway_display_state(lcd_state *state);
 static bool done(esp_lcd_panel_io_handle_t io,esp_lcd_panel_io_event_data_t *event,void *context) {
     BaseType_t wake=pdFALSE;xSemaphoreGiveFromISR(transfer,&wake);return wake==pdTRUE;
+}
+static void apply_locked(unsigned percent,unsigned rotation);
+/* Backlight: LEDC PWM on the active-low backlight pin, 1 kHz, 8 bit. It starts off (duty 255) until the first frame is on the glass. */
+static unsigned applied_percent=101,applied_rotation=2;   /* impossible values: the first apply always writes */
+static bool backlight_ready;
+static esp_err_t backlight_init(void) {
+    ledc_timer_config_t timer={.speed_mode=LEDC_LOW_SPEED_MODE,.duty_resolution=LEDC_TIMER_8_BIT,.timer_num=LEDC_TIMER_0,.freq_hz=1000,.clk_cfg=LEDC_AUTO_CLK};
+    ledc_channel_config_t channel={.gpio_num=BOARD_LCD_BL,.speed_mode=LEDC_LOW_SPEED_MODE,.channel=LEDC_CHANNEL_0,.timer_sel=LEDC_TIMER_0,.duty=ui_settings_backlight_duty(0)};
+    esp_err_t e=ledc_timer_config(&timer);
+    if(e==ESP_OK)e=ledc_channel_config(&channel);
+    backlight_ready=e==ESP_OK;
+    return e;
 }
 static void draw(const lcd_view *v) {
     if(!available || !memcmp(&previous,v,sizeof(*v)))return;
@@ -36,7 +49,7 @@ static void draw(const lcd_view *v) {
     }
     previous=*v;
 }
-esp_err_t gateway_display_start(void) {
+esp_err_t gateway_display_start(unsigned percent,unsigned rotation) {
     lock=xSemaphoreCreateMutexStatic(&lock_storage);transfer=xSemaphoreCreateBinaryStatic(&transfer_storage);
     gpio_config_t backlight={.pin_bit_mask=1ULL<<BOARD_LCD_BL,.mode=GPIO_MODE_OUTPUT};
     if(gpio_config(&backlight)!=ESP_OK)return ESP_FAIL;
@@ -52,11 +65,17 @@ esp_err_t gateway_display_start(void) {
        (e=esp_lcd_panel_init(panel))!=ESP_OK || (e=esp_lcd_panel_invert_color(panel,true))!=ESP_OK ||
        (e=esp_lcd_panel_set_gap(panel,1,26))!=ESP_OK || (e=esp_lcd_panel_swap_xy(panel,true))!=ESP_OK ||
        (e=esp_lcd_panel_mirror(panel,false,true))!=ESP_OK || (e=esp_lcd_panel_disp_on_off(panel,true))!=ESP_OK)goto fail;
+    applied_rotation=0;   /* the mirror just set is rotation 0 */
+    if(rotation>UI_ROTATION_MAX)rotation=0;
     // The control task already exists. Publish availability only while holding
     // the same lock used by its refreshes, including this first DMA frame.
     xSemaphoreTake(lock,portMAX_DELAY);
     available=true;lcd_state state={.starting=true,.usb=tud_ready(),.usb_configured=tud_mounted(),.usb_suspended=tud_suspended()};lcd_view view;lcd_compose(&state,GATEWAY_VERSION,&view);draw(&view);
-    if(available)gpio_set_level(BOARD_LCD_BL,0);
+    if(available){
+        /* Backlight on at the stored brightness, only now that there is something to see. PWM failing is not fatal: full brightness. */
+        if(backlight_init()==ESP_OK)apply_locked(percent,rotation);
+        else gpio_set_level(BOARD_LCD_BL,0);
+    }
     xSemaphoreGive(lock);
     return available?ESP_OK:ESP_FAIL;
 fail:
@@ -64,13 +83,28 @@ fail:
     if(io)esp_lcd_panel_io_del(io);
     spi_bus_free(SPI2_HOST);return e;
 }
-void gateway_display_tick(void) {
+static void apply_locked(unsigned percent,unsigned rotation) {
+    if(backlight_ready && percent!=applied_percent){
+        ledc_set_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0,ui_settings_backlight_duty(percent));ledc_update_duty(LEDC_LOW_SPEED_MODE,LEDC_CHANNEL_0);
+        applied_percent=percent;
+    }
+    if(rotation!=applied_rotation && rotation<=1){
+        /* 180 degrees: both mirror flags flip. The panel window is symmetric (gap 1,26 inside 132x162), so no gap change. */
+        if(esp_lcd_panel_mirror(panel,rotation!=0,rotation==0)==ESP_OK){applied_rotation=rotation;memset(&previous,0xff,sizeof(previous));}   /* repaint */
+    }
+}
+void gateway_display_apply(unsigned percent,unsigned rotation) {
+    if(!available || !lock || xSemaphoreTake(lock,pdMS_TO_TICKS(20))!=pdTRUE)return;
+    apply_locked(percent,rotation);xSemaphoreGive(lock);
+}
+bool gateway_display_present(void) {return available;}
+void gateway_display_show(const lcd_view *view) {
     if(!available || !lock || xSemaphoreTake(lock,0)!=pdTRUE)return;
-    lcd_state state={0};if(!gateway_display_state(&state)){xSemaphoreGive(lock);return;}state.installing=installing;state.usb=tud_ready();state.usb_configured=tud_mounted();state.usb_suspended=tud_suspended();
-    lcd_view view;lcd_compose(&state,GATEWAY_VERSION,&view);draw(&view);xSemaphoreGive(lock);
+    draw(view);xSemaphoreGive(lock);
 }
 void gateway_display_installing(void) {
     if(!available || xSemaphoreTake(lock,pdMS_TO_TICKS(100))!=pdTRUE)return;
     installing=true;lcd_state state={.installing=true,.usb=tud_ready(),.usb_configured=tud_mounted(),.usb_suspended=tud_suspended()};lcd_view view;
     lcd_compose(&state,GATEWAY_VERSION,&view);draw(&view);xSemaphoreGive(lock);
 }
+bool gateway_display_is_installing(void) {return installing;}
