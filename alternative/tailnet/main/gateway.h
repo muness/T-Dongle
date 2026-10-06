@@ -40,7 +40,7 @@ typedef struct membership {
  * The Wi-Fi task (23) is on core 0 and calls the Wi-Fi RX callback, which only copies into the ring. Asserted in gateway_main.c. */
 #define GATEWAY_TASK_BRIDGE_PRIO GATEWAY_TASK_USB_ROUTES_PRIO
 #define GATEWAY_TASK_BRIDGE_CORE GATEWAY_TASK_USB_ROUTES_CORE
-#define GATEWAY_BRIDGE_TASK_STACK 3072   /* esp_wifi_internal_tx plus the budget; the high-water mark is in the serial `status` */
+#define GATEWAY_BRIDGE_TASK_STACK 4096   /* esp_wifi_internal_tx plus the budget (board: 1,812 B free of 3,072 after a full run; margin for the deeper retry path); the high-water mark is in the serial `status` */
 extern membership_t *members;
 extern esp_netif_t *usb_interface;
 extern SemaphoreHandle_t members_lock;

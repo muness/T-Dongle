@@ -142,3 +142,40 @@ static void pm_timer_poll(void) {                    /* esp_timer task */
 static void pm_usb_begin(void *ctx) { (void)ctx; tdongle_pm_burst_begin(&usb_tx_pm); }
 static void pm_usb_end(void *ctx) { (void)ctx; tdongle_pm_burst_end(&usb_tx_pm); }
 static bool cpu_max(void) { return atomic_load(&usb_txq_lock) || atomic_load(&fwd_lock); }
+
+/* ---- the bridge's retry timer and wait (esp_timer + task notification), with time that moves only when the worker waits ---- */
+typedef void *esp_timer_handle_t;
+typedef struct { void (*callback)(void *); void *arg; const char *name; } esp_timer_create_args_t;
+static void (*l2_timer_cb)(void *);
+static pthread_mutex_t l2t_lock = PTHREAD_MUTEX_INITIALIZER;
+static bool l2_timer_armed;
+static uint64_t l2_timer_due;
+static void (*wait_hook)(void);                  /* runs inside every retry wait: "the TinyUSB task keeps delivering frames meanwhile" */
+static esp_err_t esp_timer_create(const esp_timer_create_args_t *a, esp_timer_handle_t *h) { l2_timer_cb = a->callback; *h = &l2_timer_cb; return ESP_OK; }
+static esp_err_t esp_timer_delete(esp_timer_handle_t h) { (void)h; return ESP_OK; }
+static esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t us) {
+    (void)h;
+    assert(!in_producer);
+    esp_err_t r = ESP_ERR_INVALID_STATE;
+    pthread_mutex_lock(&l2t_lock);
+    if (!l2_timer_armed) { l2_timer_armed = true; l2_timer_due = (uint64_t)atomic_load(&mock_us) + us; r = ESP_OK; }
+    pthread_mutex_unlock(&l2t_lock);
+    return r;
+}
+/* l2.c's ulTaskNotifyTake: time passes until the armed timer fires (or the timeout), then the test may act. */
+static uint32_t l2_notify_take(int clear, TickType_t ticks) {
+    (void)clear;
+    assert(!in_producer && !in_crit);
+    pthread_mutex_lock(&l2t_lock);
+    const bool armed = l2_timer_armed;
+    const uint64_t due = l2_timer_due;
+    l2_timer_armed = false;
+    pthread_mutex_unlock(&l2t_lock);
+    if (armed) { int64_t now = atomic_load(&mock_us); if ((uint64_t)now < due) atomic_fetch_add(&mock_us, (int64_t)(due - (uint64_t)now)); l2_timer_cb(NULL); }
+    else atomic_fetch_add(&mock_us, (int64_t)ticks * TEST_TICK_MS * 1000);
+#ifndef BRIDGE_THREADS
+    pm_timer_poll();
+#endif
+    if (wait_hook) wait_hook();
+    return 1;
+}

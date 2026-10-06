@@ -47,6 +47,9 @@ static void air_observe(const uint8_t *f, uint16_t len) {              /* the pp
 /* ---- the world ---- */
 #define HEAP_BRIDGE 140000L         /* about what the bridge image has free: no tailnet runtime, no membership */
 static bool wifi_up;
+#define BRIDGE_RING_BASE 8u            /* gateway_main.c: GATEWAY_BRIDGE_TX_BASE_FRAMES */
+#define BRIDGE_RING_CHUNKS 2u          /* GATEWAY_BRIDGE_TX_MAX_CHUNKS */
+#define BRIDGE_RING_FRAMES (BRIDGE_RING_BASE + BRIDGE_RING_CHUNKS * TINYUSB_NET_TX_CHUNK_SLABS)
 static size_t heap_must_stay_above = ML_HB_RESERVE;   /* the lowest free heap any operation may leave (a case with a deliberately tiny heap lowers it) */
 static void clock_tick_hook(void) {                /* every vTaskDelay(1) is one tick of real time */
     atomic_fetch_add(&mock_us, TEST_TICK_MS * 1000u);
@@ -60,7 +63,7 @@ static void world_reset(long total, bool dfs) {
     heap_caps_free(s_tx.base);
     memset(&s_tx, 0, sizeof(s_tx));
     pending = 0; atomic_store(&notify_count, 0); usb_ready = 1; ntb_credit = -1; allow_tx = 1; schedule = 0;
-    frag_next = 0; malloc_fail = 0; malloc_hook = NULL; pre_copy_hook = NULL; delay_hook = clock_tick_hook;
+    frag_next = 0; malloc_fail = 0; malloc_hook = NULL; pre_copy_hook = NULL; delay_hook = clock_tick_hook; wait_hook = NULL; l2_timer_armed = false;
     atomic_store(&mock_tick, 0); atomic_store(&mock_us, 1000000);
     atomic_store(&heap_live_bytes, 0); atomic_store(&mock_largest, 100000);
     assert(heap_live_blocks == 0);
@@ -89,7 +92,7 @@ static void world_reset(long total, bool dfs) {
     wifi_pins_start();
     assert(wifi_pins_installed && wifi_pins_tx_done_ok && drv_done_cb == wifi_pins_tx_done);
     /* the ring, then the bridge, in the order gateway_main.c starts them */
-    const tinyusb_net_tx_config_t tx = {.base_frames = 8, .max_chunks = 12, .priority = 10, .work_priority = 6, .core = 1,
+    const tinyusb_net_tx_config_t tx = {.base_frames = BRIDGE_RING_BASE, .max_chunks = BRIDGE_RING_CHUNKS, .priority = 10, .work_priority = 6, .core = 1,
                                         .floor_free = ML_HB_FLOOR, .floor_largest = ML_ADM_LARGEST_BLOCK, .idle_ms = 10000, .gate = NULL,
                                         .pm_begin = pm_usb_begin, .pm_end = pm_usb_end};
     assert(tinyusb_net_tx_ring_start(&tx) == ESP_OK);
@@ -146,14 +149,14 @@ static void check_world(void) {
     const tdongle_l2_stats_t s = l2_stats();
     assert(s.w2h_frames == s.w2h_forwarded + s.w2h_invalid + s.w2h_own_mac + s.w2h_link_down + s.w2h_usb_not_ready + s.w2h_ring_full);
     assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down + s.h2w_queue_full);
-    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
-    assert(s.h2w_queue_depth <= TDONGLE_L2_HOST_SLOTS && s.h2w_queue_high_water <= TDONGLE_L2_HOST_SLOTS);
+    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
+    assert(s.h2w_queue_depth <= TDONGLE_L2_HOST_QUEUE_LIMIT && s.h2w_queue_high_water <= TDONGLE_L2_HOST_QUEUE_LIMIT);
     /* The ring: every frame the bridge handed it is queued, delivered to an NTB or flushed, and the USB side saw exactly the delivered ones. */
     const tinyusb_net_tx_stats_t r = ring_stats();
     assert(s.w2h_forwarded == r.enqueued_frames);
     assert(r.enqueued_frames == r.sent_frames + r.flushed_link_down + s_tx.frames_queued);
     assert(r.sent_frames == atomic_load(&usb_delivered));
-    assert(r.ring_bytes <= 32 * TINYUSB_NET_TX_SLAB_BYTES && r.max_bytes == 32 * TINYUSB_NET_TX_SLAB_BYTES);
+    assert(r.ring_bytes <= BRIDGE_RING_FRAMES * TINYUSB_NET_TX_SLAB_BYTES && r.max_bytes == BRIDGE_RING_FRAMES * TINYUSB_NET_TX_SLAB_BYTES);
     assert(heap_live_blocks == 1 + (long)s_tx.chunks_present);
     /* The Wi-Fi budget (wifi_pin_budget.h): the accounting identity, in bridge mode. */
     const unsigned charged = atomic_load(&wifi_pins.tx_charged), inflight = gw_wtx_outstanding(&wifi_pins);
@@ -176,7 +179,7 @@ static void check_final(void) {
     const tdongle_l2_stats_t s = l2_stats();
     const tinyusb_net_tx_stats_t t = ring_stats();
     assert(t.enqueued_frames == t.sent_frames + t.flushed_link_down && t.sent_frames == atomic_load(&usb_delivered) && s.w2h_forwarded == t.enqueued_frames);
-    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_link_down_queued + s.h2w_tx_failed && s.h2w_sent == drv_accepted);
+    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed && s.h2w_sent == drv_accepted);
     assert(drv_accepted == drv_aired + drv_cleared && atomic_load(&air_delivered) == drv_aired && gw_wtx_outstanding(&wifi_pins) == 0);
     assert(atomic_load(&wifi_pins.tx_charged) == atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_aborted) + atomic_load(&wifi_pins.tx_flushed) + atomic_load(&wifi_pins.tx_stale));
     assert(atomic_load(&rx_frees) == s.w2h_frames);                 /* the driver's RX buffer: freed exactly once per frame it handed over */

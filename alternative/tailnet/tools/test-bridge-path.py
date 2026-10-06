@@ -20,7 +20,7 @@ def stripped(path):
 
 mock = (root / 'tests/mocks/net.h').read_text()
 ring = stripped(root / 'components/esp_tinyusb/tinyusb_net.c')
-l2 = stripped(root / 'components/tdongle_runtime/l2.c')
+l2 = stripped(root / 'components/tdongle_runtime/l2.c').replace('ulTaskNotifyTake', 'l2_notify_take')   # the retry wait: see bridge_prelude.inc
 inc = ['-I', str(root / 'tests/mocks/include'), '-I', str(root / 'components/esp_tinyusb/include'), '-I', str(root / 'components/tdongle_runtime/include'),
        '-I', str(here / 'tests/host_pins'), '-I', str(here / 'components/microlink/include'), '-I', str(here / 'main'), '-I', str(here / 'tests')]
 pm = str(root / 'components/tdongle_runtime/tdongle_pm_burst.c')

@@ -11,6 +11,7 @@ static const char *TAG = "tdongle_pm";
 
 static struct {
     bool scaling;
+    bool fixed;
     int configure_error;
     uint32_t lock_create_failures;
     struct {
@@ -57,6 +58,18 @@ esp_err_t tdongle_pm_start(void) {
         } else
             ESP_LOGE(TAG, "forwarding activity hold unavailable: hops outside the shared tasks run at the idle clock");
     }
+    return err;
+}
+
+esp_err_t tdongle_pm_set_fixed(bool fixed) {
+    if (!pm.scaling) return ESP_ERR_INVALID_STATE;
+    const esp_pm_config_t config = {
+        .max_freq_mhz = TDONGLE_PM_MAX_MHZ,
+        .min_freq_mhz = fixed ? TDONGLE_PM_MAX_MHZ : TDONGLE_PM_MIN_MHZ,
+        .light_sleep_enable = false,
+    };
+    const esp_err_t err = esp_pm_configure(&config);
+    if (err == ESP_OK) pm.fixed = fixed;
     return err;
 }
 
@@ -108,6 +121,7 @@ void tdongle_pm_note_activity(void) {
 void tdongle_pm_status(tdongle_pm_status_t *out) {
     memset(out, 0, sizeof(*out));
     out->scaling = pm.scaling;
+    out->fixed = pm.fixed;
     out->configure_error = pm.configure_error;
     out->max_mhz = pm.scaling ? TDONGLE_PM_MAX_MHZ : 0;
     out->min_mhz = pm.scaling ? TDONGLE_PM_MIN_MHZ : 0;

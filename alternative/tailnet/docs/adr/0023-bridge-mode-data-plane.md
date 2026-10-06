@@ -17,7 +17,7 @@ The unified image runs either as the tailnet gateway or as the transparent Wi-Fi
 
 ### 1. Host -> Wi-Fi: a bounded hand-off to a worker (`l2.c`)
 
-The TinyUSB callback `tdongle_l2_host()` validates the frame, copies it into one of **16 fixed slots** (1,518 B each, 24 KB, allocated once at start) and notifies the worker `l2_wifi`; it returns. The worker calls the Wi-Fi transmit (below) and advances the consumer counter, which gives the slot back. The queue is single producer, single consumer with two free-running 32-bit counters (no lock; the slot count is a power of two so the counters may wrap, tested across the wrap).
+*(Sizes, the retry and the ring cap below are the first-run values; the amendment at the end replaces them after the first board A/B.)* The TinyUSB callback `tdongle_l2_host()` validates the frame, copies it into one of **16 fixed slots** (1,518 B each, 24 KB, allocated once at start) and notifies the worker `l2_wifi`; it returns. The worker calls the Wi-Fi transmit (below) and advances the consumer counter, which gives the slot back. The queue is single producer, single consumer with two free-running 32-bit counters (no lock; the slot count is a power of two so the counters may wrap, tested across the wrap).
 
 Why this and not the alternatives:
 
@@ -92,6 +92,36 @@ Not provable on the host: the closed-source driver's real blocking behaviour, th
 * Host -> Wi-Fi gains a queue (24 KB permanent) and a worker; the bridge loses 48,768 B of permanent pool. Net permanent heap about 11 KB lower, elastic ring up to 36.5 KB higher.
 * Upload under a saturated Wi-Fi pool now drops at the queue (counted), after at most 20 ms of retry, instead of after 20 immediate calls.
 * The unified image grows by 3,008 B of flash (see the PR for the table).
+
+## Amendment 1 (2026-10-05): the first board A/B, and what changed
+
+Board, bridge mode, iperf3 to 192.168.1.2 over en19, against main 1e7d767 (no crash):
+
+| | main | first #45 |
+|---|---|---|
+| TCP up / down, Mbit/s | 4.9-5.6 / 4.0-4.2 | 6.6-6.8 / 6.6-7.2 |
+| UDP 4 / 8 Mbit/s loss | 10-11% / 21-28% | 1% / 12% |
+| ping avg/max idle, ms | 10 / 38 | **25 / 154** |
+| ping avg/max under TCP up, ms | 24 / 63 | **52 / 86** |
+| heap minimum | 113.8 KB | **70.6 KB** |
+
+Counters after the run: ring `high_water_slabs` 32, 48,768 B, `dropped_full` 719, grow 60 / shrink 48; host to Wi-Fi `queue_full` 529, `tx_failed` 101, `tx_retries` 590, `refused_pool` 690, `last_tx_error` 257; Wi-Fi TX charged 46,306, done 46,305, aborted 1; `worker_stack_free` 1,812 (of 3,072).
+
+**Reading.** Throughput and loss improved as designed. Load latency and the heap minimum are one finding: *standing queues are delay*. Ping under TCP upload crosses the host-to-Wi-Fi path, which held up to 16 frames (24 KB, 27 ms at the USB OUT limit) on top of the driver's own pool, where main had a bare drop; `high_water_slabs` 32 says the ring ran at its cap (55 ms of USB time) and took 36.5 KB of elastic heap with it, which is the 43 KB heap-minimum difference.
+
+**2. Bounded standing queues (constants in `tdongle_l2.h` / `gateway_main.c`, asserted).**
+* Host to Wi-Fi: 8 physical slots, a standing limit of **6 frames** (`TDONGLE_L2_HOST_QUEUE_LIMIT`) and a **sojourn limit of 20 ms** (`TDONGLE_L2_SOJOURN_MS`): a frame older than that when the worker reaches it, or still refused at that age, is dropped (`sojourn_drop`, `tx_failed`). Reasoning: the path's delay product is USB OUT (875 B/ms) times a LAN round trip of 3-10 ms = 2.6-8.8 KB; 6 frames (9 KB, 10 ms) covers the worst case and the frames of one worker wake-up, and the seventh is the sender's cue to slow down. The sojourn limit is CoDel's target reduced to its essence: a stalled link must not turn the queue into a delay line, whatever its depth. Permanent heap -12 KB.
+* Wi-Fi to host (USB ring): 8 permanent + **2 elastic chunks = 12 frames** (18 KB, 21 ms of USB time; was 32 frames, 55 ms), asserted at most 25 ms of drain time. The elastic mechanism stays (it still grows from 8 to 12 under a burst and shrinks 10 s later); only its cap is time-based. The 12 frames cover a 6-frame A-MPDU burst arriving while the previous NTB is on the wire.
+* Expected: load ping back toward main's 24 ms (the standing delay is now at most 10 ms in the queue plus the driver's own pool, as on main) and heap minimum back near main's, since the elastic ring cannot take 36 KB. TCP throughput has to stay within about 5% of 6.6-7.2: a drop at 6 queued frames is the same signal TCP got from the full 16-slot queue, earlier. If upload loses more than that, raise `TDONGLE_L2_HOST_QUEUE_LIMIT` to 8 (slots allow it) first; if download does, raise `GATEWAY_BRIDGE_TX_MAX_CHUNKS` to 3.
+
+**4. `tx_failed` 101 and `last_tx_error` 257.** 257 is 0x101, `ESP_ERR_NO_MEM`, the budget's refusal (`wifi_pins_tx` returns it when 16 charges are outstanding: `refused_pool` 690, `refused_heap` 0; the driver itself never refused: `aborted` 1). The pool of 16 is full whenever the Wi-Fi link carries less than USB feeds it, which is what upload at 6.7 Mbit/s over this link is. Each refusal is an *attempt*, not a frame: 690 is about 590 retries + 101 final attempts; the 101 are the frames still refused at the end of their window (2 retries each at the 2-tick window: 202 of the 590), the other 388 retries belonged to frames that were then sent. Both are the policy working as designed, but the retry was wrong in one respect: it slept on the RTOS tick, and at `CONFIG_FREERTOS_HZ` 100 that is **10 ms**, longer than the whole 16-buffer pool takes to leave the antenna (16 x 1.5 KB at 25 Mbit/s = 8 ms). A frame refused at 16 in flight therefore left the radio idle for most of a tick, which costs upload throughput, and is consistent with the queue behind it filling (`queue_full` 529). Now: the worker retries on a **500 us esp_timer** (`TDONGLE_L2_RETRY_US`, about one frame of airtime at the Wi-Fi rate), until the frame's sojourn limit (so the retry window is what is left of the 20 ms after the queue wait, not a fresh 20 ms), and wakes early for new frames. The 20 ms window is unchanged in time; it is now 40 attempts instead of 2, each cheap (a budget check against a counter, no driver call while the pool is full). `refused_pool` will therefore be a larger number than before for the same loss: read `tx_failed` and `sojourn_drop` for frames, `refused_pool` for attempts.
+
+**1. Review fixes.** (a) `GATEWAY_BRIDGE_TASK_STACK` 4,096 (board: 1,812 B free of 3,072; the deeper retry path and the timing counters are margin). (b) `tdongle_l2_stats` loads `tail` before `head` (head only grows, so the depth cannot wrap to 4 billion; the TSan test samples it during traffic). (c) `tdongle_l2_link(true)` flushes the ring before registering the callback, and opens `linked` last; `receive()` reads the link epoch before the link check and re-checks it after the ring accepted the frame, and when it moved (a frame that passed the old association's check and was stamped with the new generation) flushes again and counts `w2h_raced`.
+
+**3. Idle ping, 25 ms against 10 (max 154 against 38).** What the host tests can show: the new path adds one task wake (a notification to a core-1 task, microseconds) on host to Wi-Fi, none on Wi-Fi to host (the same relay and deferral as the tailnet's), and nothing waits on the 10 ms tick when the link is idle (the tick was only in the retry path, now gone). The suspects that remain are all on-chip and cannot be separated by reading code: the clock switch inside the first note after idle, an effect of 80 MHz on the Wi-Fi driver's own processing (the Wi-Fi task and the driver run on the same core at the idle clock until the note raises it), and DFS's interaction with the radio. So this change adds the measurements and an A/B switch instead of a guess:
+* `bridge_timing` (serial `status`, `bridge` report): `pm_note_us_max/sum/pm_notes` (what the clock raise costs inside the callback), `wait_us_max/sum` (host to Wi-Fi queueing per frame), `tx_us_max/sum` (the Wi-Fi transmit call), and `cold_us_max/sum/cold_starts` (Wi-Fi to host: commit to NTB). If a ping's extra 15 ms is in the dongle it is in one of these; if all stay under a millisecond it is the radio or the host.
+* `pm fixed` / `pm scale` (serial, not persisted): re-runs `esp_pm_configure` with min = max = 240 or 80..240, so the same image gives both numbers in one session. Procedure: `pm fixed`, 100 idle pings (1 s apart), `pm scale`, 100 more; read `bridge_timing` between.
+* If fixed 240 fixes idle ping, the trade is thermal and power for latency: options in order of preference are a higher floor (`TDONGLE_PM_MIN_MHZ` 160, which ADR 0016 measured as costing p90 205 against 149 ms at 240 on the tailnet, so not free either), a longer activity hold, or fixed 240 for the bridge only. That decision needs the A/B above, not this ADR.
 
 ## Board plan (bridge mode; `mode wifi_bridge` over serial, then back to `mode tailnet_gateway`)
 

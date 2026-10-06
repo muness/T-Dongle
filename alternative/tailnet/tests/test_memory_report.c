@@ -135,9 +135,9 @@ static bool bridge_mode = true;
 bool gateway_tailnet_mode(void) { return !bridge_mode; }
 void tdongle_l2_stats(tdongle_l2_stats_t *s) {
     *s = (tdongle_l2_stats_t){.linked = true, .link_changes = 5, .worker_stack_free = 1900,
-        .w2h_frames = 100, .w2h_forwarded = 90, .w2h_invalid = 2, .w2h_own_mac = 3, .w2h_link_down = 1, .w2h_usb_not_ready = 1, .w2h_ring_full = 3,
+        .w2h_frames = 100, .w2h_forwarded = 90, .w2h_invalid = 2, .w2h_own_mac = 3, .w2h_link_down = 1, .w2h_usb_not_ready = 1, .w2h_ring_full = 3, .w2h_raced = 1, .pm_notes = 50, .pm_note_us_sum = 900, .pm_note_us_max = 400, .h2w_wait_us_sum = 5000, .h2w_wait_us_max = 800, .h2w_tx_us_sum = 3000, .h2w_tx_us_max = 120,
         .h2w_frames = 80, .h2w_queued = 70, .h2w_invalid = 1, .h2w_foreign_mac = 2, .h2w_link_down = 3, .h2w_queue_full = 4,
-        .h2w_sent = 60, .h2w_stale = 4, .h2w_link_down_queued = 2, .h2w_tx_failed = 3, .h2w_tx_retries = 11, .h2w_last_tx_error = -1,
+        .h2w_sent = 58, .h2w_stale = 4, .h2w_sojourn_drop = 2, .h2w_link_down_queued = 2, .h2w_tx_failed = 3, .h2w_tx_retries = 11, .h2w_last_tx_error = -1,
         .h2w_queue_depth = 1, .h2w_queue_high_water = 9};
 }
 #include "bridge_status.inc"

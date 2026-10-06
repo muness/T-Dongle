@@ -21,6 +21,7 @@
 
 typedef struct {
     bool scaling;                        /* esp_pm_configure succeeded: the CPU moves between min and max */
+    bool fixed;                          /* tdongle_pm_set_fixed(true): min = max = 240, scaling kept configured (an A/B switch) */
     int configure_error;                 /* esp_err_t of the last tdongle_pm_start (0 = ESP_OK) */
     uint32_t max_mhz, min_mhz;           /* as configured; 0 when scaling is off */
     uint32_t cpu_mhz;                    /* the clock right now */
@@ -33,6 +34,11 @@ typedef struct {
  * at its boot frequency (CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ, 240 in the gateway image), i.e. fixed at the maximum.
  * Call once, before the forwarding tasks start. */
 esp_err_t tdongle_pm_start(void);
+
+/* A/B switch for latency work (serial `pm fixed` / `pm scale`): re-run esp_pm_configure with the minimum raised to the maximum (the CPU stays
+ * at 240 MHz, every lock still counts) or back to 80..240. Not persisted: a reboot is back to scaling. ESP_ERR_INVALID_STATE when scaling
+ * never started. */
+esp_err_t tdongle_pm_set_fixed(bool fixed);
 
 /* Bind `burst` to a new CPU-frequency-max lock called `name` and list it in the status. Idempotent per object.
  * False: the registry is full or the lock could not be created (the burst then counts but holds nothing). */

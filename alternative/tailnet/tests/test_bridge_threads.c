@@ -69,6 +69,11 @@ static void *event_task(void *arg) {                       /* the association co
     }
     return NULL;
 }
+static void *sampler(void *arg) {                          /* a status reader: the depth must never wrap, whatever the worker does between two loads */
+    (void)arg;
+    while (!atomic_load(&stop_workers)) { const tdongle_l2_stats_t s = l2_stats(); assert(s.h2w_queue_depth < (1u << 16)); sched_yield(); }
+    return NULL;
+}
 static void *timer_task(void *arg) {                       /* esp_timer: the forwarding-activity hold */
     (void)arg;
     while (!atomic_load(&stop_workers)) { atomic_fetch_add(&mock_us, 3000); pm_timer_poll(); usleep(30); }
@@ -81,18 +86,19 @@ int main(void) {
     assert(tinyusb_net_init(&cfg) == ESP_OK);
     world_reset(HEAP_BRIDGE, false);                      /* the PM properties that need a time model are in test_bridge_path.c */
     wifi_connect();
-    pthread_t wifi, usb, ring, fwd, pp, ev, tim;
+    pthread_t wifi, usb, ring, fwd, pp, ev, tim, smp;
     pthread_create(&ring, NULL, ring_worker, NULL);
     pthread_create(&fwd, NULL, forwarder, NULL);
     pthread_create(&pp, NULL, pp_task, (void *)1);
     pthread_create(&ev, NULL, event_task, (void *)2);
     pthread_create(&tim, NULL, timer_task, NULL);
+    pthread_create(&smp, NULL, sampler, NULL);
     pthread_create(&usb, NULL, usb_task, (void *)3);
     pthread_create(&wifi, NULL, wifi_task, (void *)4);
     pthread_join(wifi, NULL);
     pthread_join(usb, NULL);
     atomic_store(&stop_workers, 1);
-    pthread_join(ring, NULL); pthread_join(fwd, NULL); pthread_join(pp, NULL); pthread_join(ev, NULL); pthread_join(tim, NULL);
+    pthread_join(ring, NULL); pthread_join(fwd, NULL); pthread_join(pp, NULL); pthread_join(ev, NULL); pthread_join(tim, NULL); pthread_join(smp, NULL);
     if (!wifi_up) wifi_connect();
     settle();
     advance_ms(500);
@@ -103,7 +109,7 @@ int main(void) {
     const tdongle_l2_stats_t s = l2_stats();
     const tinyusb_net_tx_stats_t t = ring_stats();
     assert(s.w2h_frames > ITERATIONS / 2 && s.h2w_frames == ITERATIONS && s.w2h_forwarded > 1000 && s.h2w_sent > 1000);
-    printf("PASS: transparent bridge across seven threads: to host %u/%u forwarded (%u ring-full, %u flushed, %u link-down), to Wi-Fi %u/%u sent (%u queue-full, %u refused, %u stale, %u link-down), %u link changes, ring grew %u times\n",
+    printf("PASS: transparent bridge across eight threads: to host %u/%u forwarded (%u ring-full, %u flushed, %u link-down), to Wi-Fi %u/%u sent (%u queue-full, %u refused, %u stale, %u link-down), %u link changes, ring grew %u times\n",
            s.w2h_forwarded, s.w2h_frames, s.w2h_ring_full, t.flushed_link_down, s.w2h_link_down, s.h2w_sent, s.h2w_frames, s.h2w_queue_full, s.h2w_tx_failed, s.h2w_stale,
            s.h2w_link_down + s.h2w_link_down_queued, s.link_changes, t.grow_events);
     return 0;

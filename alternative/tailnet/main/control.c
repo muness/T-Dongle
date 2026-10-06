@@ -27,6 +27,7 @@ static void pm_report(void) {
     snprintf(line, sizeof(line), "power scaling=%d cpu_mhz=%lu max_mhz=%lu min_mhz=%lu configure_error=%d lock_create_failures=%lu\r\n", pm.scaling,
              (unsigned long)pm.cpu_mhz, (unsigned long)pm.max_mhz, (unsigned long)pm.min_mhz, pm.configure_error, (unsigned long)pm.lock_create_failures);
     mgmt_write(line);
+    mgmt_write(pm.fixed ? "pm_mode fixed=1\r\n" : "pm_mode fixed=0\r\n");   /* new line: `pm fixed` / `pm scale` switch it */
     for (unsigned i = 0; i < pm.bursts; i++) {
         const tdongle_pm_burst_stats_t *b = &pm.burst[i];
         snprintf(line, sizeof(line), "pm_lock name=%s depth=%lu acquires=%lu releases=%lu held_us=%lu max_depth=%lu underflows=%lu forced_releases=%lu backend_failures=%lu isr_rejects=%lu\r\n",
@@ -82,7 +83,11 @@ static void command_task(void *arg) {
                        "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/\r\n");
         else if (!strcmp(line, "capabilities"))
             mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n");
-        else if (!strcmp(line, "pm")) {
+        else if (!strcmp(line, "pm fixed") || !strcmp(line, "pm scale")) {
+            /* Latency A/B without a reflash: 240 MHz fixed against 80..240 scaling (ADR 0023). Not persisted. */
+            mgmt_write(tdongle_pm_set_fixed(line[3] == 'f') == ESP_OK ? "OK\r\n" : "ERR scaling is not running\r\n");
+            pm_report();
+        } else if (!strcmp(line, "pm")) {
             pm_report();
         } else if (!strcmp(line, "status")) {
             gateway_serial_command(line);

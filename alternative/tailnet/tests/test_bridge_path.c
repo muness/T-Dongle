@@ -29,7 +29,7 @@ static void test_install_and_config(void) {
     wifi_pins_hook_rx(); wifi_pins_link_changed();              /* nothing to hook, nothing to crash */
     assert(!wifi_pins_rx_hooked);
     tinyusb_net_tx_stats_t r = ring_stats();
-    assert(r.base_bytes == 8 * TINYUSB_NET_TX_SLAB_BYTES && r.max_bytes == 32 * TINYUSB_NET_TX_SLAB_BYTES && r.ring_bytes == r.base_bytes);
+    assert(r.base_bytes == BRIDGE_RING_BASE * TINYUSB_NET_TX_SLAB_BYTES && r.max_bytes == BRIDGE_RING_FRAMES * TINYUSB_NET_TX_SLAB_BYTES && r.ring_bytes == r.base_bytes);
     assert(s_tx.cfg.gate == NULL && s_tx.cfg.pm_begin == pm_usb_begin);
     /* Nothing flows before the Wi-Fi link is up, and what arrives is counted. */
     restart_sequences();
@@ -87,37 +87,36 @@ static void test_ring_backpressure(void) {
     }
     tdongle_l2_stats_t s = l2_stats();
     tinyusb_net_tx_stats_t r = ring_stats();
-    assert(s.w2h_forwarded == 32 && s.w2h_ring_full == 168);      /* the original bridge's 32 frames, 8 of them permanent */
-    assert(r.ring_bytes == r.max_bytes && r.dropped_full == 168 && r.grow_events == 12 && r.grow_denied_heap == 0);
+    assert(s.w2h_forwarded == BRIDGE_RING_FRAMES && s.w2h_ring_full == 200 - BRIDGE_RING_FRAMES);   /* a bounded standing queue: 12 frames = 21 ms of USB time, 8 permanent */
+    assert(r.ring_bytes == r.max_bytes && r.dropped_full == 200 - BRIDGE_RING_FRAMES && r.grow_events == BRIDGE_RING_CHUNKS && r.grow_denied_heap == 0);
     assert(atomic_load(&usb_delivered) == 0);
     ntb_credit = -1;
     settle();
     check_world();
-    assert(atomic_load(&usb_delivered) == 32 && ring_stats().flushed_link_down == 0);     /* all 32, in order */
+    assert(atomic_load(&usb_delivered) == BRIDGE_RING_FRAMES && ring_stats().flushed_link_down == 0);     /* all of them, in order */
     /* The elastic part goes back to the heap when the burst is over; the permanent part stays. */
     for (int i = 0; i < 40; i++) { advance_ms(600); pump_ring(); }
-    assert(s_tx.chunks_present == 0 && heap_live_blocks == 1 && ring_stats().shrink_events == 12 && ring_stats().ring_bytes == r.base_bytes);
+    assert(s_tx.chunks_present == 0 && heap_live_blocks == 1 && ring_stats().shrink_events == BRIDGE_RING_CHUNKS && ring_stats().ring_bytes == r.base_bytes);
     check_world();
 
     /* A tight heap: growth stops at the floor (counted), the ring drops instead, and the heap never goes below the floor. */
-    world_reset(ML_HB_FLOOR + 8 * TINYUSB_NET_TX_SLAB_BYTES + 9000, true);
+    world_reset(ML_HB_FLOOR + 8 * TINYUSB_NET_TX_SLAB_BYTES + 4000, true);
     heap_must_stay_above = ML_HB_FLOOR;
     restart_sequences();
     wifi_connect();
     ntb_credit = 0;
     for (int i = 0; i < 100; i++) { send_to_host(1514, KIND_UNICAST); pump_ring(); check_world(); }
     s = l2_stats(); r = ring_stats();
-    assert(s.w2h_forwarded == 12 && s.w2h_ring_full == 88 && r.chunks == 2 && r.grow_denied_heap > 0);
+    assert(s.w2h_forwarded == 10 && s.w2h_ring_full == 90 && r.chunks == 1 && r.grow_denied_heap > 0);
     assert(heap_free_now() >= ML_HB_FLOOR);
     ntb_credit = -1;
     settle();
-    assert(atomic_load(&usb_delivered) == 12);
+    assert(atomic_load(&usb_delivered) == 10);
 }
 
 /* The Wi-Fi driver stops completing frames (a stall, poor signal): its pool fills, the bridge's queue fills, then frames are dropped, counted. */
 static unsigned delays_seen, injected, refused_full, complete_on_delay;
-static void while_worker_waits(void) {            /* runs inside the worker's vTaskDelay: the TinyUSB task keeps delivering frames */
-    clock_tick_hook();
+static void while_worker_waits(void) {            /* runs inside the worker's retry wait: the TinyUSB task keeps delivering frames */
     if (++delays_seen == complete_on_delay) drv_complete(1);       /* the pool frees one buffer on this tick */
     if (delays_seen <= 12) { if (send_to_wifi(500, KIND_UNICAST) == ESP_OK) injected++; else refused_full++; }
 }
@@ -132,9 +131,9 @@ static void test_wifi_backpressure(void) {
         check_world();
     }
     tdongle_l2_stats_t s = l2_stats();
-    const unsigned budget = pdMS_TO_TICKS(TDONGLE_L2_TX_RETRY_MS) ? pdMS_TO_TICKS(TDONGLE_L2_TX_RETRY_MS) : 1;
-    assert(s.h2w_sent == 16 && drv_depth() == 16 && s.h2w_tx_failed == 24 && s.h2w_tx_retries == 24u * budget);
-    assert(atomic_load(&wifi_pins.tx_refused_pool) == 24u * (budget + 1) && gw_wtx_outstanding(&wifi_pins) == 16 && atomic_load(&wifi_pins.tx_high_water) == 16);
+    const unsigned retries = TDONGLE_L2_SOJOURN_MS * 1000u / TDONGLE_L2_RETRY_US;      /* per stuck frame: one attempt per retry period until its sojourn limit */
+    assert(s.h2w_sent == 16 && drv_depth() == 16 && s.h2w_tx_failed == 24 && s.h2w_tx_retries == 24u * retries);
+    assert(atomic_load(&wifi_pins.tx_refused_pool) == 24u * (retries + 1) && gw_wtx_outstanding(&wifi_pins) == 16 && atomic_load(&wifi_pins.tx_high_water) == 16);
     assert(s.h2w_last_tx_error == ESP_ERR_NO_MEM);
     /* The retry window is time, not frames: a stuck frame costs the worker one window, then the next frame gets its own chance. */
     drv_complete(16);
@@ -149,22 +148,21 @@ static void test_wifi_backpressure(void) {
     world_reset(HEAP_BRIDGE, true);
     restart_sequences();
     wifi_connect();
-    for (int i = 0; i < 16; i++) assert(send_to_wifi(500, KIND_UNICAST) == ESP_OK);
-    pump_l2();
+    for (int i = 0; i < 16; i++) { assert(send_to_wifi(500, KIND_UNICAST) == ESP_OK); pump_l2(); }
     assert(drv_depth() == 16);
     assert(send_to_wifi(500, KIND_UNICAST) == ESP_OK);
     delays_seen = injected = refused_full = 0;
-    complete_on_delay = pdMS_TO_TICKS(TDONGLE_L2_TX_RETRY_MS) >= 3 ? 3 : 1;      /* within the window: 20 ms is 20 ticks at 1 ms, 2 at the firmware's 10 ms */
-    delay_hook = while_worker_waits;
+    complete_on_delay = 8;                                    /* the eighth retry period: 4 ms, well inside the 20 ms limit, whatever the RTOS tick */
+    wait_hook = while_worker_waits;
     {   /* the worker takes the one waiting frame (the oldest) and nothing else, so the hook's arrivals stay queued */
         const unsigned tail = atomic_load(&l2.tail);
         deliver(&l2.slots[tail & SLOT_MASK]);
         atomic_store(&l2.tail, tail + 1u);
     }
-    delay_hook = clock_tick_hook;
+    wait_hook = NULL;
     tdongle_l2_stats_t t = l2_stats();
     assert(t.h2w_sent == 17 && t.h2w_tx_retries == complete_on_delay && t.h2w_tx_failed == 0);   /* the retry succeeded on the tick the pool freed a buffer */
-    assert(injected > 0 && t.h2w_queue_depth == injected);                             /* the callback queued frames while the worker waited */
+    assert(injected == TDONGLE_L2_HOST_QUEUE_LIMIT - 1 && refused_full > 0 && t.h2w_queue_depth == injected);   /* the bounded queue took 5 more and refused the rest, instantly */                             /* the callback queued frames while the worker waited */
     check_world();
     settle();
     check_world();
@@ -424,7 +422,7 @@ static void test_status_lines(void) {
                seen_value("to_host", "link_down") + seen_value("to_host", "usb_not_ready") + seen_value("to_host", "ring_full"));
     assert(seen_value("to_wifi", "frames") == seen_value("to_wifi", "queued") + seen_value("to_wifi", "invalid") + seen_value("to_wifi", "foreign_mac") +
                seen_value("to_wifi", "link_down") + seen_value("to_wifi", "queue_full"));
-    assert(seen_value("to_wifi", "queued") == seen_value("to_wifi", "sent") + seen_value("to_wifi", "stale") + seen_value("to_wifi", "link_down_queued") +
+    assert(seen_value("to_wifi", "queued") == seen_value("to_wifi", "sent") + seen_value("to_wifi", "stale") + seen_value("to_wifi", "sojourn_drop") + seen_value("to_wifi", "link_down_queued") +
                seen_value("to_wifi", "tx_failed") + seen_value("to_wifi", "queue_depth"));
     assert(seen_value("wifi_tx", "charged") == seen_value("wifi_tx", "done") + seen_value("wifi_tx", "aborted") + seen_value("wifi_tx", "flushed") +
                seen_value("wifi_tx", "stale") + seen_value("wifi_tx", "inflight"));
@@ -436,20 +434,20 @@ static void test_status_lines(void) {
     /* The serial lines: one per section, every field present (none was dropped for length), each line within the buffer, none an old line. */
     serial_used = 0; serial_out[0] = 0;
     bridge_status_lines();
-    static const char *const sections[] = {"link", "to_host", "to_wifi", "usb_ring", "wifi_tx"};
+    static const char *const sections[] = {"link", "to_host", "to_wifi", "usb_ring", "timing", "wifi_tx"};
     unsigned lines = 0, fields = 0;
     for (char *line = serial_out; *line;) {
         char *end = strstr(line, "\r\n");
         assert(end && (size_t)(end - line) < BRIDGE_LINE_MAX - 2);
-        assert(!strncmp(line, "bridge_", 7) && lines < 5 && !strncmp(line + 7, sections[lines], strlen(sections[lines])));
+        assert(!strncmp(line, "bridge_", 7) && lines < 6 && !strncmp(line + 7, sections[lines], strlen(sections[lines])));
         for (char *p = line; p < end; p++) if (*p == '=') fields++;
         lines++;
         line = end + 2;
     }
-    assert(lines == 5 && fields == seen_n);
+    assert(lines == 6 && fields == seen_n);
     assert(strstr(serial_out, "bridge_to_host frames=") && strstr(serial_out, " ring_full=") && strstr(serial_out, " last_tx_error=") && strstr(serial_out, "bridge_wifi_tx installed=1"));
     /* The diagnostics report, built the way memory_diagnostics.inc builds it, is the same set. */
-    assert(seen_n == 3 + 7 + 14 + 11 + 12);
+    assert(seen_n == 3 + 8 + 15 + 12 + 10 + 12);
 }
 
 /* A long random run: every operation, in any order, with the checks after each one. */

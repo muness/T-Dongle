@@ -14,6 +14,13 @@
 #include "tdongle_l2.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
+/* esp_timer's one-shot API, as l2.c uses it (the shared stub header only has the clock). */
+typedef void *esp_timer_handle_t;
+typedef struct { void (*callback)(void *); void *arg; const char *name; } esp_timer_create_args_t;
+esp_err_t esp_timer_create(const esp_timer_create_args_t *, esp_timer_handle_t *);
+esp_err_t esp_timer_start_once(esp_timer_handle_t, uint64_t);
+esp_err_t esp_timer_delete(esp_timer_handle_t);
 
 /* ---- the world ---- */
 static bool in_callback;                 /* inside tdongle_l2_host or the Wi-Fi RX callback: nothing here may wait or allocate */
@@ -29,11 +36,14 @@ static unsigned tx_calls, tx_script_n;
 static esp_err_t tx_default;
 static unsigned char tx_seen[2000];
 static uint16_t tx_seen_len;
-static TickType_t now_ticks;
-static unsigned delays;
-static void (*delay_hook)(void);
+static int64_t now_us_v;                  /* the clock, in microseconds */
+static unsigned waits;                   /* retry waits the worker made */
+static void (*wait_hook)(void);
+static bool timer_armed; static uint64_t timer_due; static void (*timer_cb)(void *);
 static int cb_registered;                /* 1 = receive registered, 0 = unregistered */
 static int order[8], order_n;            /* the order of reg_rxcb / flush / link_state in one tdongle_l2_link call */
+static void (*ring_hook)(void);          /* runs inside tinyusb_net_tx_ring_send: "something else happens while the callback copies" */
+static bool fail_timer;
 static void *allocate(size_t n, size_t size) {
     assert(!in_callback);
     return fail_alloc ? NULL : calloc(n, size);
@@ -54,6 +64,7 @@ esp_err_t esp_wifi_internal_reg_rxcb(int i, esp_err_t (*f)(void *, uint16_t, voi
 }
 esp_err_t tinyusb_net_tx_ring_send(const void *b, uint16_t n) {
     ring_calls++;
+    if (ring_hook) { void (*h)(void) = ring_hook; ring_hook = NULL; h(); }
     if (ring_result == ESP_OK) {
         memcpy(ring_seen, b, n);
         ring_seen_len = n;
@@ -69,9 +80,22 @@ int xTaskCreatePinnedToCore(void (*f)(void *), const char *n, uint32_t s, void *
     return pdPASS;
 }
 int xTaskNotifyGive(TaskHandle_t h) { assert(h); notifies++; return pdPASS; }   /* allowed in a callback: it never blocks */
-uint32_t ulTaskNotifyTake(int c, TickType_t t) { (void)c; (void)t; assert(!in_callback); return 0; }
-void vTaskDelay(TickType_t t) { assert(!in_callback); delays++; now_ticks += t; if (delay_hook) delay_hook(); }
-TickType_t xTaskGetTickCount(void) { return now_ticks; }
+/* The worker's retry wait: time passes until the armed timer fires (or the timeout), and the test may act meanwhile. */
+uint32_t ulTaskNotifyTake(int c, TickType_t t) {
+    (void)c;
+    assert(!in_callback);
+    waits++;
+    if (timer_armed) { now_us_v = (int64_t)timer_due; timer_armed = false; timer_cb(NULL); }
+    else now_us_v += (int64_t)t * TEST_TICK_MS * 1000;
+    if (wait_hook) wait_hook();
+    return 1;
+}
+void vTaskDelay(TickType_t t) { (void)t; assert(0 && "the bridge never sleeps on the RTOS tick"); }
+TickType_t xTaskGetTickCount(void) { return 0; }
+int64_t esp_timer_get_time(void) { return now_us_v; }
+esp_err_t esp_timer_create(const esp_timer_create_args_t *a, esp_timer_handle_t *h) { if (fail_timer) return -1; timer_cb = a->callback; *h = &timer_cb; return 0; }
+esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t us) { (void)h; assert(!in_callback); if (timer_armed) return ESP_ERR_INVALID_STATE; timer_armed = true; timer_due = (uint64_t)now_us_v + us; return 0; }
+esp_err_t esp_timer_delete(esp_timer_handle_t h) { (void)h; return 0; }
 unsigned uxTaskGetStackHighWaterMark(TaskHandle_t h) { (void)h; return 1234; }
 void tdongle_pm_note_activity(void) { note_activity_calls++; }
 static esp_err_t wifi_tx(void *b, uint16_t n) {
@@ -113,8 +137,8 @@ static tdongle_l2_config_t config(void) {
     return (tdongle_l2_config_t){.wifi_tx = wifi_tx, .task_priority = 8, .task_core = 1, .task_stack = 3072};
 }
 static void reset_world(void) {
-    freed = link_calls = flushes = notifies = note_activity_calls = ring_calls = tx_calls = tx_script_n = delays = order_n = 0;
-    ring_result = ESP_OK; tx_default = ESP_OK; now_ticks = 0; delay_hook = NULL; fail_alloc = fail_task = false;
+    freed = link_calls = flushes = notifies = note_activity_calls = ring_calls = tx_calls = tx_script_n = waits = order_n = 0;
+    ring_result = ESP_OK; tx_default = ESP_OK; now_us_v = 1000000; wait_hook = NULL; ring_hook = NULL; timer_armed = false; fail_alloc = fail_task = fail_timer = false;
 }
 static void start(void) {
     if (l2.slots) { free(l2.slots); l2.slots = NULL; }
@@ -127,7 +151,7 @@ static void check_identities(void) {
     tdongle_l2_stats_t s = stats();
     assert(s.w2h_frames == s.w2h_forwarded + s.w2h_invalid + s.w2h_own_mac + s.w2h_link_down + s.w2h_usb_not_ready + s.w2h_ring_full);
     assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down + s.h2w_queue_full);
-    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
+    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
 }
 
 static void test_start(void) {
@@ -240,12 +264,12 @@ static void test_to_wifi(void) {
     assert(tx_calls == 4);                                                                       /* nothing filtered reached the driver */
     /* A full queue drops the new frame, keeps the old ones in order, and never blocks. */
     frame(f, 200, peer, mac, 0);
-    for (unsigned i = 0; i < TDONGLE_L2_HOST_SLOTS; i++) { f[20] = (uint8_t)i; assert(host_in(f, 200) == ESP_OK); }
-    assert(stats().h2w_queue_depth == TDONGLE_L2_HOST_SLOTS && stats().h2w_queue_high_water == TDONGLE_L2_HOST_SLOTS);
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) { f[20] = (uint8_t)i; assert(host_in(f, 200) == ESP_OK); }
+    assert(stats().h2w_queue_depth == TDONGLE_L2_HOST_QUEUE_LIMIT && stats().h2w_queue_high_water == TDONGLE_L2_HOST_QUEUE_LIMIT);   /* the limit, not the slot count */
     f[20] = 99;
     assert(host_in(f, 200) == ESP_ERR_NO_MEM && host_in(f, 200) == ESP_ERR_NO_MEM && stats().h2w_queue_full == 2);
     unsigned sent_before = stats().h2w_sent;
-    for (unsigned i = 0; i < TDONGLE_L2_HOST_SLOTS; i++) {
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) {
         /* one frame at a time: it is the oldest, tx_seen proves the order */
         unsigned tail = atomic_load(&l2.tail);
         assert(l2.slots[tail & SLOT_MASK].bytes[20] == (uint8_t)i);
@@ -253,9 +277,9 @@ static void test_to_wifi(void) {
         atomic_store(&l2.tail, tail + 1);
         assert(tx_seen[20] == (uint8_t)i);
     }
-    assert(stats().h2w_sent == sent_before + TDONGLE_L2_HOST_SLOTS && stats().h2w_queue_depth == 0);
+    assert(stats().h2w_sent == sent_before + TDONGLE_L2_HOST_QUEUE_LIMIT && stats().h2w_queue_depth == 0);
     check_identities();
-    assert(tx_calls == 4 + TDONGLE_L2_HOST_SLOTS);
+    assert(tx_calls == 4 + TDONGLE_L2_HOST_QUEUE_LIMIT);
 }
 
 /* The slot counters run free: the queue keeps working across the wrap of the 32-bit counters. */
@@ -265,15 +289,15 @@ static void test_counter_wrap(void) {
     tdongle_l2_link(true);
     atomic_store(&l2.head, 0xfffffffcu); atomic_store(&l2.tail, 0xfffffffcu);
     for (unsigned round = 0; round < 6; round++) {
-        for (unsigned i = 0; i < 11; i++) { frame(f, 100, peer, mac, round * 11 + i); assert(host_in(f, 100) == ESP_OK); }
-        for (unsigned i = 0; i < 11; i++) {
+        for (unsigned i = 0; i < 5; i++) { frame(f, 100, peer, mac, round * 5 + i); assert(host_in(f, 100) == ESP_OK); }
+        for (unsigned i = 0; i < 5; i++) {
             unsigned tail = atomic_load(&l2.tail);
             deliver(&l2.slots[tail & SLOT_MASK]);
             atomic_store(&l2.tail, tail + 1);
-            assert(tx_seen[20] == (uint8_t)(round * 11 + i + 20));
+            assert(tx_seen[20] == (uint8_t)(round * 5 + i + 20));
         }
     }
-    assert(atomic_load(&l2.head) == 0xfffffffcu + 66 && stats().h2w_sent == 66 && stats().h2w_queue_depth == 0);
+    assert(atomic_load(&l2.head) == 0xfffffffcu + 30 && stats().h2w_sent == 30 && stats().h2w_queue_depth == 0);
     check_identities();
 }
 
@@ -299,45 +323,97 @@ static void test_link_flap(void) {
     order_n = 0; tdongle_l2_link(false);
     assert(order_n == 3 && order[0] == 0 && order[1] == 2 && order[2] == 3);
     order_n = 0; tdongle_l2_link(true);
-    assert(order_n == 3 && order[0] == 1 && order[1] == 2 && order[2] == 3);
+    assert(order_n == 3 && order[0] == 2 && order[1] == 1 && order[2] == 3);   /* connect: flush the old association's frames, then open the callback */
     assert(stats().link_changes == 7);
 }
 
 static unsigned hook_calls;
-static void drop_link_in_delay(void) { if (++hook_calls == 1) tdongle_l2_link(false); }
-/* A refused transmit is retried for a bounded time at tick granularity, never forever, and only when retrying can help. */
+static void drop_link_in_wait(void) { if (++hook_calls == 1) tdongle_l2_link(false); }
+static void advance_us(int64_t us) { now_us_v += us; }
+/* A refused transmit is retried on the retry timer (not the RTOS tick) until the frame's sojourn limit, never forever, only when retrying can help. */
 static void test_retry(void) {
     uint8_t f[200];
     frame(f, 200, peer, mac, 1);
-    const TickType_t budget = pdMS_TO_TICKS(TDONGLE_L2_TX_RETRY_MS) ? pdMS_TO_TICKS(TDONGLE_L2_TX_RETRY_MS) : 1;
-    /* Refused twice, then taken. */
+    const unsigned limit_us = TDONGLE_L2_SOJOURN_MS * 1000u;
+    /* Refused twice, then taken: two 500 us waits, not two 10 ms ticks. */
     start(); tdongle_l2_link(true);
     tx_script[0] = ESP_ERR_NO_MEM; tx_script[1] = ESP_ERR_NO_MEM; tx_script_n = 2;
-    assert(host_in(f, 200) == ESP_OK && pump() == 1);
-    assert(stats().h2w_sent == 1 && stats().h2w_tx_retries == 2 && delays == 2 && stats().h2w_last_tx_error == ESP_ERR_NO_MEM);
-    /* Always refused: it stops after the budget, counts one failure, and the next frame is not held up behind a second budget. */
+    assert(host_in(f, 200) == ESP_OK);
+    const int64_t t0 = now_us_v;
+    assert(pump() == 1);
+    assert(stats().h2w_sent == 1 && stats().h2w_tx_retries == 2 && waits == 2 && now_us_v - t0 == 2 * TDONGLE_L2_RETRY_US && stats().h2w_last_tx_error == ESP_ERR_NO_MEM);
+    /* Always refused: it stops at the sojourn limit measured from the callback, counts one failure, and the frame behind it gets its own full window. */
     start(); tdongle_l2_link(true);
     tx_default = ESP_ERR_NO_MEM;
-    assert(host_in(f, 200) == ESP_OK && host_in(f, 200) == ESP_OK && pump() == 2);
-    assert(stats().h2w_tx_failed == 2 && stats().h2w_sent == 0);
-    assert(now_ticks == 2 * budget && stats().h2w_tx_retries == 2 * budget && tx_calls == 2 * (budget + 1));
+    assert(host_in(f, 200) == ESP_OK);
+    advance_us(5000);                                  /* it already waited 5 ms in the queue: only 15 ms of retries remain */
+    assert(pump() == 1);
+    assert(stats().h2w_tx_failed == 1 && stats().h2w_tx_retries == (limit_us - 5000) / TDONGLE_L2_RETRY_US && now_us_v - t0 > 0);
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && stats().h2w_tx_failed == 2 && stats().h2w_tx_retries == (limit_us - 5000) / TDONGLE_L2_RETRY_US + limit_us / TDONGLE_L2_RETRY_US);
     /* A final error is not retried. */
     start(); tdongle_l2_link(true);
     tx_default = -1;    /* ESP_FAIL */
-    assert(host_in(f, 200) == ESP_OK && pump() == 1 && tx_calls == 1 && delays == 0 && stats().h2w_tx_failed == 1 && stats().h2w_last_tx_error == -1);
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && tx_calls == 1 && waits == 0 && stats().h2w_tx_failed == 1 && stats().h2w_last_tx_error == -1);
     /* The link drops while the worker waits: the frame is abandoned at once. */
     start(); tdongle_l2_link(true);
-    tx_default = ESP_ERR_NO_MEM; hook_calls = 0; delay_hook = drop_link_in_delay;
+    tx_default = ESP_ERR_NO_MEM; hook_calls = 0; wait_hook = drop_link_in_wait;
     assert(host_in(f, 200) == ESP_OK && pump() == 1 && tx_calls == 2 && stats().h2w_tx_failed == 1);
     check_identities();
-    /* tdongle_l2.h promises the retry stays below the activity hold. */
-    assert((uint64_t)TDONGLE_L2_TX_RETRY_MS * 1000u < TDONGLE_PM_ACTIVITY_HOLD_US);
+    /* The timer cannot be created: the bridge does not start (nothing half built). */
+    memset(&l2, 0, sizeof(l2)); fail_timer = true;
+    tdongle_l2_config_t c = config();
+    assert(tdongle_l2_start(mac, &c) == ESP_ERR_NO_MEM && !l2.slots);
+    fail_timer = false;
 }
 
-/* The retry window is a time, not a count: with a 1 ms tick it is 20 attempts, with the firmware's 10 ms tick it is 2 (+1). */
+/* The standing queue is bounded in time too: a frame older than the sojourn limit when the worker reaches it is dropped unsent. */
+static void test_sojourn(void) {
+    uint8_t f[200];
+    frame(f, 200, peer, mac, 1);
+    start(); tdongle_l2_link(true);
+    for (unsigned i = 0; i < 3; i++) assert(host_in(f, 200) == ESP_OK);
+    advance_us(TDONGLE_L2_SOJOURN_MS * 1000u - 1);       /* just inside the limit: sent */
+    assert(pump() == 3 && stats().h2w_sent == 3 && stats().h2w_sojourn_drop == 0);
+    assert(stats().h2w_wait_us_max == TDONGLE_L2_SOJOURN_MS * 1000u - 1 && stats().h2w_wait_us_sum == 3 * (TDONGLE_L2_SOJOURN_MS * 1000u - 1));
+    for (unsigned i = 0; i < 3; i++) assert(host_in(f, 200) == ESP_OK);
+    advance_us(TDONGLE_L2_SOJOURN_MS * 1000u);           /* at the limit: dropped, counted, never sent */
+    tx_calls = 0;
+    assert(pump() == 3 && tx_calls == 0 && stats().h2w_sojourn_drop == 3);
+    check_identities();
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && stats().h2w_sent == 4);     /* the queue recovers at once */
+    assert(stats().h2w_tx_us_max == 0);                                            /* the stub's call takes no time */
+    check_identities();
+}
+
+/* tdongle_l2_stats reads tail before head: a worker that finishes frames between the loads cannot make the depth negative. */
+static void test_depth_never_wraps(void) {
+    start(); tdongle_l2_link(true);
+    atomic_store(&l2.head, 7); atomic_store(&l2.tail, 7);
+    assert(stats().h2w_queue_depth == 0);
+    atomic_store(&l2.head, 9); atomic_store(&l2.tail, 7);
+    assert(stats().h2w_queue_depth == 2);
+}
+
+static void late_link_down(void) { tdongle_l2_link(false); }
+/* A frame in the RX callback while the association ends passes the link check, is stamped with the NEW generation by the ring, and would
+ * outlive the change: the callback notices the epoch moved and flushes again. */
+static void test_rx_race(void) {
+    uint8_t f[200];
+    start(); tdongle_l2_link(true);
+    frame(f, 200, unicast_dst, peer, 1);
+    const unsigned flushes_before = flushes;
+    ring_hook = late_link_down;                          /* the event task runs inside the ring send */
+    assert(wifi_in(f, 200) == ESP_OK);
+    assert(stats().w2h_raced == 1 && stats().w2h_forwarded == 1 && flushes == flushes_before + 2);   /* the change's own flush, and the callback's */
+    wifi_in(f, 200);                                     /* link is down now: counted, no race */
+    assert(stats().w2h_raced == 1 && stats().w2h_link_down == 1);
+    check_identities();
+}
+
 static void test_tick_scale(void) {
-    printf("  retry budget at a %d ms tick: %u ticks\n", TEST_TICK_MS, (unsigned)pdMS_TO_TICKS(TDONGLE_L2_TX_RETRY_MS));
-    assert(TEST_TICK_MS == 1 ? pdMS_TO_TICKS(TDONGLE_L2_TX_RETRY_MS) == 20 : pdMS_TO_TICKS(TDONGLE_L2_TX_RETRY_MS) == 2);
+    printf("  retry period %u us, sojourn limit %u ms, queue limit %u of %u slots (tick %d ms: unused by the worker)\n", TDONGLE_L2_RETRY_US, TDONGLE_L2_SOJOURN_MS,
+           TDONGLE_L2_HOST_QUEUE_LIMIT, TDONGLE_L2_HOST_SLOTS, TEST_TICK_MS);
+    assert(sizeof(host_slot_t) <= TDONGLE_L2_SLOT_BYTES);
 }
 
 int main(void) {
@@ -348,6 +424,9 @@ int main(void) {
     test_counter_wrap();
     test_link_flap();
     test_retry();
+    test_sojourn();
+    test_depth_never_wraps();
+    test_rx_race();
     test_tick_scale();
     free(l2.slots);
     puts("Bridge l2: filters, both directions, every drop counted once, the driver buffer freed once, queue order and wrap, stale links, bounded retry, clock notes");

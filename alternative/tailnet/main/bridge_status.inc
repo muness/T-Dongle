@@ -2,13 +2,13 @@
  * Included by gateway_main.c after wifi_pins.inc. One visitor lists them, two renderers print them, so the serial `status` lines and the
  * diagnostics `bridge` report cannot drift apart:
  *   serial `status` (bridge mode)  new lines only, one per section: bridge_link, bridge_to_host, bridge_to_wifi, bridge_usb_ring,
- *                                  bridge_wifi_tx. Android parses the first status lines with end-anchored patterns, so nothing is ever
+ *                                  bridge_timing, bridge_wifi_tx. Android parses the first status lines with end-anchored patterns, so nothing is ever
  *                                  appended to a line that existed before (tools/check-android-status.py holds that line);
  *   `bridge` (diagnostics build)   one JSON line, keys "<section>_<name>".
  * Identities that hold at rest (tests/test_bridge_path.c checks them on the real code):
  *   to_host.frames  = forwarded + invalid + own_mac + link_down + usb_not_ready + ring_full
  *   to_wifi.frames  = queued + invalid + foreign_mac + link_down + queue_full
- *   to_wifi.queued  = sent + stale + link_down_queued + tx_failed + queue_depth
+ *   to_wifi.queued  = sent + stale + sojourn_drop + link_down_queued + tx_failed + queue_depth
  *   wifi_tx.charged = done + aborted + flushed + stale + inflight (wifi_pin_budget.h) */
 typedef void (*bridge_emit_fn)(void *ctx, const char *section, const char *name, int64_t value);
 static void bridge_visit(bridge_emit_fn emit, void *ctx) {
@@ -27,6 +27,7 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
     E("to_host", "link_down", l2.w2h_link_down);
     E("to_host", "usb_not_ready", l2.w2h_usb_not_ready);
     E("to_host", "ring_full", l2.w2h_ring_full);
+    E("to_host", "raced", l2.w2h_raced);
     E("to_wifi", "frames", l2.h2w_frames);
     E("to_wifi", "queued", l2.h2w_queued);
     E("to_wifi", "invalid", l2.h2w_invalid);
@@ -35,6 +36,7 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
     E("to_wifi", "queue_full", l2.h2w_queue_full);
     E("to_wifi", "sent", l2.h2w_sent);
     E("to_wifi", "stale", l2.h2w_stale);
+    E("to_wifi", "sojourn_drop", l2.h2w_sojourn_drop);
     E("to_wifi", "link_down_queued", l2.h2w_link_down_queued);
     E("to_wifi", "tx_failed", l2.h2w_tx_failed);
     E("to_wifi", "tx_retries", l2.h2w_tx_retries);
@@ -52,6 +54,20 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
     E("usb_ring", "shrink_events", ring.shrink_events);
     E("usb_ring", "grow_denied_heap", ring.grow_denied_heap);
     E("usb_ring", "grow_denied_largest", ring.grow_denied_largest);
+    E("usb_ring", "ring_max_bytes", ring.max_bytes);
+    /* Where the time goes, in microseconds (sums wrap at 71 min: take two readings). Wi-Fi to host: the ring's cold start is the wait of the first frame
+     * of a burst, commit to NTB (relay wake + deferral + TinyUSB task). Host to Wi-Fi: queueing and the transmit call. pm_note is the cost of the
+     * clock raise inside the callback. */
+    E("timing", "cold_starts", ring.cold_starts);
+    E("timing", "cold_us_sum", ring.cold_us_sum);
+    E("timing", "cold_us_max", ring.cold_us_max);
+    E("timing", "pm_notes", l2.pm_notes);
+    E("timing", "pm_note_us_sum", l2.pm_note_us_sum);
+    E("timing", "pm_note_us_max", l2.pm_note_us_max);
+    E("timing", "wait_us_sum", l2.h2w_wait_us_sum);
+    E("timing", "wait_us_max", l2.h2w_wait_us_max);
+    E("timing", "tx_us_sum", l2.h2w_tx_us_sum);
+    E("timing", "tx_us_max", l2.h2w_tx_us_max);
     E("wifi_tx", "installed", wifi_pins_installed);
     E("wifi_tx", "tx_done_cb", wifi_pins_tx_done_ok);
     E("wifi_tx", "charged", atomic_load(&wifi_pins.tx_charged));
