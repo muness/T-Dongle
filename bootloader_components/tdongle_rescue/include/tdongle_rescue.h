@@ -14,5 +14,7 @@
 #define TDONGLE_RESCUE_ARMED   0xA5u
 #define TDONGLE_RESCUE_HEALTHY 0x0Cu
 #define TDONGLE_RESCUE_LIMIT   2u
+// The RTC watchdog the bootloader leaves armed for the app start (reset the digital core only; the app re-arms it with its own timeout).
+#define TDONGLE_RESCUE_WDT_MS  30000u
 // word = MAGIC << 16 | state << 8 | consecutive unhealthy boots
 #define TDONGLE_RESCUE_WORD(state, count) ((TDONGLE_RESCUE_MAGIC << 16) | ((state) << 8) | ((count) & 0xFFu))
