@@ -1548,6 +1548,7 @@ dependencies = [
 name = "tdongle-nvs-write"
 version = "0.3.0-dev"
 dependencies = [
+ "embedded-storage",
  "proptest",
  "tdongle-nvs-format",
  "tdongle-nvs-read",
