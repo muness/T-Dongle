@@ -12,7 +12,7 @@ static void gateway_startup_sequence(void) {
      * Wi-Fi settings and saved identities remain untouched. */
     if(!gateway_boot_recovery()) {
         if(setup_active) {
-            /* The setup access point (ADR 0023) and nothing else: no bridge, no tailnet runtime, no manager. */
+            /* The setup access point (ADR 0024) and nothing else: no bridge, no tailnet runtime, no manager. */
             if(settings && network)start_step(BOOT_SETUP,start_setup);
         } else {
             bool directory=gateway_tailnet_mode() && settings && start_step(BOOT_DIRECTORY,start_directory);

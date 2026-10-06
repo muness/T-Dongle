@@ -33,7 +33,7 @@ int main(void) {
     tailnet=false;memset(seen,0,sizeof(seen));fail_at=0;gateway_startup_sequence();assert(!seen[BOOT_HTTP] && !seen[BOOT_DNS] && !seen[BOOT_DIRECTORY] && !seen[BOOT_ROUTES] && seen[BOOT_WIFI] && seen[BOOT_MANAGER]);tailnet=true;
     memset(seen,0,sizeof(seen));sequence=complete=failed=usb_alive=0;recovery=true;fail_at=0;
     gateway_startup_sequence();assert(seen[BOOT_HTTP] && !seen[BOOT_DIRECTORY] && !seen[BOOT_WIFI] && !seen[BOOT_MANAGER]);
-    /* A setup boot (ADR 0023): the HTTP server, the display and the access point, and none of the bridge, tailnet, DNS or manager stages,
+    /* A setup boot (ADR 0024): the HTTP server, the display and the access point, and none of the bridge, tailnet, DNS or manager stages,
      * in either mode, whatever mode was saved. */
     recovery=false;
     for(unsigned mode=0;mode<2;mode++){

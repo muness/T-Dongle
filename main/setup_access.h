@@ -19,15 +19,25 @@ typedef enum { ACTION_MODE, ACTION_WIFI, ACTION_WIFI_REMOVE, ACTION_ADD, ACTION_
 
 enum { ACCESS_TOKEN_LENGTH = 32 };
 
-/* peer_ipv4 is the client's IPv4 address in host byte order (an IPv4-mapped IPv6 peer is converted by the caller);
+/* local_ipv4 is the address the client connected TO (getsockname), host byte order. A client of a subnet must have reached the dongle's own
+ * address on that subnet (192.168.77.1 for USB, 192.168.4.1 for the setup network): a packet from the open access point that forges a USB
+ * source address and addresses another local interface (lwIP accepts a destination on any interface) is refused. Host and Origin are
+ * attacker-chosen and prove nothing alone.
+ * peer_ipv4 is the client's IPv4 address in host byte order (an IPv4-mapped IPv6 peer is converted by the caller);
  * peer_known is false when the address could not be read. host and origin are the header values, origin NULL when absent. */
-access_origin access_classify(bool peer_known, uint32_t peer_ipv4, bool setup_active, const char *host, const char *origin);
+access_origin access_classify(bool peer_known, uint32_t peer_ipv4, bool local_known, uint32_t local_ipv4, bool setup_active, const char *host, const char *origin);
 /* A client on the setup access point's subnet, whatever it asked for: the handler uses it to send captive-portal probes (any Host
  * name the DNS hijack made it use) to http://192.168.4.1/ instead of answering 403. */
 bool access_in_setup_subnet(uint32_t peer_ipv4);
 bool access_endpoint_allowed(access_origin origin, access_endpoint endpoint);
 bool access_action_allowed(access_origin origin, access_action action);
 access_action access_action_parse(const char *name);
+/* What a `wifi` save may do. The setup network is open, so whoever joins it is untrusted: it may ADD a network (default name and priority, the owner
+ * adjusts those over USB, serial or the button) but not set a priority or name, and not replace a saved network (a new password or SSID in an
+ * occupied slot, or a network that is already saved). It can still delete one: the page needs that, and a delete leaves the owner with a smaller
+ * list, not a poisoned one (ADR 0024). USB keeps everything. */
+bool access_may_set_metadata(access_origin origin);
+bool access_may_replace(access_origin origin);
 /* Setup-AP requests carry a per-boot random token (X-Setup-Token). Constant time over the expected length; an empty expected
  * token matches nothing. */
 bool access_token_equal(const char *supplied, const char *expected);

@@ -73,8 +73,11 @@ static bool wifi_load_profiles(void){
 typedef struct {typeof(wifi_saved) list;wifi_meta_set meta;wifi_meta_blob next,previous;} wifi_save_work;
 /* Save, replace or remove one network, with its name and priority (name NULL or empty, priority < 0: keep what it has, or the defaults for a
  * new or replaced network). slot >= 0 targets that slot (it may be one past the end to append); -1 finds the network by SSID. The password
- * and the metadata are written together: metadata first, because it is keyed by SSID and harmless without the list change, then the
- * list, then one commit. Either everything changes or nothing does.
+ * and the metadata are TWO flash writes (nvs_set_blob writes at once; the one commit does not make them one transaction): metadata first, then
+ * the list, then the commit. A failed write is rolled back (the previous metadata is put back and nothing in RAM changes). A power cut between
+ * the two writes leaves the new metadata beside the old list. Because the metadata is keyed by SSID that cannot attach a priority to another
+ * network: an entry for a network not in the list is ignored, and a network whose entry is older keeps its old name, priority or preference, or
+ * gets the defaults. The worst outcome is a stale priority or preference on the SAME network, fixed by the next save.
  *
  * Replacing a network in the preferred slot keeps that slot preferred (v0.1.1: the preferred slot was a slot, and "change my main network" is
  * the usual reason to replace it); removing it clears the preference. */
@@ -174,7 +177,8 @@ static bool display_save(const ui_settings *s) {
  * One AP record at a time bounds our SRAM, regardless of nearby AP count. */
 /* The station configuration for one saved network, the same for every way of joining it (the worker, `use N`).
  *  - scan every channel and join the strongest AP of the SSID, not the first one the fast scan finds (v0.1.1);
- *  - WPA3 (SAE both methods) and protected management frames on, and an AP weaker than WPA2 refused for a network with a password (v0.1.1);
+ *  - bridge mode only (wifi_v011_station_profile): WPA3 (SAE both methods) and protected management frames on, and an AP weaker than WPA2 refused for
+ *    a network with a password (v0.1.1); tailnet mode keeps the #44 configuration;
  *  - 802.11k neighbour reports and 802.11v BSS transition requests, so the network can steer the dongle to a better AP: the roaming assist
  *    of v0.1.1. Self-initiated roaming stays off (an RSSI-only rule ping-ponged between two similar access points). Per mode, see
  *    wifi_roaming_assist() in gateway_main.c. */
@@ -182,8 +186,10 @@ static void wifi_fill_station(wifi_config_t *c,const wifi_profile *p){
     memset(c,0,sizeof(*c));
     memcpy(c->sta.ssid,p->ssid,strnlen(p->ssid,32));memcpy(c->sta.password,p->password,strnlen(p->password,63));
     c->sta.scan_method=WIFI_ALL_CHANNEL_SCAN;c->sta.sort_method=WIFI_CONNECT_AP_BY_SIGNAL;
-    c->sta.sae_pwe_h2e=WPA3_SAE_PWE_BOTH;c->sta.pmf_cfg.capable=true;
-    c->sta.threshold.authmode=p->password[0]?WIFI_AUTH_WPA2_PSK:WIFI_AUTH_OPEN;
+    if(wifi_v011_station_profile()){   /* the bridge only: the tailnet gateway keeps the station configuration it was measured with */
+        c->sta.sae_pwe_h2e=WPA3_SAE_PWE_BOTH;c->sta.pmf_cfg.capable=true;
+        c->sta.threshold.authmode=p->password[0]?WIFI_AUTH_WPA2_PSK:WIFI_AUTH_OPEN;
+    }
     c->sta.rm_enabled=c->sta.btm_enabled=wifi_roaming_assist()?1:0;
 }
 static void wifi_maintain(void){

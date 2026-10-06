@@ -274,6 +274,8 @@ static void wifi_radio_profile(void) {
 static bool wifi_roaming_assist(void) {
     return !gateway_tailnet_mode() || TAILNET_ROAMING_ASSIST;
 }
+/* The v0.1.1 station profile (WPA3 SAE, PMF, WPA2 threshold) is the bridge's; the tailnet gateway keeps the configuration #44 shipped and measured. */
+static bool wifi_v011_station_profile(void) { return !gateway_tailnet_mode(); }
 #include "wifi_profiles.inc"
 #include "wifi_link.inc"
 #include "wifi_pins.inc"
@@ -435,7 +437,7 @@ static void admission_failed(membership_t *m) {
 #endif
 static bool start_member_holding_token(membership_t *m);
 static void start_member(membership_t *m) {
-    /* Never in a setup boot: the access point owns the radio and the heap, and no tailnet's admission accounts for it (ADR 0023). */
+    /* Never in a setup boot: the access point owns the radio and the heap, and no tailnet's admission accounts for it (ADR 0024). */
     if (setup_active || !gateway_tailnet_mode() || !m->enabled || m->client || !online)
         return;
     if (!route_storage_ok) {
@@ -837,14 +839,20 @@ static bool request_peer(httpd_req_t *req, uint32_t *ipv4) {
     return getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&peer, &n) == 0 && peer_ipv4((const struct sockaddr *)&peer, n, ipv4);
 }
 /* Who is asking (setup_access.h): the USB host, a phone on the setup access point (only during a setup boot), or nobody we serve. */
+static bool request_local(httpd_req_t *req, uint32_t *ipv4) {
+    struct sockaddr_storage local = {0};
+    socklen_t n = sizeof(local);
+    return getsockname(httpd_req_to_sockfd(req), (struct sockaddr *)&local, &n) == 0 && peer_ipv4((const struct sockaddr *)&local, n, ipv4);
+}
 static access_origin request_origin(httpd_req_t *req) {
-    uint32_t ipv4 = 0;
+    uint32_t ipv4 = 0, local = 0;
     bool known = request_peer(req, &ipv4);
+    bool local_known = request_local(req, &local);
     char host[64], origin[96];
     bool have_host = httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) == ESP_OK;
     bool have_origin = httpd_req_get_hdr_value_len(req, "Origin") != 0;
     if (have_origin && httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) return ACCESS_DENIED;
-    return access_classify(known, ipv4, setup_active, have_host ? host : NULL, have_origin ? origin : NULL);
+    return access_classify(known, ipv4, local_known, local, setup_active, have_host ? host : NULL, have_origin ? origin : NULL);
 }
 /* USB clients only: the status, diagnostics and recovery endpoints, which never answer the setup access point. */
 static bool local_request(httpd_req_t *req) { return request_origin(req) == ACCESS_USB; }
@@ -1317,6 +1325,10 @@ static esp_err_t status(httpd_req_t *req) {
         return ESP_FAIL;
     return httpd_resp_send_chunk(req, NULL, 0);
 }
+static bool wifi_ssid_saved(const char *ssid) {
+    for (unsigned i = 0; i < wifi_saved.count; i++) if (!strcmp(wifi_saved.profiles[i].ssid, ssid)) return true;
+    return false;
+}
 static esp_err_t command(httpd_req_t *req) {
     access_origin origin;
     if (!endpoint_allowed(req, EP_COMMAND, &origin)) return ESP_OK;
@@ -1365,6 +1377,7 @@ static esp_err_t command(httpd_req_t *req) {
                        cJSON_GetStringValue(cJSON_GetObjectItem(j, "password")),
                    *name = cJSON_GetStringValue(cJSON_GetObjectItem(j, "name"));
         cJSON *slot_item = cJSON_GetObjectItem(j, "slot"), *priority_item = cJSON_GetObjectItem(j, "priority");
+        if (!access_may_set_metadata(origin)) { name = NULL; priority_item = NULL; }   /* the open setup network cannot set a name or a priority */
         int slot = -1, priority = -1;   /* optional: the network's slot (1 to 8) and priority (0 to 100) */
         bool extras_ok = true;
         if (slot_item) { extras_ok = cJSON_IsNumber(slot_item) && slot_item->valuedouble == (int)slot_item->valuedouble && slot_item->valueint >= 1 && slot_item->valueint <= WIFI_PROFILE_LIMIT; if (extras_ok) slot = slot_item->valueint - 1; }
@@ -1375,6 +1388,8 @@ static esp_err_t command(httpd_req_t *req) {
             error = "Enter a valid Wi-Fi name and password";
         else if (origin == ACCESS_SETUP_AP && password[0] && strlen(password) < 8)
             error = "Passwords need at least 8 characters. Leave it empty only for an open network.";
+        else if (!access_may_replace(origin) && (wifi_ssid_saved(ssid) || (slot >= 0 && slot < (int)wifi_saved.count)))
+            error = "That network is already saved. Delete it first to change it: replacing a saved network is not available on the setup network.";
         else if (!extras_ok)
             error = "Use a name of up to 24 plain characters, a slot from 1 to 8 and a priority from 0 to 100";
         else {
@@ -1496,9 +1511,12 @@ static esp_err_t wifi_saved_list(httpd_req_t *req) {
     if (ok) list = NULL;
     for (unsigned i = 0; ok && i < wifi_saved.count; i++) {
         cJSON *network = cJSON_CreateObject();
-        ok = network && cJSON_AddNumberToObject(network, "slot", i + 1) && cJSON_AddStringToObject(network, "name", wifi_meta.slot[i].name) &&
-             cJSON_AddStringToObject(network, "ssid", wifi_saved.profiles[i].ssid) && cJSON_AddNumberToObject(network, "priority", wifi_meta.slot[i].priority) &&
-             cJSON_AddBoolToObject(network, "preferred", wifi_meta.preferred == (int)i) &&
+        /* The open setup network gets what its page needs to list and delete (slot and SSID, the name shown is the SSID) and no more: no priority, no
+         * preference, no name. The SSIDs are the trade: without them the page cannot say what it is deleting (ADR 0024). */
+        bool full = origin == ACCESS_USB;
+        ok = network && cJSON_AddNumberToObject(network, "slot", i + 1) && cJSON_AddStringToObject(network, "name", full ? wifi_meta.slot[i].name : wifi_saved.profiles[i].ssid) &&
+             cJSON_AddStringToObject(network, "ssid", wifi_saved.profiles[i].ssid) &&
+             (!full || (cJSON_AddNumberToObject(network, "priority", wifi_meta.slot[i].priority) && cJSON_AddBoolToObject(network, "preferred", wifi_meta.preferred == (int)i))) &&
              cJSON_AddItemToArray(cJSON_GetObjectItem(response, "networks"), network);
         if (!ok) cJSON_Delete(network);
     }
@@ -1571,7 +1589,9 @@ static esp_err_t start_usb(void) {
 static esp_err_t start_network(void) {
     START_TRY(esp_netif_init());
     START_TRY(esp_event_loop_create_default());
-    if(!gateway_tailnet_mode())return ESP_OK;
+    /* No USB netif in a setup boot, whatever the mode: with CONFIG_LWIP_IP_FORWARD lwIP would forward between the open access point and the USB
+     * subnet, handing the host on the USB side to anyone who joined the setup network (ADR 0024). Setup is configured over the access point only. */
+    if(!gateway_tailnet_mode() || setup_active)return ESP_OK;
     esp_netif_ip_info_t ip = {0};
     IP4_ADDR(&ip.ip, 192, 168, 77, 1);
     ip.gw = ip.ip;
@@ -1745,7 +1765,7 @@ void app_main(void) {
     setup_boot_decision boot=setup_boot_early(networks_saved,store_ok);
     setup_active=boot.setup;setup_preselect=boot.preselect;
     /* The session clock starts here, not when the access point comes up: if that never happens the dongle still leaves setup (setup_session_should_end). */
-    if(setup_active)setup_session_start(&setup_clock,(uint32_t)(esp_timer_get_time()/1000));
+    if(setup_active){setup_session_start(&setup_clock,(uint32_t)(esp_timer_get_time()/1000));setup_failsafe_arm();}
 
     /* Frequency scaling for both modes (ADR 0016, 0023): 240 MHz while forwarding work is pending, 80 MHz when idle. The tailnet's tasks
      * hold CPU-max locks while they have work; the transparent bridge notes forwarding activity in its Wi-Fi and USB callbacks and its

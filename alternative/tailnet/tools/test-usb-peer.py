@@ -12,7 +12,8 @@ tests = r'''
 static access_origin classify(const struct sockaddr *a, socklen_t n, bool setup, const char *host) {
     uint32_t ip = 0;
     bool known = peer_ipv4(a, n, &ip);
-    return access_classify(known, ip, setup, host, NULL);
+    uint32_t local = (ip & 0xffffff00u) == 0xc0a80400u ? 0xc0a80401u : 0xc0a84d01u;
+    return access_classify(known, ip, known, local, setup, host, NULL);
 }
 int main(void) {
     struct sockaddr_in a = {0};

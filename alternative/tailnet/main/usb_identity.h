@@ -20,7 +20,7 @@ static inline void gateway_usb_macs(const uint8_t station[6], uint8_t device[6],
  * already knows the adapter keeps its service name and its position in the service order across the upgrade. In tailnet gateway
  * mode it is "T-Dongle-S3 tailnet gateway" as before: that mode has its own USB MAC pair (gateway_usb_macs) and its own subnet, so
  * a host sees it as a different interface anyway, and the longer name says what it is. Manufacturer and serial (the station MAC)
- * are the same in both modes. Documented in docs/REFERENCE.md and ADR 0023. */
+ * are the same in both modes. Documented in docs/REFERENCE.md and ADR 0024. */
 static inline const char *gateway_usb_product(bool tailnet_mode) {
     return tailnet_mode ? "T-Dongle-S3 tailnet gateway" : "T-Dongle-S3 NCM";
 }

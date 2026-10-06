@@ -2,7 +2,7 @@
 
 These files are the original standalone bridge firmware (setup access point with captive portal, LVGL status pages, APA102 light, button menu, Wi-Fi trial and factory reset). **They are not built.** The shipped firmware is the unified image (`main/` plus `alternative/tailnet/main/`). They are kept as the reference for how each feature worked in v0.1.1; git history and tag `v0.1.1` keep them regardless.
 
-Where each part went in the unified image (the change that restored them is described in docs/REFERENCE.md and ADR 0023):
+Where each part went in the unified image (the change that restored them is described in docs/REFERENCE.md and ADR 0024):
 
 | v0.1.x | Unified |
 |---|---|

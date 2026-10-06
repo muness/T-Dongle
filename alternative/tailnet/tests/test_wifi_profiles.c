@@ -202,7 +202,9 @@ static void station_configuration(void){
  assert(c.sta.sae_pwe_h2e==WPA3_SAE_PWE_BOTH && c.sta.pmf_cfg.capable && c.sta.threshold.authmode==WIFI_AUTH_WPA2_PSK);   /* WPA3 and PMF, and no downgrade below WPA2 */
  assert(c.sta.rm_enabled==1 && c.sta.btm_enabled==1);            /* 802.11k and 802.11v: the roaming assist */
  wifi_fill_station(&c,&open);assert(c.sta.threshold.authmode==WIFI_AUTH_OPEN && !c.sta.password[0]);
- roaming=false;wifi_fill_station(&c,&secure);assert(c.sta.rm_enabled==0 && c.sta.btm_enabled==0 && c.sta.pmf_cfg.capable);   /* the tailnet gateway, by default */
+ roaming=false;wifi_fill_station(&c,&secure);assert(c.sta.rm_enabled==0 && c.sta.btm_enabled==0 && c.sta.pmf_cfg.capable);   /* roaming off, v0.1.1 profile still on (bridge with the option off) */
+ station_v011=false;wifi_fill_station(&c,&secure);assert(!c.sta.sae_pwe_h2e && !c.sta.pmf_cfg.capable && c.sta.threshold.authmode==WIFI_AUTH_OPEN && c.sta.scan_method==WIFI_ALL_CHANNEL_SCAN);   /* tailnet gateway: #44's configuration */
+ wifi_fill_station(&c,&open);assert(c.sta.threshold.authmode==WIFI_AUTH_OPEN);station_v011=true;
  /* A 32 character SSID and a 63 character password fill their fields exactly, without a terminator. */
  wifi_profile widest;memset(&widest,0,sizeof(widest));memset(widest.ssid,'s',32);memset(widest.password,'p',63);
  wifi_fill_station(&c,&widest);assert(!memcmp(c.sta.ssid,widest.ssid,32) && !memcmp(c.sta.password,widest.password,63) && !c.sta.password[63]);
@@ -240,6 +242,6 @@ int main(void){
  original_cases();
  upgrade_is_lossless();in_between_build_keeps_priorities();use_after_upgrade_survives_a_restart();replacing_the_preferred_network();the_network_in_use_is_remembered_across_a_save();profile_blob_format_is_frozen();saving_with_metadata();saves_are_all_or_nothing();
  preferred_and_priority_choose_the_network();station_configuration();factory_reset();early_setup_probe_matches_the_loader();
- puts("Wi-Fi profiles: v0.1.1 import is lossless, metadata is keyed by SSID and written atomically, priority/preferred choose the network, factory reset forgets everything v0.1.1 stored");
+ puts("Wi-Fi profiles: v0.1.1 import is lossless, metadata is keyed by SSID and written with rollback (two writes, never one transaction), priority/preferred choose the network, factory reset forgets everything v0.1.1 stored");
  return 0;
 }

@@ -6,7 +6,7 @@ menu "T-Dongle-S3 device"
    The setup access point (TDongle-XXXXXX, shown on the screen) has no password, so anyone in range can open the setup page
    while setup is running (at most 10 minutes) and can add or delete saved Wi-Fi networks. This is the v0.1.x behaviour and an
    explicit owner decision: a phone joins it with one tap. The page can only change Wi-Fi networks; tailnets, the routing mode and
-   diagnostics are never served on it. Turn it off to protect the access point with a random WPA2 password that the screen shows.
+   diagnostics are never served on it, there is no route from it to the USB host, and it can add and delete saved networks but not rename, re-prioritise or replace them. Anyone in range can still plant a network or delete one for up to 10 minutes, and the Wi-Fi password is typed over an open link: see ADR 0024. Turn it off to protect the access point with a random WPA2 password that the screen shows.
  config TDONGLE_WIFI_ROAMING_TAILNET
   bool "802.11k/v roaming assist in tailnet gateway mode"
   default n

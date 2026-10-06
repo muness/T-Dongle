@@ -10,6 +10,7 @@
 #include "../../../main/traffic.h"
 #define GATEWAY_VERSION "9.9.9-test"
 #define vTaskDelay(x) ((void)(x))
+#define uxTaskGetStackHighWaterMark(x) 1234u
 static unsigned restarts;static setup_request restart_request;static unsigned restart_slot;
 static bool setup_active,recovery,tailnet;static unsigned setup_preselect;static char setup_ap_name[16]="TDongle-AB0CF9";static setup_session setup_clock;
 static void setup_restart(setup_request r,unsigned slot){restarts++;restart_request=r;restart_slot=slot;}   /* the firmware's does not return */
@@ -131,7 +132,7 @@ static void status_lines(void){
  assert(says("wifi_prefs saved=2 preferred=2 priorities=80,30 roaming_assist=1 roams=2\r\n"));
  assert(says("display brightness=60 rotation=0 dim_seconds=60 page=2\r\n"));
  assert(says("setup active=0 ap=- seconds_left=0\r\n"));
- assert(says("traffic down_bytes=") && says("down_kbps=1234 up_kbps=56 usb_resets=3\r\n"));
+ assert(says("traffic down_bytes=") && says("down_kbps=1234 up_kbps=56 usb_resets=3 control_stack_free_bytes=1234\r\n"));
  tailnet=true;roaming=false;assert(run("status") && !strncmp(out,"mode=tailnet",12) && says("roaming_assist=0"));tailnet=false;roaming=true;
  setup_active=true;setup_session_start(&setup_clock,0);test_time=100000000;
  assert(run("status") && !strncmp(out,"mode=setup trial=0",18) && says("setup active=1 ap=TDongle-AB0CF9 seconds_left=")); /* clock past the session */

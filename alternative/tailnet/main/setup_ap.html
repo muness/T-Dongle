@@ -68,15 +68,14 @@ small{display:block;margin-top:1.2em;color:var(--mute);font-size:.8em}
 <label>Wi-Fi network name (SSID)<span class=hint>Exactly as it appears, including capitals. 2.4 GHz only.</span><input name=ssid maxlength=32 required autocapitalize=off autocorrect=off spellcheck=false></label>
 <label>Password<span class=hint>Leave empty for an open network. 8 to 63 characters.</span><input id=pw name=password type=password maxlength=63 autocomplete=new-password autocapitalize=off autocorrect=off spellcheck=false></label>
 <label class=show><input type=checkbox id=show>Show password</label>
-<details><summary>Advanced: name, slot, priority</summary>
-<label>Name<span class=hint>Shown on the dongle screen. Defaults to the network name.</span><input name=name maxlength=24></label>
-<div class=row><label>Slot (1 to 8)<input name=slot type=number inputmode=numeric min=1 max=8 value=1 required></label><label>Priority (0 to 100)<input name=priority type=number inputmode=numeric min=0 max=100 value=50 required></label></div>
+<details><summary>Advanced: slot</summary>
+<div class=row><label>Slot (1 to 8)<input name=slot type=number inputmode=numeric min=1 max=8 value=1 required></label></div>
 </details>
 <button id=save>Save network</button>
 <button id=cancel type=button class=quiet>Cancel setup</button>
 </form>
 <div id=result role=status aria-live=polite></div>
-<small>A network is saved on the dongle as soon as you tap Save, and saving into a slot that is already used replaces that network. Nothing here checks that the network reaches the Internet. Setup closes by itself after 10 minutes.</small>
+<small>A network is saved on the dongle as soon as you tap Save. This page can add and delete networks; names, priorities and changing a saved network are done from the dongle's button menu, USB or the app. Nothing here checks that the network reaches the Internet. Setup closes by itself after 10 minutes.</small>
 </main>
 <script>const token='@@TOKEN@@';
 const $=id=>document.getElementById(id),res=$('result'),f=$('f');
@@ -139,12 +138,10 @@ const lights=[['#3a8dff','Breathing blue: setup is open'],['#ffb020','Amber, bre
 f.onsubmit=async e=>{
  e.preventDefault();
  const d=Object.fromEntries(new FormData(f));
- d.slot=Number(d.slot);d.priority=Number(d.priority);d.action='wifi';
- if(!d.name)d.name=d.ssid.slice(0,24);
- // Saving over a network that is already saved (a new password) goes to ITS slot, unless the slot was chosen by hand: the dongle keeps one entry per network.
- const known=savedNets.find(n=>n.ssid===d.ssid);if(known&&!slotTouched)d.slot=known.slot;
+ d.slot=Number(d.slot);d.action='wifi';
+ if(savedNets.some(n=>n.ssid===d.ssid)){say('That network is already saved. Delete it below first if you want to change its password.','msg err');return}
  if(d.password&&d.password.length<8){say('Passwords need at least 8 characters. Leave it empty only for an open network.','msg err');$('pw').focus();return}
- if(!/^[ -~]*$/.test(d.ssid+d.name+d.password)){say('Only plain ASCII letters, numbers and symbols are supported for now.','msg err');return}
+ if(!/^[ -~]*$/.test(d.ssid+d.password)){say('Only plain ASCII letters, numbers and symbols are supported for now.','msg err');return}
  $('save').disabled=true;$('save').textContent='Saving...';
  const r=await send(d);
  $('save').disabled=false;$('save').textContent='Save network';
@@ -152,7 +149,7 @@ f.onsubmit=async e=>{
  if(r.ok===null){say('The dongle did not answer. Check you are still joined to its Wi-Fi and try again.','msg err');return}
  f.password.value='';
  say('Saved '+d.ssid+'. Add another network, or tap Done.','msg');
- f.ssid.value='';f.name.value='';slotTouched=false;
+ f.ssid.value='';slotTouched=false;
  setTimeout(loadSaved,600);
 };
 $('cancel').onclick=async()=>{

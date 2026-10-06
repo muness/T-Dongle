@@ -5,7 +5,7 @@
  * Setup is entered by RESTARTING the dongle (button menu, serial `setup`, the first boot with no saved network), exactly as in
  * v0.1.1, never by starting an access point inside a running dongle. A setup boot runs no Wi-Fi bridge and no tailnet memberships:
  * the radio, the heap and the HTTP server belong to setup alone for at most SETUP_SESSION_MS, then the dongle restarts into its
- * normal mode. That is what keeps the access point out of the tailnet heap budget (ADR 0023): the two never coexist, so admission
+ * normal mode. That is what keeps the access point out of the tailnet heap budget (ADR 0024): the two never coexist, so admission
  * (ml_admission.h, ml_heap_budget.h) never has to account for the access point.
  *
  * The request survives the restart in three RTC words (RTC_NOINIT: not cleared by a software reset, indeterminate after a power
@@ -37,6 +37,9 @@ uint32_t setup_session_seconds_left(const setup_session *s, uint32_t now_ms);
 /* Time to restart into normal mode? The session is over, or the access point is still not up SETUP_AP_GRACE_MS after the boot began: a setup
  * boot whose access point failed to start (no memory, no radio, the settings or the network layer failed) serves nobody, so it must not sit idle
  * for the whole session. The session clock starts when the boot decides to run setup, not when the access point comes up. */
+/* The independent failsafe (an esp_timer armed in app_main, which does not depend on any task or on USB/console init having worked): how many
+ * milliseconds until the next moment setup could have to end, or 0 when it must end now. The timer re-arms itself with this until it returns 0. */
+uint32_t setup_session_failsafe_delay_ms(const setup_session *s, uint32_t now_ms, bool access_point_up);
 bool setup_session_should_end(const setup_session *s, uint32_t now_ms, bool access_point_up);
 
 /* Access point name: TDongle-XXXXXX from the last three bytes of the station MAC (v0.1.1). out holds at least 15 bytes. */

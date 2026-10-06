@@ -1,4 +1,4 @@
-/* The setup access point (ADR 0023), compiled into gateway_main.c after the saved-network store.
+/* The setup access point (ADR 0024), compiled into gateway_main.c after the saved-network store.
  *
  * A setup boot is a normal boot that starts none of the dongle's services: no Wi-Fi bridge, no tailnet memberships, no DNS or NAT. It
  * starts the one HTTP server (start_http), the display, and this: an OPEN access point TDongle-XXXXXX on 192.168.4.1 with a DHCP server
@@ -34,6 +34,21 @@ static setup_boot_decision setup_boot_early(bool networks_saved, bool store_ok) 
 static void setup_restart(setup_request request, unsigned preselect) {
     setup_boot_request(&setup_rtc[0], &setup_rtc[1], &setup_rtc[2], request, preselect);
     esp_restart();
+}
+/* The failsafe: an esp_timer armed in app_main whenever this boot is setup. It forces the restart even if the control task never ran (USB or console
+ * init failed), re-arming itself with setup_session_failsafe_delay_ms until the session is over or the access point proved not to come up. The
+ * control task's check (gateway_display_tick) is the fast path; this is the one that cannot be starved. */
+static esp_timer_handle_t setup_failsafe;
+static void setup_failsafe_fire(void *arg) {
+    if (!setup_active) return;   /* recovery cancelled it */
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t next = setup_session_failsafe_delay_ms(&setup_clock, now, wifi_ready);
+    if (!next) setup_restart(SETUP_REQUEST_LEAVE, 0);
+    else esp_timer_start_once(setup_failsafe, (uint64_t)next * 1000);
+}
+static void setup_failsafe_arm(void) {
+    const esp_timer_create_args_t args = {.callback = setup_failsafe_fire, .name = "setup_failsafe"};
+    if (esp_timer_create(&args, &setup_failsafe) == ESP_OK) esp_timer_start_once(setup_failsafe, (uint64_t)SETUP_AP_GRACE_MS * 1000);
 }
 /* Does the settings store hold at least one saved network? Read the way wifi_load_profiles will read it, before the store is open: the
  * unified list, else the older single network, else the v0.1.x list. `early` is a read-only tn_settings handle, or 0 when that

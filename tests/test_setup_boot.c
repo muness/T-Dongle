@@ -61,6 +61,26 @@ static void giving_up(void) {
     setup_session_start(&s, 0xffffff00u);                                      /* across the 32 bit wrap */
     assert(!setup_session_should_end(&s, 0xffffff00u + 29999, false) && setup_session_should_end(&s, 0xffffff00u + 30000, false));
 }
+static void failsafe(void) {
+    setup_session s = {0};
+    assert(setup_session_failsafe_delay_ms(&s, 5, false) == 0);                          /* not a setup boot: nothing to force */
+    setup_session_start(&s, 1000);
+    assert(setup_session_failsafe_delay_ms(&s, 1000, false) == SETUP_AP_GRACE_MS);       /* first look at the grace period */
+    assert(setup_session_failsafe_delay_ms(&s, 1000 + 10000, false) == SETUP_AP_GRACE_MS - 10000);
+    assert(setup_session_failsafe_delay_ms(&s, 1000 + 30000, false) == 0);               /* AP not up: leave now */
+    assert(setup_session_failsafe_delay_ms(&s, 1000 + 5000, true) == SETUP_SESSION_MS - 5000);   /* AP up: next look at the session end */
+    assert(setup_session_failsafe_delay_ms(&s, 1000 + 599999, true) == 1);
+    assert(setup_session_failsafe_delay_ms(&s, 1000 + 600000, true) == 0);
+    /* Driven as the timer drives it: the AP comes up at 4 s; the timer fires at 30 s (grace), then at the session end, and leaves exactly then. */
+    uint32_t now = 1000, fired = 0;
+    bool up = false;
+    for (;;) { if (now >= 1000 + 4000) up = true; uint32_t d = setup_session_failsafe_delay_ms(&s, now, up); if (!d) break; now += d; fired++; assert(fired < 10); }
+    assert(now == 1000 + SETUP_SESSION_MS && fired == 2);
+    /* AP never comes up: one look, at the grace period. */
+    now = 1000; fired = 0;
+    for (;;) { uint32_t d = setup_session_failsafe_delay_ms(&s, now, false); if (!d) break; now += d; fired++; }
+    assert(now == 1000 + SETUP_AP_GRACE_MS && fired == 1);
+}
 static void access_point_name(void) {
     char ssid[16];
     uint8_t mac[6] = {0x34, 0x85, 0x18, 0xab, 0x0c, 0xf9};
@@ -71,7 +91,7 @@ static void access_point_name(void) {
     assert(strlen(small) == 7);   /* truncated and terminated, never overrun */
 }
 int main(void) {
-    decisions(); request_words(); session(); giving_up(); access_point_name();
+    decisions(); request_words(); session(); giving_up(); failsafe(); access_point_name();
     puts("Setup boot: request survives only a software reset, first plug-in opens setup, leaving never loops, 10 minute session wraps safely");
     return 0;
 }

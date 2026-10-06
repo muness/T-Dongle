@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""The setup access point and a tailnet never run together (ADR 0023).
+"""The setup access point and a tailnet never run together (ADR 0024).
 
 The access point is not charged to tailnet admission (ml_admission.h) or to ADR 0022's elastic floor (ml_heap_budget.h): it is allowed to
 exist only because nothing that those budgets protect is running while it does. This pins the three places that guarantee it, beyond
@@ -46,6 +46,20 @@ class SetupExclusion(unittest.TestCase):
         start_wifi = GATEWAY[GATEWAY.index('static esp_err_t start_wifi(void) {'):]
         self.assertLess(start_wifi.index('tdongle_l2_start('), start_wifi.index('static esp_err_t start_dns'))
         self.assertNotIn('tdongle_l2_start', SETUP)
+
+    def test_no_usb_netif_in_a_setup_boot(self):
+        # lwIP forwards (CONFIG_LWIP_IP_FORWARD=y): a USB netif beside the open access point would route the setup network to the USB host.
+        body = GATEWAY[GATEWAY.index('static esp_err_t start_network(void) {'):]
+        body = body[:body.index('esp_netif_inherent_config_t')]
+        self.assertRegex(body, r'if\(!gateway_tailnet_mode\(\) \|\| setup_active\)return ESP_OK;')
+        self.assertNotIn('esp_netif_new', GATEWAY[:GATEWAY.index('static esp_err_t start_network(void) {')])
+        self.assertEqual(GATEWAY.count('esp_netif_new('), 1)
+        self.assertEqual(GATEWAY.count('esp_netif_napt_enable('), 1)
+        self.assertNotIn('esp_netif_napt_enable', SETUP)   # and NAPT lives in start_dns, which a setup boot never runs
+
+    def test_the_failsafe_timer_is_armed_for_every_setup_boot(self):
+        self.assertRegex(GATEWAY, r'if\(setup_active\)\{setup_session_start\(&setup_clock,[^;]*;setup_failsafe_arm\(\);\}')
+        self.assertIn('setup_session_failsafe_delay_ms', SETUP)
 
     def test_pm_scaling_is_not_started_for_setup(self):
         self.assertRegex(GATEWAY, r'if\(gateway_tailnet_mode\(\) && !setup_active\)tdongle_pm_start\(\);')

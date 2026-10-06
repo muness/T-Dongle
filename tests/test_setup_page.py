@@ -76,11 +76,12 @@ class SetupPage(unittest.TestCase):
         for inner in re.findall(r'innerHTML\s*=\s*([^;]+);', SCRIPT):
             self.assertRegex(inner.strip(), r"^(''|\"<svg viewBox='0 0 52 52' aria-hidden=true>.*)$", inner)
 
-    def test_resaving_a_known_network_goes_to_its_own_slot(self):
-        # The server keeps one entry per SSID and refuses the same network in another slot, so the page must aim a new password at the slot the
-        # network is already in (a nearby-list tap on a saved network), unless the user chose a slot by hand.
-        self.assertIn('savedNets=j.networks', SCRIPT)
-        self.assertRegex(SCRIPT, r"const known=savedNets\.find\(n=>n\.ssid===d\.ssid\);if\(known&&!slotTouched\)d\.slot=known\.slot;")
+    def test_the_page_cannot_ask_for_what_the_open_network_may_not_do(self):
+        # The server ignores a name and a priority from the setup network and refuses to replace a saved network; the page must not offer them.
+        self.assertNotIn('name=priority', HTML)
+        self.assertNotIn('name=name', HTML)
+        self.assertNotIn('d.priority', SCRIPT)
+        self.assertIn("savedNets.some(n=>n.ssid===d.ssid)", SCRIPT)
 
     def test_the_server_serves_what_the_page_uses(self):
         for uri in ('/wifi-scan', '/wifi-saved', '/command', '/'):

@@ -34,3 +34,10 @@ uint32_t setup_session_seconds_left(const setup_session *s, uint32_t now_ms) {
 void setup_ap_ssid(char *out, unsigned size, const uint8_t mac[6]) {
     snprintf(out, size, "TDongle-%02X%02X%02X", mac[3], mac[4], mac[5]);
 }
+uint32_t setup_session_failsafe_delay_ms(const setup_session *s, uint32_t now_ms, bool access_point_up) {
+    if (!s->active || setup_session_should_end(s, now_ms, access_point_up)) return 0;
+    uint32_t elapsed = (uint32_t)(now_ms - s->started_ms);
+    uint32_t next = SETUP_SESSION_MS - elapsed;
+    if (!access_point_up && SETUP_AP_GRACE_MS - elapsed < next) next = SETUP_AP_GRACE_MS - elapsed;
+    return next ? next : 1;
+}

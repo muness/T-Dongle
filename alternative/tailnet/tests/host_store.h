@@ -42,7 +42,7 @@ static int nvs_commit(int h){(void)h;return ESP_OK;}
 enum {WIFI_AUTH_OPEN,WIFI_AUTH_WPA2_PSK=3};enum {WPA3_SAE_PWE_BOTH=3};
 typedef struct {struct {uint8_t ssid[32],password[64];int scan_method,sort_method,sae_pwe_h2e;struct {bool capable;} pmf_cfg;struct {int authmode;} threshold;unsigned rm_enabled:1,btm_enabled:1;} sta;} wifi_config_t;
 static wifi_config_t wifi_config;
-static bool roaming=true;static bool wifi_roaming_assist(void){return roaming;}
+static bool roaming=true,station_v011=true;static bool wifi_roaming_assist(void){return roaming;}static bool wifi_v011_station_profile(void){return station_v011;}
 static unsigned char *unused_disk;
 #include "wifi_store.inc"
 static bool online,wifi_ready=true,wifi_scan_pauses_reconnect,connected;
@@ -79,7 +79,7 @@ static void reset_world(void){
  memset(kv,0,sizeof(kv));memset(&wifi_saved,0,sizeof(wifi_saved));wifi_saved.schema=1;memset(&wifi_config,0,sizeof(wifi_config));
  const char *none[8]={""};wifi_meta_defaults(&wifi_meta,none,0);ui_settings_defaults(&display_settings);
  have_old=old_erased=false;memset(&old_settings,0,sizeof(old_settings));fail_write=fail_erase=false;writes_before_failure=~0u;write_count=0;
- wifi_pin_clear(&wifi_pinned);wifi_revision=0;wifi_current=-1;memset(wifi_retry_after,0,sizeof(wifi_retry_after));roaming=true;
+ wifi_pin_clear(&wifi_pinned);wifi_revision=0;wifi_current=-1;memset(wifi_retry_after,0,sizeof(wifi_retry_after));roaming=true;station_v011=true;
  connected=online=false;joins=0;scans=0;wifi_ready=true;wifi_rescan=true;reject_config=false;during_scan=0;current_rssi=-80;memset(found,0,sizeof(found));test_time=1000000;
 }
 /* A restart: the RAM copies are gone, the flash (kv) stays. */

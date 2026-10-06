@@ -7,14 +7,16 @@
 
 static bool one_of(const char *value, const char *a, const char *b) { return value && (!strcmp(value, a) || !strcmp(value, b)); }
 
-access_origin access_classify(bool peer_known, uint32_t peer_ipv4, bool setup_active, const char *host, const char *origin) {
-    if (!peer_known) return ACCESS_DENIED;
+access_origin access_classify(bool peer_known, uint32_t peer_ipv4, bool local_known, uint32_t local_ipv4, bool setup_active, const char *host, const char *origin) {
+    if (!peer_known || !local_known) return ACCESS_DENIED;
     if ((peer_ipv4 & 0xffffff00u) == USB_SUBNET) {
+        if (local_ipv4 != USB_SUBNET + 1) return ACCESS_DENIED;
         if (!one_of(host, "192.168.77.1", "192.168.77.1:80")) return ACCESS_DENIED;
         if (origin && !one_of(origin, "http://192.168.77.1", "http://192.168.77.1:80")) return ACCESS_DENIED;
         return ACCESS_USB;
     }
     if (setup_active && (peer_ipv4 & 0xffffff00u) == AP_SUBNET) {
+        if (local_ipv4 != AP_SUBNET + 1) return ACCESS_DENIED;
         if (!one_of(host, "192.168.4.1", "192.168.4.1:80")) return ACCESS_DENIED;
         if (origin && !one_of(origin, "http://192.168.4.1", "http://192.168.4.1:80")) return ACCESS_DENIED;
         return ACCESS_SETUP_AP;
@@ -42,6 +44,8 @@ access_action access_action_parse(const char *name) {
         if (!strcmp(name, table[i].name)) return table[i].action;
     return ACTION_UNKNOWN;
 }
+bool access_may_set_metadata(access_origin origin) { return origin == ACCESS_USB; }
+bool access_may_replace(access_origin origin) { return origin == ACCESS_USB; }
 bool access_token_equal(const char *supplied, const char *expected) {
     size_t n = expected ? strlen(expected) : 0;
     if (!supplied || !n || strlen(supplied) != n) return false;

@@ -1,4 +1,4 @@
-# ADR 0023: The setup access point is a boot mode; the front panel is polled, not a task; the USB product string follows the mode
+# ADR 0024: The setup access point is a boot mode; the front panel is polled, not a task; the USB product string follows the mode
 
 Status: accepted for on-board validation, 2026-10-06. **Nothing here has been run on the board** (no flashing in this change); the host tests establish structure and the numbers below say which are measured (the build) and which are predictions. Follows ADR 0013 (admission), 0016 (PM) and 0022 (the one elastic floor). Restores, in the unified image, the v0.1.1 features its parity audit listed as missing: setup access point with captive portal, button menu and factory reset, APA102 states, LCD pages and display settings, serial `setup`/`reset`/`confirm-reset`/`display`, saved-network priority and preferred slot, 802.11k/v roaming assist, and decides the USB product string.
 
@@ -28,7 +28,7 @@ Button, light and screen are polled by the existing `gateway_control` task every
 
 ### 4. Saved networks: metadata beside the list, keyed by SSID
 
-`tn_settings/wifi_profiles` stays byte for byte what the first unified build wrote (a downgrade still reads it). Names, priorities and the preferred network live in `wifi_meta`, keyed by SSID, so no reordering, deletion, partial write or older firmware can attach a priority to the wrong network; the two are written together (metadata first, then the list, one commit; the previous metadata is restored if the second write fails). v0.1.1's `adapter/config` is only ever read: import is lossless for every field (`main/legacy_import.c`) and repeats until the first explicit save. Selection ranks preferred (if usable, -85 dBm), then priority, then signal, with the existing hysteresis; with default priorities and no preferred network it is the existing strongest-wins rule (the existing tests run unchanged).
+`tn_settings/wifi_profiles` stays byte for byte what the first unified build wrote (a downgrade still reads it). Names, priorities and the preferred network live in `wifi_meta`, keyed by SSID, so no reordering, deletion, partial write or older firmware can attach a priority to the wrong network; a save is two flash writes, not one transaction (`nvs_set_blob` writes at once): metadata first, then the list, then a commit, and a failed write restores the previous metadata and changes nothing in RAM. A power cut between the two writes leaves new metadata beside the old list; because the metadata is keyed by SSID that cannot attach a priority to a different network (an entry for a network not in the list is ignored), and the worst outcome is a stale priority, name or preference on the same network until the next save. A generation counter would add nothing the SSID key does not already give. v0.1.1's `adapter/config` is only ever read: import is lossless for every field (`main/legacy_import.c`) and repeats until the first explicit save. Selection ranks preferred (if usable, -85 dBm), then priority, then signal, with the existing hysteresis; with default priorities and no preferred network it is the existing strongest-wins rule (the existing tests run unchanged).
 
 ### 5. Roaming assist: built in, requested per mode
 
@@ -41,6 +41,14 @@ Bridge mode enumerates as `T-Dongle-S3 NCM`, exactly as v0.1.1, so a Mac or Pi k
 ### 7. Traffic counters at the NCM callbacks
 
 The Traffic page needs bytes per direction in both modes. Counting in the bridge's receive path or the transmit ring would touch code under change elsewhere and differ per mode, so `main/traffic_hooks.c` wraps TinyUSB's `tud_network_recv_cb` and `tud_network_xmit_cb` at link time (the `--wrap` mechanism the socket budget and the transmit ring already use) and counts what the class driver accepted. Cost: one relaxed atomic add per frame.
+
+## Threat model of the open setup network
+
+The setup access point is open by owner decision, so everyone in radio range for up to 10 minutes is an attacker, and the home Wi-Fi password crosses the air in clear when it is typed on the page. What the design limits:
+- **No route to the USB host.** A setup boot creates no USB netif (`start_network`), runs no NAT, and has no other netif to forward between: with `CONFIG_LWIP_IP_FORWARD` an AP client could otherwise reach 192.168.77.0/24.
+- **Nothing of the tailnet side is served** (memberships, sign-in keys, mode, diagnostics), and a request is classified by source subnet **and** the connection's own local address (`getsockname`) **and** `Host`/`Origin`, so a header or a source address alone proves nothing.
+- **An AP client can add and delete, not rewrite.** It cannot set a name or a priority, cannot replace a saved network (a new password or SSID in an occupied slot) and gets no priorities or preference back from `/wifi-saved` (only slot and SSID, which its delete buttons need). A planted network gets the default priority, so it competes only by signal strength; it can still be an open evil twin the owner must notice on the screen or in `list`, and delete-then-add remains possible: the cost of a phone-only setup flow. Setting `CONFIG_TDONGLE_SETUP_AP_OPEN=n` (WPA2 password on the screen) is the stronger answer.
+- **It always ends**: the control task's check, an `esp_timer` failsafe armed in `app_main` that does not depend on USB or console init, and a 30 s limit when the access point is not up.
 
 ## Measured (the build) and predicted (the board)
 
@@ -56,6 +64,8 @@ Release and diagnostics images against the PR #44 base build (same toolchain, ID
 | `app.bin` | +50,016 B (1,324,576 B of the 4 MiB partition) | +50,144 B (1,354,032 B) |
 
 Where the flash goes: about 8 KB is the 802.11k/v/WNM support in the supplicant, about 12.6 KB the setup page, the rest the new code and strings. Where the RAM goes: about 1.0 KB the front panel's state and the saved-network metadata, 0.2 KB the supplicant's 11k/v state. The scan list and its lock are allocated only in a setup boot.
+
+The 802.11k/v support (`CONFIG_ESP_WIFI_11KV_SUPPORT`, RRM, WNM) compiled in costs 192 B of `.bss` in libwpa_supplicant and about 8 KB of flash; its runtime allocations happen only when a station asks for it (bridge mode, or tailnet with the Kconfig option), so a tailnet boot pays only the static part. The WPA3/PMF/WPA2-threshold station settings are bridge-only; tailnet mode keeps #44's configuration. The Traffic page counts frames the NCM class driver accepted; the bridge data path of #45 may drop a frame after accepting it, so "up" is an upper bound there (follow-up: count from #45's stats once both are merged).
 
 The static RAM is charged to the tailnet heap 1:1: predicted free heap after boot about 1.7 KB lower, margin to admission (8,100 B at ~107 KB) about 6.4 KB. **Prediction, to be checked on the board:** first-membership `start_heap_before` stays within 3 KB of the PR #44 value, admission still passes on 3 of 3 boots, `heap_budget` refusals unchanged under the 6 Mbit/s UDP flood. **Refuted if** admission refuses a boot that PR #44 admitted: then the 802.11k/v support (0.2 KB of RAM, 8 KB of flash) is the first thing to make conditional, and the front panel's statics (about 1 KB) the second.
 
