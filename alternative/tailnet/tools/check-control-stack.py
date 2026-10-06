@@ -12,7 +12,6 @@ Usage: check-control-stack.py BUILD_DIR   Fails when the worst path leaves less 
 import json, re, shlex, subprocess, sys, tempfile
 from pathlib import Path
 
-STACK = 4096
 MARGIN = 1024
 ROOT = 'command_task'
 UNITS = ('control.c', 'gateway_main.c', 'lcd.c', 'lcd_view.c', 'console.c', 'menu.c', 'led.c', 'traffic.c', 'wifi_meta.c', 'ui_settings.c', 'setup_boot.c', 'health.c')
@@ -27,8 +26,8 @@ EXTERNAL = {'snprintf': 1056, 'vsnprintf': 1056, 'sprintf': 1056, 'printf': 1056
             'calloc': 300, 'heap_caps_malloc': 300}
 EDGES = {'boot_sink': ['mgmt_write']}   # function-pointer sinks
 build = Path(sys.argv[1])
-# The diagnostics image adds its own evidence commands (memory, wifistats: a 512 B line buffer plus printf), which are not shipped: it only has to stay clear.
-if 'diagnostics' in build.name: MARGIN = 128
+# control.c: 4,096 B in release, 5,120 B in the diagnostics image (its evidence commands are deeper); the same 1 KB margin is enforced for both.
+STACK = 5120 if 'CONFIG_TDONGLE_MEMORY_DIAGNOSTICS=y' in (build / 'sdkconfig').read_text() else 4096
 commands = {Path(c['file']).name: c for c in json.load(open(build / 'compile_commands.json')) if '/tailnet/main/' in c['file'] or '/IDF_PROJECT/main/' in c['file'] or c['file'].count('/main/') and not c['file'].endswith('esp32s3.c')}
 frame, calls = {}, {}
 with tempfile.TemporaryDirectory() as tmp:

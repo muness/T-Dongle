@@ -59,7 +59,15 @@ static QueueHandle_t commands;
 static StaticQueue_t command_queue;
 static uint8_t command_bytes[2*512];
 static StaticTask_t command_tcb;
-static StackType_t command_stack[4096];
+/* 4 KB in the release image (tailnet heap is measured to the byte). The diagnostics image adds evidence commands (memory, wifistats: a 992 B frame, a
+ * 512 B line buffer and printf below it) that need 1 KB more to keep the same 1 KB margin; it is not heap-constrained like release tailnet.
+ * tools/check-control-stack.py enforces the margin for both and reads this size. */
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+#define CONTROL_STACK_BYTES 5120
+#else
+#define CONTROL_STACK_BYTES 4096
+#endif
+static StackType_t command_stack[CONTROL_STACK_BYTES];
 static int boot_sink(void *context,const char *data,size_t n) {
     char part[128];
     while(n){size_t take=n<127?n:127;memcpy(part,data,take);part[take]=0;mgmt_write(part);data+=take;n-=take;}
