@@ -18,6 +18,14 @@ void bootloader_hooks_include(void) {}
  * unless CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE) before app_main. All that changes here is the timeout (30 s, so a slow app start is not cut off) and the action:
  * stage 0 = 3, reset the main system but NOT the RTC domain, so RTC_CNTL_STORE0 (the rescue count) survives a watchdog reset (action 4 wipes it: reset reason 16).
  * The Rust apps leave it armed through esp_hal::init (vendored esp-hal) and re-arm it with their own timeout as their first statement. */
+static void rescue_disarm_rtc_wdt(void)
+{
+    wdt_hal_context_t ctx = RWDT_HAL_CONTEXT_DEFAULT();
+    wdt_hal_write_protect_disable(&ctx);
+    wdt_hal_disable(&ctx);
+    wdt_hal_write_protect_enable(&ctx);
+}
+
 static void rescue_arm_rtc_wdt(void)
 {
     wdt_hal_context_t ctx = RWDT_HAL_CONTEXT_DEFAULT();
@@ -45,6 +53,7 @@ void bootloader_after_init(void)
     if (count >= TDONGLE_RESCUE_LIMIT) {
         ESP_LOGW("rescue", "%u boots in a row never became healthy (last reset %d): entering ROM download mode",
                  (unsigned)count, (int)reason);
+        rescue_disarm_rtc_wdt(); // the ROM loader must not be reset by a watchdog armed for the app
         REG_WRITE(RTC_CNTL_STORE0_REG, 0); // the next boot after a flash runs the app normally
         REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
         esp_rom_software_reset_system();
