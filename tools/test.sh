@@ -8,11 +8,8 @@ if [[ "${TEST_CFLAGS:-}" == *address* ]]; then
   "${compiler[@]}" ${TEST_CFLAGS:-} tests/sanitizer_probe.c -o build-host/sanitizer_probe
   build-host/sanitizer_probe
 fi
-"${compiler[@]}" -std=c11 -Wall -Wextra -Werror ${TEST_CFLAGS:-} -I main main/core.c main/view.c tests/test_core.c -lm -o build-host/test_core
+"${compiler[@]}" -std=c11 -Wall -Wextra -Werror ${TEST_CFLAGS:-} -I main -I legacy main/core.c legacy/view.c tests/test_core.c -lm -o build-host/test_core
 build-host/test_core
-"${compiler[@]}" -std=c11 -I main main/core.c main/view.c tests/preview.c -o build-host/preview
-build-host/preview > build-host/preview.txt
-python3 tools/preview.py
 python3 tools/test_flash_wait.py
 python3 tools/test_net.py
 python3 tools/test_settings.py

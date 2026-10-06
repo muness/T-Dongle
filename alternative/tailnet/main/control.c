@@ -78,8 +78,11 @@ static void command_task(void *arg) {
         if (xQueueReceive(commands, line, pdMS_TO_TICKS(1000)) != pdTRUE)
             continue;
         if (!strcmp(line, "help"))
-            mgmt_write("T-Dongle tailnet gateway protocol=1\r\nCommands: status, list, "
-                       "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/\r\n");
+            mgmt_write(gateway_tailnet_mode()?
+                       "T-Dongle tailnet gateway protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, mode wifi_bridge|tailnet_gateway, "
+                       "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/\r\n":
+                       "T-Dongle Wi-Fi bridge protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, mode wifi_bridge|tailnet_gateway, "
+                       "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Add Wi-Fi: profile {\"slot\":N,\"priority\":50,\"name\":\"X\",\"ssid\":\"X\",\"password\":\"X\"}, or muness.com/T-Dongle\r\n");
         else if (!strcmp(line, "capabilities"))
             mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n");
         else if (!strcmp(line, "pm")) {

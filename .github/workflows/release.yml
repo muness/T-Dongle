@@ -35,39 +35,51 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dryrun"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
       - if: env.PREPARED_IDF != 'true'
+        name: Install Go for control protocol interoperability tests
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: false
+      - if: env.PREPARED_IDF != 'true'
         run: sudo apt-get update && sudo apt-get install -y git wget flex bison gperf python3-venv cmake ninja-build ccache libffi-dev libssl-dev libusb-1.0-0
       - if: env.PREPARED_IDF != 'true'
         run: tools/bootstrap.sh
-      - name: Build and test (hosted, bootstrapped ESP-IDF)
+      - name: Test and build (hosted, bootstrapped ESP-IDF)
         if: env.PREPARED_IDF != 'true'
         shell: bash
         run: |
-          VERSION='${{ steps.ver.outputs.version }}'
+          export TDONGLE_VERSION='${{ steps.ver.outputs.version }}'
           . "$HOME/.cache/tdongle/esp-idf-v5.5.5/export.sh"
-          tools/test.sh
-          TDONGLE_VERSION="$VERSION" tools/build.sh full
-          python3 tools/site.py "dist/tdongle-$VERSION-full" "$VERSION" site-out
-      - name: Build and test (prepared ESP-IDF v5.5.5 runner)
+          tools/ci.sh release
+      - name: Test and build (prepared ESP-IDF v5.5.5 runner)
         if: env.PREPARED_IDF == 'true'
         shell: bash
         run: |
           set -e
-          VERSION='${{ steps.ver.outputs.version }}'
-          # Tools are baked into the approved runner; no Docker socket, image pull or download.
+          export TDONGLE_VERSION='${{ steps.ver.outputs.version }}'
+          # Tools (including Go) are baked into the approved runner; no Docker socket, image pull or download.
           git config --global --add safe.directory /opt/esp/idf
           . /opt/esp/idf/export.sh
           idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
           echo "IDF_PATH=$IDF_PATH commit=$(git -C "$IDF_PATH" rev-parse HEAD)"
-          tools/test.sh
-          TDONGLE_VERSION="$VERSION" tools/build.sh full
-          python3 tools/site.py "dist/tdongle-$VERSION-full" "$VERSION" site-out
+          tools/ci.sh release
+      - name: Verify package version and assemble flash page
+        shell: bash
+        run: |
+          set -e
+          VERSION='${{ steps.ver.outputs.version }}'
+          PKG="dist/tdongle-$VERSION"
+          # Tag, package manifest, app descriptor and the firmware's reported version must all agree.
+          python3 -c "import json,sys; m=json.load(open('$PKG/manifest.json')); assert m['version']=='$VERSION' and m['flash_mode']=='dio' and m['flash_freq']=='40m', m"
+          grep -aq "firmware=$VERSION" "$PKG/app.bin"
+          python3 tools/site.py "$PKG" "$VERSION" site-out
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ steps.ver.outputs.version }}
           path: |
-            dist/tdongle-${{ steps.ver.outputs.version }}-full.tar.gz
-            dist/tdongle-${{ steps.ver.outputs.version }}-full.tar.gz.sha256
-            dist/tdongle-${{ steps.ver.outputs.version }}-full/
+            dist/tdongle-${{ steps.ver.outputs.version }}.tar.gz
+            dist/tdongle-${{ steps.ver.outputs.version }}.tar.gz.sha256
+            dist/tdongle-${{ steps.ver.outputs.version }}/
             site-out/
   publish:
     # Always runs so dry runs exercise routing and the artifact layout; the release and Pages steps
@@ -85,20 +97,29 @@ jobs:
       - name: Verify release files
         run: |
           echo "publish=$PUBLISH runner=$RUNNER_NAME"
-          ls -l "dist/tdongle-$VERSION-full.tar.gz" "dist/tdongle-$VERSION-full.tar.gz.sha256" \
-            "dist/tdongle-$VERSION-full/app.bin" "dist/tdongle-$VERSION-full/bootloader.bin" \
-            "dist/tdongle-$VERSION-full/partition-table.bin" site-out/index.html
-          (cd dist && sha256sum -c "tdongle-$VERSION-full.tar.gz.sha256")
+          ls -l "dist/tdongle-$VERSION.tar.gz" "dist/tdongle-$VERSION.tar.gz.sha256" \
+            "dist/tdongle-$VERSION/app.bin" "dist/tdongle-$VERSION/bootloader.bin" \
+            "dist/tdongle-$VERSION/partition-table.bin" site-out/index.html site-out/manifest.json
+          (cd dist && sha256sum -c "tdongle-$VERSION.tar.gz.sha256")
+          # The flash page manifest must list bootloader, partition table and app (no merged image: it would erase NVS).
+          python3 - <<PY
+          import json,os
+          m=json.load(open('site-out/manifest.json'))
+          parts=m['builds'][0]['parts']
+          assert [p['offset'] for p in parts]==[0,0x8000,0x20000], parts
+          assert all(os.path.getsize('site-out/'+p['path'])>0 for p in parts)
+          assert m['version']=='$VERSION', m
+          PY
       - name: GitHub release
         if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "T-Dongle $GITHUB_REF_NAME" --generate-notes \
-            "dist/tdongle-$VERSION-full.tar.gz" "dist/tdongle-$VERSION-full.tar.gz.sha256" \
-            "dist/tdongle-$VERSION-full/app.bin#app.bin (0x20000)" \
-            "dist/tdongle-$VERSION-full/bootloader.bin#bootloader.bin (0x0)" \
-            "dist/tdongle-$VERSION-full/partition-table.bin#partition-table.bin (0x8000)"
+            "dist/tdongle-$VERSION.tar.gz" "dist/tdongle-$VERSION.tar.gz.sha256" \
+            "dist/tdongle-$VERSION/app.bin#app.bin (0x20000)" \
+            "dist/tdongle-$VERSION/bootloader.bin#bootloader.bin (0x0)" \
+            "dist/tdongle-$VERSION/partition-table.bin#partition-table.bin (0x8000)"
       - name: Publish flash page
         if: env.PUBLISH == 'true'
         uses: peaceiris/actions-gh-pages@v4

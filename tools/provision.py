@@ -46,10 +46,12 @@ def command(port, line, timeout=3):
 
 def profile_input(port):
     print(command(port, 'scan', 8))
+    print(command(port, 'list'))
     # SSID is typed after inspecting scan results; hidden networks work too.
-    p = {'slot': int(input('Profile slot [1..8]: ')),
+    # A new network takes the first free slot; an existing slot is replaced.
+    p = {'slot': int(input('Profile slot [1..8; next free slot adds a network]: ')),
          'name': input('Profile name: '), 'ssid': input('SSID (exact): '),
-         'priority': int(input('Priority [0..100]: ')),
+         'priority': 50,
          'password': getpass.getpass('Password (empty for open): ')}
     validate_profile(p)
     encoded = 'profile ' + json.dumps(p, separators=(',', ':'), ensure_ascii=True)
@@ -57,44 +59,37 @@ def profile_input(port):
         raise ValueError('Encoded profile exceeds protocol limit')
     # Firmware never echoes commands. Do not print raw replies to a secret-
     # bearing request, even if the user accidentally selected another device.
-    command(port, encoded)
+    reply = command(port, encoded)
     p['password'] = ''
-    print('Trial requested. The dongle reboots; check its screen, then reconnect for status.')
+    print('Saved. The dongle joins the strongest saved network.' if 'OK saved' in reply
+          else 'Not saved: ' + reply.strip().splitlines()[0][:80] if reply.strip() else 'No reply; check `list`.')
 
 
 def menu(port):
     while True:
-        print('\n1 Status/diagnostics  2 Scan  3 Profiles  4 Add/edit profile\n'
-              '5 Select profile  6 Delete profile  7 Browser setup\n'
-              '8 Display settings  9 Factory reset  0 Quit')
+        print('\n1 Status  2 Scan  3 List networks  4 Add/replace network\n'
+              '5 Use network  6 Delete network  7 Switch mode  0 Quit')
         choice = input('Choice: ').strip()
         if choice == '0':
             return
         if choice == '4':
             profile_input(port)
             return
-        if choice in {'1', '2', '3', '7'}:
-            print(command(port, {'1': 'status', '2': 'scan', '3': 'list', '7': 'setup'}[choice], 8))
-            if choice == '7':
-                return
+        if choice in {'1', '2', '3'}:
+            print(command(port, {'1': 'status', '2': 'scan', '3': 'list'}[choice], 8))
         elif choice in {'5', '6'}:
             slot = int(input('Slot [1..8]: '))
             if not 1 <= slot <= 8:
                 raise ValueError('Slot must be 1..8')
-            if choice == '6' and input('Type DELETE to delete this profile: ') != 'DELETE':
+            if choice == '6' and input('Type DELETE to delete this network: ') != 'DELETE':
                 continue
             print(command(port, ('use ' if choice == '5' else 'del ') + str(slot)))
-        elif choice == '8':
-            brightness = int(input('Brightness [5..100]: '))
-            rotation = int(input('Orientation [0 normal, 1 upside down]: '))
-            seconds = int(input('Dim after seconds [10..3600]: '))
-            print(command(port, f'display {brightness} {rotation} {seconds}'))
-        elif choice == '9':
-            if input('Type ERASE ALL PROFILES to confirm: ') == 'ERASE ALL PROFILES':
-                print(command(port, 'reset'))
-                command(port, 'confirm-reset')
-                print('Reset requested.')
-                return
+        elif choice == '7':
+            mode = input('Mode (wifi_bridge or tailnet_gateway): ').strip()
+            if mode not in {'wifi_bridge', 'tailnet_gateway'}:
+                raise ValueError('Unknown mode')
+            print(command(port, 'mode ' + mode))
+            return
 
 
 def main():
@@ -107,7 +102,7 @@ def main():
     with serial.Serial(args.port, 115200, timeout=0.1, write_timeout=2) as port:
         time.sleep(0.3)
         banner = command(port, 'help')
-        if 'Profiles validate by association' not in banner:
+        if 'protocol=1' not in banner:
             raise RuntimeError('Port did not identify this firmware; no configuration sent')
         if args.status:
             print(command(port, 'status', 5))

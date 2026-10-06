@@ -131,7 +131,9 @@ static void usb_event(tinyusb_event_t *event, void *arg) {
 static bool online;
 /* SNTP supervision: written by the manager task, read (word sized fields) by /status and the console. */
 static gw_clock_t sntp_clock;
-static tdongle_mode runtime_mode=TDONGLE_TAILNET_GATEWAY;
+/* Bridge until a stored mode (or pre-existing tailnet memberships) says otherwise; see mode_store.c. Also the value used when
+ * the settings namespace does not exist yet (fresh install, upgrade from the original bridge firmware). */
+static tdongle_mode runtime_mode=TDONGLE_WIFI_BRIDGE;
 bool gateway_tailnet_mode(void){return runtime_mode==TDONGLE_TAILNET_GATEWAY;}
 static volatile bool wifi_scan_pauses_reconnect;
 static SemaphoreHandle_t wifi_scan_lock;

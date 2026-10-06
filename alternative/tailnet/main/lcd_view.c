@@ -14,6 +14,8 @@ void lcd_compose(const lcd_state *s,const char *version,lcd_view *v) {
         title=s->saved_wifi?"JOINING WI-FI":"SET UP WI-FI";
         detail=s->saved_wifi?"Trying saved Wi-Fi":"App: Networks";
         hint=s->saved_wifi?"App: Networks to change":"Add a 2.4 GHz network";
+        /* Bridge mode has no USB web page: Wi-Fi is added from the flash page or the app. */
+        if(s->bridge && !s->saved_wifi){detail="Add via app or web page";hint="muness.com/T-Dongle";}
     }
     else if(s->bridge){title="WI-FI BRIDGE";detail="Wi-Fi connected";hint=s->usb?"USB host connected":usb_wait;}
     else if(s->login){title="APPROVE LOGIN";detail="App: Networks - Sign in";hint="Approve in your browser";}

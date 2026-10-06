@@ -13,7 +13,8 @@ int main(int argc,char **argv) {
     lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.title,"SET UP WI-FI"));frame(out,"wifi",&s);
     assert(!strcmp(v.hint,"Add a 2.4 GHz network"));
     s.saved_wifi=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.detail,"Trying saved Wi-Fi"));s.saved_wifi=false;
-    s.bridge=true;s.wifi=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.title,"WI-FI BRIDGE") && !strstr(v.detail,"internet"));assert(!strcmp(v.hint,"Waiting for USB host"));s.usb=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.hint,"USB host connected"));frame(out,"bridge",&s);s=(lcd_state){0};
+    s.bridge=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.title,"SET UP WI-FI") && !strcmp(v.hint,"muness.com/T-Dongle"));frame(out,"bridge-setup",&s);
+    s.wifi=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.title,"WI-FI BRIDGE") && !strstr(v.detail,"internet"));assert(!strcmp(v.hint,"Waiting for USB host"));s.usb=true;lcd_compose(&s,"0.2.21",&v);assert(!strcmp(v.hint,"USB host connected"));frame(out,"bridge",&s);s=(lcd_state){0};
     s=(lcd_state){.wifi=true,.bridge=true,.usb_configured=true,.usb_suspended=true};lcd_compose(&s,"0.2.22",&v);assert(!strcmp(v.hint,"USB suspended") && strstr(v.footer,"USB SUSPENDED"));frame(out,"suspended",&s);
     s.bridge=false;s.ready=s.enabled=1;lcd_compose(&s,"0.2.22",&v);assert(!strcmp(v.title,"TAILNET READY") && !strcmp(v.hint,"USB suspended"));
     s.usb_configured=false;lcd_compose(&s,"0.2.22",&v);assert(!strcmp(v.hint,"Waiting for USB host"));

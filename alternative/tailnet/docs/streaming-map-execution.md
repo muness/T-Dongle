@@ -6,7 +6,7 @@ Scope: control-plane memory and startup allocation accounting. Task stack reduct
 
 ## Checks and results
 
-- `tools/build-gateway.sh`: pinned ESP-IDF build, size report, host checks with AddressSanitizer/UndefinedBehaviorSanitizer, and package generation.
+- `tools/test-gateway.sh` and the root `tools/build.sh`: pinned ESP-IDF build, size report, host checks with AddressSanitizer/UndefinedBehaviorSanitizer, and package generation.
 - `tests/test_project_stream.c`: byte-by-byte 300 KB discarded string with retained identity; exact output equivalence to the old projector for initial peers, changes, removals, endpoint patches, escaped keys, scalar values, and preferred DERP region after the ordinary region limit. Malformed discarded JSON, excessive nesting and retained output overflow fail explicitly.
 - `tests/test_stream.c`: 80 KB raw map across fragmented HTTP/2 DATA and Noise records; multiple maps; padding, incomplete maps, invalid length prefixes, stream reset, and flow-control handling. Registration tests include SETTINGS/PING acknowledgments, fragmented 12 KB response, padded DATA, missing END_STREAM, reset/GOAWAY, and workspace overflow. Raw-callback mode remains bounded and tested separately.
 - Existing routing, identity/protocol, Noise and setup checks remain in the build suite. Partition layout and NVS preservation are checked when packaging the APK.
