@@ -246,3 +246,25 @@ pub fn use_network(slot: i64) {
         _ => mgmt_write(reply::USE_INVALID),
     }
 }
+
+/// `boot-status`: the JSON report `gateway_boot_report` writes, with the fields phase 1 has (schema, firmware, `elf`, recovery, stage, reset reason, heap,
+/// usb health, errors, crash) plus `"rust_port":1`. `elf` is the SHA-256 of the running app's ELF as the IDF app descriptor carries it
+/// (`esp_app_get_elf_sha256`, the 32 bytes at offset 144 of `esp_app_desc_t`, printed as 64 hex digits): `tools/flash_wait.py` compares it with the
+/// ELF it just flashed. Crash evidence and the stage machine arrive with phase 2.
+pub fn boot_status<W: Write>(out: &mut W) {
+    let mut elf = [0u8; 65];
+    // SAFETY: `elf` is 65 writable bytes; the IDF writes at most `size - 1` hex digits and a NUL.
+    unsafe { esp_idf_svc::sys::esp_app_get_elf_sha256(elf.as_mut_ptr().cast(), elf.len()) };
+    let length = elf.iter().position(|&b| b == 0).unwrap_or(0);
+    let elf = core::str::from_utf8(&elf[..length]).unwrap_or("");
+    infallible(write!(
+        out,
+        "{{\"schema\":1,\"firmware\":\"{VERSION}\",\"elf\":\"{elf}\",\"recovery\":false,\"stage\":\"complete\",\"previous_stage\":\"none\",\"reset_reason\":{},\
+         \"free_memory\":{},\"minimum_free_memory\":{},\"usb\":{{\"suspend_count\":0,\"resume_count\":0,\"configured\":{},\"ready\":{}}},\"errors\":[],\"crash\":null,\"rust_port\":1}}\r\n",
+        crate::sys::reset_reason(),
+        heap::free_heap_size(),
+        heap::minimum_free_internal(),
+        usb::task::mounted(),
+        usb::task::ready()
+    ));
+}

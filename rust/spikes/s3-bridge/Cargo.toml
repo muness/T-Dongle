@@ -1,0 +1,41 @@
+[package]
+name = "s3-bridge"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# pins: S1 (radio) + S2 (USB/embassy) union; same versions as the two spikes
+esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
+esp-radio = { version = "=1.0.0-beta.1", features = ["esp32s3", "wifi", "unstable"] }
+esp-rtos = { version = "0.4", features = ["esp32s3", "esp-radio", "esp-alloc", "embassy"] }
+esp-alloc = { version = "0.11", features = ["esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
+esp-println = { version = "0.18", features = ["esp32s3"] }
+esp-backtrace = { version = "0.20", features = ["esp32s3", "panic-handler", "println"] }
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+embassy-usb = { version = "0.6", default-features = false }
+embassy-net-driver = "0.2"
+static_cell = "2.1"
+critical-section = "1"
+
+# the real pure logic, shared with the std firmware
+tdongle-bridge = { path = "../../crates/tdongle-bridge" }
+tdongle-aqm = { path = "../../crates/tdongle-aqm" }
+tdongle-spsc = { path = "../../crates/tdongle-spsc" }
+tdongle-serial = { path = "../../crates/tdongle-serial" }
+tdongle-traffic = { path = "../../crates/tdongle-traffic" }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 1
+
+[profile.dev]
+opt-level = "s"

@@ -1479,6 +1479,14 @@ name = "tdongle-nvs-format"
 version = "0.3.0-dev"
 
 [[package]]
+name = "tdongle-nvs-read"
+version = "0.3.0-dev"
+dependencies = [
+ "proptest",
+ "tdongle-nvs-format",
+]
+
+[[package]]
 name = "tdongle-pm"
 version = "0.3.0-dev"
 

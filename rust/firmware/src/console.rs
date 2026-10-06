@@ -178,6 +178,7 @@ fn dispatch(line: &str) {
         Command::Help => infallible(reply::write_help(&mut out, false, "")),
         Command::Capabilities => infallible(reply::write_capabilities(&mut out, false, "")),
         Command::Pm => crate::report::pm(&mut out),
+        Command::BootStatus => crate::report::boot_status(&mut out),
         Command::Status => crate::report::status(&mut out),
         Command::List => crate::report::list(&mut out),
         Command::Mode(mode) => crate::report::mode(mode),
@@ -203,7 +204,6 @@ fn dispatch(line: &str) {
         | Command::Profile(_)
         | Command::Del(_)
         | Command::Scan
-        | Command::BootStatus
         | Command::RetryStartup
         | Command::CryptoBench
         | Command::Diagnostic(_) => mgmt_write(NOT_YET),

@@ -54,6 +54,12 @@ pub fn reboot_to_rom_download() -> ! {
     }
 }
 
+/// Why the chip last reset (`esp_reset_reason`), the `reset_reason` of `boot-status`.
+pub fn reset_reason() -> u32 {
+    // SAFETY: no preconditions.
+    unsafe { sys::esp_reset_reason() as u32 }
+}
+
 /// The station MAC (`esp_read_mac(ESP_MAC_WIFI_STA)`): the address the host speaks with, the USB serial string and the NCM MAC.
 pub fn read_sta_mac() -> [u8; 6] {
     let mut mac = [0u8; 6];
