@@ -395,7 +395,7 @@ pub async fn ui_task(hw: Hardware) -> ! {
             LED_WRITES.fetch_add(1, Ordering::Relaxed);
         }
         if let Some(cmd) = ui.take_command() {
-            dispatch(cmd);
+            dispatch(cmd).await;
         }
     }
 }
@@ -419,14 +419,26 @@ async fn apply(p: &mut Panel, backlight: Option<&Backlight>, percent: u32, rotat
     }
 }
 
-/// A command a button gesture chose (`gateway_ui_take_command`): the same lines the serial console takes.
-fn dispatch(cmd: Command) {
+/// A command a button gesture chose (`gateway_ui_take_command`): the same operations the serial console runs, so a button and a terminal cannot disagree.
+async fn dispatch(cmd: Command) {
     match cmd {
         Command::Use(n) => {
             let count = SAVED.lock(|c| c.borrow().as_ref().map_or(0, |l| l.saved.list().len())) as u32;
             if (1..=count).contains(&n) {
                 crate::PINNED.store(n as i32 - 1, Ordering::Relaxed);
                 crate::USE_REQ.signal(());
+                let _ = crate::settings::make_preferred(n as i32 - 1).await;
+                crate::PINNED.store(n as i32 - 1, Ordering::Relaxed);
+            }
+        }
+        Command::Reset => {
+            let _ = crate::settings::reset();
+        }
+        Command::ConfirmReset => {
+            let (_, restart) = crate::settings::confirm_reset().await;
+            if restart {
+                Timer::after_millis(300).await;
+                tdongle_rescue::deliberate_reset()
             }
         }
         other => crate::ui_command(other),

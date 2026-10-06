@@ -1842,6 +1842,7 @@ dependencies = [
  "tdongle-lcd",
  "tdongle-nvs-format",
  "tdongle-nvs-read",
+ "tdongle-nvs-write",
  "tdongle-pm",
  "tdongle-rescue",
  "tdongle-saved",
@@ -1868,6 +1869,14 @@ version = "0.3.0-dev"
 [[package]]
 name = "tdongle-nvs-read"
 version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-nvs-write"
+version = "0.3.0-dev"
+dependencies = [
+ "embedded-storage",
+ "tdongle-nvs-format",
+]
 
 [[package]]
 name = "tdongle-pm"

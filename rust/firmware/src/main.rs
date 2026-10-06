@@ -11,7 +11,7 @@ extern crate alloc;
 mod ops;
 mod guard;
 mod supervise;
-mod saved;
+mod settings;
 mod l2;
 mod pm;
 mod ui;
@@ -594,7 +594,7 @@ static SCAN_REQ: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static SCAN_DONE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// The mode and display settings read from the NVS at boot (`None` until the init task has read them).
-static STORED: CsMutex<core::cell::Cell<Option<saved::Stored>>> = CsMutex::new(core::cell::Cell::new(None));
+static STORED: CsMutex<core::cell::Cell<Option<settings::Stored>>> = CsMutex::new(core::cell::Cell::new(None));
 /// Console `use N`: the saved network (0-based) the link task must join and keep; -1 = by rank. A failed join of the pinned slot drops the pin (C `pin_failed_slot`).
 static PINNED: AtomicI32 = AtomicI32::new(-1);
 static PIN_FAILED: AtomicU32 = AtomicU32::new(0);
@@ -712,6 +712,7 @@ async fn main(spawner: Spawner) -> ! {
     int_spawner.spawn(usb_tx_task(SendTx(tx)).unwrap());
     spawner.spawn(ring_housekeeping_task().unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
+    spawner.spawn(settings::task().unwrap());
     spawner.spawn(
         ui::ui_task(ui::Hardware {
             spi: peripherals.SPI2,
@@ -751,20 +752,18 @@ async fn init_task(
         return;
     }
 
-    // ---- the saved networks: read-only from the NVS the C firmware wrote ----
+    // ---- the stored settings: the NVS the C firmware wrote (the C load rules, v0.1.x import included) ----
     guard::stage(Stage::Settings);
-    let mut flash = esp_storage::FlashStorage::new(flash);
-    let stored = saved::load_stored(&mut flash);
-    critical_section::with(|cs| STORED.borrow(cs).set(Some(stored)));
-    let loaded = match saved::load(&mut flash) {
-        Ok(l) if !l.saved.list().is_empty() => Some(l),
-        Ok(_) => {
-            init_note("no saved networks");
-            None
+    let loaded = match settings::mount(flash).await {
+        Ok((l, stored)) => {
+            critical_section::with(|cs| STORED.borrow(cs).set(Some(stored)));
+            if l.saved.list().is_empty() {
+                init_note("no saved networks");
+            }
+            Some(l)
         }
-        Err(e) => {
-            println!("nvs: {:?}", e);
-            init_note("saved networks unreadable");
+        Err(why) => {
+            init_note(why);
             None
         }
     };
@@ -802,7 +801,7 @@ async fn init_task(
     spawner.spawn(pm::timer_task().unwrap());
     pm::start();
     SAVED.lock(|c| *c.borrow_mut() = Some(loaded));
-    link_loop(&mut controller, bridge, loaded).await
+    link_loop(&mut controller, bridge).await
 }
 
 // ======================================================================================================================
@@ -904,11 +903,16 @@ fn drop_failed_pin(slot: usize) {
     }
 }
 
-async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>, loaded: tdongle_nvs_format::load::Loaded) -> ! {
+async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>) -> ! {
     // SAFETY: this is the link supervisor task; it may block and is not a driver callback.
     let ctx = unsafe { TaskContext::assume() };
     let mut next = 0usize;
     loop {
+        // The list as it is now (a console `profile`, `del` or reset replaces it): nothing saved means nothing to join.
+        let Some(loaded) = SAVED.lock(|c| *c.borrow()).filter(|l| !l.saved.list().is_empty()) else {
+            let _ = with_timeout(Duration::from_secs(2), USE_REQ.wait()).await;
+            continue;
+        };
         // Strongest saved network that a scan (hidden SSIDs included) sees; none seen: try the saved list in order (directed probes find hidden ones).
         guard::stage(Stage::Scan);
         let scan = scan_all(controller).await;
@@ -1747,23 +1751,38 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 if (1..=count).contains(&n) {
                     PINNED.store(n - 1, Ordering::Relaxed);
                     USE_REQ.signal(());
-                    // the preference is not persisted until the NVS writer lands (C: `wifi_set_preferred`)
-                    let _ = reply::write_use_ok(&mut s, n, false);
+                    // v0.1.1: `use N` also makes N the preferred network, kept across restarts (a failed write only costs the preference)
+                    s.push_str(&settings::call(settings::Req::Use(n)).await.0);
                 } else {
                     s.push_str(reply::USE_INVALID);
                 }
+            }
+            Command::Del(SlotArg::Number(n)) => s.push_str(&settings::call(settings::Req::Del(n)).await.0),
+            Command::Del(SlotArg::TrailingGarbage) => s.push_str(reply::DEL_FAILED),
+            Command::Profile(json) => s.push_str(&settings::call(settings::Req::Profile(String::from(json))).await.0),
+            Command::Display(DisplayArgs::Set(d)) => s.push_str(&settings::call(settings::Req::Display(d)).await.0),
+            Command::Display(DisplayArgs::Invalid) => s.push_str(reply::DISPLAY_USAGE),
+            Command::Reset => s.push_str(&settings::call(settings::Req::Reset).await.0),
+            Command::ConfirmReset => {
+                let (text, restart) = settings::call(settings::Req::ConfirmReset).await;
+                if restart {
+                    out(wr, &text, 500).await;
+                    Timer::after(Duration::from_millis(300)).await;
+                    tdongle_rescue::deliberate_reset()
+                }
+                s.push_str(&text);
             }
             Command::Use(SlotArg::TrailingGarbage) => s.push_str(reply::USE_INVALID),
             Command::Mode(None) => s.push_str(reply::MODE_INVALID),
             Command::Mode(Some(StoredMode::TailnetGateway)) => s.push_str("ERR Tailnet gateway mode is not part of this firmware yet; flash the C image\r\n"),
             Command::Mode(Some(StoredMode::WifiBridge)) => {
-                let stored = critical_section::with(|cs| STORED.borrow(cs).get()).map(|x| x.mode);
-                if matches!(stored, Some(Ok(StoredMode::WifiBridge))) {
-                    out(wr, reply::MODE_SAVED, 500).await;
+                let (text, restart) = settings::call(settings::Req::Mode(StoredMode::WifiBridge)).await;
+                if restart {
+                    out(wr, &text, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
                     tdongle_rescue::deliberate_reset()
                 }
-                s.push_str(reply::MODE_NOT_SAVED);
+                s.push_str(&text);
             }
             Command::Reboot => {
                 guard::leave_safe_mode();
