@@ -1,1 +1,0 @@
-{"rustc":17329007180185699724,"features":"[]","declared_features":"[\"test-support\"]","target":15574756483603500515,"profile":14916091798821964526,"path":13783867691436788666,"deps":[],"local":[{"CheckDepInfo":{"dep_info":"debug/.fingerprint/tdongle-spsc-60030c2489527fb8/dep-lib-tdongle_spsc","checksum":false}}],"rustflags":[],"config":9396254390672932401,"compile_kind":0}
