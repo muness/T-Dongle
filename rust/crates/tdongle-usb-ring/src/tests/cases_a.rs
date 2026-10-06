@@ -6,9 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering::SeqCst;
 
 use super::world::{FLOOR_FREE, FLOOR_LARGEST, Rig, World, cfg_with};
-use crate::{CHUNK_BYTES, Config, ConfigError, Ring, RestartError, SLAB_BYTES, SendError, Wait, WORKER_STACK};
-
-const SLAB: usize = SLAB_BYTES;
+use crate::{ConfigError, RestartError, Ring, SendError, WORKER_STACK, Wait};
 
 #[test]
 fn lifecycle() {
@@ -306,5 +304,4 @@ fn growth_denied() {
     r.step();
     assert!(r.w().heap_live_blocks.load(SeqCst) == 1 && r.stats().grow_events == 0 && r.stats().grow_denied_heap == 0);
     r.drain_all();
-    let _ = (SLAB, CHUNK_BYTES, Config::bridge(1, 0, 0));
 }

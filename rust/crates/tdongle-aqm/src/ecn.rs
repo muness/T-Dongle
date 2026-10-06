@@ -62,9 +62,7 @@ pub fn ip6_l4(frame: &[u8]) -> Option<(u8, usize)> {
             }
             let hl = match next {
                 44 => {
-                    if (u16::from(at(frame, o + 2)?) << 5) | (u16::from(at(frame, o + 3)?) >> 3)
-                        != 0
-                    {
+                    if (u16::from(at(frame, o + 2)?) << 5) | (u16::from(at(frame, o + 3)?) >> 3) != 0 {
                         return Some((0xff, o)); // non-first fragment: no transport header here
                     }
                     8
@@ -191,11 +189,7 @@ fn tcp_ecn_syn_inner(f: &[u8]) -> Option<TcpEcnSyn> {
     let ty = ethertype(f)?;
     let flags = if ty == 0x0800 && len >= 14 + 20 && (at(f, 14)? >> 4) == 4 {
         let ihl = usize::from(at(f, 14)? & 0x0f) * 4;
-        if ihl < 20
-            || at(f, 23)? != 6
-            || 14 + ihl + 14 > len
-            || ((u16::from(at(f, 20)? & 0x1f) << 8) | u16::from(at(f, 21)?)) != 0
-        {
+        if ihl < 20 || at(f, 23)? != 6 || 14 + ihl + 14 > len || ((u16::from(at(f, 20)? & 0x1f) << 8) | u16::from(at(f, 21)?)) != 0 {
             return Some(TcpEcnSyn::Other);
         }
         at(f, 14 + ihl + 13)?
@@ -208,12 +202,7 @@ fn tcp_ecn_syn_inner(f: &[u8]) -> Option<TcpEcnSyn> {
     } else {
         return Some(TcpEcnSyn::Other);
     };
-    let (syn, ack, ece, cwr) = (
-        flags & 0x02 != 0,
-        flags & 0x10 != 0,
-        flags & 0x40 != 0,
-        flags & 0x80 != 0,
-    );
+    let (syn, ack, ece, cwr) = (flags & 0x02 != 0, flags & 0x10 != 0, flags & 0x40 != 0, flags & 0x80 != 0);
     Some(if syn && !ack && ece && cwr {
         TcpEcnSyn::SynEcnSetup
     } else if syn && ack && ece && !cwr {

@@ -58,7 +58,7 @@ fn codel_on(w: &W, target_us: u32, interval_ms: u32) {
 fn saturate(w: &mut W, iterations: u32, step_us: u32, f: &[u8]) {
     for _ in 0..iterations {
         for _ in 0..=HOST_QUEUE_LIMIT {
-            w.host_in(f);
+            let _ = w.host_in(f);
         }
         w.advance_us(step_us);
         w.pump();
@@ -67,7 +67,7 @@ fn saturate(w: &mut W, iterations: u32, step_us: u32, f: &[u8]) {
 
 fn steady_flow(w: &mut W, frames: u32, spacing_us: u32, f: &[u8]) {
     for _ in 0..frames {
-        w.host_in(f);
+        let _ = w.host_in(f);
         w.pump();
         w.advance_us(spacing_us);
     }
@@ -152,7 +152,7 @@ fn codel_never_touches_arp_syn_dhcp_and_ends_with_the_holds() {
     w.advance_us(150_000);
     let before = w.stats().h2w_codel_drop + w.stats().h2w_ce_marked;
     for _ in 0..400 {
-        w.host_in(&f);
+        let _ = w.host_in(&f);
         w.pump();
         w.advance_us(2500); // 4 Mbit/s of 100 B: a steady unheld flow
     }
@@ -184,7 +184,7 @@ fn hold_evidenced_period() {
     let mut w = W::linked();
     codel_on(&w, 5000, 100);
     for i in 0..1000u32 {
-        w.host_in(&f);
+        let _ = w.host_in(&f);
         w.pump();
         w.advance_us(if i % 7 == 0 { 6500 } else { 2200 });
     }
@@ -248,8 +248,8 @@ fn hold_evidenced_period() {
     }
     assert!((400_000..=412_000).contains(&first_us), "{first_us}");
     // A link change forgets the period.
-    w.b.link(false);
-    w.b.link(true);
+    w.b.link(false, &ctx());
+    w.b.link(true, &ctx());
     assert_eq!(w.b.hold_period_age(w.env().now.get()), 0);
     w.check_identities();
 }
@@ -301,7 +301,7 @@ fn ecn_counters() {
     use tdongle_aqm::{EcnClass, TcpEcnSyn, classify, tcp_ecn_syn};
     let mut w = W::linked();
     let offer = |w: &mut W, f: &[u8]| {
-        w.host_in(f);
+        let _ = w.host_in(f);
         w.pump();
     };
     let f = tcp_frame(false, 0x00, 0xc2, 0); // SYN, ECE, CWR: an ECN-setup SYN, itself not-ECT, exempt (setup)

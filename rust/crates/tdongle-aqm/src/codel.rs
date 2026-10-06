@@ -32,15 +32,7 @@ impl Codel {
     /// A fresh controller (`tdongle_codel_init`).
     #[must_use]
     pub const fn new(target_us: u32, interval_us: u32) -> Self {
-        Self {
-            target_us,
-            interval_us,
-            dropping: false,
-            first_above_us: 0,
-            drop_next_us: 0,
-            count: 0,
-            lastcount: 0,
-        }
+        Self { target_us, interval_us, dropping: false, first_above_us: 0, drop_next_us: 0, count: 0, lastcount: 0 }
     }
 
     /// Change the parameters and restart the controller: a state built under other numbers means nothing (`tdongle_codel_retune`).

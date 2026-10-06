@@ -6,7 +6,7 @@
 //! the whole ring, including its concurrency, runs on the host with std threads in the tests.
 //!
 //! The pieces: [`Ring`] is the object; [`Config`] the configuration; [`TxStats`] the counters (`tinyusb_net_tx_stats_t`); [`consts`] the
-//! geometry with its compile-time assertions. `unsafe` is confined to [`ring`] (calls into [`mem`], the only raw-memory accessors), each
+//! geometry with its compile-time assertions. `unsafe` is confined to the private `ring` module (calls into the private `mem` module, the only raw-memory accessors), each
 //! block with a `SAFETY:` comment.
 //!
 //! The firmware's wiring, in terms of the C entry points:

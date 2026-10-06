@@ -11,7 +11,7 @@ fn to_host() {
     w.wifi_in(&frame(600, &UNICAST, &PEER, 1));
     assert_eq!(w.env().ring_calls.get(), 0);
     assert_eq!(w.stats().w2h_link_down, 1);
-    w.b.link(true);
+    w.b.link(true, &ctx());
     assert!(w.env().registered.get());
     assert_eq!((w.env().link_calls.get(), w.env().flushes.get()), (1, 1));
     // ARP, IPv4 (DHCP) and IPv6 bytes reach the ring exactly as received: no address rewriting.
@@ -57,7 +57,7 @@ fn to_host() {
     assert_eq!((s.w2h_ring_full, s.w2h_usb_not_ready, s.w2h_invalid, s.w2h_frames), (1, 2, 4, 14));
     w.check_identities();
     // The link goes down: the callback is unregistered, later frames are counted, and the ring is flushed.
-    w.b.link(false);
+    w.b.link(false, &ctx());
     assert!(!w.env().registered.get());
     assert_eq!(w.env().flushes.get(), 2);
     assert!(!w.stats().linked);
@@ -81,17 +81,17 @@ fn pm_notes() {
     w.wifi_in(&frame(100, &UNICAST, &MAC, 1)); // filtered
     w.wifi_in(&[0u8; 5]); // invalid
     assert_eq!(w.env().note_activity_calls.get(), 1);
-    w.host_in(&frame(100, &PEER, &MAC, 2));
+    let _ = w.host_in(&frame(100, &PEER, &MAC, 2));
     assert_eq!(w.env().note_activity_calls.get(), 2);
     assert_eq!(w.stats().h2w_queued, 1);
-    w.host_in(&frame(100, &BCAST, &MAC, 2)); // DHCP discover, ARP request
+    let _ = w.host_in(&frame(100, &BCAST, &MAC, 2)); // DHCP discover, ARP request
     assert_eq!(w.env().note_activity_calls.get(), 2);
     assert_eq!(w.stats().h2w_queued, 2);
-    w.host_in(&frame(100, &PEER, &PEER, 2)); // foreign source
-    w.host_in(&[0u8; 10]); // runt
+    let _ = w.host_in(&frame(100, &PEER, &PEER, 2)); // foreign source
+    let _ = w.host_in(&[0u8; 10]); // runt
     assert_eq!(w.env().note_activity_calls.get(), 2);
-    w.b.link(false);
-    w.host_in(&frame(100, &PEER, &MAC, 2)); // link down
+    w.b.link(false, &ctx());
+    let _ = w.host_in(&frame(100, &PEER, &MAC, 2)); // link down
     assert_eq!(w.env().note_activity_calls.get(), 2);
     w.pump();
     w.check_identities();
@@ -110,7 +110,7 @@ fn to_wifi() {
     let mut w = W::new();
     assert_eq!(w.host_in(&frame(600, &PEER, &MAC, 1)), HostOutcome::LinkDown);
     assert_eq!(w.stats().h2w_link_down, 1, "Wi-Fi not up yet");
-    w.b.link(true);
+    w.b.link(true, &ctx());
     w.env().notifies.set(0);
     for k in 0..3u8 {
         // ARP, DHCP, IPv6: bytes untouched, source is the STA MAC.
@@ -198,7 +198,7 @@ fn backpressure() {
         assert_eq!(w.host_in(&f), HostOutcome::Queued);
     }
     w.b.held.store(true, Ordering::SeqCst); // ... the callback, after storing the flag
-    w.drain_one(); // the worker consumed one frame meanwhile (depth 2: no resume yet: above the resume depth)
+    let _ = w.drain_one(); // the worker consumed one frame meanwhile (depth 2: no resume yet: above the resume depth)
     assert_eq!(w.host_in(&f), HostOutcome::Queued, "room: a normal enqueue (limit 3, depth 2). held was left set by the earlier store");
     w.pump();
     assert!(
@@ -211,7 +211,7 @@ fn backpressure() {
         assert_eq!(w.host_in(&f), HostOutcome::Queued);
     }
     assert!(w.host_in(&f).is_hold() && w.b.held.load(Ordering::SeqCst));
-    w.b.link(false);
+    w.b.link(false, &ctx());
     assert!(w.env().resumes.get() == 1 && !w.b.held.load(Ordering::SeqCst));
     w.pump();
     w.check_identities();
@@ -242,8 +242,7 @@ fn backpressure() {
 #[test]
 fn counter_wrap() {
     let mut w = W::linked();
-    w.b.head.store(0xffff_fffc, Ordering::SeqCst);
-    w.b.tail.store(0xffff_fffc, Ordering::SeqCst);
+    w.b.queue().__set_counters(0xffff_fffc);
     for round in 0..10u8 {
         for i in 0..3u8 {
             assert_eq!(w.host_in(&frame(100, &PEER, &MAC, round * 3 + i)), HostOutcome::Queued);
@@ -253,7 +252,7 @@ fn counter_wrap() {
             assert_eq!(w.env().tx_seen.borrow()[20], (round * 3 + i).wrapping_add(20));
         }
     }
-    assert_eq!(w.b.head.load(Ordering::SeqCst), 0xffff_fffcu32.wrapping_add(30));
+    assert_eq!(w.b.queue().head(Ordering::SeqCst), 0xffff_fffcu32.wrapping_add(30));
     let s = w.stats();
     assert_eq!((s.h2w_sent, s.h2w_queue_depth), (30, 0));
     w.check_identities();
@@ -267,19 +266,19 @@ fn link_flap() {
     for _ in 0..3 {
         assert_eq!(w.host_in(&f), HostOutcome::Queued);
     }
-    w.b.link(false); // the association ended with three frames queued
+    w.b.link(false, &ctx()); // the association ended with three frames queued
     assert_eq!(w.pump(), 3);
     assert_eq!((w.env().tx_calls.get(), w.stats().h2w_link_down_queued), (0, 3));
     for _ in 0..4 {
         assert_eq!(w.host_in(&f), HostOutcome::LinkDown, "link down: refused, counted");
     }
     assert_eq!(w.stats().h2w_link_down, 4);
-    w.b.link(true);
+    w.b.link(true, &ctx());
     for _ in 0..3 {
         assert_eq!(w.host_in(&f), HostOutcome::Queued);
     }
-    w.b.link(false); // a quick flap: down and up again before the worker ran
-    w.b.link(true);
+    w.b.link(false, &ctx()); // a quick flap: down and up again before the worker ran
+    w.b.link(true, &ctx());
     assert_eq!(w.pump(), 3);
     assert_eq!((w.env().tx_calls.get(), w.stats().h2w_stale), (0, 3), "queued under the first association of this link: stale");
     assert_eq!(w.host_in(&f), HostOutcome::Queued);
@@ -288,10 +287,10 @@ fn link_flap() {
     w.check_identities();
     // link() orders its steps: stop (or start) the callback, flush the ring, then tell the host.
     w.env().order.borrow_mut().clear();
-    w.b.link(false);
+    w.b.link(false, &ctx());
     assert_eq!(*w.env().order.borrow(), [0, 2, 3]);
     w.env().order.borrow_mut().clear();
-    w.b.link(true);
+    w.b.link(true, &ctx());
     assert_eq!(*w.env().order.borrow(), [2, 1, 3], "connect: flush the old association's frames, then open the callback");
     assert_eq!(w.stats().link_changes, 7);
 }
@@ -334,7 +333,7 @@ fn retry() {
     // The link drops while the worker waits: the frame is abandoned at once.
     let mut w = W::linked();
     w.env().tx_default.set(Err(TxError::NoMem));
-    *w.env().wait_hook.borrow_mut() = Some(Box::new(|b: &'static Bridge<TestEnv>| b.link(false)));
+    *w.env().wait_hook.borrow_mut() = Some(Box::new(|b: &'static Bridge<TestEnv>| b.link(false, &ctx())));
     assert_eq!(w.host_in(&f), HostOutcome::Queued);
     assert_eq!(w.pump(), 1);
     assert_eq!((w.env().tx_calls.get(), w.stats().h2w_tx_failed), (2, 1));
@@ -373,10 +372,12 @@ fn sojourn() {
 #[test]
 fn depth_never_wraps() {
     let w = W::linked();
-    w.b.head.store(7, Ordering::SeqCst);
-    w.b.tail.store(7, Ordering::SeqCst);
+    let mut w = w;
+    w.b.queue().__set_counters(7);
     assert_eq!(w.stats().h2w_queue_depth, 0);
-    w.b.head.store(9, Ordering::SeqCst);
+    for _ in 0..2 {
+        assert_eq!(w.host_in(&frame(100, &PEER, &MAC, 1)), HostOutcome::Queued);
+    }
     assert_eq!(w.stats().h2w_queue_depth, 2);
 }
 
@@ -387,7 +388,7 @@ fn rx_race() {
     let w = W::linked();
     let f = frame(200, &UNICAST, &PEER, 1);
     let flushes_before = w.env().flushes.get();
-    *w.env().ring_hook.borrow_mut() = Some(Box::new(|b: &'static Bridge<TestEnv>| b.link(false))); // the event task runs inside the ring send
+    *w.env().ring_hook.borrow_mut() = Some(Box::new(|b: &'static Bridge<TestEnv>| b.link(false, &ctx()))); // the event task runs inside the ring send
     w.wifi_in(&f);
     let s = w.stats();
     assert_eq!((s.w2h_raced, s.w2h_forwarded), (1, 1));
@@ -435,7 +436,7 @@ fn tuning() {
     assert_eq!(w.b.set_tuning(&t), Ok(()));
     assert_eq!(w.b.tuning(), t);
     let f = frame(200, &PEER, &MAC, 1);
-    w.b.link(true);
+    w.b.link(true, &ctx());
     for _ in 0..5 {
         assert_eq!(w.host_in(&f), HostOutcome::Queued);
     }

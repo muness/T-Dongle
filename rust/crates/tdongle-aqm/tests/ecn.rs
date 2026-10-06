@@ -42,11 +42,7 @@ fn ipv4_marking_keeps_checksums_valid() {
         if cls != EcnClass::Capable {
             continue;
         }
-        let l4_before = if proto == 6 || proto == 17 {
-            l4_checksum(&f[..len], false)
-        } else {
-            0
-        };
+        let l4_before = if proto == 6 || proto == 17 { l4_checksum(&f[..len], false) } else { 0 };
         mark_ce(&mut f[..len]);
         marked += 1;
         assert!(f[15] & 3 == 3 && f[15] & 0xfc == g[15] & 0xfc); // CE, DSCP untouched
@@ -202,12 +198,7 @@ fn ipv4_exemption_details() {
     let mut r = Rng::new();
     let mut f = [0u8; 1600];
     // UDP source 68 / destination 67; ports 66 and 69 are not DHCP.
-    for (src, dst, want) in [
-        (68u16, 5000u16, EcnClass::Exempt),
-        (5000, 67, EcnClass::Exempt),
-        (66, 5000, EcnClass::Capable),
-        (5000, 69, EcnClass::Capable),
-    ] {
+    for (src, dst, want) in [(68u16, 5000u16, EcnClass::Exempt), (5000, 67, EcnClass::Exempt), (66, 5000, EcnClass::Capable), (5000, 69, EcnClass::Capable)] {
         let len = build4(&mut r, &mut f, 1, 17, 5, 40, 0);
         [f[34], f[35]] = src.to_be_bytes();
         [f[36], f[37]] = dst.to_be_bytes();
@@ -240,14 +231,7 @@ fn ipv4_exemption_details() {
 fn ipv6_extension_headers() {
     let mut r = Rng::new();
     let (mut f, mut g) = ([0u8; 1600], [0u8; 1600]);
-    let (hbh, hbh2, dst, rt, frag, ah) = (
-        ext(0, 0),
-        ext(0, 2),
-        ext(60, 1),
-        ext(43, 1),
-        ext(44, 0),
-        ext(51, 1),
-    );
+    let (hbh, hbh2, dst, rt, frag, ah) = (ext(0, 0), ext(0, 2), ext(60, 1), ext(43, 1), ext(44, 0), ext(51, 1));
     // MLD (ICMPv6) behind hop-by-hop: exempt, the case the review found being dropped.
     let mut n = build6_chain(&mut r, &mut f, 2, &[hbh], 58, 0, 0, 0);
     assert_eq!(classify(&f[..n]), EcnClass::Exempt);
@@ -337,16 +321,7 @@ fn ipv6_random_extension_chains() {
         let tcp_flags = r.rnd(256);
         let udp_dst = if r.rnd(2) != 0 { 546 } else { r.rnd(65536) };
         let frag_off = if r.rnd(3) == 0 { r.rnd(8000) } else { 0 };
-        let n = build6_chain(
-            &mut r,
-            &mut f,
-            tclass,
-            &c[..k],
-            proto,
-            tcp_flags,
-            udp_dst,
-            frag_off,
-        );
+        let n = build6_chain(&mut r, &mut f, tclass, &c[..k], proto, tcp_flags, udp_dst, frag_off);
         let cut = if r.rnd(4) == 0 { r.usz(n + 1) } else { n };
         assert_eq!(classify(&f[..cut]), ref_classify(&f[..cut]));
         let _ = tcp_ecn_syn(&f[..cut]);
@@ -399,11 +374,7 @@ fn tcp_ecn_syn_ipv4() {
         for ihl_words in [5u32, 7, 15] {
             let len = build4(&mut r, &mut f, 0, 6, ihl_words, 40, 0);
             f[flags_at(ihl_words)] = flags;
-            assert_eq!(
-                tcp_ecn_syn(&f[..len]),
-                want,
-                "flags {flags:#x} ihl {ihl_words}"
-            );
+            assert_eq!(tcp_ecn_syn(&f[..len]), want, "flags {flags:#x} ihl {ihl_words}");
         }
     }
     let len = build4(&mut r, &mut f, 0, 6, 5, 40, 0);

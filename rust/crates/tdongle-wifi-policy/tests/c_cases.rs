@@ -1,10 +1,7 @@
 //! Every case of `alternative/tailnet/tests/test_wifi_policy.c` and the policy / retry parts of `tests/test_core.c`.
 use tdongle_nvs_format::legacy::{CFG_VERSION, LegacyProfile, LegacySettings};
 use tdongle_wifi_policy::retry::{TrialDecision, policy_next, retry_delay_ms, trial_decision};
-use tdongle_wifi_policy::{
-    HEALTHY_DBM, HYSTERESIS_DB, PIN_MAX_ATTEMPTS, PRIORITY_DEFAULT, PRIORITY_MAX, Pin, Rank,
-    USABLE_DBM, pick, pick_ranked, rank_order,
-};
+use tdongle_wifi_policy::{HEALTHY_DBM, HYSTERESIS_DB, PIN_MAX_ATTEMPTS, PRIORITY_DEFAULT, PRIORITY_MAX, Pin, Rank, USABLE_DBM, pick, pick_ranked, rank_order};
 
 const NS: i16 = -127;
 
@@ -68,27 +65,15 @@ fn priority_and_the_preferred_slot() {
     // Defaults: no priorities and no preferred slot behave exactly like wifi_pick.
     let none = Rank::NONE;
     assert_eq!(pick_ranked(&s, 3, None, false, &none), Some(1));
-    assert_eq!(
-        pick_ranked(&s, 3, None, false, &none),
-        pick(&s, 3, None, false)
-    );
-    let flat = Rank {
-        priority: Some([50; 8]),
-        preferred: None,
-    };
+    assert_eq!(pick_ranked(&s, 3, None, false, &none), pick(&s, 3, None, false));
+    let flat = Rank { priority: Some([50; 8]), preferred: None };
     assert_eq!(pick_ranked(&s, 3, None, false, &flat), Some(1));
     // A higher priority beats a stronger signal.
     let pr = [50, 50, 80, 50, 50, 50, 50, 50];
-    let prio = Rank {
-        priority: Some(pr),
-        preferred: None,
-    };
+    let prio = Rank { priority: Some(pr), preferred: None };
     assert_eq!(pick_ranked(&s, 3, None, false, &prio), Some(2));
     // The preferred slot beats a higher priority.
-    let mut pref = Rank {
-        priority: Some(pr),
-        preferred: Some(0),
-    };
+    let mut pref = Rank { priority: Some(pr), preferred: Some(0) };
     assert_eq!(pick_ranked(&s, 3, None, false, &pref), Some(0));
     // ... unless it is not usable (below WIFI_USABLE_DBM): a barely visible preferred network does not outrank a good one.
     s[0] = -90;
@@ -108,10 +93,7 @@ fn priority_and_the_preferred_slot() {
     // Connected: a healthy link is never left, whatever is preferred (v0.1.1: never oscillate a healthy link).
     let mut t: [i16; 8] = [-70, -40, NS, NS, NS, NS, NS, NS];
     let tp = [50, 99, 50, 50, 50, 50, 50, 50];
-    let higher = Rank {
-        priority: Some(tp),
-        preferred: Some(1),
-    };
+    let higher = Rank { priority: Some(tp), preferred: Some(1) };
     assert_eq!(pick_ranked(&t, 2, Some(0), true, &higher), None);
     // A weak one is left for a candidate 12 dB stronger, by the ranking.
     t[0] = -80;
@@ -120,16 +102,10 @@ fn priority_and_the_preferred_slot() {
     t[1] = -68;
     assert_eq!(pick_ranked(&t, 2, Some(0), true, &higher), Some(1));
     t[1] = -60;
-    let other = Rank {
-        priority: Some(tp),
-        preferred: Some(0),
-    };
+    let other = Rank { priority: Some(tp), preferred: Some(0) };
     assert_eq!(pick_ranked(&t, 2, Some(0), true, &other), None); // the current network is the best: stay
     // Unseen networks (hidden SSIDs) while offline: preferred first, then priority, then slot.
-    let orank = Rank {
-        priority: Some([50, 50, 70, 50, 90, 50, 50, 50]),
-        preferred: Some(3),
-    };
+    let orank = Rank { priority: Some([50, 50, 70, 50, 90, 50, 50, 50]), preferred: Some(3) };
     let order = rank_order(&orank, 5);
     assert_eq!(&order[..5], &[3, 4, 2, 0, 1]);
     let order = rank_order(&Rank::NONE, 4);
@@ -138,10 +114,7 @@ fn priority_and_the_preferred_slot() {
     // A pin outranks all of it; the ranked pick applies once the pin is given up.
     let mut p = Pin::NONE;
     let u: [i16; 8] = [-70, -40, NS, NS, NS, NS, NS, NS];
-    let pinned_rank = Rank {
-        priority: Some([50; 8]),
-        preferred: Some(0),
-    };
+    let pinned_rank = Rank { priority: Some([50; 8]), preferred: Some(0) };
     p.set(1);
     assert_eq!(p.pick_ranked(&u, 2, None, false, &pinned_rank), Some(1));
     p.set(1);
@@ -151,14 +124,7 @@ fn priority_and_the_preferred_slot() {
 }
 
 fn legacy(entries: &[(&str, u8)], preferred: u8) -> LegacySettings {
-    let mut s = LegacySettings {
-        version: CFG_VERSION,
-        p: [LegacyProfile::EMPTY; 8],
-        preferred,
-        brightness: 60,
-        rotation: 0,
-        dim_seconds: 60,
-    };
+    let mut s = LegacySettings { version: CFG_VERSION, p: [LegacyProfile::EMPTY; 8], preferred, brightness: 60, rotation: 0, dim_seconds: 60 };
     for (i, (ssid, prio)) in entries.iter().enumerate() {
         s.p[i].ssid[..ssid.len()].copy_from_slice(ssid.as_bytes());
         s.p[i].priority = *prio;

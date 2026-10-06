@@ -101,7 +101,7 @@ fn random_run(seed: u64, ops: u32, codel: bool) {
             70..=77 => w.advance_us(rng.below(30_000)),
             78..=80 => {
                 linked = !linked;
-                w.b.link(linked);
+                w.b.link(linked, &ctx());
             }
             81..=85 => w.env().room.set(rng.below(3) != 0),
             86..=89 => w.env().tx_default.set(match rng.below(4) {
@@ -131,7 +131,7 @@ fn random_run(seed: u64, ops: u32, codel: bool) {
                 // A burst from the host as fast as it can go: exercises HOLD and resume.
                 for _ in 0..10 {
                     let f = random_frame(&mut rng, true);
-                    w.host_in(&f);
+                    let _ = w.host_in(&f);
                 }
             }
         }
@@ -184,7 +184,7 @@ impl Env for LiveEnv {
     fn usb_link_state(&self, _up: bool) {}
     fn wifi_rx_register(&self, _on: bool) {}
     fn notify_worker(&self) {}
-    fn wifi_tx(&self, frame: &[u8]) -> Result<(), TxError> {
+    fn wifi_tx(&self, frame: &[u8], _context: &TaskContext) -> Result<(), TxError> {
         let n = self.tx_calls.fetch_add(1, Ordering::Relaxed);
         let every = self.tx_refuse_every.load(Ordering::Relaxed);
         if every != 0 && n.is_multiple_of(every) {
@@ -201,10 +201,10 @@ impl Env for LiveEnv {
     fn wifi_room(&self) -> bool {
         true
     }
-    fn wait_retry(&self) {
+    fn wait_retry(&self, _context: &TaskContext) {
         thread::sleep(Duration::from_micros(50));
     }
-    fn rx_resume(&self) {
+    fn rx_resume(&self, _context: &TaskContext) {
         self.resume.store(true, Ordering::SeqCst);
     }
     fn note_activity(&self) {}
@@ -235,7 +235,7 @@ fn threads_keep_identities_and_bytes() {
         sent: Mutex::new(Vec::new()),
     };
     let bridge: &'static Bridge<LiveEnv> = Box::leak(Box::new(Bridge::new(env, MAC)));
-    bridge.link(true);
+    bridge.link(true, &ctx());
     let stop = Arc::new(AtomicBool::new(false));
     let wifi_stop = stop.clone();
     let flap_stop = stop.clone();
@@ -283,7 +283,7 @@ fn threads_keep_identities_and_bytes() {
     let wifi = thread::spawn(move || {
         let mut n = 0u32;
         while !wifi_stop.load(Ordering::Relaxed) {
-            bridge.wifi_rx(&counted_frame(n, 80 + (n as usize * 13) % 1400, false));
+            let _ = bridge.wifi_rx(&counted_frame(n, 80 + (n as usize * 13) % 1400, false));
             n += 1;
             if n.is_multiple_of(64) {
                 thread::yield_now();
@@ -295,10 +295,10 @@ fn threads_keep_identities_and_bytes() {
         while !flap_stop.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(3));
             up = !up;
-            bridge.link(up);
+            bridge.link(up, &ctx());
             if !up {
                 thread::sleep(Duration::from_millis(1));
-                bridge.link(true);
+                bridge.link(true, &ctx());
                 up = true;
             }
         }
@@ -309,7 +309,7 @@ fn threads_keep_identities_and_bytes() {
     wifi.join().unwrap();
     flapper.join().unwrap();
     worker.join().unwrap();
-    bridge.link(true);
+    bridge.link(true, &ctx());
 
     let s = bridge.stats();
     assert_eq!(s.check_identities(), Ok(()), "{s:#?}");

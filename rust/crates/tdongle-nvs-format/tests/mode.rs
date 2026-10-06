@@ -25,21 +25,10 @@ fn names_and_values() {
     assert_eq!(Mode::TailnetGateway.name(), "tailnet_gateway");
     assert_eq!(Mode::parse("wifi_bridge"), Some(Mode::WifiBridge));
     assert_eq!(Mode::parse("tailnet_gateway"), Some(Mode::TailnetGateway));
-    for bad in [
-        "",
-        "Wifi_bridge",
-        "wifi_bridge ",
-        "tailnet",
-        "wifi_bridge\0",
-        "0",
-        "1",
-    ] {
+    for bad in ["", "Wifi_bridge", "wifi_bridge ", "tailnet", "wifi_bridge\0", "0", "1"] {
         assert_eq!(Mode::parse(bad), None, "{bad:?}");
     }
-    assert_eq!(
-        (Mode::WifiBridge.to_u8(), Mode::TailnetGateway.to_u8()),
-        (0, 1)
-    );
+    assert_eq!((Mode::WifiBridge.to_u8(), Mode::TailnetGateway.to_u8()), (0, 1));
     assert_eq!(Mode::from_u8(0), Some(Mode::WifiBridge));
     assert_eq!(Mode::from_u8(1), Some(Mode::TailnetGateway));
     assert_eq!(Mode::from_u8(2), None);

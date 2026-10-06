@@ -123,10 +123,7 @@ impl Cursor<'_> {
     /// cJSON `parse_number`: the longest `strtod` prefix of the run of number characters, as an `f64`.
     fn number(&mut self) -> Result<f64, ProfileJsonError> {
         let rest = &self.text[self.at..];
-        let run = rest
-            .iter()
-            .take_while(|b| matches!(b, b'0'..=b'9' | b'+' | b'-' | b'e' | b'E' | b'.'))
-            .count();
+        let run = rest.iter().take_while(|b| matches!(b, b'0'..=b'9' | b'+' | b'-' | b'e' | b'E' | b'.')).count();
         let used = strtod_prefix(&rest[..run]);
         if used == 0 {
             return Err(ProfileJsonError::Malformed);
@@ -141,12 +138,7 @@ impl Cursor<'_> {
 /// Length of the longest prefix of `s` that C `strtod` reads as a decimal number: `[+-] (digits [. digits*] | . digits) [(e|E) [+-] digits]`,
 /// or 0 when there is none. (`inf`, `nan` and hex floats cannot occur: their letters are not in the run.)
 fn strtod_prefix(s: &[u8]) -> usize {
-    let digits = |from: usize| {
-        s[from.min(s.len())..]
-            .iter()
-            .take_while(|b| b.is_ascii_digit())
-            .count()
-    };
+    let digits = |from: usize| s[from.min(s.len())..].iter().take_while(|b| b.is_ascii_digit()).count();
     let mut i = usize::from(matches!(s.first(), Some(b'+' | b'-')));
     let int = digits(i);
     i += int;
@@ -212,11 +204,7 @@ pub fn profile_parse_json(json: &[u8]) -> Result<ParsedProfile, ProfileJsonError
         }
         i += 1;
     }
-    let body = if text.len() >= 4 && text.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        &text[3..]
-    } else {
-        text
-    };
+    let body = if text.len() >= 4 && text.starts_with(&[0xEF, 0xBB, 0xBF]) { &text[3..] } else { text };
     let mut cur = Cursor { text: body, at: 0 };
     cur.skip_ws();
     if !cur.eat(b'{') {
@@ -231,10 +219,7 @@ pub fn profile_parse_json(json: &[u8]) -> Result<ParsedProfile, ProfileJsonError
             cur.skip_ws();
             let mut key = [0u8; 8];
             let key_len = cur.string(&mut key)?;
-            let bit = key
-                .get(..key_len)
-                .and_then(key_bit)
-                .ok_or(ProfileJsonError::BadKey)?;
+            let bit = key.get(..key_len).and_then(key_bit).ok_or(ProfileJsonError::BadKey)?;
             if seen & bit != 0 {
                 return Err(ProfileJsonError::BadKey);
             }
@@ -288,8 +273,5 @@ pub fn profile_parse_json(json: &[u8]) -> Result<ParsedProfile, ProfileJsonError
     if !profile.valid() {
         return Err(ProfileJsonError::InvalidProfile);
     }
-    Ok(ParsedProfile {
-        slot: slot as usize - 1,
-        profile,
-    })
+    Ok(ParsedProfile { slot: slot as usize - 1, profile })
 }

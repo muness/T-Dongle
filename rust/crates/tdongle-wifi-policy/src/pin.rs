@@ -29,19 +29,11 @@ impl Default for Pin {
 
 impl Pin {
     /// C `WIFI_PIN_INIT`.
-    pub const NONE: Self = Self {
-        slot: None,
-        attempts: 0,
-        failed_slot: None,
-    };
+    pub const NONE: Self = Self { slot: None, attempts: 0, failed_slot: None };
 
     /// C `wifi_pin_set`: pin `slot` (0-based) and forget any earlier failure.
     pub fn set(&mut self, slot: usize) {
-        *self = Self {
-            slot: Some(slot),
-            attempts: 0,
-            failed_slot: None,
-        };
+        *self = Self { slot: Some(slot), attempts: 0, failed_slot: None };
     }
 
     /// C `wifi_pin_clear`: nothing pinned, no failure remembered.
@@ -54,14 +46,7 @@ impl Pin {
     /// Unpinned: [`pick_ranked`]. Pinned: stay while connected to the pinned network; otherwise retry it regardless of signal (it may be
     /// hidden or briefly unseen) until [`PIN_MAX_ATTEMPTS`] passes have been used, then give the pin up, record [`Pin::failed_slot`] and
     /// fall back to the ranked choice. A pin beyond the saved list (`slot >= count`) is dropped first.
-    pub fn pick_ranked(
-        &mut self,
-        signal: &[i16; PROFILE_LIMIT],
-        count: usize,
-        current: Option<usize>,
-        connected: bool,
-        rank: &Rank,
-    ) -> Option<usize> {
+    pub fn pick_ranked(&mut self, signal: &[i16; PROFILE_LIMIT], count: usize, current: Option<usize>, connected: bool, rank: &Rank) -> Option<usize> {
         if self.slot.is_some_and(|s| s >= count) {
             self.clear();
         }
@@ -83,13 +68,7 @@ impl Pin {
     }
 
     /// C `wifi_pin_pick`: [`Pin::pick_ranked`] with no priorities and nothing preferred.
-    pub fn pick(
-        &mut self,
-        signal: &[i16; PROFILE_LIMIT],
-        count: usize,
-        current: Option<usize>,
-        connected: bool,
-    ) -> Option<usize> {
+    pub fn pick(&mut self, signal: &[i16; PROFILE_LIMIT], count: usize, current: Option<usize>, connected: bool) -> Option<usize> {
         self.pick_ranked(signal, count, current, connected, &Rank::NONE)
     }
 }

@@ -16,7 +16,7 @@
 
 #![no_std]
 #![deny(missing_docs)]
-#![deny(unsafe_op_in_unsafe_fn)]
+#![forbid(unsafe_code)]
 
 #[cfg(test)]
 #[macro_use]
@@ -24,7 +24,6 @@ extern crate std;
 
 mod bridge;
 mod env;
-mod queue;
 mod stats;
 #[cfg(test)]
 mod tests;
@@ -33,6 +32,7 @@ mod tuning;
 pub use bridge::{Bridge, HostOutcome, Producer, Worker};
 pub use env::{Env, RingSend, TxError};
 pub use stats::{IdentityFailure, Stats};
+pub use tdongle_spsc::TaskContext;
 pub use tuning::{InvalidTuning, Tuning};
 
 /// The largest Ethernet frame the bridge carries (1,500 byte MTU + header; no VLAN tag): anything else is dropped and counted.

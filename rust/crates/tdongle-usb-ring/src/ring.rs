@@ -18,12 +18,15 @@
 
 use core::cell::UnsafeCell;
 use core::ptr::{self, NonNull};
-use core::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst}};
+use core::sync::atomic::{
+    AtomicBool, AtomicU16, AtomicU32,
+    Ordering::{AcqRel, Acquire, Relaxed, Release, SeqCst},
+};
 
 use crate::config::{Config, ConfigError, RestartError, SendError, SetMaxChunksError, TxStats, Wait};
 use crate::consts::{
-    CHUNK_BYTES, CHUNK_SLABS, FIFO_MASK, FRAME_MAX, FRAME_MIN, GROW_RETRY_MAX_MS, GROW_RETRY_MS, HEAP_BLOCK_SLACK, HOUSEKEEP_MS,
-    IDLE_DEFAULT_MS, LINK_POLL_MS, MAX_CHUNKS, MAX_SLABS, REC_HDR, SLAB_BYTES, align4,
+    CHUNK_BYTES, CHUNK_SLABS, FIFO_MASK, FRAME_MAX, FRAME_MIN, GROW_RETRY_MAX_MS, GROW_RETRY_MS, HEAP_BLOCK_SLACK, HOUSEKEEP_MS, IDLE_DEFAULT_MS, LINK_POLL_MS,
+    MAX_CHUNKS, MAX_SLABS, REC_HDR, SLAB_BYTES, align4,
 };
 use crate::env::RingEnv;
 use crate::mem;

@@ -2,11 +2,7 @@
 use tdongle_nvs_format::ui_settings::{BLOB_LEN, UiSettings, UiSettingsError};
 
 fn ui(brightness: u8, rotation: u8, dim_seconds: u16) -> UiSettings {
-    UiSettings {
-        brightness,
-        rotation,
-        dim_seconds,
-    }
+    UiSettings { brightness, rotation, dim_seconds }
 }
 
 #[test]
@@ -27,10 +23,7 @@ fn parse_accepts() {
     assert_eq!(UiSettings::parse(b"  5   0   10  "), Ok(ui(5, 0, 10)));
     assert_eq!(UiSettings::parse(b"075 1 0100"), Ok(ui(75, 1, 100)));
     assert_eq!(UiSettings::parse(b"00005 00000 00010"), Ok(ui(5, 0, 10)));
-    assert_eq!(
-        UiSettings::parse(b"60 0 60\0 trailing after NUL"),
-        Ok(ui(60, 0, 60))
-    );
+    assert_eq!(UiSettings::parse(b"60 0 60\0 trailing after NUL"), Ok(ui(60, 0, 60)));
 }
 
 #[test]
@@ -62,30 +55,17 @@ fn parse_refuses() {
         b"256 0 60",
     ];
     for text in bad {
-        assert!(
-            UiSettings::parse(text).is_err(),
-            "{:?}",
-            String::from_utf8_lossy(text)
-        );
+        assert!(UiSettings::parse(text).is_err(), "{:?}", String::from_utf8_lossy(text));
     }
-    assert_eq!(
-        UiSettings::parse(b"60 0 x"),
-        Err(UiSettingsError::Malformed)
-    );
-    assert_eq!(
-        UiSettings::parse(b"4 0 60"),
-        Err(UiSettingsError::OutOfRange)
-    );
+    assert_eq!(UiSettings::parse(b"60 0 x"), Err(UiSettingsError::Malformed));
+    assert_eq!(UiSettings::parse(b"4 0 60"), Err(UiSettingsError::OutOfRange));
 }
 
 /// A naive reference for the grammar: split on spaces, three tokens of 1 to 5 ASCII digits, range check.
 fn reference(text: &[u8]) -> Option<UiSettings> {
     let end = text.iter().position(|&b| b == 0).unwrap_or(text.len());
     let text = &text[..end];
-    let tokens: Vec<&[u8]> = text
-        .split(|&b| b == b' ')
-        .filter(|t| !t.is_empty())
-        .collect();
+    let tokens: Vec<&[u8]> = text.split(|&b| b == b' ').filter(|t| !t.is_empty()).collect();
     if tokens.len() != 3 {
         return None;
     }
@@ -96,11 +76,7 @@ fn reference(text: &[u8]) -> Option<UiSettings> {
         }
         v[i] = std::str::from_utf8(t).ok()?.parse().ok()?;
     }
-    let s = ui(
-        v[0].min(255) as u8,
-        v[1].min(255) as u8,
-        v[2].min(65535) as u16,
-    );
+    let s = ui(v[0].min(255) as u8, v[1].min(255) as u8, v[2].min(65535) as u16);
     s.valid().then_some(s)
 }
 
@@ -118,9 +94,7 @@ fn parse_matches_reference_on_random_text() {
     for round in 0..200_000 {
         let text: Vec<u8> = if round % 2 == 0 {
             let len = (next() % 20) as usize;
-            (0..len)
-                .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
-                .collect()
+            (0..len).map(|_| alphabet[(next() % alphabet.len() as u64) as usize]).collect()
         } else {
             // Near-valid text: three numbers (often in range) with random spacing, then up to two random edits.
             let mut t = Vec::new();
@@ -145,18 +119,10 @@ fn parse_matches_reference_on_random_text() {
         };
         total += 1;
         let got = UiSettings::parse(&text).ok();
-        assert_eq!(
-            got,
-            reference(&text),
-            "{:?}",
-            String::from_utf8_lossy(&text)
-        );
+        assert_eq!(got, reference(&text), "{:?}", String::from_utf8_lossy(&text));
         accepted += usize::from(got.is_some());
     }
-    assert!(
-        accepted > 100,
-        "the generator should hit valid input sometimes ({accepted} of {total})"
-    );
+    assert!(accepted > 100, "the generator should hit valid input sometimes ({accepted} of {total})");
 }
 
 #[test]
@@ -195,13 +161,7 @@ fn blob() {
     assert_eq!(with(4, 1), Err(UiSettingsError::OutOfRange));
     assert_eq!(with(5, 2), Err(UiSettingsError::OutOfRange));
     assert_eq!(with(7, 0xff), Err(UiSettingsError::OutOfRange));
-    assert_eq!(
-        UiSettings::from_bytes(&b[..7]),
-        Err(UiSettingsError::WrongSize)
-    );
-    assert_eq!(
-        UiSettings::from_bytes(&[&b[..], &[0]].concat()),
-        Err(UiSettingsError::WrongSize)
-    );
+    assert_eq!(UiSettings::from_bytes(&b[..7]), Err(UiSettingsError::WrongSize));
+    assert_eq!(UiSettings::from_bytes(&[&b[..], &[0]].concat()), Err(UiSettingsError::WrongSize));
     assert_eq!(UiSettings::from_bytes(&[]), Err(UiSettingsError::WrongSize));
 }

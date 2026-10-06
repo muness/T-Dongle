@@ -33,7 +33,7 @@ extern "C" {
 
 #define CFG_TUD_ENDPOINT0_SIZE          64
 
-#define CFG_TUSB_DEBUG                  CONFIG_TINYUSB_DEBUG_LEVEL
+#define CFG_TUSB_DEBUG                  1                       /* errors only (CONFIG_TINYUSB_DEBUG_LEVEL=1 in the C image) */
 #define CFG_TUSB_DEBUG_PRINTF           esp_rom_printf          /* TinyUSB prints from ISR context: only the ROM printf is safe there */
 
 /* Class drivers: one CDC-ACM (the serial console), one CDC-NCM (the network). Nothing else is linked in. */

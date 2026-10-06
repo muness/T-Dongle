@@ -11,9 +11,20 @@ publish = false
 workspace = true
 
 [dependencies]
+esp-idf-hal = { version = "0.47", default-features = false, features = ["std", "alloc", "binstart", "critical-section"] }
 esp-idf-svc = { version = "0.53", default-features = false, features = ["std", "alloc", "binstart", "critical-section"] }
 esp-idf-sys = { version = "0.38", default-features = false, features = ["std", "binstart"] }
 log = "0.4"
+tdongle-aqm = { path = "../crates/tdongle-aqm" }
+tdongle-bridge = { path = "../crates/tdongle-bridge" }
+tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
+tdongle-pm = { path = "../crates/tdongle-pm" }
+tdongle-serial = { path = "../crates/tdongle-serial" }
+tdongle-traffic = { path = "../crates/tdongle-traffic" }
+tdongle-usb-descriptors = { path = "../crates/tdongle-usb-descriptors" }
+tdongle-usb-ring = { path = "../crates/tdongle-usb-ring" }
+tdongle-wifi-budget = { path = "../crates/tdongle-wifi-budget" }
+tdongle-wifi-policy = { path = "../crates/tdongle-wifi-policy" }
 
 [build-dependencies]
 embuild = "0.33"

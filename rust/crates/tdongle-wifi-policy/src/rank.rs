@@ -29,17 +29,12 @@ pub struct Rank {
 
 impl Rank {
     /// C `WIFI_RANK_NONE`.
-    pub const NONE: Self = Self {
-        priority: None,
-        preferred: None,
-    };
+    pub const NONE: Self = Self { priority: None, preferred: None };
 
     /// C `wifi_rank_priority`: the priority of `slot` (the default when there are no priorities or the slot is out of range).
     #[must_use]
     pub fn priority_of(&self, slot: usize) -> u8 {
-        self.priority
-            .and_then(|p| p.get(slot).copied())
-            .unwrap_or(PRIORITY_DEFAULT)
+        self.priority.and_then(|p| p.get(slot).copied()).unwrap_or(PRIORITY_DEFAULT)
     }
 
     fn is_preferred(&self, slot: usize) -> bool {
@@ -80,13 +75,7 @@ pub fn rank_better(rank: &Rank, signal: &[i16; PROFILE_LIMIT], a: usize, b: usiz
 /// the best candidate is not at least [`HYSTERESIS_DB`] stronger than the current signal. A `current` outside the signal array is treated
 /// as no current network.
 #[must_use]
-pub fn pick_ranked(
-    signal: &[i16; PROFILE_LIMIT],
-    count: usize,
-    current: Option<usize>,
-    connected: bool,
-    rank: &Rank,
-) -> Option<usize> {
+pub fn pick_ranked(signal: &[i16; PROFILE_LIMIT], count: usize, current: Option<usize>, connected: bool, rank: &Rank) -> Option<usize> {
     let mut best: Option<usize> = None;
     for i in 0..count.min(PROFILE_LIMIT) {
         if signal[i] > NOT_SEEN_DBM && best.is_none_or(|b| rank_better(rank, signal, i, b)) {
@@ -111,12 +100,7 @@ pub fn pick_ranked(
 /// C `wifi_pick`: [`pick_ranked`] with no priorities and nothing preferred. Stable ties, 12 dB hysteresis and the weak-current threshold
 /// prevent churn.
 #[must_use]
-pub fn pick(
-    signal: &[i16; PROFILE_LIMIT],
-    count: usize,
-    current: Option<usize>,
-    connected: bool,
-) -> Option<usize> {
+pub fn pick(signal: &[i16; PROFILE_LIMIT], count: usize, current: Option<usize>, connected: bool) -> Option<usize> {
     pick_ranked(signal, count, current, connected, &Rank::NONE)
 }
 
@@ -136,15 +120,8 @@ pub fn rank_order(rank: &Rank, count: usize) -> [u8; PROFILE_LIMIT] {
         let mut j = i;
         while j > 0 {
             let prev = order[j - 1];
-            let (slot_pref, prev_pref) = (
-                rank.is_preferred(usize::from(slot)),
-                rank.is_preferred(usize::from(prev)),
-            );
-            let before = if slot_pref == prev_pref {
-                rank.priority_of(usize::from(slot)) > rank.priority_of(usize::from(prev))
-            } else {
-                slot_pref
-            };
+            let (slot_pref, prev_pref) = (rank.is_preferred(usize::from(slot)), rank.is_preferred(usize::from(prev)));
+            let before = if slot_pref == prev_pref { rank.priority_of(usize::from(slot)) > rank.priority_of(usize::from(prev)) } else { slot_pref };
             if !before {
                 break;
             }

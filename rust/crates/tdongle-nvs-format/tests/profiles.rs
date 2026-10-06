@@ -1,17 +1,12 @@
 //! The `wifi_profiles` blob layout and validation (`alternative/tailnet/main/wifi_profiles.inc`).
 mod common;
 use common::fixed;
-use tdongle_nvs_format::wifi_profiles::{
-    BLOB_LEN, SavedNetworks, SavedNetworksError, SavedProfile,
-};
+use tdongle_nvs_format::wifi_profiles::{BLOB_LEN, SavedNetworks, SavedNetworksError, SavedProfile};
 
 fn list(entries: &[(&str, &str)]) -> SavedNetworks {
     let mut l = SavedNetworks::default();
     for (i, (ssid, pass)) in entries.iter().enumerate() {
-        l.profiles[i] = SavedProfile {
-            ssid: fixed(ssid),
-            password: fixed(pass),
-        };
+        l.profiles[i] = SavedProfile { ssid: fixed(ssid), password: fixed(pass) };
     }
     l.count = entries.len();
     l
@@ -34,10 +29,7 @@ fn layout_is_frozen() {
 fn round_trip_keeps_every_byte() {
     let mut l = list(&[("Home", "pass1234")]);
     l.profiles[0].ssid[10] = 0x77; // after the terminator
-    l.profiles[3] = SavedProfile {
-        ssid: [0xA5; 33],
-        password: [0xA5; 64],
-    }; // unused entry
+    l.profiles[3] = SavedProfile { ssid: [0xA5; 33], password: [0xA5; 64] }; // unused entry
     let b = l.to_bytes();
     assert_eq!(SavedNetworks::from_bytes(&b), Ok(l));
 }
@@ -54,23 +46,11 @@ fn validation() {
     assert_eq!(with(&|b| b[0] = 2), Err(SavedNetworksError::BadSchema));
     assert_eq!(with(&|b| b[4] = 9), Err(SavedNetworksError::BadCount));
     assert_eq!(with(&|b| b[4] = 8), Err(SavedNetworksError::EmptySsid)); // entries 1..8 are empty but now in use
-    assert_eq!(
-        with(&|b| b[8..41].fill(b'x')),
-        Err(SavedNetworksError::SsidUnterminated)
-    );
-    assert_eq!(
-        with(&|b| b[8 + 33..8 + 97].fill(b'x')),
-        Err(SavedNetworksError::PasswordUnterminated)
-    );
+    assert_eq!(with(&|b| b[8..41].fill(b'x')), Err(SavedNetworksError::SsidUnterminated));
+    assert_eq!(with(&|b| b[8 + 33..8 + 97].fill(b'x')), Err(SavedNetworksError::PasswordUnterminated));
     assert_eq!(with(&|b| b[8] = 0), Err(SavedNetworksError::EmptySsid));
-    assert_eq!(
-        SavedNetworks::from_bytes(&good[..BLOB_LEN - 1]),
-        Err(SavedNetworksError::WrongSize)
-    );
-    assert_eq!(
-        SavedNetworks::from_bytes(&[]),
-        Err(SavedNetworksError::WrongSize)
-    );
+    assert_eq!(SavedNetworks::from_bytes(&good[..BLOB_LEN - 1]), Err(SavedNetworksError::WrongSize));
+    assert_eq!(SavedNetworks::from_bytes(&[]), Err(SavedNetworksError::WrongSize));
     // Unused entries are never looked at.
     assert!(with(&|b| b[8 + 97 * 4..8 + 97 * 5].fill(0xFF)).is_ok());
     // A 32 character SSID and a 63 character password are the longest allowed.

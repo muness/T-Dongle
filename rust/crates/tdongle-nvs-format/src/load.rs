@@ -61,9 +61,7 @@ fn apply_legacy_meta(saved: &SavedNetworks, meta: &mut MetaSet, legacy: &LegacyI
 /// # Errors
 /// [`SavedNetworksError`] when an existing `profiles` blob is invalid. Nothing else can fail.
 pub fn load_wifi_profiles(inputs: &LoadInputs<'_>) -> Result<Loaded, SavedNetworksError> {
-    let legacy = inputs
-        .legacy
-        .and_then(|blob| LegacyImport::decode(blob).ok());
+    let legacy = inputs.legacy.and_then(|blob| LegacyImport::decode(blob).ok());
     let saved = match inputs.profiles {
         Some(blob) => SavedNetworks::from_bytes(blob)?,
         None => import_fresh(inputs.older, legacy.as_ref()),
@@ -92,11 +90,7 @@ fn import_fresh(older: Option<(&[u8], &[u8])>, legacy: Option<&LegacyImport>) ->
         if saved.count >= LIMIT {
             break;
         }
-        if saved
-            .list()
-            .iter()
-            .any(|p| p.ssid_bytes() == c_str(&net.ssid))
-        {
+        if saved.list().iter().any(|p| p.ssid_bytes() == c_str(&net.ssid)) {
             continue;
         }
         let mut profile = SavedProfile::EMPTY;
@@ -114,15 +108,8 @@ fn import_fresh(older: Option<(&[u8], &[u8])>, legacy: Option<&LegacyImport>) ->
 pub fn display_load(display: Option<&[u8]>, legacy: Option<&[u8]>) -> UiSettings {
     display
         .and_then(|blob| UiSettings::from_bytes(blob).ok())
-        .or_else(|| {
-            legacy
-                .and_then(|blob| LegacyImport::decode(blob).ok())
-                .and_then(|import| import.display)
-        })
+        .or_else(|| legacy.and_then(|blob| LegacyImport::decode(blob).ok()).and_then(|import| import.display))
         .unwrap_or_default()
 }
 
-const _: () = assert!(
-    LIMIT == SLOTS,
-    "saved-network metadata must have a slot for every saved network"
-);
+const _: () = assert!(LIMIT == SLOTS, "saved-network metadata must have a slot for every saved network");

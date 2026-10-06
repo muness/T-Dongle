@@ -1,9 +1,7 @@
 //! Ports of `tests/test_wifi_meta.c`, plus byte-layout checks.
 mod common;
 use common::{SSIDS, fixed};
-use tdongle_nvs_format::wifi_meta::{
-    BLOB_LEN, MetaBlob, MetaBlobError, MetaSet, MetaSlot, NAME_MAX,
-};
+use tdongle_nvs_format::wifi_meta::{BLOB_LEN, MetaBlob, MetaBlobError, MetaSet, MetaSlot, NAME_MAX};
 
 /// What the firmware does with a stored blob: defaults for the list, the blob laid over them.
 fn decode(data: &[u8], ssids: &[&[u8]]) -> Result<MetaSet, MetaBlobError> {
@@ -21,8 +19,7 @@ fn defaults() {
     let s = MetaSet::defaults(&SSIDS[..3]);
     assert!(s.preferred.is_none() && name(&s.slot[0]) == b"Home" && s.slot[2].priority == 50);
     assert!(name(&s.slot[3]).is_empty() && s.slot[3].priority == 0);
-    let long =
-        MetaSlot::default_for(b"A very long network name that exceeds twenty-four characters");
+    let long = MetaSlot::default_for(b"A very long network name that exceeds twenty-four characters");
     assert_eq!(name(&long), b"A very long network name");
     assert_eq!(name(&long).len(), 24);
     let odd = MetaSlot::default_for(b"caf\xc3\xa9\x01");
@@ -35,15 +32,7 @@ fn name_validity() {
     for ok in [&b"Home"[..], b"a", b"123456789012345678901234", b" ~"] {
         assert!(MetaSlot::name_valid(ok), "{ok:?}");
     }
-    for bad in [
-        &b""[..],
-        b"1234567890123456789012345",
-        b"tab\there",
-        b"caf\xc3\xa9",
-        b"\x7f",
-        b"\x1f",
-        b"\0abc",
-    ] {
+    for bad in [&b""[..], b"1234567890123456789012345", b"tab\there", b"caf\xc3\xa9", b"\x7f", b"\x1f", b"\0abc"] {
         assert!(!MetaSlot::name_valid(bad), "{bad:?}");
     }
     // A name array that fills all 25 bytes has no terminator inside 24 characters: invalid, as in C.
@@ -72,14 +61,7 @@ fn round_trip() {
     let out = decode(&blob.to_bytes(), &SSIDS[..4]).unwrap();
     assert_eq!(out.preferred, Some(2));
     assert_eq!(name(&out.slot[1]), b"Phone hotspot");
-    assert_eq!(
-        (
-            out.slot[1].priority,
-            out.slot[3].priority,
-            out.slot[0].priority
-        ),
-        (90, 0, 50)
-    );
+    assert_eq!((out.slot[1].priority, out.slot[3].priority, out.slot[0].priority), (90, 0, 50));
     assert_eq!(out, s);
 }
 
@@ -94,15 +76,7 @@ fn keyed_by_ssid_not_slot() {
     // The list was edited without the metadata: Home moved to the end, Office was deleted, a newcomer appeared.
     let edited: [&[u8]; 4] = [b"Phone", b"Cafe", b"Home", b"Newcomer"];
     let out = decode(&bytes, &edited).unwrap();
-    assert_eq!(
-        [
-            out.slot[0].priority,
-            out.slot[1].priority,
-            out.slot[2].priority,
-            out.slot[3].priority
-        ],
-        [20, 40, 10, 50]
-    );
+    assert_eq!([out.slot[0].priority, out.slot[1].priority, out.slot[2].priority, out.slot[3].priority], [20, 40, 10, 50]);
     assert_eq!(name(&out.slot[3]), b"Newcomer");
     assert_eq!(out.preferred, Some(1)); // Cafe is still preferred wherever it sits
     let without: [&[u8]; 2] = [b"Phone", b"Home"];
@@ -154,10 +128,7 @@ fn removal() {
     s.preferred = Some(2);
     s.remove(4, 0); // before the preferred one: it moves up and stays preferred
     assert_eq!(s.preferred, Some(1));
-    assert_eq!(
-        [s.slot[0].priority, s.slot[1].priority, s.slot[2].priority],
-        [20, 30, 40]
-    );
+    assert_eq!([s.slot[0].priority, s.slot[1].priority, s.slot[2].priority], [20, 30, 40]);
     assert!(name(&s.slot[3]).is_empty() && s.slot[3].priority == 0);
     s.remove(3, 2); // after it: untouched
     assert_eq!(s.preferred, Some(1));
@@ -183,31 +154,13 @@ fn hostile_blobs() {
     };
     assert_eq!(with(&|b| b[0] = 2), Err(MetaBlobError::BadSchema));
     assert_eq!(with(&|b| b[4] = 9), Err(MetaBlobError::BadCount));
-    assert_eq!(
-        with(&|b| b[4..8].copy_from_slice(&0x1_0000u32.to_le_bytes())),
-        Err(MetaBlobError::BadCount)
-    );
+    assert_eq!(with(&|b| b[4..8].copy_from_slice(&0x1_0000u32.to_le_bytes())), Err(MetaBlobError::BadCount));
     assert_eq!(with(&|b| b[41 + 58] = 101), Err(MetaBlobError::BadPriority));
-    assert_eq!(
-        with(&|b| b[41 + 59 + 33..41 + 59 + 58].fill(b'x')),
-        Err(MetaBlobError::Unterminated)
-    ); // name of entry 1
-    assert_eq!(
-        with(&|b| b[41 + 59..41 + 59 + 33].fill(b'x')),
-        Err(MetaBlobError::Unterminated)
-    ); // ssid of entry 1
-    assert_eq!(
-        with(&|b| b[8..41].fill(b'x')),
-        Err(MetaBlobError::Unterminated)
-    ); // preferred ssid
-    assert_eq!(
-        decode(&good[..BLOB_LEN - 1], list),
-        Err(MetaBlobError::WrongSize)
-    );
-    assert_eq!(
-        decode(&[good.as_slice(), &[0]].concat(), list),
-        Err(MetaBlobError::WrongSize)
-    );
+    assert_eq!(with(&|b| b[41 + 59 + 33..41 + 59 + 58].fill(b'x')), Err(MetaBlobError::Unterminated)); // name of entry 1
+    assert_eq!(with(&|b| b[41 + 59..41 + 59 + 33].fill(b'x')), Err(MetaBlobError::Unterminated)); // ssid of entry 1
+    assert_eq!(with(&|b| b[8..41].fill(b'x')), Err(MetaBlobError::Unterminated)); // preferred ssid
+    assert_eq!(decode(&good[..BLOB_LEN - 1], list), Err(MetaBlobError::WrongSize));
+    assert_eq!(decode(&[good.as_slice(), &[0]].concat(), list), Err(MetaBlobError::WrongSize));
     assert_eq!(decode(&[], list), Err(MetaBlobError::WrongSize));
     let nine: [&[u8]; 9] = [b"a"; 9];
     assert_eq!(decode(&good, &nine), Err(MetaBlobError::WrongSize)); // count > WIFI_META_SLOTS
@@ -219,10 +172,7 @@ fn hostile_blobs() {
         b[41 + 58] = 77;
     })
     .unwrap();
-    assert_eq!(
-        (name(&out.slot[0]), out.slot[0].priority),
-        (&b"Home"[..], 77)
-    );
+    assert_eq!((name(&out.slot[0]), out.slot[0].priority), (&b"Home"[..], 77));
     // Eight networks and a preferred one at the last slot.
     let mut set = MetaSet::defaults(&SSIDS);
     set.preferred = Some(7);

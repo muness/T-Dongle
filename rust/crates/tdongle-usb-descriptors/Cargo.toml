@@ -1,0 +1,11 @@
+[package]
+name = "tdongle-usb-descriptors"
+description = "The T-Dongle's USB identity: device, configuration (CDC-ACM console + CDC-NCM network) and string descriptors, byte-identical to the C firmware's."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

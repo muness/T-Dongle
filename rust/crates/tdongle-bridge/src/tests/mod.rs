@@ -14,6 +14,10 @@ use std::vec::Vec;
 
 use crate::*;
 
+pub(crate) fn ctx() -> TaskContext {
+    TaskContext::for_tests()
+}
+
 mod cases;
 mod codel;
 mod stress;
@@ -124,7 +128,7 @@ impl Env for TestEnv {
         bump(&self.notifies); // allowed in a callback: it never blocks
     }
 
-    fn wifi_tx(&self, frame: &[u8]) -> Result<(), TxError> {
+    fn wifi_tx(&self, frame: &[u8], _context: &TaskContext) -> Result<(), TxError> {
         if frame.len() > 34 && frame[15] & 3 == 3 {
             *self.ce_seen.borrow_mut() = frame.to_vec();
         }
@@ -142,7 +146,7 @@ impl Env for TestEnv {
         self.room.get()
     }
 
-    fn wait_retry(&self) {
+    fn wait_retry(&self, _context: &TaskContext) {
         assert!(!self.in_callback.get(), "a callback must never wait");
         bump(&self.waits);
         // The retry timer fires RETRY_US after it was armed: time passes, then the test may act.
@@ -154,7 +158,7 @@ impl Env for TestEnv {
         }
     }
 
-    fn rx_resume(&self) {
+    fn rx_resume(&self, _context: &TaskContext) {
         assert!(!self.in_callback.get());
         bump(&self.resumes);
     }
@@ -188,14 +192,14 @@ impl W {
 
     pub(crate) fn linked() -> Self {
         let w = Self::new();
-        w.b.link(true);
+        w.b.link(true, &TaskContext::for_tests());
         w
     }
 
     /// The driver calls the RX callback in the Wi-Fi task; the glue frees the driver buffer afterwards (once per call, by construction).
     pub(crate) fn wifi_in(&self, frame: &[u8]) {
         self.env().in_callback.set(true);
-        self.b.wifi_rx(frame);
+        let _ = self.b.wifi_rx(frame);
         self.env().in_callback.set(false);
     }
 

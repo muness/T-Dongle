@@ -1,0 +1,163 @@
+@@@@ SCENARIO control_c:0 LEN 20 @@@@
+esp_pm_dump_locks:
+
+@@@@ END @@@@
+@@@@ SCENARIO control_c:1 LEN 2 @@@@
+
+
+@@@@ END @@@@
+@@@@ SCENARIO control_c:2 LEN 63 @@@@
+ERR Could not preserve crash evidence or reset recovery guard
+
+@@@@ END @@@@
+@@@@ SCENARIO control_c:3 LEN 31 @@@@
+OK restarting services
+done>
+
+@@@@ END @@@@
+@@@@ SCENARIO control_c:4 LEN 21 @@@@
+OK rebooting
+done>
+
+@@@@ END @@@@
+@@@@ SCENARIO control_c:5 LEN 44 @@@@
+OK rebooting into ROM download mode
+done>
+
+@@@@ END @@@@
+@@@@ SCENARIO control_c:6 LEN 7 @@@@
+done>
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:7 LEN 43 @@@@
+ERR Refresh saved networks before editing
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:8 LEN 30 @@@@
+ERR Wi-Fi could not be saved
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:9 LEN 15 @@@@
+ERR Scan busy
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:10 LEN 32 @@@@
+ERR Scan failed; retry shortly
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:11 LEN 19 @@@@
+ERR Settings busy
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:12 LEN 61 @@@@
+ERR Wi-Fi driver refused the network; previous setting kept
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:13 LEN 73 @@@@
+ERR Not available while setup is open; finish with Done or cancel first
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:14 LEN 27 @@@@
+ERR Invalid saved network
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:15 LEN 40 @@@@
+ERR Saved network could not be removed
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:16 LEN 12 @@@@
+OK deleted
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:17 LEN 66 @@@@
+ERR display: brightness 5..100 rotation 0|1 dim 10..3600 seconds
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:18 LEN 25 @@@@
+ERR Storage save failed
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:19 LEN 18 @@@@
+OK display saved
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:20 LEN 18 @@@@
+ERR Invalid mode
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:21 LEN 19 @@@@
+ERR Settings busy
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:22 LEN 24 @@@@
+ERR Mode was not saved
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:23 LEN 34 @@@@
+OK mode saved; restarting
+done>
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:24 LEN 53 @@@@
+ERR setup: optionally a saved network number 1 to 8
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:25 LEN 64 @@@@
+ERR Setup is not available in recovery mode; use retry-startup
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:26 LEN 23 @@@@
+OK setup already open
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:27 LEN 33 @@@@
+OK restarting into setup
+done>
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:28 LEN 37 @@@@
+OK leaving setup; restarting
+done>
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:29 LEN 16 @@@@
+OK setup saved
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:30 LEN 42 @@@@
+Confirm within 10 seconds: confirm-reset
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:31 LEN 32 @@@@
+ERR reset confirmation expired
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:32 LEN 19 @@@@
+ERR Settings busy
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:33 LEN 55 @@@@
+ERR Factory reset failed; storage could not be erased
+
+@@@@ END @@@@
+@@@@ SCENARIO serial_setup_inc:34 LEN 48 @@@@
+OK factory reset; restarting into setup
+done>
+
+@@@@ END @@@@
+@@@@ SCENARIO console_c:35 LEN 38 @@@@
+ERR line too long/invalid; discarded
+
+@@@@ END @@@@
+@@@@ SCENARIO console_c:36 LEN 24 @@@@
+ERR command queue full
+
+@@@@ END @@@@
+@@@@ SCENARIO console_c:37 LEN 10 @@@@
+tdongle>
+
+@@@@ END @@@@
+@@@@ SCENARIO memory_diagnostics_inc:38 LEN 38 @@@@
+ERR memory guard takes 0-65536 bytes
+
+@@@@ END @@@@

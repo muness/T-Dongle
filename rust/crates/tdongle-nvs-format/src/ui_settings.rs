@@ -53,11 +53,7 @@ pub enum UiSettingsError {
 impl Default for UiSettings {
     /// C `ui_settings_defaults`.
     fn default() -> Self {
-        Self {
-            brightness: BRIGHTNESS_DEFAULT,
-            rotation: 0,
-            dim_seconds: DIM_SECONDS_DEFAULT,
-        }
+        Self { brightness: BRIGHTNESS_DEFAULT, rotation: 0, dim_seconds: DIM_SECONDS_DEFAULT }
     }
 }
 
@@ -87,9 +83,7 @@ impl UiSettings {
             if digits == 0 || digits > 5 {
                 return Err(UiSettingsError::Malformed);
             }
-            *value = p[..digits]
-                .iter()
-                .fold(0, |acc, &d| acc * 10 + u32::from(d - b'0'));
+            *value = p[..digits].iter().fold(0, |acc, &d| acc * 10 + u32::from(d - b'0'));
             p = &p[digits..];
             if i < 2 && p.first() != Some(&b' ') {
                 return Err(UiSettingsError::Malformed);
@@ -101,26 +95,14 @@ impl UiSettings {
         if !p.is_empty() {
             return Err(UiSettingsError::Malformed);
         }
-        let candidate = Self {
-            brightness: v[0].min(255) as u8,
-            rotation: v[1].min(255) as u8,
-            dim_seconds: v[2].min(65535) as u16,
-        };
-        if candidate.valid() {
-            Ok(candidate)
-        } else {
-            Err(UiSettingsError::OutOfRange)
-        }
+        let candidate = Self { brightness: v[0].min(255) as u8, rotation: v[1].min(255) as u8, dim_seconds: v[2].min(65535) as u16 };
+        if candidate.valid() { Ok(candidate) } else { Err(UiSettingsError::OutOfRange) }
     }
 
     /// C `ui_settings_backlight_percent`: [`DIM_PERCENT`] while dimmed, never above the configured brightness.
     #[must_use]
     pub fn backlight_percent(&self, dimmed: bool) -> u8 {
-        if dimmed && self.brightness > DIM_PERCENT {
-            DIM_PERCENT
-        } else {
-            self.brightness
-        }
+        if dimmed && self.brightness > DIM_PERCENT { DIM_PERCENT } else { self.brightness }
     }
 
     /// C `ui_settings_backlight_duty`: LEDC duty (8-bit) of an active-low backlight at `percent`; percentages above 100 are clamped.
@@ -148,18 +130,10 @@ impl UiSettings {
         if data.len() != BLOB_LEN {
             return Err(UiSettingsError::WrongSize);
         }
-        let candidate = Self {
-            brightness: data[4],
-            rotation: data[5],
-            dim_seconds: u16::from_le_bytes([data[6], data[7]]),
-        };
+        let candidate = Self { brightness: data[4], rotation: data[5], dim_seconds: u16::from_le_bytes([data[6], data[7]]) };
         if read_u32(data, 0) != SCHEMA {
             return Err(UiSettingsError::BadSchema);
         }
-        if candidate.valid() {
-            Ok(candidate)
-        } else {
-            Err(UiSettingsError::OutOfRange)
-        }
+        if candidate.valid() { Ok(candidate) } else { Err(UiSettingsError::OutOfRange) }
     }
 }

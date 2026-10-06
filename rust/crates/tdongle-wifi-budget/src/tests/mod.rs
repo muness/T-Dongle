@@ -4,6 +4,7 @@ mod floor;
 mod rules;
 mod sim;
 mod threads;
+mod tx;
 
 use std::cell::Cell;
 use std::prelude::v1::*;

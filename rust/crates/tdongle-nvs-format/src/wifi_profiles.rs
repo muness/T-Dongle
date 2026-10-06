@@ -26,10 +26,7 @@ pub struct SavedProfile {
 
 impl SavedProfile {
     /// An all-zero entry.
-    pub const EMPTY: Self = Self {
-        ssid: [0; 33],
-        password: [0; 64],
-    };
+    pub const EMPTY: Self = Self { ssid: [0; 33], password: [0; 64] };
 
     /// The SSID without its terminator.
     #[must_use]
@@ -74,10 +71,7 @@ pub struct SavedNetworks {
 impl Default for SavedNetworks {
     /// An empty list (C: `memset(&wifi_saved, 0, ...)` and `schema = 1`).
     fn default() -> Self {
-        Self {
-            count: 0,
-            profiles: [SavedProfile::EMPTY; LIMIT],
-        }
+        Self { count: 0, profiles: [SavedProfile::EMPTY; LIMIT] }
     }
 }
 
@@ -114,10 +108,7 @@ impl SavedNetworks {
         if count > LIMIT {
             return Err(SavedNetworksError::BadCount);
         }
-        let mut list = Self {
-            count,
-            profiles: [SavedProfile::EMPTY; LIMIT],
-        };
+        let mut list = Self { count, profiles: [SavedProfile::EMPTY; LIMIT] };
         for (i, p) in list.profiles.iter_mut().enumerate() {
             let at = 8 + i * PROFILE_LEN;
             p.ssid.copy_from_slice(&data[at..at + 33]);

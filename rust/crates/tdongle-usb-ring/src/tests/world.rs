@@ -9,7 +9,10 @@ use std::prelude::v1::*;
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicUsize, Ordering::{Acquire, Relaxed, Release, SeqCst}};
+use std::sync::atomic::{
+    AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicUsize,
+    Ordering::{Acquire, Relaxed, Release, SeqCst},
+};
 use std::sync::{Arc, Mutex, Weak};
 
 use crate::{CHUNK_BYTES, Config, Ring, RingEnv, SLAB_BYTES, Wait};
@@ -105,6 +108,8 @@ pub struct World {
     pub malloc_hook: Mutex<Option<Hook>>,
     pub delay_hook: Mutex<Option<Hook>>,
     pub pre_copy_hook: Mutex<Option<Hook>>,
+    /// Runs (once) inside `now_us`: the producer calls it between reserve and commit.
+    pub now_hook: Mutex<Option<Hook>>,
     pub pm_begin_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub pm_end_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     pub obs: Mutex<Observer>,
@@ -147,6 +152,7 @@ impl World {
             malloc_hook: Mutex::new(None),
             delay_hook: Mutex::new(None),
             pre_copy_hook: Mutex::new(None),
+            now_hook: Mutex::new(None),
             pm_begin_hook: Mutex::new(None),
             pm_end_hook: Mutex::new(None),
             obs: Mutex::new(Observer { mul: 1, active: true, ..Observer::default() }),
@@ -206,6 +212,7 @@ unsafe impl RingEnv for World {
     }
 
     fn now_us(&self) -> u32 {
+        self.run_hook(&self.now_hook, true);
         self.us.load(SeqCst)
     }
 
@@ -371,7 +378,16 @@ pub const IDLE_MS: u32 = 2000;
 
 /// `cfg_with(base, chunks)` of the C cases: priority 5, the test floors, a 2 s idle period and the PM hold.
 pub fn cfg_with(base: u32, chunks: u32) -> Config {
-    Config { base_frames: base, max_chunks: chunks, priority: 5, work_priority: 0, floor_free: FLOOR_FREE, floor_largest: FLOOR_LARGEST, idle_ms: IDLE_MS, pm: true }
+    Config {
+        base_frames: base,
+        max_chunks: chunks,
+        priority: 5,
+        work_priority: 0,
+        floor_free: FLOOR_FREE,
+        floor_largest: FLOOR_LARGEST,
+        idle_ms: IDLE_MS,
+        pm: true,
+    }
 }
 
 impl Rig {

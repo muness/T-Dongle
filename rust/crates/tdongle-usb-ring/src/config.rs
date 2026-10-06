@@ -109,7 +109,7 @@ pub enum SetMaxChunksError {
     TooMany,
 }
 
-/// How long the worker should wait for a notification before calling [`Ring::worker_step`] again (`tx_worker_wait`'s `TickType_t`).
+/// How long the worker should wait for a notification before calling [`Ring::worker_step`](crate::Ring::worker_step) again (`tx_worker_wait`'s `TickType_t`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wait {
     /// `portMAX_DELAY`: nothing to do until a producer publishes.

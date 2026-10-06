@@ -4,9 +4,9 @@
 use std::prelude::v1::*;
 
 use super::{Rs, conserved_rx, conserved_tx, pins};
+use crate::TxVerdict::{Band, Elastic, Heap, Pool};
 use crate::heap_budget::*;
 use crate::pins::*;
-use crate::TxVerdict::{Band, Elastic, Heap, Pool};
 
 const F: usize = ML_HB_FLOOR;
 
@@ -14,9 +14,9 @@ const F: usize = ML_HB_FLOOR;
 fn constants() {
     // The inequality the header asserts, restated with numbers: reserve + (the shared band + the RX frame under check) buffers + the racing
     // slack fit under the elastic floor, and the TX pool and the FIFO agree.
-    assert!(GATEWAY_WIFI_BAND_TOTAL == 5 && GATEWAY_WIFI_TX_POOL == 16 && GW_WTX_RING == 16);
+    const { assert!(GATEWAY_WIFI_BAND_TOTAL == 5 && GATEWAY_WIFI_TX_POOL == 16 && GW_WTX_RING == 16) };
     assert_eq!(GATEWAY_WIFI_PIN_BAND_BYTES, 6 * 1664);
-    assert!(ML_HB_RESERVE + GATEWAY_WIFI_PIN_BAND_BYTES + ML_HB_SLACK_BYTES == 29_696 && 29_696 <= ML_HB_FLOOR);
+    const { assert!(ML_HB_RESERVE + GATEWAY_WIFI_PIN_BAND_BYTES + ML_HB_SLACK_BYTES == 29_696 && 29_696 <= ML_HB_FLOOR) };
     // ml_heap_budget.h values, one by one.
     assert_eq!(ML_ADM_NEG_PEAK_BYTES, 13_500);
     assert_eq!(ML_ADM_RECOVERY_BYTES, 16_384);
@@ -29,7 +29,7 @@ fn constants() {
     assert_eq!(ML_HB_RX_SMALL_BYTES, 512);
     assert_eq!(GW_WTX_LEASE_MS, 3000);
     assert_eq!(GW_WTX_OVERHEAD, 192);
-    assert!(GATEWAY_WIFI_RX_BAND_MAX == 4 && GATEWAY_WIFI_TX_BAND_MAX == 4);
+    const { assert!(GATEWAY_WIFI_RX_BAND_MAX == 4 && GATEWAY_WIFI_TX_BAND_MAX == 4) };
 }
 
 #[test]

@@ -2,19 +2,10 @@
 mod common;
 use common::{fixed, legacy_profile};
 use tdongle_nvs_format::cstr::c_str;
-use tdongle_nvs_format::legacy::{
-    BLOB_LEN, CFG_VERSION, LegacyError, LegacyImport, LegacyProfile, LegacySettings,
-};
+use tdongle_nvs_format::legacy::{BLOB_LEN, CFG_VERSION, LegacyError, LegacyImport, LegacyProfile, LegacySettings};
 
 fn blank() -> LegacySettings {
-    LegacySettings {
-        version: CFG_VERSION,
-        p: [LegacyProfile::EMPTY; 8],
-        preferred: 0,
-        brightness: 60,
-        rotation: 0,
-        dim_seconds: 60,
-    }
+    LegacySettings { version: CFG_VERSION, p: [LegacyProfile::EMPTY; 8], preferred: 0, brightness: 60, rotation: 0, dim_seconds: 60 }
 }
 
 fn set(s: &mut LegacySettings, slot: usize, name: &str, ssid: &str, pass: &str, priority: u8) {
@@ -49,10 +40,7 @@ fn layout_is_the_v011_layout() {
     assert_eq!(b[p1 + 123], 77);
     assert_eq!(&b[996..1004], &[3, 85, 1, 0, 0x23, 0x01, 0, 0]);
     assert_eq!(LegacySettings::from_bytes(&b), Ok(s));
-    assert_eq!(
-        LegacySettings::from_bytes(&b[..1003]),
-        Err(LegacyError::WrongSize)
-    );
+    assert_eq!(LegacySettings::from_bytes(&b[..1003]), Err(LegacyError::WrongSize));
 }
 
 #[test]
@@ -79,31 +67,14 @@ fn everything_is_carried() {
     let i = import(&s);
     assert_eq!((i.count, i.preferred), (3, Some(2)));
     assert_eq!(
-        (
-            net_ssid(&i, 0),
-            c_str(&i.net[0].password),
-            i.net[0].meta.name_bytes(),
-            i.net[0].meta.priority
-        ),
+        (net_ssid(&i, 0), c_str(&i.net[0].password), i.net[0].meta.name_bytes(), i.net[0].meta.priority),
         (&b"HomeNet"[..], &b"correct-horse"[..], &b"Home"[..], 50)
     );
     assert_eq!(
-        (
-            net_ssid(&i, 1),
-            c_str(&i.net[1].password),
-            i.net[1].meta.name_bytes(),
-            i.net[1].meta.priority
-        ),
+        (net_ssid(&i, 1), c_str(&i.net[1].password), i.net[1].meta.name_bytes(), i.net[1].meta.priority),
         (&b"Pixel hotspot"[..], &b""[..], &b"Phone"[..], 90)
     );
-    assert_eq!(
-        (
-            net_ssid(&i, 2),
-            i.net[2].meta.name_bytes(),
-            i.net[2].meta.priority
-        ),
-        (&b"CarWifi"[..], &b"Car"[..], 10)
-    );
+    assert_eq!((net_ssid(&i, 2), i.net[2].meta.name_bytes(), i.net[2].meta.priority), (&b"CarWifi"[..], &b"Car"[..], 10));
     let d = i.display.unwrap();
     assert_eq!((d.brightness, d.rotation, d.dim_seconds), (85, 1, 300));
 }
@@ -132,10 +103,7 @@ fn preferred_follows_the_network() {
     s.preferred = 2;
     let i = import(&s);
     assert_eq!((i.count, i.preferred), (2, Some(0)));
-    assert_eq!(
-        (c_str(&i.net[0].password), i.net[0].meta.priority),
-        (&b"aaaaaaaa"[..], 20)
-    );
+    assert_eq!((c_str(&i.net[0].password), i.net[0].meta.priority), (&b"aaaaaaaa"[..], 20));
     s.preferred = 3; // an empty slot
     assert_eq!(import(&s).preferred, None);
     s.preferred = 200; // out of range
@@ -146,10 +114,7 @@ fn preferred_follows_the_network() {
     set(&mut s, 1, "Good", "good", "gggggggg", 50);
     s.preferred = 0;
     let i = import(&s);
-    assert_eq!(
-        (i.count, net_ssid(&i, 0), i.preferred),
-        (1, &b"good"[..], None)
-    );
+    assert_eq!((i.count, net_ssid(&i, 0), i.preferred), (1, &b"good"[..], None));
 }
 
 #[test]
@@ -161,15 +126,7 @@ fn eight_networks() {
     }
     s.preferred = 7;
     let i = import(&s);
-    assert_eq!(
-        (
-            i.count,
-            i.preferred,
-            i.net[7].meta.priority,
-            net_ssid(&i, 7)
-        ),
-        (8, Some(7), 17, &b"net7"[..])
-    );
+    assert_eq!((i.count, i.preferred, i.net[7].meta.priority, net_ssid(&i, 7)), (8, Some(7), 17, &b"net7"[..]));
 }
 
 #[test]
@@ -187,18 +144,8 @@ fn damaged_fields_do_not_cost_the_network() {
     s.dim_seconds = 5;
     let i = import(&s);
     assert_eq!(i.count, 3);
-    assert_eq!(
-        (
-            net_ssid(&i, 0),
-            i.net[0].meta.name_bytes(),
-            i.net[0].meta.priority
-        ),
-        (&b"net0"[..], &b"net0"[..], 50)
-    );
-    assert_eq!(
-        (i.net[1].meta.name_bytes(), i.net[2].meta.name_bytes()),
-        (&b"net1"[..], &b"net2"[..])
-    );
+    assert_eq!((net_ssid(&i, 0), i.net[0].meta.name_bytes(), i.net[0].meta.priority), (&b"net0"[..], &b"net0"[..], 50));
+    assert_eq!((i.net[1].meta.name_bytes(), i.net[2].meta.name_bytes()), (&b"net1"[..], &b"net2"[..]));
     assert_eq!(i.display, None);
 }
 
@@ -222,20 +169,11 @@ fn not_a_v011_blob() {
     let mut s = blank();
     set(&mut s, 0, "Home", "HomeNet", "pass1234", 50);
     let b = s.to_bytes();
-    assert_eq!(
-        LegacyImport::decode(&b[..BLOB_LEN - 1]),
-        Err(LegacyError::WrongSize)
-    );
-    assert_eq!(
-        LegacyImport::decode(&[&b[..], &[0; 4]].concat()),
-        Err(LegacyError::WrongSize)
-    );
+    assert_eq!(LegacyImport::decode(&b[..BLOB_LEN - 1]), Err(LegacyError::WrongSize));
+    assert_eq!(LegacyImport::decode(&[&b[..], &[0; 4]].concat()), Err(LegacyError::WrongSize));
     assert_eq!(LegacyImport::decode(&[]), Err(LegacyError::WrongSize));
     s.version = 2;
-    assert_eq!(
-        LegacyImport::decode(&s.to_bytes()),
-        Err(LegacyError::WrongVersion)
-    );
+    assert_eq!(LegacyImport::decode(&s.to_bytes()), Err(LegacyError::WrongVersion));
 }
 
 #[test]
@@ -257,9 +195,7 @@ fn profile_and_settings_validity() {
     s.preferred = 7;
     assert!(s.valid());
     // The rest of the rule.
-    let p = |name: &str, ssid: &str, pass: &str, prio: u8| {
-        legacy_profile(name, ssid, pass, prio).valid()
-    };
+    let p = |name: &str, ssid: &str, pass: &str, prio: u8| legacy_profile(name, ssid, pass, prio).valid();
     assert!(p("n", "s", "", 0) && p("n", "s", "12345678", 100) && !p("n", "s", "12345678", 101));
     assert!(!p("", "s", "", 0) && !p("n", "", "", 0));
     assert!(p(&"n".repeat(24), &"s".repeat(32), &"p".repeat(63), 50));
@@ -267,9 +203,7 @@ fn profile_and_settings_validity() {
     assert!(!p("n", &"s".repeat(33), "", 50));
     assert!(!p("n", "s", &"p".repeat(64), 50));
     assert!(!p("n", "s", "1234567", 50) && p("n", "s", "12345678", 50));
-    assert!(
-        !p("n\t", "s", "", 50) && !p("n", "s\u{e9}", "", 50) && !p("n", "s", "pass\u{7f}word", 50)
-    );
+    assert!(!p("n\t", "s", "", 50) && !p("n", "s\u{e9}", "", 50) && !p("n", "s", "pass\u{7f}word", 50));
     // settings_valid: version, display ranges, every non-empty slot.
     let mut s = blank();
     s.version = 2;

@@ -37,11 +37,7 @@ pub fn policy_next(settings: &LegacySettings, tried: u8) -> Option<usize> {
 /// C `retry_delay_ms`: 1 s doubling with each failure (1, 2, 4, 8, 16 s), then [`RETRY_DELAY_MAX_MS`] from the fifth failure on.
 #[must_use]
 pub const fn retry_delay_ms(failures: u32) -> u32 {
-    if failures >= RETRY_BACKOFF_STEPS {
-        RETRY_DELAY_MAX_MS
-    } else {
-        1000 << failures
-    }
+    if failures >= RETRY_BACKOFF_STEPS { RETRY_DELAY_MAX_MS } else { 1000 << failures }
 }
 
 /// Outcome of a candidate-network trial (C `trial_decision`: 0, 1, -1).
@@ -62,12 +58,7 @@ pub enum TrialDecision {
 /// [`TRIAL_ASSOCIATE_WITHIN_MS`] after the start (and not before it: an association epoch older than the trial is another connection) and
 /// has stayed [`TRIAL_STABLE_MS`]; otherwise the trial times out [`TRIAL_TIMEOUT_MS`] after it began.
 #[must_use]
-pub const fn trial_decision(
-    now: u64,
-    started: u64,
-    associated_since: u64,
-    associated: bool,
-) -> TrialDecision {
+pub const fn trial_decision(now: u64, started: u64, associated_since: u64, associated: bool) -> TrialDecision {
     if now < started {
         return TrialDecision::TimedOut;
     }
@@ -79,9 +70,5 @@ pub const fn trial_decision(
     {
         return TrialDecision::Commit;
     }
-    if now - started >= TRIAL_TIMEOUT_MS {
-        TrialDecision::TimedOut
-    } else {
-        TrialDecision::Waiting
-    }
+    if now - started >= TRIAL_TIMEOUT_MS { TrialDecision::TimedOut } else { TrialDecision::Waiting }
 }

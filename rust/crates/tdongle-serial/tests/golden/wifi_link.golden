@@ -1,0 +1,3959 @@
+@@@@ SCENARIO connected_00/line@380 LEN 271 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=3 rssi_dbm=-128 channel=0 secondary=none phy=lr bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=- power_save=none tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_00/line@271 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_00/line@272 LEN 271 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=3 rssi_dbm=-128 channel=0 secondary=none phy=lr bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=- power_save=none tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_00/line@270 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_00/json@480 LEN 382 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":3,"rssi_dbm":-128,"channel":0,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"-","power_save":"none","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_00/json@382 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_00/json@383 LEN 382 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":3,"rssi_dbm":-128,"channel":0,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"-","power_save":"none","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_00/json@381 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_00/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/line@380 LEN 276 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=11 secondary=above phy=11b bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=b power_save=max_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/line@276 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/line@277 LEN 276 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=11 secondary=above phy=11b bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=b power_save=max_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/line@275 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/json@480 LEN 388 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":11,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"b","power_save":"max_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/json@388 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/json@389 LEN 388 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":11,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"b","power_save":"max_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/json@387 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_01/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/line@380 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=165 secondary=below phy=11g bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=g power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/line@282 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=165 secondary=below phy=11g bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=g power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/json@480 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":165,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"g","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/json@390 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":165,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"g","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/json@388 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_02/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/line@380 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=1 secondary=unknown phy=11a bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bg power_save=min_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/line@278 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/line@279 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=1 secondary=unknown phy=11a bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bg power_save=min_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/line@277 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/json@480 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":1,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bg","power_save":"min_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/json@391 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":1,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bg","power_save":"min_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_03/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/line@380 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=unknown channel=14 secondary=unknown phy=HT20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=n power_save=unknown tx_power_qdbm=-128 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/line@286 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=unknown channel=14 secondary=unknown phy=HT20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=n power_save=unknown tx_power_qdbm=-128 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/line@284 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/json@480 LEN 398 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":14,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"n","power_save":"unknown","tx_power_qdbm":-128,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/json@398 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/json@399 LEN 398 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":14,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"n","power_save":"unknown","tx_power_qdbm":-128,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/json@397 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_04/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/line@380 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=255 secondary=none phy=HT40 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bn power_save=none tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/line@282 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=255 secondary=none phy=HT40 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bn power_save=none tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/json@480 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":255,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bn","power_save":"none","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/json@391 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":255,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bn","power_save":"none","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_05/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/line@380 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=6 secondary=above phy=HE20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=gn power_save=max_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/line@281 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=6 secondary=above phy=HE20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=gn power_save=max_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/line@279 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/json@480 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":6,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"gn","power_save":"max_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/json@392 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":6,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"gn","power_save":"max_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_06/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/line@380 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=8 rssi_dbm=-61 channel=36 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bgn power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/line@281 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=8 rssi_dbm=-61 channel=36 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bgn power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/line@279 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/json@480 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":8,"rssi_dbm":-61,"channel":36,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bgn","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/json@393 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":8,"rssi_dbm":-61,"channel":36,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bgn","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_07/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/line@380 LEN 317 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=0 secondary=unknown phy=unknown bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=ax power_save=min_modem tx_power_qdbm=unknown connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/line@317 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/line@318 LEN 317 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=0 secondary=unknown phy=unknown bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=ax power_save=min_modem tx_power_qdbm=unknown connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/line@316 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/json@480 LEN 437 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":0,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"ax","power_save":"min_modem","tx_power_qdbm":null,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/json@437 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/json@438 LEN 437 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":0,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"ax","power_save":"min_modem","tx_power_qdbm":null,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/json@436 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_08/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/line@380 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=unknown channel=11 secondary=unknown phy=unknown bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bax power_save=unknown tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/line@287 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=unknown channel=11 secondary=unknown phy=unknown bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bax power_save=unknown tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/json@480 LEN 395 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":11,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bax","power_save":"unknown","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/json@396 LEN 395 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":11,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bax","power_save":"unknown","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/json@394 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_09/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/line@380 LEN 272 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=165 secondary=none phy=lr bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=gax power_save=none tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/line@272 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/line@273 LEN 272 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=165 secondary=none phy=lr bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=gax power_save=none tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/line@271 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/json@480 LEN 383 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":165,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"gax","power_save":"none","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/json@383 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/json@384 LEN 383 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":165,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"gax","power_save":"none","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/json@382 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_10/rssi_text LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/line@380 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=1 secondary=above phy=11b bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bgax power_save=max_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/line@287 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=1 secondary=above phy=11b bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bgax power_save=max_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/json@480 LEN 395 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":1,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bgax","power_save":"max_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/json@396 LEN 395 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":1,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bgax","power_save":"max_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/json@394 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_11/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/line@380 LEN 283 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=14 secondary=below phy=11g bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=nax power_save=unknown tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/line@283 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/line@284 LEN 283 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=14 secondary=below phy=11g bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=nax power_save=unknown tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/line@282 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/json@480 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":14,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"nax","power_save":"unknown","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":127,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/json@397 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":14,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"nax","power_save":"unknown","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":127,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_12/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/line@380 LEN 282 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=255 secondary=unknown phy=11a bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bnax power_save=min_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/line@282 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/line@283 LEN 282 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=255 secondary=unknown phy=11a bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bnax power_save=min_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/json@480 LEN 394 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":255,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bnax","power_save":"min_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/json@394 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/json@395 LEN 394 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":255,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bnax","power_save":"min_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_13/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/line@380 LEN 292 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=255 rssi_dbm=unknown channel=6 secondary=unknown phy=HT20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=gnax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/line@292 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/line@293 LEN 292 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=255 rssi_dbm=unknown channel=6 secondary=unknown phy=HT20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=gnax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/line@291 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/json@480 LEN 397 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":255,"rssi_dbm":null,"channel":6,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"gnax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/json@397 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/json@398 LEN 397 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":255,"rssi_dbm":null,"channel":6,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"gnax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_14/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/line@380 LEN 275 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=36 secondary=none phy=HT40 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bgnax power_save=none tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/line@275 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/line@276 LEN 275 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=36 secondary=none phy=HT40 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bgnax power_save=none tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/line@274 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/json@480 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":36,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bgnax","power_save":"none","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/json@387 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/json@388 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":36,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bgnax","power_save":"none","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/json@386 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_15/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/line@380 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=0 secondary=above phy=HE20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bgnax power_save=max_modem tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/line@281 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=0 secondary=above phy=HE20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bgnax power_save=max_modem tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/line@279 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/json@480 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":0,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bgnax","power_save":"max_modem","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/json@392 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":0,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bgnax","power_save":"max_modem","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_16/rssi_text LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/line@380 LEN 284 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=11 secondary=below phy=VHT20 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=- power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/line@284 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/line@285 LEN 284 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=11 secondary=below phy=VHT20 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=- power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/line@283 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/json@480 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":11,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"-","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/json@394 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":11,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"-","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_17/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/line@380 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=165 secondary=unknown phy=unknown bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=b power_save=min_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/line@287 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=165 secondary=unknown phy=unknown bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=b power_save=min_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/json@480 LEN 397 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":165,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"b","power_save":"min_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/json@397 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/json@398 LEN 397 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":165,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"b","power_save":"min_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_18/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/line@380 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=unknown channel=1 secondary=unknown phy=unknown bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=g power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/line@286 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=unknown channel=1 secondary=unknown phy=unknown bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=g power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/line@284 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/json@480 LEN 394 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":1,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"g","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/json@394 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/json@395 LEN 394 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":1,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"g","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_19/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/line@380 LEN 276 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=14 secondary=none phy=lr bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bg power_save=none tx_power_qdbm=unknown connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/line@276 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/line@277 LEN 276 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=14 secondary=none phy=lr bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bg power_save=none tx_power_qdbm=unknown connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/line@275 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/json@480 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":14,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bg","power_save":"none","tx_power_qdbm":null,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/json@390 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":14,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bg","power_save":"none","tx_power_qdbm":null,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/json@388 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_20/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/line@380 LEN 275 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=255 secondary=above phy=11b bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=n power_save=max_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/line@275 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/line@276 LEN 275 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=255 secondary=above phy=11b bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=n power_save=max_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/line@274 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/json@480 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":255,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"n","power_save":"max_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/json@387 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/json@388 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":255,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"n","power_save":"max_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/json@386 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_21/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/line@380 LEN 274 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=6 secondary=below phy=11g bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bn power_save=unknown tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/line@274 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/line@275 LEN 274 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=6 secondary=below phy=11g bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bn power_save=unknown tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/line@273 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/json@480 LEN 385 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":6,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bn","power_save":"unknown","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/json@385 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/json@386 LEN 385 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":6,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bn","power_save":"unknown","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/json@384 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_22/rssi_text LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/line@380 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=36 secondary=unknown phy=11a bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=gn power_save=min_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/line@287 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/line@288 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=36 secondary=unknown phy=11a bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=gn power_save=min_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/json@480 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":36,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"gn","power_save":"min_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/json@397 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":36,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"gn","power_save":"min_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_23/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/line@380 LEN 315 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=unknown channel=0 secondary=unknown phy=HT20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bgn power_save=unknown tx_power_qdbm=-128 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/line@315 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/line@316 LEN 315 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=unknown channel=0 secondary=unknown phy=HT20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bgn power_save=unknown tx_power_qdbm=-128 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/line@314 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/json@480 LEN 435 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":0,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bgn","power_save":"unknown","tx_power_qdbm":-128,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/json@435 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/json@436 LEN 435 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":0,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bgn","power_save":"unknown","tx_power_qdbm":-128,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/json@434 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_24/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/line@380 LEN 272 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=11 secondary=none phy=HT40 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=ax power_save=none tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/line@272 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/line@273 LEN 272 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=11 secondary=none phy=HT40 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=ax power_save=none tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/line@271 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/json@480 LEN 384 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":11,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"ax","power_save":"none","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/json@384 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/json@385 LEN 384 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":11,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"ax","power_save":"none","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/json@383 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_25/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/line@380 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=165 secondary=above phy=HE20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bax power_save=max_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/line@287 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=165 secondary=above phy=HE20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bax power_save=max_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/json@480 LEN 394 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":165,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bax","power_save":"max_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/json@394 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/json@395 LEN 394 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":165,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bax","power_save":"max_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_26/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/line@380 LEN 277 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=1 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=gax power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/line@277 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/line@278 LEN 277 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=1 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=gax power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/line@276 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/json@480 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":1,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"gax","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/json@390 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":1,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"gax","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/json@388 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_27/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/line@380 LEN 289 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=1 rssi_dbm=1 channel=14 secondary=unknown phy=unknown bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bgax power_save=min_modem tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/line@289 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/line@290 LEN 289 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=1 rssi_dbm=1 channel=14 secondary=unknown phy=unknown bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bgax power_save=min_modem tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/line@288 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/json@480 LEN 402 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":1,"rssi_dbm":1,"channel":14,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bgax","power_save":"min_modem","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":127,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/json@402 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/json@403 LEN 402 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":1,"rssi_dbm":1,"channel":14,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bgax","power_save":"min_modem","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":127,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/json@401 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_28/rssi_text LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/line@380 LEN 295 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=unknown channel=255 secondary=unknown phy=unknown bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=nax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/line@295 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/line@296 LEN 295 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=unknown channel=255 secondary=unknown phy=unknown bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=nax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/line@294 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/json@480 LEN 401 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":255,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"nax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/json@401 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/json@402 LEN 401 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":255,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"nax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/json@400 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_29/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/line@380 LEN 274 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=6 secondary=none phy=lr bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bnax power_save=none tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/line@274 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/line@275 LEN 274 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=6 secondary=none phy=lr bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bnax power_save=none tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/line@273 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/json@480 LEN 385 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":6,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bnax","power_save":"none","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/json@385 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/json@386 LEN 385 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":6,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bnax","power_save":"none","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/json@384 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_30/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/line@380 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=36 secondary=above phy=11b bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=gnax power_save=max_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/line@282 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=36 secondary=above phy=11b bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=gnax power_save=max_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/json@480 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":36,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"gnax","power_save":"max_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/json@394 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":36,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"gnax","power_save":"max_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_31/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/line@380 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=0 secondary=below phy=11g bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bgnax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/line@282 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=0 secondary=below phy=11g bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bgnax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/json@480 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":0,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bgnax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/json@390 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":0,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bgnax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/json@388 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_32/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/line@380 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=11 secondary=unknown phy=11a bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bgnax power_save=min_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/line@281 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=11 secondary=unknown phy=11a bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bgnax power_save=min_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/line@279 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/json@480 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":11,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bgnax","power_save":"min_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/json@393 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":11,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bgnax","power_save":"min_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_33/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/line@380 LEN 284 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=unknown channel=165 secondary=unknown phy=HT20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=- power_save=unknown tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/line@284 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/line@285 LEN 284 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=unknown channel=165 secondary=unknown phy=HT20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=- power_save=unknown tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/line@283 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/json@480 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":165,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"-","power_save":"unknown","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/json@393 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":165,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"-","power_save":"unknown","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_34/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/line@380 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=2 rssi_dbm=127 channel=1 secondary=none phy=HT40 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=b power_save=none tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/line@278 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/line@279 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=2 rssi_dbm=127 channel=1 secondary=none phy=HT40 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=b power_save=none tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/line@277 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/json@480 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":2,"rssi_dbm":127,"channel":1,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"b","power_save":"none","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/json@387 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/json@388 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":2,"rssi_dbm":127,"channel":1,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"b","power_save":"none","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/json@386 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_35/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/line@380 LEN 282 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=14 secondary=above phy=HE20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=g power_save=max_modem tx_power_qdbm=-128 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/line@282 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/line@283 LEN 282 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=14 secondary=above phy=HE20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=g power_save=max_modem tx_power_qdbm=-128 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/json@480 LEN 398 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":14,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"g","power_save":"max_modem","tx_power_qdbm":-128,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/json@398 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/json@399 LEN 398 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":14,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"g","power_save":"max_modem","tx_power_qdbm":-128,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/json@397 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_36/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/line@380 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=255 secondary=below phy=VHT20 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bg power_save=unknown tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/line@278 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/line@279 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=255 secondary=below phy=VHT20 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bg power_save=unknown tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/line@277 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/json@480 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":255,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bg","power_save":"unknown","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/json@391 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":255,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bg","power_save":"unknown","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_37/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/line@380 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=6 secondary=unknown phy=unknown bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=n power_save=min_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/line@287 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/line@288 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=6 secondary=unknown phy=unknown bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=n power_save=min_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/json@480 LEN 395 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":6,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"n","power_save":"min_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/json@396 LEN 395 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":6,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"n","power_save":"min_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/json@394 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_38/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/line@380 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=unknown channel=36 secondary=unknown phy=unknown bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bn power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/line@287 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/line@288 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=unknown channel=36 secondary=unknown phy=unknown bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bn power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/json@480 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":36,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bn","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/json@397 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":36,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bn","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_39/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/line@380 LEN 300 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=0 secondary=none phy=lr bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=gn power_save=none tx_power_qdbm=-128 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/line@300 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/line@301 LEN 300 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=0 secondary=none phy=lr bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=gn power_save=none tx_power_qdbm=-128 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/line@299 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/json@480 LEN 423 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":0,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"gn","power_save":"none","tx_power_qdbm":-128,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/json@423 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/json@424 LEN 423 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":0,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"gn","power_save":"none","tx_power_qdbm":-128,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/json@422 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_40/rssi_text LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/line@380 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=11 secondary=above phy=11b bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bgn power_save=max_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/line@287 LEN 286 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=11 secondary=above phy=11b bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bgn power_save=max_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/json@480 LEN 395 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":11,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bgn","power_save":"max_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/json@396 LEN 395 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":11,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bgn","power_save":"max_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/json@394 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_41/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/line@380 LEN 279 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=3 rssi_dbm=-128 channel=165 secondary=below phy=11g bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=ax power_save=unknown tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/line@279 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/line@280 LEN 279 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=3 rssi_dbm=-128 channel=165 secondary=below phy=11g bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=ax power_save=unknown tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/line@278 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/json@480 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":3,"rssi_dbm":-128,"channel":165,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"ax","power_save":"unknown","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/json@391 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":3,"rssi_dbm":-128,"channel":165,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"ax","power_save":"unknown","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_42/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/line@380 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=1 secondary=unknown phy=11a bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bax power_save=min_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/line@282 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=1 secondary=unknown phy=11a bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bax power_save=min_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/json@480 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":1,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bax","power_save":"min_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/json@394 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":1,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bax","power_save":"min_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_43/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/line@380 LEN 292 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=unknown channel=14 secondary=unknown phy=HT20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=gax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/line@292 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/line@293 LEN 292 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=unknown channel=14 secondary=unknown phy=HT20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=gax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/line@291 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/json@480 LEN 399 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":14,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"gax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":127,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/json@399 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/json@400 LEN 399 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":14,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"gax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":127,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/json@398 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_44/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/line@380 LEN 273 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=255 secondary=none phy=HT40 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bgax power_save=none tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/line@273 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/line@274 LEN 273 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=255 secondary=none phy=HT40 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bgax power_save=none tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/line@272 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/json@480 LEN 385 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":255,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bgax","power_save":"none","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/json@385 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/json@386 LEN 385 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":255,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bgax","power_save":"none","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/json@384 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_45/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/line@380 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=6 secondary=above phy=HE20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=nax power_save=max_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/line@278 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/line@279 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=6 secondary=above phy=HE20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=nax power_save=max_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/line@277 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/json@480 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":6,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"nax","power_save":"max_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/json@390 LEN 389 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":6,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"nax","power_save":"max_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/json@388 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_46/rssi_text LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/line@380 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=36 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bnax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/line@287 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/line@288 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=36 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bnax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/json@480 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":36,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bnax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/json@397 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":36,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bnax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_47/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/line@380 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=0 secondary=unknown phy=unknown bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=gnax power_save=min_modem tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/line@287 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/line@288 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=0 secondary=unknown phy=unknown bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=gnax power_save=min_modem tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/json@480 LEN 398 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":0,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"gnax","power_save":"min_modem","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/json@398 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/json@399 LEN 398 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":0,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"gnax","power_save":"min_modem","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/json@397 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_48/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/line@380 LEN 288 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=8 rssi_dbm=unknown channel=11 secondary=unknown phy=unknown bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bgnax power_save=unknown tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/line@288 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/line@289 LEN 288 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=8 rssi_dbm=unknown channel=11 secondary=unknown phy=unknown bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=bgnax power_save=unknown tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/line@287 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/json@480 LEN 397 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":8,"rssi_dbm":null,"channel":11,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bgnax","power_save":"unknown","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/json@397 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/json@398 LEN 397 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":8,"rssi_dbm":null,"channel":11,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"bgnax","power_save":"unknown","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_49/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/line@380 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=165 secondary=none phy=lr bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bgnax power_save=none tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/line@281 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=165 secondary=none phy=lr bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bgnax power_save=none tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/line@279 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/json@480 LEN 388 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":165,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bgnax","power_save":"none","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/json@388 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/json@389 LEN 388 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":165,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bgnax","power_save":"none","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/json@387 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_50/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/line@380 LEN 275 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=1 secondary=above phy=11b bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=- power_save=max_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/line@275 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/line@276 LEN 275 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=1 secondary=above phy=11b bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=- power_save=max_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/line@274 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/json@480 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":1,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"-","power_save":"max_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/json@387 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/json@388 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":1,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"-","power_save":"max_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/json@386 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_51/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/line@380 LEN 276 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=14 secondary=below phy=11g bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=b power_save=unknown tx_power_qdbm=-128 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/line@276 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/line@277 LEN 276 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=14 secondary=below phy=11g bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=b power_save=unknown tx_power_qdbm=-128 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/line@275 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/json@480 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":14,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"b","power_save":"unknown","tx_power_qdbm":-128,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/json@393 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":14,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"b","power_save":"unknown","tx_power_qdbm":-128,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_52/rssi_text LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/line@380 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=255 secondary=unknown phy=11a bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=g power_save=min_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/line@287 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/line@288 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=255 secondary=unknown phy=11a bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=g power_save=min_modem tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/json@480 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":255,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"g","power_save":"min_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/json@397 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":255,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"g","power_save":"min_modem","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_53/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/line@380 LEN 283 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=unknown channel=6 secondary=unknown phy=HT20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bg power_save=unknown tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/line@283 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/line@284 LEN 283 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=unknown channel=6 secondary=unknown phy=HT20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bg power_save=unknown tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/line@282 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/json@480 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":6,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bg","power_save":"unknown","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/json@392 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":6,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bg","power_save":"unknown","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_54/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/line@380 LEN 273 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=36 secondary=none phy=HT40 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=n power_save=none tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/line@273 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/line@274 LEN 273 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=36 secondary=none phy=HT40 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=n power_save=none tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/line@272 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/json@480 LEN 385 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":36,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"n","power_save":"none","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/json@385 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/json@386 LEN 385 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":36,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"n","power_save":"none","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/json@384 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_55/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/line@380 LEN 314 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=255 rssi_dbm=-1 channel=0 secondary=above phy=HE20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bn power_save=max_modem tx_power_qdbm=unknown connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/line@314 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/line@315 LEN 314 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=255 rssi_dbm=-1 channel=0 secondary=above phy=HE20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bn power_save=max_modem tx_power_qdbm=unknown connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/line@313 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/json@480 LEN 434 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":255,"rssi_dbm":-1,"channel":0,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bn","power_save":"max_modem","tx_power_qdbm":null,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/json@434 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/json@435 LEN 434 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":255,"rssi_dbm":-1,"channel":0,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bn","power_save":"max_modem","tx_power_qdbm":null,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/json@433 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_56/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/line@380 LEN 275 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=11 secondary=below phy=VHT20 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=gn power_save=unknown tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/line@275 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/line@276 LEN 275 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=11 secondary=below phy=VHT20 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=gn power_save=unknown tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/line@274 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/json@480 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":11,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"gn","power_save":"unknown","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/json@387 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/json@388 LEN 387 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":11,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"gn","power_save":"unknown","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/json@386 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_57/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/line@380 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=165 secondary=unknown phy=unknown bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bgn power_save=min_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/line@286 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=1 channel=165 secondary=unknown phy=unknown bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bgn power_save=min_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/line@284 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/json@480 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":165,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bgn","power_save":"min_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/json@397 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":1,"channel":165,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bgn","power_save":"min_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_58/rssi_text LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/line@380 LEN 292 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=unknown channel=1 secondary=unknown phy=unknown bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=ax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/line@292 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/line@293 LEN 292 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=unknown channel=1 secondary=unknown phy=unknown bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=ax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/line@291 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/json@480 LEN 398 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":1,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"ax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/json@398 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/json@399 LEN 398 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":1,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"ax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/json@397 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_59/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/line@380 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=14 secondary=none phy=lr bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bax power_save=none tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/line@278 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/line@279 LEN 278 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=14 secondary=none phy=lr bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bax power_save=none tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/line@277 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/json@480 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":14,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bax","power_save":"none","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":127,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/json@392 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":14,"secondary":"none","phy":"lr","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bax","power_save":"none","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":127,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_60/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/line@380 LEN 279 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=255 secondary=above phy=11b bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=gax power_save=max_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/line@279 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/line@280 LEN 279 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=255 secondary=above phy=11b bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=gax power_save=max_modem tx_power_qdbm=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/line@278 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/json@480 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":255,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"gax","power_save":"max_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/json@392 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":255,"secondary":"above","phy":"11b","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"gax","power_save":"max_modem","tx_power_qdbm":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_61/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/line@380 LEN 282 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=6 secondary=below phy=11g bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bgax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/line@282 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/line@283 LEN 282 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-1 channel=6 secondary=below phy=11g bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bgax power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/json@480 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":6,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bgax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/json@391 LEN 390 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-1,"channel":6,"secondary":"below","phy":"11g","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bgax","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/json@389 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_62/rssi_text LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/line@380 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=36 secondary=unknown phy=11a bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=nax power_save=min_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/line@281 LEN 280 @@@@
+wifi_link connected=1 join=connected selected=3 pinned=0 pin_failed=0 rssi_dbm=0 channel=36 secondary=unknown phy=11a bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=nax power_save=min_modem tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/line@279 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/json@480 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":36,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"nax","power_save":"min_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/json@393 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":3,"pinned":false,"pin_failed_slot":0,"rssi_dbm":0,"channel":36,"secondary":"unknown","phy":"11a","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"nax","power_save":"min_modem","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_63/rssi_text LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/line@380 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=unknown channel=0 secondary=unknown phy=HT20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bnax power_save=unknown tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/line@286 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=8 pinned=1 pin_failed=0 rssi_dbm=unknown channel=0 secondary=unknown phy=HT20 bandwidth_cfg_mhz=0 ap_bandwidth_mhz=20 ap_modes=bnax power_save=unknown tx_power_qdbm=-128 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/line@284 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/json@480 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":0,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bnax","power_save":"unknown","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/json@394 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":8,"pinned":true,"pin_failed_slot":0,"rssi_dbm":null,"channel":0,"secondary":"unknown","phy":"HT20","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":20,"ap_modes":"bnax","power_save":"unknown","tx_power_qdbm":-128,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_64/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/line@380 LEN 282 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=11 secondary=none phy=HT40 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=gnax power_save=none tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/line@282 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/line@283 LEN 282 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=0 pin_failed=0 rssi_dbm=127 channel=11 secondary=none phy=HT40 bandwidth_cfg_mhz=20 ap_bandwidth_mhz=40 ap_modes=gnax power_save=none tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/json@480 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":11,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"gnax","power_save":"none","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/json@392 LEN 391 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":false,"pin_failed_slot":0,"rssi_dbm":127,"channel":11,"secondary":"none","phy":"HT40","bandwidth_cfg_mhz":20,"ap_bandwidth_mhz":40,"ap_modes":"gnax","power_save":"none","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/json@390 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_65/rssi_text LEN 3 @@@@
+127
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/line@380 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=165 secondary=above phy=HE20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bgnax power_save=max_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/line@285 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/line@286 LEN 285 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=1 pin_failed=0 rssi_dbm=-128 channel=165 secondary=above phy=HE20 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=255 ap_modes=bgnax power_save=max_modem tx_power_qdbm=78 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/line@284 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/json@480 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":165,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bgnax","power_save":"max_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/json@396 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/json@397 LEN 396 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-128,"channel":165,"secondary":"above","phy":"HE20","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":255,"ap_modes":"bgnax","power_save":"max_modem","tx_power_qdbm":78,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/json@395 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_66/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/line@380 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=1 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bgnax power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/line@281 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/line@282 LEN 281 @@@@
+wifi_link connected=1 join=connected selected=1 pinned=0 pin_failed=0 rssi_dbm=-61 channel=1 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=0 ap_modes=bgnax power_save=unknown tx_power_qdbm=127 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/line@280 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/json@480 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":1,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bgnax","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/json@394 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":1,"pinned":false,"pin_failed_slot":0,"rssi_dbm":-61,"channel":1,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":0,"ap_modes":"bgnax","power_save":"unknown","tx_power_qdbm":127,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO connected_67/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/line@380 LEN 144 @@@@
+wifi_link connected=0 join=disconnected selected=0 pinned=0 pin_failed=0 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/line@144 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/line@145 LEN 144 @@@@
+wifi_link connected=0 join=disconnected selected=0 pinned=0 pin_failed=0 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/line@143 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/json@480 LEN 236 @@@@
+{"connected":false,"join":"disconnected","selected_slot":0,"pinned":false,"pin_failed_slot":0,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/json@236 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/json@237 LEN 236 @@@@
+{"connected":false,"join":"disconnected","selected_slot":0,"pinned":false,"pin_failed_slot":0,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/json@235 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_0/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/line@380 LEN 137 @@@@
+wifi_link connected=0 join=joining selected=1 pinned=1 pin_failed=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/line@137 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/line@138 LEN 137 @@@@
+wifi_link connected=0 join=joining selected=1 pinned=1 pin_failed=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/line@136 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/json@480 LEN 223 @@@@
+{"connected":false,"join":"joining","selected_slot":1,"pinned":true,"pin_failed_slot":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/json@223 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/json@224 LEN 223 @@@@
+{"connected":false,"join":"joining","selected_slot":1,"pinned":true,"pin_failed_slot":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/json@222 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_1/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/line@380 LEN 136 @@@@
+wifi_link connected=0 join=failed selected=2 pinned=0 pin_failed=3 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/line@136 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/line@137 LEN 136 @@@@
+wifi_link connected=0 join=failed selected=2 pinned=0 pin_failed=3 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/line@135 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/json@480 LEN 223 @@@@
+{"connected":false,"join":"failed","selected_slot":2,"pinned":false,"pin_failed_slot":3,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/json@223 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/json@224 LEN 223 @@@@
+{"connected":false,"join":"failed","selected_slot":2,"pinned":false,"pin_failed_slot":3,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/json@222 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_2/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/line@380 LEN 137 @@@@
+wifi_link connected=0 join=joining selected=3 pinned=1 pin_failed=3 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/line@137 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/line@138 LEN 137 @@@@
+wifi_link connected=0 join=joining selected=3 pinned=1 pin_failed=3 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/line@136 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/json@480 LEN 223 @@@@
+{"connected":false,"join":"joining","selected_slot":3,"pinned":true,"pin_failed_slot":3,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/json@223 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/json@224 LEN 223 @@@@
+{"connected":false,"join":"joining","selected_slot":3,"pinned":true,"pin_failed_slot":3,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/json@222 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_3/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/line@380 LEN 169 @@@@
+wifi_link connected=0 join=failed selected=4 pinned=0 pin_failed=255 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/line@169 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/line@170 LEN 169 @@@@
+wifi_link connected=0 join=failed selected=4 pinned=0 pin_failed=255 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/line@168 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/json@480 LEN 268 @@@@
+{"connected":false,"join":"failed","selected_slot":4,"pinned":false,"pin_failed_slot":255,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/json@268 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/json@269 LEN 268 @@@@
+{"connected":false,"join":"failed","selected_slot":4,"pinned":false,"pin_failed_slot":255,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/json@267 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_4/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/line@380 LEN 139 @@@@
+wifi_link connected=0 join=joining selected=5 pinned=1 pin_failed=255 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/line@139 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/line@140 LEN 139 @@@@
+wifi_link connected=0 join=joining selected=5 pinned=1 pin_failed=255 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/line@138 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/json@480 LEN 225 @@@@
+{"connected":false,"join":"joining","selected_slot":5,"pinned":true,"pin_failed_slot":255,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/json@225 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/json@226 LEN 225 @@@@
+{"connected":false,"join":"joining","selected_slot":5,"pinned":true,"pin_failed_slot":255,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/json@224 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO disconnected_5/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/line@380 LEN 142 @@@@
+wifi_link connected=0 join=disconnected selected=0 pinned=0 pin_failed=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/line@142 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/line@143 LEN 142 @@@@
+wifi_link connected=0 join=disconnected selected=0 pinned=0 pin_failed=0 connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/line@141 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/json@480 LEN 229 @@@@
+{"connected":false,"join":"disconnected","selected_slot":0,"pinned":false,"pin_failed_slot":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/json@229 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/json@230 LEN 229 @@@@
+{"connected":false,"join":"disconnected","selected_slot":0,"pinned":false,"pin_failed_slot":0,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/json@228 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO all_zero/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/line@380 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=0 pin_failed=0 rssi_dbm=unknown channel=0 secondary=unknown phy=unknown bandwidth_cfg_mhz=0 ap_bandwidth_mhz=0 ap_modes=- power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/line@287 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/line@288 LEN 287 @@@@
+wifi_link connected=1 join=connected selected=0 pinned=0 pin_failed=0 rssi_dbm=unknown channel=0 secondary=unknown phy=unknown bandwidth_cfg_mhz=0 ap_bandwidth_mhz=0 ap_modes=- power_save=unknown tx_power_qdbm=unknown connects=0 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0
+
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/line@286 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/json@480 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":0,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":0,"ap_modes":"-","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/json@393 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/json@394 LEN 393 @@@@
+{"connected":true,"join":"connected","selected_slot":0,"pinned":false,"pin_failed_slot":0,"rssi_dbm":null,"channel":0,"secondary":"unknown","phy":"unknown","bandwidth_cfg_mhz":0,"ap_bandwidth_mhz":0,"ap_modes":"-","power_save":"unknown","tx_power_qdbm":null,"connects":0,"disconnects":0,"beacon_timeouts":0,"last_disconnect_reason":0,"last_disconnect_rssi_dbm":0,"last_disconnect_uptime_ms":0}
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO all_unknown/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO widest/line@380 LEN 324 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=1 pin_failed=255 rssi_dbm=-128 channel=255 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=255 ap_modes=bgnax power_save=max_modem tx_power_qdbm=-128 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO widest/line@324 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO widest/line@325 LEN 324 @@@@
+wifi_link connected=1 join=connected selected=255 pinned=1 pin_failed=255 rssi_dbm=-128 channel=255 secondary=below phy=VHT20 bandwidth_cfg_mhz=255 ap_bandwidth_mhz=255 ap_modes=bgnax power_save=max_modem tx_power_qdbm=-128 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO widest/line@323 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO widest/json@480 LEN 447 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":true,"pin_failed_slot":255,"rssi_dbm":-128,"channel":255,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":255,"ap_modes":"bgnax","power_save":"max_modem","tx_power_qdbm":-128,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO widest/json@447 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO widest/json@448 LEN 447 @@@@
+{"connected":true,"join":"connected","selected_slot":255,"pinned":true,"pin_failed_slot":255,"rssi_dbm":-128,"channel":255,"secondary":"below","phy":"VHT20","bandwidth_cfg_mhz":255,"ap_bandwidth_mhz":255,"ap_modes":"bgnax","power_save":"max_modem","tx_power_qdbm":-128,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO widest/json@446 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO widest/rssi_text LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/line@380 LEN 172 @@@@
+wifi_link connected=0 join=joining selected=255 pinned=1 pin_failed=255 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/line@172 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/line@173 LEN 172 @@@@
+wifi_link connected=0 join=joining selected=255 pinned=1 pin_failed=255 connects=4294967295 disconnects=4294967295 beacon_timeouts=4294967295 last_disconnect_reason=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/line@171 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/json@480 LEN 270 @@@@
+{"connected":false,"join":"joining","selected_slot":255,"pinned":true,"pin_failed_slot":255,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/json@270 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/json@271 LEN 270 @@@@
+{"connected":false,"join":"joining","selected_slot":255,"pinned":true,"pin_failed_slot":255,"connects":4294967295,"disconnects":4294967295,"beacon_timeouts":4294967295,"last_disconnect_reason":65535,"last_disconnect_rssi_dbm":-128,"last_disconnect_uptime_ms":4294967295}
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/json@269 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO widest_disconnected/rssi_text LEN 7 @@@@
+unknown
+@@@@ END @@@@
+@@@@ SCENARIO full/line@380 LEN 276 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-61 channel=6 secondary=above phy=HT40 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=40 ap_modes=bgn power_save=none tx_power_qdbm=78 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO full/line@276 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO full/line@277 LEN 276 @@@@
+wifi_link connected=1 join=connected selected=2 pinned=1 pin_failed=0 rssi_dbm=-61 channel=6 secondary=above phy=HT40 bandwidth_cfg_mhz=40 ap_bandwidth_mhz=40 ap_modes=bgn power_save=none tx_power_qdbm=78 connects=3 disconnects=2 beacon_timeouts=1 last_disconnect_reason=200
+
+@@@@ END @@@@
+@@@@ SCENARIO full/line@275 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO full/json@480 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-61,"channel":6,"secondary":"above","phy":"HT40","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":40,"ap_modes":"bgn","power_save":"none","tx_power_qdbm":78,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO full/json@392 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO full/json@393 LEN 392 @@@@
+{"connected":true,"join":"connected","selected_slot":2,"pinned":true,"pin_failed_slot":0,"rssi_dbm":-61,"channel":6,"secondary":"above","phy":"HT40","bandwidth_cfg_mhz":40,"ap_bandwidth_mhz":40,"ap_modes":"bgn","power_save":"none","tx_power_qdbm":78,"connects":3,"disconnects":2,"beacon_timeouts":1,"last_disconnect_reason":200,"last_disconnect_rssi_dbm":-85,"last_disconnect_uptime_ms":9000}
+@@@@ END @@@@
+@@@@ SCENARIO full/json@391 LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO full/rssi_text LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO names/0 LEN 52 @@@@
+phy=lr secondary=none ps=none join=connected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/1 LEN 57 @@@@
+phy=11b secondary=above ps=min_modem join=joining modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/2 LEN 56 @@@@
+phy=11g secondary=below ps=max_modem join=failed modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/3 LEN 63 @@@@
+phy=11a secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/4 LEN 63 @@@@
+phy=HT20 secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/5 LEN 64 @@@@
+phy=HT40 secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/6 LEN 64 @@@@
+phy=HE20 secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/7 LEN 66 @@@@
+phy=VHT20 secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/8 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/9 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/10 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/11 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/12 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/13 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/14 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/15 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/16 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/17 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/18 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/19 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/20 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/21 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/22 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/23 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/24 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/25 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/26 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/27 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/28 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/29 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/30 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/31 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/32 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/33 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/34 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/35 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/36 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/37 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/38 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/39 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/40 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/41 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/42 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/43 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/44 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/45 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/46 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/47 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/48 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/49 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/50 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/51 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/52 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/53 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/54 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/55 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/56 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/57 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/58 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/59 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/60 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/61 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/62 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/63 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/64 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/65 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/66 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/67 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/68 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/69 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/70 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/71 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/72 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/73 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/74 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/75 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/76 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/77 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/78 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/79 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/80 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/81 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/82 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/83 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/84 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/85 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/86 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/87 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/88 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/89 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/90 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/91 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/92 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/93 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/94 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/95 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/96 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/97 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/98 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/99 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/100 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/101 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/102 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/103 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/104 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/105 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/106 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/107 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/108 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/109 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/110 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/111 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/112 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/113 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/114 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/115 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/116 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/117 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/118 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/119 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/120 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/121 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/122 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/123 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/124 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/125 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/126 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/127 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/128 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/129 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/130 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/131 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/132 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/133 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/134 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/135 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/136 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/137 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/138 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/139 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/140 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/141 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/142 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/143 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/144 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/145 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/146 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/147 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/148 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/149 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/150 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/151 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/152 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/153 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/154 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/155 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/156 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/157 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/158 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/159 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/160 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/161 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/162 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/163 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/164 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/165 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/166 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/167 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/168 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/169 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/170 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/171 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/172 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/173 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/174 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/175 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/176 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/177 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/178 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/179 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/180 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/181 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/182 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/183 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/184 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/185 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/186 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/187 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/188 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/189 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/190 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/191 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/192 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/193 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/194 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/195 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/196 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/197 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/198 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/199 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/200 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/201 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/202 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/203 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/204 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/205 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/206 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/207 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/208 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/209 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/210 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/211 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/212 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/213 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/214 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/215 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/216 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/217 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/218 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/219 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/220 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/221 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/222 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/223 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/224 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/225 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/226 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/227 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/228 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/229 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/230 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/231 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/232 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/233 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/234 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/235 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/236 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/237 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/238 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/239 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/240 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/241 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/242 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/243 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/244 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/245 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/246 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/247 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/248 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/249 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/250 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/251 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/252 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/253 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/254 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/255 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/256 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/257 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/258 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/259 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/260 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/261 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/262 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/263 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/264 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/265 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/266 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/267 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/268 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/269 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/270 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/271 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/272 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/273 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/274 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/275 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/276 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/277 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/278 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/279 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/280 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/281 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/282 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/283 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO names/284 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=nax
+@@@@ END @@@@
+@@@@ SCENARIO names/285 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bnax
+@@@@ END @@@@
+@@@@ SCENARIO names/286 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gnax
+@@@@ END @@@@
+@@@@ SCENARIO names/287 LEN 70 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgnax
+@@@@ END @@@@
+@@@@ SCENARIO names/288 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=-
+@@@@ END @@@@
+@@@@ SCENARIO names/289 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=b
+@@@@ END @@@@
+@@@@ SCENARIO names/290 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=g
+@@@@ END @@@@
+@@@@ SCENARIO names/291 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bg
+@@@@ END @@@@
+@@@@ SCENARIO names/292 LEN 66 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=n
+@@@@ END @@@@
+@@@@ SCENARIO names/293 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bn
+@@@@ END @@@@
+@@@@ SCENARIO names/294 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gn
+@@@@ END @@@@
+@@@@ SCENARIO names/295 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgn
+@@@@ END @@@@
+@@@@ SCENARIO names/296 LEN 67 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=ax
+@@@@ END @@@@
+@@@@ SCENARIO names/297 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bax
+@@@@ END @@@@
+@@@@ SCENARIO names/298 LEN 68 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=gax
+@@@@ END @@@@
+@@@@ SCENARIO names/299 LEN 69 @@@@
+phy=unknown secondary=unknown ps=unknown join=disconnected modes=bgax
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-128 LEN 4 @@@@
+-128
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-127 LEN 4 @@@@
+-127
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-126 LEN 4 @@@@
+-126
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-125 LEN 4 @@@@
+-125
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-124 LEN 4 @@@@
+-124
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-123 LEN 4 @@@@
+-123
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-122 LEN 4 @@@@
+-122
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-121 LEN 4 @@@@
+-121
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-120 LEN 4 @@@@
+-120
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-119 LEN 4 @@@@
+-119
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-118 LEN 4 @@@@
+-118
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-117 LEN 4 @@@@
+-117
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-116 LEN 4 @@@@
+-116
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-115 LEN 4 @@@@
+-115
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-114 LEN 4 @@@@
+-114
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-113 LEN 4 @@@@
+-113
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-112 LEN 4 @@@@
+-112
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-111 LEN 4 @@@@
+-111
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-110 LEN 4 @@@@
+-110
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-109 LEN 4 @@@@
+-109
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-108 LEN 4 @@@@
+-108
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-107 LEN 4 @@@@
+-107
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-106 LEN 4 @@@@
+-106
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-105 LEN 4 @@@@
+-105
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-104 LEN 4 @@@@
+-104
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-103 LEN 4 @@@@
+-103
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-102 LEN 4 @@@@
+-102
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-101 LEN 4 @@@@
+-101
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-100 LEN 4 @@@@
+-100
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-99 LEN 3 @@@@
+-99
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-98 LEN 3 @@@@
+-98
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-97 LEN 3 @@@@
+-97
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-96 LEN 3 @@@@
+-96
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-95 LEN 3 @@@@
+-95
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-94 LEN 3 @@@@
+-94
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-93 LEN 3 @@@@
+-93
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-92 LEN 3 @@@@
+-92
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-91 LEN 3 @@@@
+-91
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-90 LEN 3 @@@@
+-90
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-89 LEN 3 @@@@
+-89
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-88 LEN 3 @@@@
+-88
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-87 LEN 3 @@@@
+-87
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-86 LEN 3 @@@@
+-86
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-85 LEN 3 @@@@
+-85
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-84 LEN 3 @@@@
+-84
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-83 LEN 3 @@@@
+-83
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-82 LEN 3 @@@@
+-82
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-81 LEN 3 @@@@
+-81
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-80 LEN 3 @@@@
+-80
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-79 LEN 3 @@@@
+-79
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-78 LEN 3 @@@@
+-78
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-77 LEN 3 @@@@
+-77
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-76 LEN 3 @@@@
+-76
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-75 LEN 3 @@@@
+-75
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-74 LEN 3 @@@@
+-74
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-73 LEN 3 @@@@
+-73
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-72 LEN 3 @@@@
+-72
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-71 LEN 3 @@@@
+-71
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-70 LEN 3 @@@@
+-70
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-69 LEN 3 @@@@
+-69
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-68 LEN 3 @@@@
+-68
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-67 LEN 3 @@@@
+-67
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-66 LEN 3 @@@@
+-66
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-65 LEN 3 @@@@
+-65
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-64 LEN 3 @@@@
+-64
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-63 LEN 3 @@@@
+-63
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-62 LEN 3 @@@@
+-62
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-61 LEN 3 @@@@
+-61
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-60 LEN 3 @@@@
+-60
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-59 LEN 3 @@@@
+-59
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-58 LEN 3 @@@@
+-58
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-57 LEN 3 @@@@
+-57
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-56 LEN 3 @@@@
+-56
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-55 LEN 3 @@@@
+-55
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-54 LEN 3 @@@@
+-54
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-53 LEN 3 @@@@
+-53
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-52 LEN 3 @@@@
+-52
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-51 LEN 3 @@@@
+-51
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-50 LEN 3 @@@@
+-50
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-49 LEN 3 @@@@
+-49
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-48 LEN 3 @@@@
+-48
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-47 LEN 3 @@@@
+-47
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-46 LEN 3 @@@@
+-46
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-45 LEN 3 @@@@
+-45
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-44 LEN 3 @@@@
+-44
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-43 LEN 3 @@@@
+-43
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-42 LEN 3 @@@@
+-42
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-41 LEN 3 @@@@
+-41
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-40 LEN 3 @@@@
+-40
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-39 LEN 3 @@@@
+-39
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-38 LEN 3 @@@@
+-38
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-37 LEN 3 @@@@
+-37
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-36 LEN 3 @@@@
+-36
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-35 LEN 3 @@@@
+-35
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-34 LEN 3 @@@@
+-34
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-33 LEN 3 @@@@
+-33
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-32 LEN 3 @@@@
+-32
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-31 LEN 3 @@@@
+-31
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-30 LEN 3 @@@@
+-30
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-29 LEN 3 @@@@
+-29
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-28 LEN 3 @@@@
+-28
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-27 LEN 3 @@@@
+-27
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-26 LEN 3 @@@@
+-26
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-25 LEN 3 @@@@
+-25
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-24 LEN 3 @@@@
+-24
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-23 LEN 3 @@@@
+-23
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-22 LEN 3 @@@@
+-22
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-21 LEN 3 @@@@
+-21
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-20 LEN 3 @@@@
+-20
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-19 LEN 3 @@@@
+-19
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-18 LEN 3 @@@@
+-18
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-17 LEN 3 @@@@
+-17
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-16 LEN 3 @@@@
+-16
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-15 LEN 3 @@@@
+-15
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-14 LEN 3 @@@@
+-14
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-13 LEN 3 @@@@
+-13
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-12 LEN 3 @@@@
+-12
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-11 LEN 3 @@@@
+-11
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-10 LEN 3 @@@@
+-10
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-9 LEN 2 @@@@
+-9
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-8 LEN 2 @@@@
+-8
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-7 LEN 2 @@@@
+-7
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-6 LEN 2 @@@@
+-6
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-5 LEN 2 @@@@
+-5
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-4 LEN 2 @@@@
+-4
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-3 LEN 2 @@@@
+-3
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-2 LEN 2 @@@@
+-2
+@@@@ END @@@@
+@@@@ SCENARIO rssi/-1 LEN 2 @@@@
+-1
+@@@@ END @@@@
+@@@@ SCENARIO rssi/0 LEN 1 @@@@
+0
+@@@@ END @@@@
+@@@@ SCENARIO rssi/1 LEN 1 @@@@
+1
+@@@@ END @@@@
+@@@@ SCENARIO rssi/2 LEN 1 @@@@
+2
+@@@@ END @@@@
+@@@@ SCENARIO rssi/3 LEN 1 @@@@
+3
+@@@@ END @@@@
+@@@@ SCENARIO rssi/4 LEN 1 @@@@
+4
+@@@@ END @@@@
+@@@@ SCENARIO rssi/5 LEN 1 @@@@
+5
+@@@@ END @@@@
+@@@@ SCENARIO rssi/6 LEN 1 @@@@
+6
+@@@@ END @@@@
+@@@@ SCENARIO rssi/7 LEN 1 @@@@
+7
+@@@@ END @@@@
+@@@@ SCENARIO rssi/8 LEN 1 @@@@
+8
+@@@@ END @@@@
+@@@@ SCENARIO rssi/9 LEN 1 @@@@
+9
+@@@@ END @@@@
+@@@@ SCENARIO rssi/10 LEN 2 @@@@
+10
+@@@@ END @@@@
+@@@@ SCENARIO rssi/11 LEN 2 @@@@
+11
+@@@@ END @@@@
+@@@@ SCENARIO rssi/12 LEN 2 @@@@
+12
+@@@@ END @@@@
+@@@@ SCENARIO rssi/13 LEN 2 @@@@
+13
+@@@@ END @@@@
+@@@@ SCENARIO rssi/14 LEN 2 @@@@
+14
+@@@@ END @@@@
+@@@@ SCENARIO rssi/15 LEN 2 @@@@
+15
+@@@@ END @@@@
+@@@@ SCENARIO rssi/16 LEN 2 @@@@
+16
+@@@@ END @@@@
+@@@@ SCENARIO rssi/17 LEN 2 @@@@
+17
+@@@@ END @@@@
+@@@@ SCENARIO rssi/18 LEN 2 @@@@
+18
+@@@@ END @@@@
+@@@@ SCENARIO rssi/19 LEN 2 @@@@
+19
+@@@@ END @@@@
+@@@@ SCENARIO rssi/20 LEN 2 @@@@
+20
+@@@@ END @@@@
+@@@@ SCENARIO rssi/21 LEN 2 @@@@
+21
+@@@@ END @@@@
+@@@@ SCENARIO rssi/22 LEN 2 @@@@
+22
+@@@@ END @@@@
+@@@@ SCENARIO rssi/23 LEN 2 @@@@
+23
+@@@@ END @@@@
+@@@@ SCENARIO rssi/24 LEN 2 @@@@
+24
+@@@@ END @@@@
+@@@@ SCENARIO rssi/25 LEN 2 @@@@
+25
+@@@@ END @@@@
+@@@@ SCENARIO rssi/26 LEN 2 @@@@
+26
+@@@@ END @@@@
+@@@@ SCENARIO rssi/27 LEN 2 @@@@
+27
+@@@@ END @@@@
+@@@@ SCENARIO rssi/28 LEN 2 @@@@
+28
+@@@@ END @@@@
+@@@@ SCENARIO rssi/29 LEN 2 @@@@
+29
+@@@@ END @@@@
+@@@@ SCENARIO rssi/30 LEN 2 @@@@
+30
+@@@@ END @@@@
+@@@@ SCENARIO rssi/31 LEN 2 @@@@
+31
+@@@@ END @@@@
+@@@@ SCENARIO rssi/32 LEN 2 @@@@
+32
+@@@@ END @@@@
+@@@@ SCENARIO rssi/33 LEN 2 @@@@
+33
+@@@@ END @@@@
+@@@@ SCENARIO rssi/34 LEN 2 @@@@
+34
+@@@@ END @@@@
+@@@@ SCENARIO rssi/35 LEN 2 @@@@
+35
+@@@@ END @@@@
+@@@@ SCENARIO rssi/36 LEN 2 @@@@
+36
+@@@@ END @@@@
+@@@@ SCENARIO rssi/37 LEN 2 @@@@
+37
+@@@@ END @@@@
+@@@@ SCENARIO rssi/38 LEN 2 @@@@
+38
+@@@@ END @@@@
+@@@@ SCENARIO rssi/39 LEN 2 @@@@
+39
+@@@@ END @@@@
+@@@@ SCENARIO rssi/40 LEN 2 @@@@
+40
+@@@@ END @@@@
+@@@@ SCENARIO rssi/41 LEN 2 @@@@
+41
+@@@@ END @@@@
+@@@@ SCENARIO rssi/42 LEN 2 @@@@
+42
+@@@@ END @@@@
+@@@@ SCENARIO rssi/43 LEN 2 @@@@
+43
+@@@@ END @@@@
+@@@@ SCENARIO rssi/44 LEN 2 @@@@
+44
+@@@@ END @@@@
+@@@@ SCENARIO rssi/45 LEN 2 @@@@
+45
+@@@@ END @@@@
+@@@@ SCENARIO rssi/46 LEN 2 @@@@
+46
+@@@@ END @@@@
+@@@@ SCENARIO rssi/47 LEN 2 @@@@
+47
+@@@@ END @@@@
+@@@@ SCENARIO rssi/48 LEN 2 @@@@
+48
+@@@@ END @@@@
+@@@@ SCENARIO rssi/49 LEN 2 @@@@
+49
+@@@@ END @@@@
+@@@@ SCENARIO rssi/50 LEN 2 @@@@
+50
+@@@@ END @@@@
+@@@@ SCENARIO rssi/51 LEN 2 @@@@
+51
+@@@@ END @@@@
+@@@@ SCENARIO rssi/52 LEN 2 @@@@
+52
+@@@@ END @@@@
+@@@@ SCENARIO rssi/53 LEN 2 @@@@
+53
+@@@@ END @@@@
+@@@@ SCENARIO rssi/54 LEN 2 @@@@
+54
+@@@@ END @@@@
+@@@@ SCENARIO rssi/55 LEN 2 @@@@
+55
+@@@@ END @@@@
+@@@@ SCENARIO rssi/56 LEN 2 @@@@
+56
+@@@@ END @@@@
+@@@@ SCENARIO rssi/57 LEN 2 @@@@
+57
+@@@@ END @@@@
+@@@@ SCENARIO rssi/58 LEN 2 @@@@
+58
+@@@@ END @@@@
+@@@@ SCENARIO rssi/59 LEN 2 @@@@
+59
+@@@@ END @@@@
+@@@@ SCENARIO rssi/60 LEN 2 @@@@
+60
+@@@@ END @@@@
+@@@@ SCENARIO rssi/61 LEN 2 @@@@
+61
+@@@@ END @@@@
+@@@@ SCENARIO rssi/62 LEN 2 @@@@
+62
+@@@@ END @@@@
+@@@@ SCENARIO rssi/63 LEN 2 @@@@
+63
+@@@@ END @@@@
+@@@@ SCENARIO rssi/64 LEN 2 @@@@
+64
+@@@@ END @@@@
+@@@@ SCENARIO rssi/65 LEN 2 @@@@
+65
+@@@@ END @@@@
+@@@@ SCENARIO rssi/66 LEN 2 @@@@
+66
+@@@@ END @@@@
+@@@@ SCENARIO rssi/67 LEN 2 @@@@
+67
+@@@@ END @@@@
+@@@@ SCENARIO rssi/68 LEN 2 @@@@
+68
+@@@@ END @@@@
+@@@@ SCENARIO rssi/69 LEN 2 @@@@
+69
+@@@@ END @@@@
+@@@@ SCENARIO rssi/70 LEN 2 @@@@
+70
+@@@@ END @@@@
+@@@@ SCENARIO rssi/71 LEN 2 @@@@
+71
+@@@@ END @@@@
+@@@@ SCENARIO rssi/72 LEN 2 @@@@
+72
+@@@@ END @@@@
+@@@@ SCENARIO rssi/73 LEN 2 @@@@
+73
+@@@@ END @@@@
+@@@@ SCENARIO rssi/74 LEN 2 @@@@
+74
+@@@@ END @@@@
+@@@@ SCENARIO rssi/75 LEN 2 @@@@
+75
+@@@@ END @@@@
+@@@@ SCENARIO rssi/76 LEN 2 @@@@
+76
+@@@@ END @@@@
+@@@@ SCENARIO rssi/77 LEN 2 @@@@
+77
+@@@@ END @@@@
+@@@@ SCENARIO rssi/78 LEN 2 @@@@
+78
+@@@@ END @@@@
+@@@@ SCENARIO rssi/79 LEN 2 @@@@
+79
+@@@@ END @@@@
+@@@@ SCENARIO rssi/80 LEN 2 @@@@
+80
+@@@@ END @@@@
+@@@@ SCENARIO rssi/81 LEN 2 @@@@
+81
+@@@@ END @@@@
+@@@@ SCENARIO rssi/82 LEN 2 @@@@
+82
+@@@@ END @@@@
+@@@@ SCENARIO rssi/83 LEN 2 @@@@
+83
+@@@@ END @@@@
+@@@@ SCENARIO rssi/84 LEN 2 @@@@
+84
+@@@@ END @@@@
+@@@@ SCENARIO rssi/85 LEN 2 @@@@
+85
+@@@@ END @@@@
+@@@@ SCENARIO rssi/86 LEN 2 @@@@
+86
+@@@@ END @@@@
+@@@@ SCENARIO rssi/87 LEN 2 @@@@
+87
+@@@@ END @@@@
+@@@@ SCENARIO rssi/88 LEN 2 @@@@
+88
+@@@@ END @@@@
+@@@@ SCENARIO rssi/89 LEN 2 @@@@
+89
+@@@@ END @@@@
+@@@@ SCENARIO rssi/90 LEN 2 @@@@
+90
+@@@@ END @@@@
+@@@@ SCENARIO rssi/91 LEN 2 @@@@
+91
+@@@@ END @@@@
+@@@@ SCENARIO rssi/92 LEN 2 @@@@
+92
+@@@@ END @@@@
+@@@@ SCENARIO rssi/93 LEN 2 @@@@
+93
+@@@@ END @@@@
+@@@@ SCENARIO rssi/94 LEN 2 @@@@
+94
+@@@@ END @@@@
+@@@@ SCENARIO rssi/95 LEN 2 @@@@
+95
+@@@@ END @@@@
+@@@@ SCENARIO rssi/96 LEN 2 @@@@
+96
+@@@@ END @@@@
+@@@@ SCENARIO rssi/97 LEN 2 @@@@
+97
+@@@@ END @@@@
+@@@@ SCENARIO rssi/98 LEN 2 @@@@
+98
+@@@@ END @@@@
+@@@@ SCENARIO rssi/99 LEN 2 @@@@
+99
+@@@@ END @@@@
+@@@@ SCENARIO rssi/100 LEN 3 @@@@
+100
+@@@@ END @@@@
+@@@@ SCENARIO rssi/101 LEN 3 @@@@
+101
+@@@@ END @@@@
+@@@@ SCENARIO rssi/102 LEN 3 @@@@
+102
+@@@@ END @@@@
+@@@@ SCENARIO rssi/103 LEN 3 @@@@
+103
+@@@@ END @@@@
+@@@@ SCENARIO rssi/104 LEN 3 @@@@
+104
+@@@@ END @@@@
+@@@@ SCENARIO rssi/105 LEN 3 @@@@
+105
+@@@@ END @@@@
+@@@@ SCENARIO rssi/106 LEN 3 @@@@
+106
+@@@@ END @@@@
+@@@@ SCENARIO rssi/107 LEN 3 @@@@
+107
+@@@@ END @@@@
+@@@@ SCENARIO rssi/108 LEN 3 @@@@
+108
+@@@@ END @@@@
+@@@@ SCENARIO rssi/109 LEN 3 @@@@
+109
+@@@@ END @@@@
+@@@@ SCENARIO rssi/110 LEN 3 @@@@
+110
+@@@@ END @@@@
+@@@@ SCENARIO rssi/111 LEN 3 @@@@
+111
+@@@@ END @@@@
+@@@@ SCENARIO rssi/112 LEN 3 @@@@
+112
+@@@@ END @@@@
+@@@@ SCENARIO rssi/113 LEN 3 @@@@
+113
+@@@@ END @@@@
+@@@@ SCENARIO rssi/114 LEN 3 @@@@
+114
+@@@@ END @@@@
+@@@@ SCENARIO rssi/115 LEN 3 @@@@
+115
+@@@@ END @@@@
+@@@@ SCENARIO rssi/116 LEN 3 @@@@
+116
+@@@@ END @@@@
+@@@@ SCENARIO rssi/117 LEN 3 @@@@
+117
+@@@@ END @@@@
+@@@@ SCENARIO rssi/118 LEN 3 @@@@
+118
+@@@@ END @@@@
+@@@@ SCENARIO rssi/119 LEN 3 @@@@
+119
+@@@@ END @@@@
+@@@@ SCENARIO rssi/120 LEN 3 @@@@
+120
+@@@@ END @@@@
+@@@@ SCENARIO rssi/121 LEN 3 @@@@
+121
+@@@@ END @@@@
+@@@@ SCENARIO rssi/122 LEN 3 @@@@
+122
+@@@@ END @@@@
+@@@@ SCENARIO rssi/123 LEN 3 @@@@
+123
+@@@@ END @@@@
+@@@@ SCENARIO rssi/124 LEN 3 @@@@
+124
+@@@@ END @@@@
+@@@@ SCENARIO rssi/125 LEN 3 @@@@
+125
+@@@@ END @@@@
+@@@@ SCENARIO rssi/126 LEN 3 @@@@
+126
+@@@@ END @@@@
+@@@@ SCENARIO rssi/127 LEN 3 @@@@
+127
+@@@@ END @@@@

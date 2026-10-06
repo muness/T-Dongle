@@ -40,16 +40,8 @@ fn gen_frame(r: &mut Rng, f: &mut Buf) -> usize {
     };
     // Hostile mutations: flip header bytes, hit the flag/port bytes, truncate.
     for _ in 0..r.rnd(3) {
-        let i = if r.rnd(2) != 0 {
-            12 + r.usz(60)
-        } else {
-            r.usz(len)
-        };
-        f[i] = if r.rnd(2) != 0 {
-            r.byte()
-        } else {
-            [0x00, 0xff, 0x45, 0x60, 0x08, 0x86, 0xdd][r.usz(7)]
-        };
+        let i = if r.rnd(2) != 0 { 12 + r.usz(60) } else { r.usz(len) };
+        f[i] = if r.rnd(2) != 0 { r.byte() } else { [0x00, 0xff, 0x45, 0x60, 0x08, 0x86, 0xdd][r.usz(7)] };
     }
     if r.rnd(4) == 0 {
         len = r.usz(len + 1);
@@ -79,12 +71,7 @@ fn classify_and_mark_ce_match_independent_reference() {
     for _ in 0..300_000 {
         let len = gen_frame(&mut r, &mut f);
         let got = classify(&f[..len]);
-        assert_eq!(
-            got,
-            ref_classify(&f[..len]),
-            "frame {:02x?}",
-            &f[..len.min(80)]
-        );
+        assert_eq!(got, ref_classify(&f[..len]), "frame {:02x?}", &f[..len.min(80)]);
         seen[got as usize] += 1;
         if got == EcnClass::Capable {
             let mut a = f[..len].to_vec();
@@ -93,10 +80,7 @@ fn classify_and_mark_ce_match_independent_reference() {
             mark_ce(&mut a);
             ref_mark(&mut b);
             if valid_before {
-                assert_eq!(
-                    a, b,
-                    "marked frame differs from recomputed-from-scratch reference"
-                );
+                assert_eq!(a, b, "marked frame differs from recomputed-from-scratch reference");
             } else {
                 // An invalid checksum stays invalid under the incremental update; everything but the checksum must still match.
                 assert_eq!(a[..24], b[..24]);

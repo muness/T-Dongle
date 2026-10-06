@@ -24,6 +24,5 @@ pub mod retry;
 
 pub use pin::{PIN_MAX_ATTEMPTS, Pin};
 pub use rank::{
-    HEALTHY_DBM, HYSTERESIS_DB, NOT_SEEN_DBM, PRIORITY_DEFAULT, PRIORITY_MAX, PROFILE_LIMIT, Rank,
-    USABLE_DBM, pick, pick_ranked, rank_better, rank_order,
+    HEALTHY_DBM, HYSTERESIS_DB, NOT_SEEN_DBM, PRIORITY_DEFAULT, PRIORITY_MAX, PROFILE_LIMIT, Rank, USABLE_DBM, pick, pick_ranked, rank_better, rank_order,
 };

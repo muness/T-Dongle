@@ -9,6 +9,13 @@ publish = false
 
 [dependencies]
 tdongle-aqm = { path = "../tdongle-aqm" }
+tdongle-spsc = { path = "../tdongle-spsc" }
+
+[dev-dependencies]
+tdongle-spsc = { path = "../tdongle-spsc", features = ["test-support"] }
 
 [lints]
 workspace = true
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.7"

@@ -34,11 +34,7 @@ pub type Buf = [u8; 1600];
 pub fn csum16(p: &[u8], init: u32) -> u16 {
     let mut sum = init;
     for c in p.chunks(2) {
-        sum += if c.len() == 2 {
-            u32::from(u16::from_be_bytes([c[0], c[1]]))
-        } else {
-            u32::from(c[0]) << 8
-        };
+        sum += if c.len() == 2 { u32::from(u16::from_be_bytes([c[0], c[1]])) } else { u32::from(c[0]) << 8 };
     }
     while sum >> 16 != 0 {
         sum = (sum & 0xffff) + (sum >> 16);
@@ -77,15 +73,7 @@ pub fn l4_checksum(f: &[u8], v6: bool) -> u16 {
     csum16(&f[l4off..l4off + l4len], sum)
 }
 
-pub fn build4(
-    r: &mut Rng,
-    f: &mut Buf,
-    tos: u32,
-    proto: u32,
-    ihl_words: u32,
-    payload: u32,
-    flags_frag: u32,
-) -> usize {
+pub fn build4(r: &mut Rng, f: &mut Buf, tos: u32, proto: u32, ihl_words: u32, payload: u32, flags_frag: u32) -> usize {
     f.fill(0);
     for b in &mut f[..12] {
         *b = r.byte();
@@ -163,16 +151,7 @@ pub const fn ext(ty: u8, units: u8) -> Ext {
     Ext { ty, units }
 }
 
-pub fn build6_chain(
-    r: &mut Rng,
-    f: &mut Buf,
-    tclass: u32,
-    chain: &[Ext],
-    proto: u32,
-    tcp_flags: u32,
-    udp_dst: u32,
-    frag_off: u32,
-) -> usize {
+pub fn build6_chain(r: &mut Rng, f: &mut Buf, tclass: u32, chain: &[Ext], proto: u32, tcp_flags: u32, udp_dst: u32, frag_off: u32) -> usize {
     f.fill(0);
     for b in &mut f[..12] {
         *b = r.byte();
@@ -250,10 +229,7 @@ pub fn ref_classify(frame: &[u8]) -> EcnClass {
                     return EcnClass::Exempt;
                 }
                 if proto == 17 && l4.len() >= 4 {
-                    let (src, dst) = (
-                        u16::from_be_bytes([l4[0], l4[1]]),
-                        u16::from_be_bytes([l4[2], l4[3]]),
-                    );
+                    let (src, dst) = (u16::from_be_bytes([l4[0], l4[1]]), u16::from_be_bytes([l4[2], l4[3]]));
                     if [src, dst].iter().any(|p| *p == 67 || *p == 68) {
                         return EcnClass::Exempt;
                     }

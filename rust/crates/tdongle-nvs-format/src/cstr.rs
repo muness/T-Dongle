@@ -39,12 +39,7 @@ pub(crate) fn copy_str(dst: &mut [u8], src: &[u8]) {
 
 /// Little-endian `u32` at `offset`.
 pub(crate) fn read_u32(bytes: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes([
-        bytes[offset],
-        bytes[offset + 1],
-        bytes[offset + 2],
-        bytes[offset + 3],
-    ])
+    u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]])
 }
 
 #[cfg(test)]
@@ -58,13 +53,7 @@ mod tests {
         assert_eq!(c_str(b"\0abc"), b"");
         assert!(is_terminated(b"ab\0"));
         assert!(!is_terminated(b"abc"));
-        assert!(
-            is_printable(b' ')
-                && is_printable(b'~')
-                && !is_printable(31)
-                && !is_printable(127)
-                && !is_printable(0xc3)
-        );
+        assert!(is_printable(b' ') && is_printable(b'~') && !is_printable(31) && !is_printable(127) && !is_printable(0xc3));
     }
 
     #[test]

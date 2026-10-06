@@ -13,18 +13,11 @@ pub fn fixed<const N: usize>(text: &str) -> [u8; N] {
     out
 }
 
-pub const SSIDS: [&[u8]; 8] = [
-    b"Home", b"Phone", b"Office", b"Cafe", b"Car", b"Hotel", b"Lab", b"Shed",
-];
+pub const SSIDS: [&[u8]; 8] = [b"Home", b"Phone", b"Office", b"Cafe", b"Car", b"Hotel", b"Lab", b"Shed"];
 
 /// The legacy profile `strcpy`ed the way `tests/test_legacy_import.c` does.
 pub fn legacy_profile(name: &str, ssid: &str, pass: &str, priority: u8) -> LegacyProfile {
-    LegacyProfile {
-        name: fixed(name),
-        ssid: fixed(ssid),
-        pass: fixed(pass),
-        priority,
-    }
+    LegacyProfile { name: fixed(name), ssid: fixed(ssid), pass: fixed(pass), priority }
 }
 
 /// Canonical dump of a meta set, as written by `tools/gen_golden.c` (`dump_meta`).
@@ -62,9 +55,7 @@ pub fn dump_import(import: &LegacyImport) -> Vec<u8> {
 }
 
 /// Canonical dump of a load result (`load_case`), or the "refused" status.
-pub fn dump_load(
-    result: &Result<Loaded, tdongle_nvs_format::wifi_profiles::SavedNetworksError>,
-) -> Vec<u8> {
+pub fn dump_load(result: &Result<Loaded, tdongle_nvs_format::wifi_profiles::SavedNetworksError>) -> Vec<u8> {
     let mut out = vec![0u8; 993];
     let Ok(loaded) = result else {
         out[0] = 1;

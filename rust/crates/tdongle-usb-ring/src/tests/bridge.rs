@@ -6,7 +6,7 @@ use std::prelude::v1::*;
 
 use std::sync::atomic::Ordering::SeqCst;
 
-use super::world::{FLOOR_LARGEST, Rig, cfg_with};
+use super::world::{FLOOR_LARGEST, Rig};
 use crate::{BRIDGE_BASE_SLABS, BRIDGE_MAX_CHUNKS, BRIDGE_MAX_SLABS, Config, SLAB_BYTES, SendError};
 
 /// `ML_HB_FLOOR` of `ml_heap_budget.h`: recovery reserve 16,384 + negotiation peak 13,500.
@@ -169,5 +169,4 @@ fn bridgetune_ring_knob() {
     }
     assert!(accepted == BRIDGE_BASE_SLABS && r.stats().max_bytes as usize == BRIDGE_BASE_SLABS * SLAB_BYTES);
     r.drain_all();
-    let _ = cfg_with(3, 3);
 }

@@ -61,14 +61,7 @@ impl<L: RawLock, const POOL: usize> WifiPins<L, POOL> {
     /// # Errors
     ///
     /// [`TxError::NoMem`] when refused for buffers, [`TxError::Driver`] with the driver's error.
-    pub fn tx<E>(
-        &self,
-        tx_done_ok: bool,
-        len: u32,
-        free_internal: usize,
-        now_ms: u32,
-        send: impl FnOnce() -> Result<(), E>,
-    ) -> Result<(), TxError<E>> {
+    pub fn tx<E>(&self, tx_done_ok: bool, len: u32, free_internal: usize, now_ms: u32, send: impl FnOnce() -> Result<(), E>) -> Result<(), TxError<E>> {
         match self.tx_decision(tx_done_ok, len, free_internal, now_ms) {
             TxDecision::Refuse { .. } => Err(TxError::NoMem),
             TxDecision::SendUncounted => send().map_err(TxError::Driver),

@@ -7,6 +7,7 @@ mod cases_a;
 mod cases_b;
 mod cases_c;
 mod check;
+mod extra;
 mod model;
 mod rng;
 mod soak;

@@ -4,26 +4,16 @@ use tdongle_nvs_format::cstr::c_str;
 use tdongle_nvs_format::legacy::LegacyProfile;
 use tdongle_nvs_format::profile_json::{ProfileJsonError, profile_parse_json};
 
-const VALID: &str =
-    r#"{"slot":8,"priority":100,"name":"Home","ssid":"Network","password":"12345678"}"#;
+const VALID: &str = r#"{"slot":8,"priority":100,"name":"Home","ssid":"Network","password":"12345678"}"#;
 
 #[test]
 fn the_valid_command() {
     let p = profile_parse_json(VALID.as_bytes()).unwrap();
     assert_eq!(p.slot, 7);
     assert_eq!(c_str(&p.profile.pass), b"12345678");
-    assert_eq!(
-        (
-            c_str(&p.profile.name),
-            c_str(&p.profile.ssid),
-            p.profile.priority
-        ),
-        (&b"Home"[..], &b"Network"[..], 100)
-    );
+    assert_eq!((c_str(&p.profile.name), c_str(&p.profile.ssid), p.profile.priority), (&b"Home"[..], &b"Network"[..], 100));
     // Unused bytes of the profile are zero (C memsets it first).
-    assert!(
-        p.profile.name[4..].iter().all(|&b| b == 0) && p.profile.pass[8..].iter().all(|&b| b == 0)
-    );
+    assert!(p.profile.name[4..].iter().all(|&b| b == 0) && p.profile.pass[8..].iter().all(|&b| b == 0));
 }
 
 #[test]
@@ -58,14 +48,8 @@ fn errors_name_the_rule() {
     assert_eq!(e(r#"{"nope":1}"#), ProfileJsonError::BadKey);
     assert_eq!(e(r#"{"slot":1,"slot":1}"#), ProfileJsonError::BadKey);
     assert_eq!(e(r#"{"slot":1}"#), ProfileJsonError::MissingKey);
-    assert_eq!(
-        e(r#"{"slot":9,"priority":1,"name":"x","ssid":"x","password":""}"#),
-        ProfileJsonError::BadValue
-    );
-    assert_eq!(
-        e(r#"{"slot":1,"priority":1,"name":"x","ssid":"x","password":"1234567"}"#),
-        ProfileJsonError::InvalidProfile
-    );
+    assert_eq!(e(r#"{"slot":9,"priority":1,"name":"x","ssid":"x","password":""}"#), ProfileJsonError::BadValue);
+    assert_eq!(e(r#"{"slot":1,"priority":1,"name":"x","ssid":"x","password":"1234567"}"#), ProfileJsonError::InvalidProfile);
 }
 
 fn with(slot: &str, priority: &str) -> String {
@@ -89,8 +73,7 @@ fn numbers_follow_strtod() {
         ("1e+0", "2e-0", 0),
         ("2", "100.0000000000000001", 1),
     ] {
-        let p = profile_parse_json(with(slot, priority).as_bytes())
-            .unwrap_or_else(|e| panic!("{slot} {priority}: {e:?}"));
+        let p = profile_parse_json(with(slot, priority).as_bytes()).unwrap_or_else(|e| panic!("{slot} {priority}: {e:?}"));
         assert_eq!(p.slot, expect, "{slot}");
     }
     // Refused.
@@ -113,18 +96,9 @@ fn numbers_follow_strtod() {
         ("1", ".5"),
         ("1", "1.5"),
     ] {
-        assert!(
-            profile_parse_json(with(slot, priority).as_bytes()).is_err(),
-            "{slot} {priority}"
-        );
+        assert!(profile_parse_json(with(slot, priority).as_bytes()).is_err(), "{slot} {priority}");
     }
-    assert_eq!(
-        profile_parse_json(with("1", "1e2").as_bytes())
-            .unwrap()
-            .profile
-            .priority,
-        100
-    );
+    assert_eq!(profile_parse_json(with("1", "1e2").as_bytes()).unwrap().profile.priority, 100);
 }
 
 #[test]
@@ -132,9 +106,7 @@ fn whitespace_bom_and_nul() {
     let body = with("1", "1");
     assert!(profile_parse_json(format!(" \t\r\n{body} \t\r\n").as_bytes()).is_ok());
     assert!(profile_parse_json(format!("\x01\x02{body}\x1f ").as_bytes()).is_ok()); // any byte up to 0x20 is whitespace
-    assert!(
-        profile_parse_json([&b"\xEF\xBB\xBF"[..], body.as_bytes()].concat().as_slice()).is_ok()
-    );
+    assert!(profile_parse_json([&b"\xEF\xBB\xBF"[..], body.as_bytes()].concat().as_slice()).is_ok());
     assert!(profile_parse_json(b"\xEF\xBB\xBF").is_err());
     assert!(profile_parse_json([&b"\xEF\xBB"[..], body.as_bytes()].concat().as_slice()).is_err());
     assert!(profile_parse_json(format!("{body}}}").as_bytes()).is_err());
@@ -147,12 +119,7 @@ fn whitespace_bom_and_nul() {
 #[test]
 fn limits() {
     let make = |n: usize, s: usize, p: usize| {
-        format!(
-            r#"{{"slot":5,"priority":9,"name":"{}","ssid":"{}","password":"{}"}}"#,
-            "n".repeat(n),
-            "s".repeat(s),
-            "p".repeat(p)
-        )
+        format!(r#"{{"slot":5,"priority":9,"name":"{}","ssid":"{}","password":"{}"}}"#, "n".repeat(n), "s".repeat(s), "p".repeat(p))
     };
     for (n, s, p, ok) in [
         (24, 32, 63, true),
@@ -166,61 +133,31 @@ fn limits() {
         (0, 32, 0, false),
         (24, 0, 0, false),
     ] {
-        assert_eq!(
-            profile_parse_json(make(n, s, p).as_bytes()).is_ok(),
-            ok,
-            "{n} {s} {p}"
-        );
+        assert_eq!(profile_parse_json(make(n, s, p).as_bytes()).is_ok(), ok, "{n} {s} {p}");
     }
     let base = with("1", "1");
     for extra in 495..=502usize {
         let padded = format!("{base}{}", " ".repeat(extra.saturating_sub(base.len())));
-        assert_eq!(
-            profile_parse_json(padded.as_bytes()).is_ok(),
-            padded.len() <= 500,
-            "{}",
-            padded.len()
-        );
+        assert_eq!(profile_parse_json(padded.as_bytes()).is_ok(), padded.len() <= 500, "{}", padded.len());
     }
 }
 
 #[test]
 fn escapes_and_raw_bytes() {
     let ok = |name: &str, ssid: &str, pass: &str| {
-        profile_parse_json(
-            format!(
-                r#"{{"slot":1,"priority":1,"name":"{name}","ssid":"{ssid}","password":"{pass}"}}"#
-            )
-            .as_bytes(),
-        )
+        profile_parse_json(format!(r#"{{"slot":1,"priority":1,"name":"{name}","ssid":"{ssid}","password":"{pass}"}}"#).as_bytes())
     };
     let p = ok(r#"a\"b"#, r"x\\y", r"p\/q\/r\/s\/t").unwrap();
-    assert_eq!(
-        (
-            c_str(&p.profile.name),
-            c_str(&p.profile.ssid),
-            c_str(&p.profile.pass)
-        ),
-        (&b"a\"b"[..], &b"x\\y"[..], &b"p/q/r/s/t"[..])
-    );
+    assert_eq!((c_str(&p.profile.name), c_str(&p.profile.ssid), c_str(&p.profile.pass)), (&b"a\"b"[..], &b"x\\y"[..], &b"p/q/r/s/t"[..]));
     for bad in [r"a\tb", r"a\bb", r"a\nb", r"a\qb", r"a\fb", r"a\rb"] {
         assert!(ok(bad, "x", "").is_err(), "{bad}"); // valid JSON escapes that decode to control characters, or are not JSON at all
     }
     assert!(ok("a\tb", "x", "").is_err()); // a raw control character
     assert!(ok("caf\u{e9}", "x", "").is_err() && ok("a\u{7f}", "x", "").is_err());
     assert!(ok("a b~", r##" !\"#$%&'()*+,-./"##, "        ").is_ok());
-    assert!(
-        profile_parse_json(br#"{"s\/ot":1,"priority":1,"name":"x","ssid":"x","password":""}"#)
-            .is_err()
-    );
-    assert!(
-        profile_parse_json(br#"{"Slot":1,"priority":1,"name":"x","ssid":"x","password":""}"#)
-            .is_err()
-    );
-    assert!(
-        profile_parse_json(br#"{"password":"","ssid":"x","name":"x","priority":7,"slot":3}"#)
-            .is_ok()
-    );
+    assert!(profile_parse_json(br#"{"s\/ot":1,"priority":1,"name":"x","ssid":"x","password":""}"#).is_err());
+    assert!(profile_parse_json(br#"{"Slot":1,"priority":1,"name":"x","ssid":"x","password":""}"#).is_err());
+    assert!(profile_parse_json(br#"{"password":"","ssid":"x","name":"x","priority":7,"slot":3}"#).is_ok());
 }
 
 #[test]
@@ -247,18 +184,8 @@ fn structure() {
     ] {
         assert!(profile_parse_json(bad.as_bytes()).is_err(), "{bad}");
     }
-    assert!(
-        profile_parse_json(
-            br#"{ "slot" : 1 , "priority" : 1 , "name" : "x" , "ssid" : "x" , "password" : "" }"#
-        )
-        .is_ok()
-    );
-    assert!(
-        profile_parse_json(
-            b"{\"slot\"\t:\t1,\"priority\"\n:1,\"name\":\"x\",\"ssid\":\"x\",\"password\":\"\"}"
-        )
-        .is_ok()
-    );
+    assert!(profile_parse_json(br#"{ "slot" : 1 , "priority" : 1 , "name" : "x" , "ssid" : "x" , "password" : "" }"#).is_ok());
+    assert!(profile_parse_json(b"{\"slot\"\t:\t1,\"priority\"\n:1,\"name\":\"x\",\"ssid\":\"x\",\"password\":\"\"}").is_ok());
 }
 
 #[test]
@@ -294,8 +221,5 @@ fn matches_the_c_parser_on_the_golden_corpus() {
     }
     assert_eq!(at, corpus.len());
     assert!(cases >= 2500, "{cases}");
-    assert!(
-        accepted >= 100,
-        "the corpus must exercise acceptance too: {accepted} of {cases}"
-    );
+    assert!(accepted >= 100, "the corpus must exercise acceptance too: {accepted} of {cases}");
 }

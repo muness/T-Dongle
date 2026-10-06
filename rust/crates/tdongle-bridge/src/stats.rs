@@ -7,7 +7,7 @@
 //! * `h2w_frames  = h2w_queued + h2w_invalid + h2w_foreign_mac + h2w_link_down` (a held offer is not a frame until it is finally taken)
 //! * `h2w_queued  = h2w_sent + h2w_stale + h2w_sojourn_drop + h2w_link_down_queued + h2w_tx_failed + h2w_codel_drop + h2w_queue_depth`
 
-use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use tdongle_spsc::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 macro_rules! counters {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {
@@ -19,7 +19,7 @@ macro_rules! counters {
         }
 
         impl Counters {
-            pub(crate) const fn new() -> Self {
+            pub(crate) fn new() -> Self {
                 Self { $($name: AtomicU32::new(0),)* h2w_last_tx_error: AtomicI32::new(0) }
             }
         }

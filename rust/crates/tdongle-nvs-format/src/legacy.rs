@@ -36,12 +36,7 @@ pub struct LegacyProfile {
 
 impl LegacyProfile {
     /// An all-zero (empty) slot.
-    pub const EMPTY: Self = Self {
-        name: [0; 25],
-        ssid: [0; 33],
-        pass: [0; 65],
-        priority: 0,
-    };
+    pub const EMPTY: Self = Self { name: [0; 25], ssid: [0; 33], pass: [0; 65], priority: 0 };
 
     /// C `printable(s, max, min)` of `main/core.c`: the C string in `s` is `min` to `max` characters long, all printable ASCII, and is
     /// terminated within the first `max + 1` bytes.
@@ -55,10 +50,7 @@ impl LegacyProfile {
     /// characters.
     #[must_use]
     pub fn valid(&self) -> bool {
-        if !Self::printable(&self.name, 24, 1)
-            || !Self::printable(&self.ssid, 32, 1)
-            || self.priority > 100
-        {
+        if !Self::printable(&self.name, 24, 1) || !Self::printable(&self.ssid, 32, 1) || self.priority > 100 {
             return false;
         }
         let n = c_len(&self.pass);
@@ -152,21 +144,14 @@ impl LegacySettings {
     /// The three display values as [`UiSettings`] (not validated).
     #[must_use]
     pub fn display(&self) -> UiSettings {
-        UiSettings {
-            brightness: self.brightness,
-            rotation: self.rotation,
-            dim_seconds: self.dim_seconds,
-        }
+        UiSettings { brightness: self.brightness, rotation: self.rotation, dim_seconds: self.dim_seconds }
     }
 
     /// C `settings_valid`: version 1, `preferred < 8`, display values in range and every non-empty slot a valid profile. The unified
     /// firmware does *not* use this on import (it salvages what it can, see [`LegacyImport::decode`]); it is the v0.1.x acceptance rule.
     #[must_use]
     pub fn valid(&self) -> bool {
-        self.version == CFG_VERSION
-            && usize::from(self.preferred) < PROFILE_MAX
-            && self.display().valid()
-            && self.p.iter().all(|p| p.ssid[0] == 0 || p.valid())
+        self.version == CFG_VERSION && usize::from(self.preferred) < PROFILE_MAX && self.display().valid() && self.p.iter().all(|p| p.ssid[0] == 0 || p.valid())
     }
 }
 
@@ -213,31 +198,15 @@ impl LegacyImport {
     /// The import of an already parsed blob; [`LegacyImport::decode`] without the size and version checks.
     #[must_use]
     pub fn from_settings(old: &LegacySettings) -> Self {
-        const NET: LegacyNetwork = LegacyNetwork {
-            ssid: [0; 33],
-            password: [0; 64],
-            meta: MetaSlot::EMPTY,
-        };
-        let mut out = Self {
-            count: 0,
-            net: [NET; 8],
-            preferred: None,
-            display: None,
-        };
+        const NET: LegacyNetwork = LegacyNetwork { ssid: [0; 33], password: [0; 64], meta: MetaSlot::EMPTY };
+        let mut out = Self { count: 0, net: [NET; 8], preferred: None, display: None };
         let mut mapped = [None::<usize>; PROFILE_MAX];
         for (slot, p) in mapped.iter_mut().zip(&old.p) {
-            if p.ssid[0] == 0
-                || !is_terminated(&p.ssid)
-                || !is_terminated(&p.pass)
-                || c_len(&p.pass) > 63
-            {
+            if p.ssid[0] == 0 || !is_terminated(&p.ssid) || !is_terminated(&p.pass) || c_len(&p.pass) > 63 {
                 continue;
             }
             let ssid = c_str(&p.ssid);
-            if let Some(existing) = out.net[..out.count]
-                .iter()
-                .rposition(|n| c_str(&n.ssid) == ssid)
-            {
+            if let Some(existing) = out.net[..out.count].iter().rposition(|n| c_str(&n.ssid) == ssid) {
                 *slot = Some(existing); // the same network again: the first slot's data stands
                 continue;
             }

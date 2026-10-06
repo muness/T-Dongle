@@ -94,11 +94,11 @@ const TX_ONE: u16 = 0x100;
 
 // The `_Static_assert`s of `wifi_pin_budget.h`.
 const _: () = assert!(
-    GATEWAY_WIFI_BAND_TOTAL + 1 <= ML_HB_PIN_BUFFERS,
+    GATEWAY_WIFI_BAND_TOTAL < ML_HB_PIN_BUFFERS, // BAND_TOTAL + 1 <= ML_HB_PIN_BUFFERS
     "the Wi-Fi band and the RX frame under check can pin more buffers than the heap budget allows"
 );
 const _: () = assert!(
-    GATEWAY_WIFI_RX_BAND_MAX + 1 <= GATEWAY_WIFI_BAND_TOTAL && GATEWAY_WIFI_TX_BAND_MAX + 1 <= GATEWAY_WIFI_BAND_TOTAL,
+    GATEWAY_WIFI_RX_BAND_MAX < GATEWAY_WIFI_BAND_TOTAL && GATEWAY_WIFI_TX_BAND_MAX < GATEWAY_WIFI_BAND_TOTAL, // MAX + 1 <= TOTAL
     "each direction must leave the other one band slot, or ACKs and ARP can be starved"
 );
 const _: () = assert!(GATEWAY_WIFI_BAND_TOTAL <= 127, "the two band counts share one word, 8 bits each");

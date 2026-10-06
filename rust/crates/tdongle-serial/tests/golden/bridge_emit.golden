@@ -1,0 +1,65 @@
+@@@@ SCENARIO empty LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO one_field LEN 22 @@@@
+bridge_link linked=1
+
+@@@@ END @@@@
+@@@@ SCENARIO two_sections LEN 46 @@@@
+bridge_link a=1 b=2
+bridge_to_host frames=3
+
+@@@@ END @@@@
+@@@@ SCENARIO section_repeats_not_adjacent LEN 42 @@@@
+bridge_a x=1
+bridge_b y=2
+bridge_a z=3
+
+@@@@ END @@@@
+@@@@ SCENARIO i64_extremes LEN 73 @@@@
+bridge_s max=9223372036854775807 min=-9223372036854775808 neg=-1 zero=0
+
+@@@@ END @@@@
+@@@@ SCENARIO negative_values LEN 30 @@@@
+bridge_s a=-12 b=-2147483648
+
+@@@@ END @@@@
+@@@@ SCENARIO overflow_drops_fields LEN 428 @@@@
+bridge_big n000000000=-9223372036854775808 n000000001=-9223372036854775808 n000000002=-9223372036854775808 n000000003=-9223372036854775808 n000000004=-9223372036854775808 n000000005=-9223372036854775808 n000000006=-9223372036854775808 n000000007=-9223372036854775808 n000000008=-9223372036854775808 n000000009=-9223372036854775808 n000000010=-9223372036854775808 n000000011=-9223372036854775808 n000000012=-9223372036854775808
+
+@@@@ END @@@@
+@@@@ SCENARIO skip_then_shorter_fits LEN 439 @@@@
+bridge_t f00=-9223372036854775808 f01=-9223372036854775808 f02=-9223372036854775808 f03=-9223372036854775808 f04=-9223372036854775808 f05=-9223372036854775808 f06=-9223372036854775808 f07=-9223372036854775808 f08=-9223372036854775808 f09=-9223372036854775808 f10=-9223372036854775808 f11=-9223372036854775808 f12=-9223372036854775808 f13=-9223372036854775808 f14=-9223372036854775808 f15=-9223372036854775808 f16=-9223372036854775808 s=1
+
+@@@@ END @@@@
+@@@@ SCENARIO fits_exactly_445 LEN 447 @@@@
+bridge_s k00=1 k01=1 k02=1 k03=1 k04=1 k05=1 k06=1 k07=1 k08=1 k09=1 k10=1 k11=1 k12=1 k13=1 k14=1 k15=1 k16=1 k17=1 k18=1 k19=1 k20=1 k21=1 k22=1 k23=1 k24=1 k25=1 k26=1 k27=1 k28=1 k29=1 k30=1 k31=1 k32=1 k33=1 k34=1 k35=1 k36=1 k37=1 k38=1 k39=1 k40=1 k41=1 k42=1 k43=1 k44=1 k45=1 k46=1 k47=1 k48=1 k49=1 k50=1 k51=1 k52=1 k53=1 k54=1 k55=1 k56=1 k57=1 k58=1 k59=1 k60=1 k61=1 k62=1 k63=1 k64=1 k65=1 k66=1 k67=1 k68=1 k69=1 k70=1 k71=1 pp=1
+
+@@@@ END @@@@
+@@@@ SCENARIO one_over_445 LEN 447 @@@@
+bridge_s k00=1 k01=1 k02=1 k03=1 k04=1 k05=1 k06=1 k07=1 k08=1 k09=1 k10=1 k11=1 k12=1 k13=1 k14=1 k15=1 k16=1 k17=1 k18=1 k19=1 k20=1 k21=1 k22=1 k23=1 k24=1 k25=1 k26=1 k27=1 k28=1 k29=1 k30=1 k31=1 k32=1 k33=1 k34=1 k35=1 k36=1 k37=1 k38=1 k39=1 k40=1 k41=1 k42=1 k43=1 k44=1 k45=1 k46=1 k47=1 k48=1 k49=1 k50=1 k51=1 k52=1 k53=1 k54=1 k55=1 k56=1 k57=1 k58=1 k59=1 k60=1 k61=1 k62=1 k63=1 k64=1 k65=1 k66=1 k67=1 k68=1 k69=1 k70=1 k71=1 pp=1
+
+@@@@ END @@@@
+@@@@ SCENARIO long_section_name LEN 117 @@@@
+bridge_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx n=1 m=2
+
+@@@@ END @@@@
+@@@@ SCENARIO many_sections LEN 184 @@@@
+bridge_s0 v=0
+bridge_s1 v=1
+bridge_s2 v=2
+bridge_s3 v=3
+bridge_s4 v=4
+bridge_s5 v=5
+bridge_s6 v=6
+bridge_s7 v=7
+bridge_s8 v=8
+bridge_s9 v=9
+bridge_s10 v=10
+bridge_s11 v=11
+
+@@@@ END @@@@
+@@@@ SCENARIO empty_name LEN 18 @@@@
+bridge_s =5 ok=6
+
+@@@@ END @@@@

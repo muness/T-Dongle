@@ -5,6 +5,8 @@
 //! the methods called from the two receive callbacks may block, allocate or call into the Wi-Fi driver** (`wifi_tx` is called by the worker
 //! only). A firmware implementation is audited against that list, a test implementation asserts it.
 
+use tdongle_spsc::TaskContext;
+
 /// The outcome of handing one frame to the Wi-Fi driver (`esp_wifi_internal_tx` behind the TX budget).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TxError {
@@ -64,15 +66,15 @@ pub trait Env {
     ///
     /// # Errors
     /// [`TxError::NoMem`] when refused for buffers (retried until the frame's sojourn limit), anything else is final.
-    fn wifi_tx(&self, frame: &[u8]) -> Result<(), TxError>;
+    fn wifi_tx(&self, frame: &[u8], context: &TaskContext) -> Result<(), TxError>;
     /// True when the radio can take another frame now (`wifi_pins_tx_room`). While it is false the worker waits instead of calling
     /// [`wifi_tx`](Self::wifi_tx) and being refused. Return `true` always when there is no allowance to respect.
     fn wifi_room(&self) -> bool;
     /// Wait for the next chance: arm a [`RETRY_US`](crate::RETRY_US) timer and sleep until it fires or the worker is notified (a new frame:
     /// the loop re-attempts at once, harmlessly), but for at most `SOJOURN_MS_MAX + 1` ms. **Worker only.**
-    fn wait_retry(&self);
+    fn wait_retry(&self, context: &TaskContext);
     /// Ask the USB class driver to offer the held datagram again (`tinyusb_net_rx_resume`). **Worker only.**
-    fn rx_resume(&self);
+    fn rx_resume(&self, context: &TaskContext);
 
     // ---- power management ------------------------------------------------------------------------------------------------------------
     /// Raise the CPU clock for forwarding work (`tdongle_pm_note_activity`): one atomic load while the hold is active.

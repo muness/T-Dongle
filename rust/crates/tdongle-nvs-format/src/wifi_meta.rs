@@ -38,10 +38,7 @@ pub struct MetaSlot {
 
 impl MetaSlot {
     /// An empty slot: no name, priority 0 (what C leaves in the slots beyond the saved count).
-    pub const EMPTY: Self = Self {
-        name: [0; NAME_MAX + 1],
-        priority: 0,
-    };
+    pub const EMPTY: Self = Self { name: [0; NAME_MAX + 1], priority: 0 };
 
     /// The name without its terminator.
     #[must_use]
@@ -96,10 +93,7 @@ impl MetaSet {
     /// C `wifi_meta_defaults`: every listed network gets its default name and priority, nothing preferred. At most [`SLOTS`] SSIDs count.
     #[must_use]
     pub fn defaults(ssids: &[&[u8]]) -> Self {
-        let mut set = Self {
-            slot: [MetaSlot::EMPTY; SLOTS],
-            preferred: None,
-        };
+        let mut set = Self { slot: [MetaSlot::EMPTY; SLOTS], preferred: None };
         for (slot, ssid) in set.slot.iter_mut().zip(ssids) {
             *slot = MetaSlot::default_for(ssid);
         }
@@ -168,11 +162,7 @@ pub struct MetaEntry {
 }
 
 impl MetaEntry {
-    const ZERO: Self = Self {
-        ssid: [0; SSID_MAX + 1],
-        name: [0; NAME_MAX + 1],
-        priority: 0,
-    };
+    const ZERO: Self = Self { ssid: [0; SSID_MAX + 1], name: [0; NAME_MAX + 1], priority: 0 };
 }
 
 /// The persisted form, NVS `tn_settings/wifi_meta` (C `wifi_meta_blob`, 516 bytes).
@@ -202,12 +192,7 @@ impl MetaBlob {
     #[must_use]
     pub fn encode(ssids: &[&[u8]], set: &MetaSet) -> Self {
         let count = ssids.len().min(SLOTS);
-        let mut blob = Self {
-            schema: SCHEMA,
-            count: count as u32,
-            preferred_ssid: [0; SSID_MAX + 1],
-            entry: [MetaEntry::ZERO; SLOTS],
-        };
+        let mut blob = Self { schema: SCHEMA, count: count as u32, preferred_ssid: [0; SSID_MAX + 1], entry: [MetaEntry::ZERO; SLOTS] };
         for ((entry, ssid), slot) in blob.entry.iter_mut().zip(ssids).zip(&set.slot) {
             copy_str(&mut entry.ssid[..SSID_MAX], ssid);
             copy_str(&mut entry.name[..NAME_MAX], &slot.name);
@@ -229,19 +214,12 @@ impl MetaBlob {
         if data.len() != BLOB_LEN {
             return Err(MetaBlobError::WrongSize);
         }
-        let mut blob = Self {
-            schema: read_u32(data, 0),
-            count: read_u32(data, 4),
-            preferred_ssid: [0; SSID_MAX + 1],
-            entry: [MetaEntry::ZERO; SLOTS],
-        };
-        blob.preferred_ssid
-            .copy_from_slice(&data[PREFERRED_AT..PREFERRED_AT + SSID_MAX + 1]);
+        let mut blob = Self { schema: read_u32(data, 0), count: read_u32(data, 4), preferred_ssid: [0; SSID_MAX + 1], entry: [MetaEntry::ZERO; SLOTS] };
+        blob.preferred_ssid.copy_from_slice(&data[PREFERRED_AT..PREFERRED_AT + SSID_MAX + 1]);
         for (i, e) in blob.entry.iter_mut().enumerate() {
             let at = ENTRIES_AT + i * ENTRY_LEN;
             e.ssid.copy_from_slice(&data[at..at + SSID_MAX + 1]);
-            e.name
-                .copy_from_slice(&data[at + SSID_MAX + 1..at + SSID_MAX + 1 + NAME_MAX + 1]);
+            e.name.copy_from_slice(&data[at + SSID_MAX + 1..at + SSID_MAX + 1 + NAME_MAX + 1]);
             e.priority = data[at + ENTRY_LEN - 1];
         }
         if blob.schema != SCHEMA {
