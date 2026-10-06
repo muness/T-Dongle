@@ -62,7 +62,7 @@ class SetupExclusion(unittest.TestCase):
         self.assertIn('setup_session_failsafe_delay_ms', SETUP)
 
     def test_pm_scaling_is_not_started_for_setup(self):
-        self.assertRegex(GATEWAY, r'if\(gateway_tailnet_mode\(\) && !setup_active\)tdongle_pm_start\(\);')
+        self.assertRegex(GATEWAY, r'if\(!setup_active\)tdongle_pm_start\(\);')
 
 
 if __name__ == '__main__':

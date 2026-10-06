@@ -23,10 +23,21 @@ int main(void) {
     assert(__wrap_tud_network_recv_cb(frame, 60) && __wrap_tud_network_recv_cb(frame, 1514));
     traffic_counters now = traffic_read();
     assert(now.up_bytes - before.up_bytes == 1574 && now.up_frames - before.up_frames == 2 && now.down_bytes == before.down_bytes && real_recv_calls == 2);
-    take_frames = false;   /* the real callback could not take it (it is offered again): not counted */
+    take_frames = false;   /* (earlier case) the real callback could not take it (it is offered again): not counted */
     assert(!__wrap_tud_network_recv_cb(frame, 100));
     now = traffic_read();
     assert(now.up_bytes - before.up_bytes == 1574 && now.up_frames - before.up_frames == 2 && real_recv_calls == 3);
+    /* #45's HOLD: the callee says "not now" (false, no renew), then the class driver offers the SAME datagram again and it is taken. It is one frame:
+     * counted when taken, never when held, however many times it was held first. */
+    traffic_counters held_before = traffic_read();
+    take_frames = false;
+    for (unsigned i = 0; i < 5; i++) assert(!__wrap_tud_network_recv_cb(frame, 1200));
+    now = traffic_read();
+    assert(now.up_bytes == held_before.up_bytes && now.up_frames == held_before.up_frames);
+    take_frames = true;
+    assert(__wrap_tud_network_recv_cb(frame, 1200));
+    now = traffic_read();
+    assert(now.up_bytes - held_before.up_bytes == 1200 && now.up_frames - held_before.up_frames == 1);
     /* To the host: counted by the length the real callback copied, whatever the class driver asked for. */
     uint8_t block[1600];
     assert(__wrap_tud_network_xmit_cb(block, NULL, 1200) == 1200 && block[0] == 0xab && block[1199] == 0xab);
