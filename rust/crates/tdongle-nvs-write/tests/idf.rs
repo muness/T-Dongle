@@ -123,7 +123,10 @@ fn heavily_rewritten_image_is_accepted_by_idf() {
 
 macro_rules! fixture {
     ($n:literal) => {
-        (include_bytes!(concat!("../../tdongle-nvs-read/tests/fixtures/", $n, ".bin")).to_vec(), include_str!(concat!("../../tdongle-nvs-read/tests/fixtures/", $n, ".expected")))
+        (
+            include_bytes!(concat!("../../tdongle-nvs-read/tests/fixtures/", $n, ".bin")).to_vec(),
+            include_str!(concat!("../../tdongle-nvs-read/tests/fixtures/", $n, ".expected")),
+        )
     };
 }
 
@@ -202,7 +205,9 @@ fn generated_board_images_are_accepted_unchanged_by_mount_and_idf() {
     // Images with a few namespaces (the board images of the reader's fixtures) and a one-page image padded to a three-page partition.
     // (The generator's `overwrite_*` fixtures hold the same blob key twice with equal chunk indices, a state ESP-IDF's own mount
     // resolves by erasing the key, so they are not a valid starting point for a writer.)
-    for (name, (mut image, expected)) in [("board_v03", fixture!("board_v03")), ("board_v01", fixture!("board_v01")), ("tiny_v2", fixture!("tiny_v2")), ("main_v2", fixture!("main_v2"))] {
+    for (name, (mut image, expected)) in
+        [("board_v03", fixture!("board_v03")), ("board_v01", fixture!("board_v01")), ("tiny_v2", fixture!("tiny_v2")), ("main_v2", fixture!("main_v2"))]
+    {
         image.resize(image.len().max(3 * 4096), 0xff);
         let model = parse_expected(expected);
         let mut nvs = Nvs::open(SimFlash::from_image(image.clone()), image.len() as u32).unwrap_or_else(|e| panic!("{name}: {e:?}"));

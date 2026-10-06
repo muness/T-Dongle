@@ -16,6 +16,7 @@ tdongle-aqm = { path = "../crates/tdongle-aqm" }
 tdongle-lcd = { path = "../crates/tdongle-lcd" }
 tdongle-serial = { path = "../crates/tdongle-serial" }
 tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
+tdongle-nvs-write = { path = "../crates/tdongle-nvs-write", features = ["sim"] }
 tdongle-usb-descriptors = { path = "../crates/tdongle-usb-descriptors" }
 tdongle-setup = { path = "../crates/tdongle-setup" }
 
@@ -64,5 +65,11 @@ doc = false
 [[bin]]
 name = "setup_router"
 path = "fuzz_targets/setup_router.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "nvs_ops"
+path = "fuzz_targets/nvs_ops.rs"
 test = false
 doc = false

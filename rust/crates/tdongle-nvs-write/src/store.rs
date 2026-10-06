@@ -235,11 +235,11 @@ impl<F: Flash> Store<F> {
         }
         if !self.nvs.contains(NS_SETTINGS, KEY_DISPLAY)? {
             let mut old = [0u8; tdongle_nvs_format::legacy::BLOB_LEN + 1];
-            if let Some(blob) = read_blob(&mut self.nvs, NS_ADAPTER, KEY_LEGACY, &mut old)? {
-                if LegacyImport::decode(blob).is_ok_and(|l| l.display.is_some()) {
-                    self.save_display(&settings.display)?;
-                    wrote = true;
-                }
+            if let Some(blob) = read_blob(&mut self.nvs, NS_ADAPTER, KEY_LEGACY, &mut old)?
+                && LegacyImport::decode(blob).is_ok_and(|l| l.display.is_some())
+            {
+                self.save_display(&settings.display)?;
+                wrote = true;
             }
         }
         Ok(wrote)

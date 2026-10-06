@@ -31,6 +31,8 @@
 extern crate std;
 
 mod crc;
+#[cfg(feature = "embedded-storage")]
+mod nor;
 mod nvs;
 #[cfg(feature = "sim")]
 mod sim;
@@ -39,10 +41,12 @@ mod store;
 use core::fmt;
 
 pub use crc::crc32;
-pub use nvs::{Cursor, ItemInfo, Kind, Nvs, Stats, ENTRY_COUNT, ENTRY_SIZE, MAX_PAGES, MIN_PAGES, PAGE_SIZE};
+#[cfg(feature = "embedded-storage")]
+pub use nor::NorPartition;
+pub use nvs::{Cursor, ENTRY_COUNT, ENTRY_SIZE, ItemInfo, Kind, MAX_PAGES, MIN_PAGES, Nvs, PAGE_SIZE, Stats};
 #[cfg(feature = "sim")]
 pub use sim::{SimError, SimFlash, Tear};
-pub use store::{LoadError, Settings, Store, NS_ADAPTER, NS_SETTINGS};
+pub use store::{LoadError, NS_ADAPTER, NS_SETTINGS, Settings, Store};
 
 /// The NVS partition as the engine sees it. Offsets are relative to the start of the partition (the firmware adds `0x9000`).
 ///

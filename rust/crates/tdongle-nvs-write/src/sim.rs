@@ -69,7 +69,19 @@ impl SimFlash {
     /// A flash holding `image` (a fresh power-up).
     #[must_use]
     pub fn from_image(image: Vec<u8>) -> Self {
-        Self { sector_erases: vec![0; image.len() / 4096], data: image, spent: 0, erases: 0, write_calls: 0, violations: 0, misaligned: 0, fail_at: None, tear: Tear::Prefix, dead: false, rng: 0x9e37_79b9_7f4a_7c15 }
+        Self {
+            sector_erases: vec![0; image.len() / 4096],
+            data: image,
+            spent: 0,
+            erases: 0,
+            write_calls: 0,
+            violations: 0,
+            misaligned: 0,
+            fail_at: None,
+            tear: Tear::Prefix,
+            dead: false,
+            rng: 0x9e37_79b9_7f4a_7c15,
+        }
     }
 
     /// Cut the power after `budget` more units, leaving the interrupted operation as `tear` says.
@@ -122,7 +134,7 @@ impl Flash for SimFlash {
         if self.dead {
             return Err(SimError::PowerLoss);
         }
-        if offset % 4 != 0 || data.len() % 4 != 0 {
+        if !offset.is_multiple_of(4) || !data.len().is_multiple_of(4) {
             self.misaligned += 1;
             return Err(SimError::Misaligned);
         }

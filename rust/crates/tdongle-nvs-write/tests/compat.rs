@@ -72,7 +72,7 @@ fn the_88_golden_blobs_round_trip_byte_equal_through_the_writer() {
 fn net(i: usize, tag: u8) -> SavedProfile {
     let mut p = SavedProfile::EMPTY;
     let ssid = format!("Home{tag}-{i}");
-    let pw = if i % 3 == 0 { String::new() } else { format!("pw{i}{}", "y".repeat(i * 7)) };
+    let pw = if i.is_multiple_of(3) { String::new() } else { format!("pw{i}{}", "y".repeat(i * 7)) };
     p.ssid[..ssid.len()].copy_from_slice(ssid.as_bytes());
     p.password[..pw.len()].copy_from_slice(pw.as_bytes());
     p
@@ -198,7 +198,7 @@ fn adapter_config_is_never_rewritten_by_saves_or_imports() {
         assert_eq!(r.get_blob("adapter", "config", &mut got).unwrap(), Some(1004));
         assert_eq!(got, blob, "step {step}: v0.1.1 would read different settings");
         // v0.1.1 only needs the old namespace; its own keys are all still there and typed as before
-        assert_eq!(LegacyImport::decode(&got).is_ok(), true);
+        assert!(LegacyImport::decode(&got).is_ok());
     }
 }
 
@@ -253,8 +253,6 @@ fn generator_made_board_images_load_like_the_c_loader_and_import_cleanly() {
         let mut s = Store::mount(SimFlash::from_image(image.clone()), SIZE).unwrap();
         let loaded = s.load_all().unwrap();
         assert_eq!(s.nvs().flash().spent, 0, "{name}: loading must not write");
-        let r = Reader::new(SliceFlash(&image), SIZE);
-        drop(r);
         if name == "board_v03" {
             assert_eq!(c_loader(&image), loaded.networks, "{name}");
             assert_eq!(loaded.networks.saved.count, 3);

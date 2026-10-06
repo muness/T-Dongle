@@ -13,11 +13,15 @@ workspace = true
 default = []
 # `SimFlash`: an in-memory NOR flash with power-loss injection, for host tests, the fuzz target and the firmware's host builds.
 sim = []
+# `NorPartition`: the `Flash` trait over any `embedded_storage::nor_flash::NorFlash` (`esp_storage::FlashStorage` on the ESP32-S3) at a
+# partition offset.
+embedded-storage = ["dep:embedded-storage"]
 
 [dependencies]
 tdongle-nvs-format = { path = "../tdongle-nvs-format" }
+embedded-storage = { version = "0.3", optional = true }
 
 [dev-dependencies]
-tdongle-nvs-write = { path = ".", features = ["sim"] }
+tdongle-nvs-write = { path = ".", features = ["sim", "embedded-storage"] }
 tdongle-nvs-read = { path = "../tdongle-nvs-read" }
 proptest = { version = "1", default-features = false, features = ["std"] }

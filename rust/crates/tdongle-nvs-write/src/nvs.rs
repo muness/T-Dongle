@@ -448,7 +448,7 @@ impl<F: Flash> Nvs<F> {
     }
 
     fn wr(&mut self, off: u32, data: &[u8]) -> R<(), F> {
-        debug_assert!(off % 4 == 0 && data.len() % 4 == 0 && !data.is_empty());
+        debug_assert!(off.is_multiple_of(4) && data.len().is_multiple_of(4) && !data.is_empty());
         self.flash.write(off, data).map_err(|e| {
             self.broken = true;
             Error::Flash(e)
@@ -872,8 +872,8 @@ impl<F: Flash> Nvs<F> {
                 let h = item.hash();
                 hashes[i] = h;
                 let mut dup = None;
-                for j in 0..i {
-                    if hashes[j] == h {
+                for j in (0..i).filter(|&j| hashes[j] == h) {
+                    {
                         let other = self.read_item(p, j)?;
                         if other.ns() == item.ns() && other.chunk() == item.chunk() && other.key16() == item.key16() {
                             dup = Some(j);
@@ -980,8 +980,11 @@ impl<F: Flash> Nvs<F> {
         Ok(())
     }
 
-    /// The last item written to the newest page was the last write before the power cut: if an older page still has the previous version,
-    /// erase it.
+    /// The last item written to the newest page was the last write before the power cut: if an older page still holds the previous version
+    /// of that key, erase it. IDF erases the first older item of the same *type* (and a v1 blob under a new index); here an item of any
+    /// other non-chunk type with the same namespace and key goes too, because a key that changed type (`u8` over a blob) and lost the
+    /// power before the old item was erased would otherwise keep two live items, and which one wins would depend on page order (which
+    /// compaction changes).
     fn supersede_last_item(&mut self) -> R<(), F> {
         let last = self.cur();
         let table = self.table(last)?;
@@ -994,34 +997,27 @@ impl<F: Flash> Nvs<F> {
         let Some(item) = item else { return Ok(()) };
         for k in 0..self.n_order - 1 {
             let p = usize::from(self.order[k]);
-            if self.info[p].state != PState::Freeing && self.erase_exact(p, &item, item.ty())? {
-                return Ok(());
+            if self.info[p].state == PState::Freeing {
+                continue;
             }
-        }
-        if item.ty() == T_BLOB_IDX {
-            // The old value may be a v1 single-item blob.
-            for k in 0..self.n_order - 1 {
-                let p = usize::from(self.order[k]);
-                if self.info[p].state != PState::Freeing && self.erase_exact(p, &item, T_BLOB)? {
-                    break;
+            loop {
+                let table = self.table(p)?;
+                let mut i = 0;
+                let mut hit = None;
+                while let Some((idx, it)) = self.next_live(p, &table, i)? {
+                    i = idx + it.advance();
+                    let same = it.ns() == item.ns() && it.key16() == item.key16();
+                    let kind = if item.ty() == T_BLOB_DATA { it.ty() == T_BLOB_DATA && it.chunk() == item.chunk() } else { it.ty() != T_BLOB_DATA };
+                    if same && kind {
+                        hit = Some(idx);
+                        break;
+                    }
                 }
+                let Some(idx) = hit else { break };
+                self.erase_entry_and_span(p, idx)?;
             }
         }
         Ok(())
-    }
-
-    /// Erase the first live item of page `p` with the namespace, key, chunk of `like` and the type `ty`.
-    fn erase_exact(&mut self, p: usize, like: &Item, ty: u8) -> R<bool, F> {
-        let table = self.table(p)?;
-        let mut i = 0;
-        while let Some((idx, it)) = self.next_live(p, &table, i)? {
-            i = idx + it.advance();
-            if it.ns() == like.ns() && it.key16() == like.key16() && it.chunk() == like.chunk() && it.ty() == ty {
-                self.erase_entry_and_span(p, idx)?;
-                return Ok(true);
-            }
-        }
-        Ok(false)
     }
 
     fn recover_freeing(&mut self) -> R<(), F> {
@@ -1069,7 +1065,16 @@ impl<F: Flash> Nvs<F> {
                     if n == BLOB_CAP {
                         overflow = true;
                     } else {
-                        list[n] = Idx { ns: it.ns(), key: it.key16(), start: it.data()[5], count: it.data()[4], size: it.idx_size(), seen: 0, seen_count: 0, live: true };
+                        list[n] = Idx {
+                            ns: it.ns(),
+                            key: it.key16(),
+                            start: it.data()[5],
+                            count: it.data()[4],
+                            size: it.idx_size(),
+                            seen: 0,
+                            seen_count: 0,
+                            live: true,
+                        };
                         n += 1;
                     }
                 }
@@ -1086,9 +1091,10 @@ impl<F: Flash> Nvs<F> {
                 i = idx + it.advance();
                 if it.ty() == T_BLOB_DATA {
                     let c = it.chunk();
-                    if let Some(e) = list[..n].iter_mut().find(|e| {
-                        e.ns == it.ns() && e.key == it.key16() && c >= e.start && c < if e.start == VER_0 { VER_1 } else { CHUNK_ANY }
-                    }) {
+                    if let Some(e) = list[..n]
+                        .iter_mut()
+                        .find(|e| e.ns == it.ns() && e.key == it.key16() && c >= e.start && c < if e.start == VER_0 { VER_1 } else { CHUNK_ANY })
+                    {
                         e.seen += it.var_len() as u32;
                         e.seen_count += 1;
                     }
@@ -1116,9 +1122,9 @@ impl<F: Flash> Nvs<F> {
                 i = idx + it.advance();
                 if it.ty() == T_BLOB_DATA {
                     let c = u16::from(it.chunk());
-                    let claimed = list[..n].iter().any(|e| {
-                        e.live && e.ns == it.ns() && e.key == it.key16() && c >= u16::from(e.start) && c < u16::from(e.start) + u16::from(e.count)
-                    });
+                    let claimed = list[..n]
+                        .iter()
+                        .any(|e| e.live && e.ns == it.ns() && e.key == it.key16() && c >= u16::from(e.start) && c < u16::from(e.start) + u16::from(e.count));
                     if !claimed {
                         self.erase_entry_and_span(p, idx)?;
                         table = self.table(p)?;
@@ -1142,10 +1148,10 @@ impl<F: Flash> Nvs<F> {
     /// The index of namespace `name`, creating it (the next free index from 1) when `create`.
     fn namespace(&mut self, name: &str, create: bool) -> R<Option<u8>, F> {
         let key = Key::new(name)?;
-        if let Some(loc) = self.find(0, &key, Match::Primary, None)? {
-            if loc.item.ty() == T_U8 {
-                return Ok(Some(loc.item.data()[0]));
-            }
+        if let Some(loc) = self.find(0, &key, Match::Primary, None)?
+            && loc.item.ty() == T_U8
+        {
+            return Ok(Some(loc.item.data()[0]));
         }
         if !create {
             return Ok(None);
@@ -1296,12 +1302,12 @@ impl<F: Flash> Nvs<F> {
         self.live()?;
         let k = Key::new(key)?;
         let Some(ns) = self.namespace(namespace, true)? else { return Err(Error::NotFound) };
-        if let Some(old) = self.find(ns, &k, Match::Primary, None)? {
-            if old.item.ty() == ty {
-                let same = if is_var(ty) { self.var_equals(&old, data)? } else { old.item.data()[..data.len()] == *data };
-                if same {
-                    return Ok(());
-                }
+        if let Some(old) = self.find(ns, &k, Match::Primary, None)?
+            && old.item.ty() == ty
+        {
+            let same = if is_var(ty) { self.var_equals(&old, data)? } else { old.item.data()[..data.len()] == *data };
+            if same {
+                return Ok(());
             }
         }
         let new = self.write_storage_item(ns, ty, &k.b, data)?;
@@ -1318,13 +1324,13 @@ impl<F: Flash> Nvs<F> {
         let k = Key::new(key)?;
         let Some(ns) = self.namespace(namespace, true)? else { return Err(Error::NotFound) };
         let mut next = VER_0;
-        if let Some(old) = self.find(ns, &k, Match::Primary, None)? {
-            if old.item.ty() == T_BLOB_IDX {
-                if self.blob_equals(&old, &k, data)? {
-                    return Ok(());
-                }
-                next = if old.item.data()[5] == VER_1 { VER_0 } else { VER_1 };
+        if let Some(old) = self.find(ns, &k, Match::Primary, None)?
+            && old.item.ty() == T_BLOB_IDX
+        {
+            if self.blob_equals(&old, &k, data)? {
+                return Ok(());
             }
+            next = if old.item.data()[5] == VER_1 { VER_0 } else { VER_1 };
         }
         let new = self.write_multipage_blob(ns, &k.b, data, next)?;
         self.erase_others(ns, &k, new, Some(next))
@@ -1378,10 +1384,12 @@ impl<F: Flash> Nvs<F> {
         let Some(ns) = self.namespace(namespace, true)? else { return Err(Error::NotFound) };
         let len = v.len() + 1;
         let old = self.find(ns, &k, Match::Primary, None)?;
-        if let Some(old) = &old {
-            if old.item.ty() == T_SZ && old.item.var_len() == len && self.str_equals(old, v)? {
-                return Ok(());
-            }
+        if let Some(old) = &old
+            && old.item.ty() == T_SZ
+            && old.item.var_len() == len
+            && self.str_equals(old, v)?
+        {
+            return Ok(());
         }
         let new = self.write_long_str(ns, &k.b, v)?;
         self.erase_others(ns, &k, new, None)
@@ -1524,11 +1532,7 @@ impl<F: Flash> Nvs<F> {
         let k = Key::new(key)?;
         let Some(ns) = self.namespace(namespace, false)? else { return Err(Error::NotFound) };
         let Some(loc) = self.find(ns, &k, Match::Primary, None)? else { return Err(Error::NotFound) };
-        if loc.item.ty() == T_BLOB_IDX {
-            self.erase_multipage(&loc, None)
-        } else {
-            self.erase_entry_and_span(loc.page, loc.idx)
-        }
+        if loc.item.ty() == T_BLOB_IDX { self.erase_multipage(&loc, None) } else { self.erase_entry_and_span(loc.page, loc.idx) }
     }
 
     /// `nvs_erase_all`: erase every item of the namespace; the namespace itself stays. Nothing to do (and no error) when the namespace does
@@ -1745,12 +1749,12 @@ impl<F: Flash> Nvs<F> {
         self.live()?;
         let mut cur = Cursor::default();
         while let Some(info) = self.next_item(&mut cur)? {
-            if info.namespace == 0 && info.kind == Kind::U8 {
-                if let Some(loc) = self.find_raw(0, &info.key, Match::Primary)? {
-                    if loc.item.data()[0] == ns {
-                        return Ok(Some(info.key));
-                    }
-                }
+            if info.namespace == 0
+                && info.kind == Kind::U8
+                && let Some(loc) = self.find_raw(0, &info.key, Match::Primary)?
+                && loc.item.data()[0] == ns
+            {
+                return Ok(Some(info.key));
             }
         }
         Ok(None)
