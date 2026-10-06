@@ -31,6 +31,9 @@ if [[ $variant == diagnostics ]]; then
  fi
 fi
 # Each build directory keeps its own sdkconfig so cached options never leak between images.
+# Regenerate it from the defaults on every build: a kept sdkconfig would silently ignore option
+# changes in sdkconfig.defaults (check_build.py then fails on a stale build directory).
+rm -f "$build/sdkconfig"
 idf.py -B "$build" -D "SDKCONFIG=$PWD/$build/sdkconfig" -D "SDKCONFIG_DEFAULTS=$defaults" -D IDF_TARGET=esp32s3 build size
 python3 tools/check_build.py "$build" "$variant"
 python3 alternative/tailnet/tools/check-startup-stack.py "$build"
