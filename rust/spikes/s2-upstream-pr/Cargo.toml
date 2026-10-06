@@ -1,0 +1,49 @@
+[package]
+name = "s2-upstream-pr"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.4", features = ["esp32s3", "embassy"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
+esp-println = { version = "0.18", default-features = false, features = ["esp32s3", "uart", "critical-section"] }
+esp-backtrace = { version = "0.20", default-features = false, features = ["esp32s3", "println"] }
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+embassy-usb = { version = "0.6", default-features = false }
+static_cell = "2.1"
+tdongle-rescue = { path = "../../crates/tdongle-rescue", features = ["hal"] }
+tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
+
+[patch.crates-io]
+# Upstream PR https://github.com/embassy-rs/embassy/pull/7191 (fork muness/embassy, branch synopsys-otg-multi-packet-out), pinned to its head commit.
+# The PR driver is built on embassy main, whose embassy-sync (CriticalSectionRawMutex: Copy) and embassy-usb-driver are NOT the released 0.8.0 / 0.2.2, so the
+# whole family must come from the same checkout (a mix does not compile).
+embassy-usb-synopsys-otg = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-usb-driver = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-sync = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-usb = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-net-driver-channel = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-time = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-time-driver = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-time-queue-utils = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+esp-hal = { path = "esp-hal-patched" }
+
+[features]
+# Compile-time backpressure demo: the NCM receive task never calls read_packet.
+hold-rx = []
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 1
+
+[profile.dev]
+opt-level = "s"
