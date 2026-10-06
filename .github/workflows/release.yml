@@ -83,8 +83,10 @@ jobs:
   publish:
     # Always runs so dry runs exercise routing and the artifact layout; the release and Pages steps
     # run only for a v* tag (tag push, or tag dispatch with dry_run=false).
+    # Hosted on purpose: publishing needs the gh CLI (not installed on the fleet runners) and does no
+    # building, so there is nothing for the fleet to speed up.
     needs: build
-    runs-on: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/T-Dongle' && fromJSON('["self-hosted","linux","x64","linux-general"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       VERSION: ${{ needs.build.outputs.version }}
