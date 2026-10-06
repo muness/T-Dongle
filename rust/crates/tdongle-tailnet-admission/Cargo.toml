@@ -1,0 +1,18 @@
+[package]
+name = "tdongle-tailnet-admission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Admission, heap budget, negotiation token and inbound-path budgets of the tailnet gateway: pure, sans-IO arithmetic and policy, ported with every constant from the C firmware (ADR 0013, 0020, 0022)."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+tdongle-wifi-budget = { path = "../tdongle-wifi-budget" }

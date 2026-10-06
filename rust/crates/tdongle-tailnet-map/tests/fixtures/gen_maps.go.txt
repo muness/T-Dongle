@@ -1,0 +1,142 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/netip"
+	"os"
+	"time"
+
+	"tailscale.com/tailcfg"
+	"tailscale.com/types/dnstype"
+	"tailscale.com/types/key"
+	"tailscale.com/types/opt"
+	"tailscale.com/types/views"
+)
+
+func pfx(s string) netip.Prefix { return netip.MustParsePrefix(s) }
+func ap(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }
+func tptr(t time.Time) *time.Time { return &t }
+func bptr(b bool) *bool { return &b }
+
+func node(id tailcfg.NodeID, name string, v4, v6 string, home tailcfg.DERPRegionID, online *bool) *tailcfg.Node {
+	m := key.NewMachine().Public()
+	return &tailcfg.Node{
+		ID:         id,
+		StableID:   tailcfg.StableNodeID(fmt.Sprintf("nABC%dCNTRL", id)),
+		Name:       name,
+		User:       tailcfg.UserID(100 + id),
+		Key:        key.NewNode().Public(),
+		KeyExpiry:  time.Date(2027, 3, 14, 15, 9, 26, 0, time.UTC),
+		Machine:    m,
+		DiscoKey:   key.NewDisco().Public(),
+		Addresses:  []netip.Prefix{pfx(v4 + "/32"), pfx(v6 + "/128")},
+		AllowedIPs: []netip.Prefix{pfx(v4 + "/32"), pfx(v6 + "/128")},
+		Endpoints:  []netip.AddrPort{ap("203.0.113.7:41641"), ap("192.168.1.20:41641"), ap("[2001:db8::7]:41641")},
+		HomeDERP:   home,
+		Hostinfo: (&tailcfg.Hostinfo{
+			OS: "linux", Hostname: "host" + fmt.Sprint(id), IPNVersion: "1.104.0",
+			Services:    []tailcfg.Service{{Proto: tailcfg.TCP, Port: 22}, {Proto: tailcfg.PeerAPI4, Port: 40000}},
+			NetInfo:     &tailcfg.NetInfo{PreferredDERP: home, DERPLatency: map[string]float64{"1-v4": 0.012, "2-v4": 0.034}},
+			RoutableIPs: []netip.Prefix{pfx("192.168.50.0/24")},
+		}).View(),
+		Created:  time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
+		Cap:      130,
+		Tags:     []string{"tag:server", "tag:prod"},
+		LastSeen: tptr(time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)),
+		Online:   online,
+		Capabilities: []tailcfg.NodeCapability{"https://tailscale.com/cap/file-sharing"},
+		CapMap: tailcfg.NodeCapMap{
+			"https://tailscale.com/cap/app-connectors": []tailcfg.RawMessage{`{"name":"a","domains":["x.example"],"routes":["10.0.0.0/8"]}`},
+		},
+		MachineAuthorized: true,
+		ComputedName:      "host" + fmt.Sprint(id),
+		ComputedNameWithHost: "host" + fmt.Sprint(id),
+	}
+}
+
+func derpMap() *tailcfg.DERPMap {
+	mk := func(id tailcfg.DERPRegionID, code, name string, nodes ...*tailcfg.DERPNode) *tailcfg.DERPRegion {
+		return &tailcfg.DERPRegion{RegionID: id, RegionCode: code, RegionName: name, Latitude: 40.7, Longitude: -74.0, Nodes: nodes}
+	}
+	return &tailcfg.DERPMap{Regions: map[tailcfg.DERPRegionID]*tailcfg.DERPRegion{
+		1: mk(1, "nyc", "New York City",
+			&tailcfg.DERPNode{Name: "1f", RegionID: 1, HostName: "derp1f.tailscale.com", IPv4: "199.38.181.104", IPv6: "2607:f740:f::bc", CanPort80: true},
+			&tailcfg.DERPNode{Name: "1g", RegionID: 1, HostName: "derp1g.tailscale.com", IPv4: "209.177.145.120", IPv6: "2607:f740:f::3eb", CanPort80: true},
+			&tailcfg.DERPNode{Name: "1h", RegionID: 1, HostName: "derp1h.tailscale.com", IPv4: "199.38.181.93", STUNPort: 3478, DERPPort: 443}),
+		2: mk(2, "sfo", "San Francisco", &tailcfg.DERPNode{Name: "2a", RegionID: 2, HostName: "derp2a.tailscale.com", IPv4: "192.73.240.161", STUNOnly: true}),
+		9: {RegionID: 9, RegionCode: "dev", RegionName: "Avoid me", Avoid: true, NoMeasureNoHome: true, Nodes: []*tailcfg.DERPNode{{Name: "9a", RegionID: 9, HostName: "derp.example.com", CertName: "sha256-raw:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff", STUNPort: -1, InsecureForTests: true}}},
+	}, HomeParams: &tailcfg.DERPHomeParams{RegionScore: map[tailcfg.DERPRegionID]float64{1: 1.0, 2: 1.1}}}
+}
+
+func rules() []tailcfg.FilterRule {
+	return []tailcfg.FilterRule{{
+		SrcIPs:   []string{"100.64.0.0/10", "fd7a:115c:a1e0::/48"},
+		DstPorts: []tailcfg.NetPortRange{{IP: "*", Ports: tailcfg.PortRange{First: 0, Last: 65535}}},
+		CapGrant: []tailcfg.CapGrant{{Dsts: []netip.Prefix{pfx("100.64.0.0/10")}, CapMap: tailcfg.PeerCapMap{"cap/x": []tailcfg.RawMessage{`{"k":[{"v":[1]}]}`}}}},
+	}}
+}
+
+func write(name string, v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(os.Args[1]+"/"+name, b, 0o644); err != nil {
+		panic(err)
+	}
+}
+
+func main() {
+	_ = views.Slice[int]{}
+	self := node(1, "dongle.tail1234.ts.net.", "100.101.102.103", "fd7a:115c:a1e0::1", 1, bptr(true))
+	p2 := node(2, "laptop.tail1234.ts.net.", "100.101.102.104", "fd7a:115c:a1e0::2", 2, bptr(true))
+	p3 := node(3, "router.tail1234.ts.net.", "100.101.102.105", "fd7a:115c:a1e0::3", 1, bptr(false))
+	p3.AllowedIPs = append(p3.AllowedIPs, pfx("192.168.50.0/24"), pfx("0.0.0.0/0"), pfx("::/0"))
+	p3.PrimaryRoutes = []netip.Prefix{pfx("192.168.50.0/24")}
+	p4 := node(4, "shared.other.example.", "100.101.102.106", "fd7a:115c:a1e0::4", 0, nil)
+	p4.KeyExpiry = time.Time{}
+	p4.Tags = nil
+	p4.Expired = true
+
+	dns := &tailcfg.DNSConfig{
+		Resolvers: []*dnstype.Resolver{{Addr: "1.1.1.1"}, {Addr: "https://dns.google/dns-query", UseWithExitNode: true}},
+		Routes: map[string][]*dnstype.Resolver{
+			"corp.example.com.": {{Addr: "10.0.0.53"}},
+			"ts.net.":           nil,
+		},
+		FallbackResolvers: []*dnstype.Resolver{{Addr: "8.8.8.8"}},
+		Domains:           []string{"tail1234.ts.net", "corp.example.com"},
+		Proxied:           true,
+		CertDomains:       []string{"dongle.tail1234.ts.net"},
+		ExtraRecords:      []tailcfg.DNSRecord{{Name: "svc.tail1234.ts.net", Value: "100.101.102.200"}},
+	}
+
+	full := &tailcfg.MapResponse{
+		MapSessionHandle: "h-abc", Seq: 1,
+		Node: self, DERPMap: derpMap(), Peers: []*tailcfg.Node{p2, p3, p4},
+		DNSConfig: dns, Domain: "tail1234.ts.net", CollectServices: opt.NewBool(true),
+		PacketFilter:  rules(),
+		PacketFilters: map[string][]tailcfg.FilterRule{"base": rules(), "*": nil},
+		UserProfiles:  []tailcfg.UserProfile{{ID: 101, LoginName: "a@example.com", DisplayName: "A"}},
+		ControlTime:   tptr(time.Date(2026, 10, 6, 12, 34, 56, 789000000, time.UTC)),
+		Health:        []string{"x"},
+	}
+	write("map-full.json", full)
+
+	newer := node(5, "phone.tail1234.ts.net.", "100.101.102.107", "fd7a:115c:a1e0::5", 2, bptr(true))
+	delta := &tailcfg.MapResponse{
+		PeersChanged: []*tailcfg.Node{newer},
+		PeersRemoved: []tailcfg.NodeID{3, 4},
+		PeersChangedPatch: []*tailcfg.PeerChange{
+			{NodeID: 2, DERPRegion: 1, Endpoints: []netip.AddrPort{ap("198.51.100.9:1234")}, Online: bptr(false), Cap: 131, KeyExpiry: tptr(time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)), LastSeen: tptr(time.Date(2026, 10, 6, 13, 0, 0, 0, time.UTC))},
+			{NodeID: 5, Key: func() *key.NodePublic { k := key.NewNode().Public(); return &k }(), DiscoKey: func() *key.DiscoPublic { k := key.NewDisco().Public(); return &k }()},
+		},
+		PeerSeenChange: map[tailcfg.NodeID]bool{2: true, 5: false},
+		OnlineChange:   map[tailcfg.NodeID]bool{2: false, 5: true},
+		ControlTime:    tptr(time.Date(2026, 10, 6, 12, 35, 56, 0, time.UTC)),
+	}
+	write("map-delta.json", delta)
+	write("map-keepalive.json", &tailcfg.MapResponse{KeepAlive: true})
+	write("map-derp-only.json", &tailcfg.MapResponse{DERPMap: derpMap()})
+}

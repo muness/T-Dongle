@@ -1,0 +1,362 @@
+@@@@ SCENARIO admission/c_reference_running0 LEN 291 @@@@
+"admission":{"required_bytes":96400,"shared_runtime_bytes":24060,"member_start_bytes":20992,"member_growth_bytes":18664,"member_steady_bytes":39656,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1096},
+@@@@ END @@@@
+@@@@ SCENARIO admission/c_reference_running1 LEN 287 @@@@
+"admission":{"required_bytes":72340,"shared_runtime_bytes":0,"member_start_bytes":20992,"member_growth_bytes":18664,"member_steady_bytes":39656,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1096},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random0 LEN 289 @@@@
+"admission":{"required_bytes":73393,"shared_runtime_bytes":3095,"member_start_bytes":17536,"member_growth_bytes":17800,"member_steady_bytes":35336,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":970},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random1 LEN 285 @@@@
+"admission":{"required_bytes":72848,"shared_runtime_bytes":0,"member_start_bytes":19105,"member_growth_bytes":20663,"member_steady_bytes":39768,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":68},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random2 LEN 286 @@@@
+"admission":{"required_bytes":74949,"shared_runtime_bytes":0,"member_start_bytes":20625,"member_growth_bytes":18658,"member_steady_bytes":39283,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":649},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random3 LEN 290 @@@@
+"admission":{"required_bytes":105202,"shared_runtime_bytes":36794,"member_start_bytes":17253,"member_growth_bytes":20056,"member_steady_bytes":37309,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":69},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random4 LEN 292 @@@@
+"admission":{"required_bytes":106482,"shared_runtime_bytes":35385,"member_start_bytes":17480,"member_growth_bytes":18510,"member_steady_bytes":35990,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1077},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random5 LEN 287 @@@@
+"admission":{"required_bytes":59667,"shared_runtime_bytes":0,"member_start_bytes":11153,"member_growth_bytes":17612,"member_steady_bytes":28765,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1109},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random6 LEN 288 @@@@
+"admission":{"required_bytes":66039,"shared_runtime_bytes":8001,"member_start_bytes":4293,"member_growth_bytes":18714,"member_steady_bytes":23007,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":426},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random7 LEN 291 @@@@
+"admission":{"required_bytes":108345,"shared_runtime_bytes":33233,"member_start_bytes":27313,"member_growth_bytes":16581,"member_steady_bytes":43894,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":825},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random8 LEN 292 @@@@
+"admission":{"required_bytes":105696,"shared_runtime_bytes":38664,"member_start_bytes":14845,"member_growth_bytes":18865,"member_steady_bytes":33710,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1340},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random9 LEN 285 @@@@
+"admission":{"required_bytes":56967,"shared_runtime_bytes":0,"member_start_bytes":8005,"member_growth_bytes":17350,"member_steady_bytes":25355,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":200},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random10 LEN 290 @@@@
+"admission":{"required_bytes":94535,"shared_runtime_bytes":18974,"member_start_bytes":27304,"member_growth_bytes":18054,"member_steady_bytes":45358,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":494},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random11 LEN 290 @@@@
+"admission":{"required_bytes":73054,"shared_runtime_bytes":16887,"member_start_bytes":7886,"member_growth_bytes":18094,"member_steady_bytes":25980,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1433},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random12 LEN 287 @@@@
+"admission":{"required_bytes":69704,"shared_runtime_bytes":0,"member_start_bytes":20473,"member_growth_bytes":19209,"member_steady_bytes":39682,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1193},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random13 LEN 286 @@@@
+"admission":{"required_bytes":71270,"shared_runtime_bytes":0,"member_start_bytes":17276,"member_growth_bytes":18594,"member_steady_bytes":35870,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":212},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random14 LEN 292 @@@@
+"admission":{"required_bytes":104801,"shared_runtime_bytes":37320,"member_start_bytes":13196,"member_growth_bytes":18601,"member_steady_bytes":31797,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1105},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random15 LEN 287 @@@@
+"admission":{"required_bytes":62903,"shared_runtime_bytes":0,"member_start_bytes":13861,"member_growth_bytes":17143,"member_steady_bytes":31004,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1385},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random16 LEN 286 @@@@
+"admission":{"required_bytes":71036,"shared_runtime_bytes":0,"member_start_bytes":22521,"member_growth_bytes":17795,"member_steady_bytes":40316,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":594},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random17 LEN 286 @@@@
+"admission":{"required_bytes":69217,"shared_runtime_bytes":0,"member_start_bytes":17965,"member_growth_bytes":16844,"member_steady_bytes":34809,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":149},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random18 LEN 289 @@@@
+"admission":{"required_bytes":94463,"shared_runtime_bytes":30894,"member_start_bytes":16242,"member_growth_bytes":16491,"member_steady_bytes":32733,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":24},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random19 LEN 290 @@@@
+"admission":{"required_bytes":95972,"shared_runtime_bytes":30309,"member_start_bytes":12926,"member_growth_bytes":19711,"member_steady_bytes":32637,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":892},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random20 LEN 289 @@@@
+"admission":{"required_bytes":88439,"shared_runtime_bytes":29753,"member_start_bytes":6458,"member_growth_bytes":19346,"member_steady_bytes":25804,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":856},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random21 LEN 284 @@@@
+"admission":{"required_bytes":74995,"shared_runtime_bytes":0,"member_start_bytes":22705,"member_growth_bytes":17758,"member_steady_bytes":40463,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":6},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random22 LEN 290 @@@@
+"admission":{"required_bytes":90766,"shared_runtime_bytes":17423,"member_start_bytes":18179,"member_growth_bytes":20282,"member_steady_bytes":38461,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":724},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random23 LEN 291 @@@@
+"admission":{"required_bytes":82136,"shared_runtime_bytes":14882,"member_start_bytes":15332,"member_growth_bytes":16511,"member_steady_bytes":31843,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1422},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random24 LEN 286 @@@@
+"admission":{"required_bytes":75505,"shared_runtime_bytes":0,"member_start_bytes":27334,"member_growth_bytes":17346,"member_steady_bytes":44680,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":279},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random25 LEN 291 @@@@
+"admission":{"required_bytes":103944,"shared_runtime_bytes":39411,"member_start_bytes":12338,"member_growth_bytes":20421,"member_steady_bytes":32759,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":838},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random26 LEN 286 @@@@
+"admission":{"required_bytes":80406,"shared_runtime_bytes":0,"member_start_bytes":29230,"member_growth_bytes":19802,"member_steady_bytes":49032,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":611},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random27 LEN 286 @@@@
+"admission":{"required_bytes":74231,"shared_runtime_bytes":0,"member_start_bytes":22548,"member_growth_bytes":18392,"member_steady_bytes":40940,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":739},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random28 LEN 288 @@@@
+"admission":{"required_bytes":66616,"shared_runtime_bytes":3182,"member_start_bytes":8341,"member_growth_bytes":19402,"member_steady_bytes":27743,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":753},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random29 LEN 286 @@@@
+"admission":{"required_bytes":70786,"shared_runtime_bytes":0,"member_start_bytes":19784,"member_growth_bytes":17401,"member_steady_bytes":37185,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":325},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random30 LEN 291 @@@@
+"admission":{"required_bytes":89342,"shared_runtime_bytes":23197,"member_start_bytes":16811,"member_growth_bytes":18660,"member_steady_bytes":35471,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1389},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random31 LEN 289 @@@@
+"admission":{"required_bytes":95033,"shared_runtime_bytes":34090,"member_start_bytes":6440,"member_growth_bytes":19729,"member_steady_bytes":26169,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":749},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random32 LEN 286 @@@@
+"admission":{"required_bytes":75381,"shared_runtime_bytes":0,"member_start_bytes":22836,"member_growth_bytes":19446,"member_steady_bytes":42282,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":622},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random33 LEN 289 @@@@
+"admission":{"required_bytes":93638,"shared_runtime_bytes":28637,"member_start_bytes":14518,"member_growth_bytes":17885,"member_steady_bytes":32403,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":46},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random34 LEN 286 @@@@
+"admission":{"required_bytes":66066,"shared_runtime_bytes":0,"member_start_bytes":15198,"member_growth_bytes":16807,"member_steady_bytes":32005,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":433},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random35 LEN 291 @@@@
+"admission":{"required_bytes":116515,"shared_runtime_bytes":35155,"member_start_bytes":30737,"member_growth_bytes":17409,"member_steady_bytes":48146,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":313},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random36 LEN 285 @@@@
+"admission":{"required_bytes":76783,"shared_runtime_bytes":0,"member_start_bytes":23495,"member_growth_bytes":19605,"member_steady_bytes":43100,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":52},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random37 LEN 287 @@@@
+"admission":{"required_bytes":64336,"shared_runtime_bytes":0,"member_start_bytes":10620,"member_growth_bytes":20298,"member_steady_bytes":30918,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":1077},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random38 LEN 289 @@@@
+"admission":{"required_bytes":76533,"shared_runtime_bytes":7492,"member_start_bytes":19739,"member_growth_bytes":17756,"member_steady_bytes":37495,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":278},
+@@@@ END @@@@
+@@@@ SCENARIO admission/random39 LEN 289 @@@@
+"admission":{"required_bytes":88552,"shared_runtime_bytes":31456,"member_start_bytes":7981,"member_growth_bytes":18520,"member_steady_bytes":26501,"negotiation_reserve_bytes":13500,"recovery_reserve_bytes":16384,"largest_block_required":24000,"peer_slots_charged":2,"peer_slot_bytes":457},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/idle LEN 165 @@@@
+"negotiation":{"holder":"none","held_ms":0,"waiting":0,"grants":0,"timeouts":0,"lease_expired":0,"stale_dropped":0,"refused_full":0,"max_wait_ms":0,"max_hold_ms":0},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/held_start LEN 175 @@@@
+"negotiation":{"holder":"start","held_ms":1234,"waiting":2,"grants":9,"timeouts":1,"lease_expired":2,"stale_dropped":3,"refused_full":4,"max_wait_ms":555,"max_hold_ms":66666},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/held_control LEN 177 @@@@
+"negotiation":{"holder":"control","held_ms":1234,"waiting":2,"grants":9,"timeouts":1,"lease_expired":2,"stale_dropped":3,"refused_full":4,"max_wait_ms":555,"max_hold_ms":66666},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/held_derp LEN 174 @@@@
+"negotiation":{"holder":"derp","held_ms":1234,"waiting":2,"grants":9,"timeouts":1,"lease_expired":2,"stale_dropped":3,"refused_full":4,"max_wait_ms":555,"max_hold_ms":66666},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/holder_with_phase_none LEN 165 @@@@
+"negotiation":{"holder":"none","held_ms":1,"waiting":0,"grants":1,"timeouts":0,"lease_expired":0,"stale_dropped":0,"refused_full":0,"max_wait_ms":0,"max_hold_ms":0},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/max LEN 246 @@@@
+"negotiation":{"holder":"none","held_ms":4294967295,"waiting":4294967295,"grants":4294967295,"timeouts":4294967295,"lease_expired":4294967295,"stale_dropped":4294967295,"refused_full":4294967295,"max_wait_ms":4294967295,"max_hold_ms":4294967295},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random0 LEN 245 @@@@
+"negotiation":{"holder":"start","held_ms":1663049745,"waiting":2756302855,"grants":293152032,"timeouts":3899765994,"lease_expired":3975755465,"stale_dropped":886625182,"refused_full":4114220241,"max_wait_ms":1740752013,"max_hold_ms":1662511202},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random1 LEN 245 @@@@
+"negotiation":{"holder":"control","held_ms":3453579877,"waiting":249061996,"grants":712847351,"timeouts":1897734731,"lease_expired":4106407833,"stale_dropped":46419026,"refused_full":1359219662,"max_wait_ms":2231561880,"max_hold_ms":1225816705},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random2 LEN 246 @@@@
+"negotiation":{"holder":"control","held_ms":43920945,"waiting":3805909779,"grants":3842111166,"timeouts":1198276082,"lease_expired":572686244,"stale_dropped":2545289316,"refused_full":2717283018,"max_wait_ms":3481922262,"max_hold_ms":2046615983},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random3 LEN 245 @@@@
+"negotiation":{"holder":"control","held_ms":42330705,"waiting":3674689176,"grants":2015132422,"timeouts":4126682042,"lease_expired":2604181231,"stale_dropped":900786785,"refused_full":2640017770,"max_wait_ms":3926146922,"max_hold_ms":497272205},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random4 LEN 247 @@@@
+"negotiation":{"holder":"control","held_ms":2719287769,"waiting":3782257234,"grants":199973351,"timeouts":3838520678,"lease_expired":789914775,"stale_dropped":4157090840,"refused_full":1982118765,"max_wait_ms":3532668953,"max_hold_ms":2340804976},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random5 LEN 246 @@@@
+"negotiation":{"holder":"start","held_ms":4279654049,"waiting":1790981859,"grants":1859727021,"timeouts":3021472947,"lease_expired":561305234,"stale_dropped":1228468355,"refused_full":2570034570,"max_wait_ms":2181333825,"max_hold_ms":1942730265},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random6 LEN 243 @@@@
+"negotiation":{"holder":"derp","held_ms":615776097,"waiting":4140857025,"grants":25707382,"timeouts":1791976874,"lease_expired":3183737331,"stale_dropped":3012469262,"refused_full":2452729203,"max_wait_ms":2419736395,"max_hold_ms":2507737736},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random7 LEN 245 @@@@
+"negotiation":{"holder":"none","held_ms":1687929675,"waiting":261958627,"grants":4105246133,"timeouts":1810208631,"lease_expired":1993213809,"stale_dropped":1948166982,"refused_full":2347812935,"max_wait_ms":3016545074,"max_hold_ms":1442572369},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random8 LEN 244 @@@@
+"negotiation":{"holder":"none","held_ms":993740680,"waiting":207670072,"grants":3870859574,"timeouts":3451885929,"lease_expired":1070631268,"stale_dropped":3992770619,"refused_full":3120453563,"max_wait_ms":4151263096,"max_hold_ms":2190665698},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random9 LEN 243 @@@@
+"negotiation":{"holder":"derp","held_ms":2355641899,"waiting":2487081956,"grants":2176136395,"timeouts":3656770770,"lease_expired":1249066178,"stale_dropped":3198832124,"refused_full":1623763663,"max_wait_ms":18838990,"max_hold_ms":237916236},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random10 LEN 242 @@@@
+"negotiation":{"holder":"none","held_ms":233134881,"waiting":1420153376,"grants":33849038,"timeouts":3325400379,"lease_expired":3918768762,"stale_dropped":2706881447,"refused_full":384051399,"max_wait_ms":3824130856,"max_hold_ms":4048746075},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random11 LEN 246 @@@@
+"negotiation":{"holder":"control","held_ms":1181655113,"waiting":3962594600,"grants":1077052732,"timeouts":15563387,"lease_expired":2757953779,"stale_dropped":4210813930,"refused_full":4240047587,"max_wait_ms":776450050,"max_hold_ms":2687608996},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random12 LEN 246 @@@@
+"negotiation":{"holder":"control","held_ms":2846951894,"waiting":3494105433,"grants":735795488,"timeouts":3167299287,"lease_expired":380735019,"stale_dropped":239468424,"refused_full":4064383574,"max_wait_ms":3240880950,"max_hold_ms":3325668180},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random13 LEN 249 @@@@
+"negotiation":{"holder":"control","held_ms":1287784474,"waiting":3895072285,"grants":2171279664,"timeouts":3905774830,"lease_expired":3587688697,"stale_dropped":2482043413,"refused_full":4206386875,"max_wait_ms":1128972266,"max_hold_ms":1834479852},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random14 LEN 244 @@@@
+"negotiation":{"holder":"none","held_ms":2238867977,"waiting":3151256865,"grants":3227938590,"timeouts":130738061,"lease_expired":2610785554,"stale_dropped":797385847,"refused_full":1836484714,"max_wait_ms":2232400614,"max_hold_ms":3993002324},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random15 LEN 242 @@@@
+"negotiation":{"holder":"start","held_ms":385435216,"waiting":134796904,"grants":3672115391,"timeouts":1582449,"lease_expired":2280653857,"stale_dropped":3616207368,"refused_full":3725843130,"max_wait_ms":2903822552,"max_hold_ms":4178624166},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random16 LEN 243 @@@@
+"negotiation":{"holder":"none","held_ms":3523302967,"waiting":863972140,"grants":206437040,"timeouts":3756159369,"lease_expired":403847941,"stale_dropped":2654207749,"refused_full":3501052700,"max_wait_ms":3386763250,"max_hold_ms":1662039654},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random17 LEN 246 @@@@
+"negotiation":{"holder":"control","held_ms":1764553103,"waiting":640834482,"grants":3287546228,"timeouts":2974855279,"lease_expired":2055028891,"stale_dropped":3482235560,"refused_full":1996036431,"max_wait_ms":100317135,"max_hold_ms":463820318},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random18 LEN 242 @@@@
+"negotiation":{"holder":"none","held_ms":1340923219,"waiting":3452617666,"grants":3224648832,"timeouts":96768785,"lease_expired":870086503,"stale_dropped":1039202715,"refused_full":3495469617,"max_wait_ms":407182050,"max_hold_ms":3484253557},
+@@@@ END @@@@
+@@@@ SCENARIO negotiation/random19 LEN 241 @@@@
+"negotiation":{"holder":"derp","held_ms":560801622,"waiting":86156832,"grants":3156898412,"timeouts":2787604794,"lease_expired":3177918374,"stale_dropped":1442288057,"refused_full":2385497500,"max_wait_ms":525852938,"max_hold_ms":391922928},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/zero LEN 181 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":0,"refused_pending":0,"refused_derp_tx":0,"refused_rx_ctrl":0,"refused_derp_rx":0,"refused_wg_copy":0},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/max LEN 235 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":4294967295,"refused_pending":4294967295,"refused_derp_tx":4294967295,"refused_rx_ctrl":4294967295,"refused_derp_rx":4294967295,"refused_wg_copy":4294967295},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random0 LEN 235 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":3999351466,"refused_pending":1959703413,"refused_derp_tx":3742901605,"refused_rx_ctrl":1212889431,"refused_derp_rx":3163143478,"refused_wg_copy":3927624276},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random1 LEN 233 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":288724167,"refused_pending":1971871761,"refused_derp_tx":929711578,"refused_rx_ctrl":1069137531,"refused_derp_rx":2234517381,"refused_wg_copy":2129940460},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random2 LEN 233 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":3402755912,"refused_pending":2057863337,"refused_derp_tx":1640914592,"refused_rx_ctrl":1800138080,"refused_derp_rx":605518519,"refused_wg_copy":798770787},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random3 LEN 234 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":2867971437,"refused_pending":383889652,"refused_derp_tx":2830943369,"refused_rx_ctrl":1573226598,"refused_derp_rx":3477031388,"refused_wg_copy":1987810288},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random4 LEN 234 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":3792889845,"refused_pending":417895537,"refused_derp_tx":2934674123,"refused_rx_ctrl":1767309959,"refused_derp_rx":2959177238,"refused_wg_copy":2285127633},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random5 LEN 231 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":4133820576,"refused_pending":3703756480,"refused_derp_tx":393561079,"refused_rx_ctrl":1196083009,"refused_derp_rx":1664829608,"refused_wg_copy":2549372},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random6 LEN 235 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":3460500922,"refused_pending":2065102126,"refused_derp_tx":3892604908,"refused_rx_ctrl":1413334127,"refused_derp_rx":2302580111,"refused_wg_copy":1361458321},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random7 LEN 233 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":1350134244,"refused_pending":379521248,"refused_derp_tx":406385446,"refused_rx_ctrl":2872788098,"refused_derp_rx":2878844087,"refused_wg_copy":4028995442},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random8 LEN 234 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":4206276790,"refused_pending":3938706016,"refused_derp_tx":3360881429,"refused_rx_ctrl":886346100,"refused_derp_rx":3120353563,"refused_wg_copy":2894060847},
+@@@@ END @@@@
+@@@@ SCENARIO heap_budget/random9 LEN 234 @@@@
+"heap_budget":{"floor":29884,"reserve":16384,"pin_buffers":6,"refused_usb_rx":1317615685,"refused_pending":2559316580,"refused_derp_tx":841091865,"refused_rx_ctrl":1291826585,"refused_derp_rx":4028353424,"refused_wg_copy":3301688228},
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/empty_override0 LEN 103 @@@@
+{"schema":1,"kind":"admission","guard_floor":16384,"override":false,"slot_evictions":0,"attempts":[]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random0_override0 LEN 786 @@@@
+{"schema":1,"kind":"admission","guard_floor":24739,"override":false,"slot_evictions":93,"attempts":[{"t":4195048235,"member":19,"free":16874,"largest":32025,"budget":64354,"sockets":3,"socket_limit":18,"active":3,"verdict":"refused_budget"},{"t":797526747,"member":10,"free":190707,"largest":16979,"budget":61359,"sockets":7,"socket_limit":25,"active":0,"verdict":"start_failed"},{"t":1873752004,"member":20,"free":151750,"largest":24039,"budget":92216,"sockets":6,"socket_limit":23,"active":2,"verdict":"refused_largest"},{"t":76147832,"member":9,"free":14713,"largest":36751,"budget":9855,"sockets":14,"socket_limit":15,"active":2,"verdict":"ok"},{"t":1137734546,"member":6,"free":141063,"largest":6585,"budget":53253,"sockets":1,"socket_limit":27,"active":0,"verdict":"override"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random1_override0 LEN 923 @@@@
+{"schema":1,"kind":"admission","guard_floor":3680,"override":false,"slot_evictions":24,"attempts":[{"t":3822743332,"member":8,"free":183182,"largest":9086,"budget":45157,"sockets":18,"socket_limit":22,"active":0,"verdict":"refused_budget"},{"t":2232007626,"member":14,"free":43453,"largest":52609,"budget":87375,"sockets":17,"socket_limit":23,"active":2,"verdict":"override"},{"t":262663346,"member":1,"free":67177,"largest":39814,"budget":100031,"sockets":3,"socket_limit":25,"active":1,"verdict":"ok"},{"t":3127363663,"member":11,"free":92390,"largest":40400,"budget":94545,"sockets":5,"socket_limit":12,"active":0,"verdict":"ok"},{"t":4052234886,"member":17,"free":149655,"largest":40114,"budget":81800,"sockets":8,"socket_limit":8,"active":3,"verdict":"refused_sockets"},{"t":1601707090,"member":15,"free":163901,"largest":48675,"budget":106578,"sockets":17,"socket_limit":14,"active":0,"verdict":"refused_largest"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random2_override0 LEN 798 @@@@
+{"schema":1,"kind":"admission","guard_floor":10030,"override":false,"slot_evictions":1,"attempts":[{"t":2608378305,"member":12,"free":31508,"largest":58814,"budget":35263,"sockets":8,"socket_limit":26,"active":3,"verdict":"refused_budget"},{"t":847004607,"member":2,"free":15342,"largest":16526,"budget":22082,"sockets":5,"socket_limit":23,"active":0,"verdict":"start_failed"},{"t":3485763390,"member":3,"free":58998,"largest":1812,"budget":29924,"sockets":1,"socket_limit":8,"active":0,"verdict":"refused_sockets"},{"t":1228380954,"member":4,"free":180401,"largest":57793,"budget":12287,"sockets":2,"socket_limit":15,"active":2,"verdict":"start_failed"},{"t":2008496828,"member":8,"free":106893,"largest":26928,"budget":85517,"sockets":10,"socket_limit":21,"active":2,"verdict":"start_failed"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random3_override0 LEN 1234 @@@@
+{"schema":1,"kind":"admission","guard_floor":7659,"override":false,"slot_evictions":30,"attempts":[{"t":389466254,"member":7,"free":192828,"largest":58079,"budget":20173,"sockets":20,"socket_limit":24,"active":2,"verdict":"refused_sockets"},{"t":1901757786,"member":6,"free":49986,"largest":35026,"budget":101073,"sockets":13,"socket_limit":20,"active":1,"verdict":"refused_floor"},{"t":2311029496,"member":12,"free":172218,"largest":34647,"budget":103041,"sockets":6,"socket_limit":17,"active":3,"verdict":"refused_budget"},{"t":4142321013,"member":10,"free":143296,"largest":29091,"budget":111064,"sockets":0,"socket_limit":17,"active":1,"verdict":"override"},{"t":1903543336,"member":3,"free":140463,"largest":24469,"budget":59328,"sockets":14,"socket_limit":9,"active":1,"verdict":"start_failed"},{"t":3518525798,"member":1,"free":46667,"largest":17746,"budget":70379,"sockets":14,"socket_limit":16,"active":2,"verdict":"refused_largest"},{"t":1183327594,"member":10,"free":131102,"largest":11036,"budget":107196,"sockets":15,"socket_limit":16,"active":3,"verdict":"refused_largest"},{"t":4112729133,"member":19,"free":109386,"largest":22768,"budget":16394,"sockets":9,"socket_limit":20,"active":1,"verdict":"refused_largest"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random4_override0 LEN 953 @@@@
+{"schema":1,"kind":"admission","guard_floor":37875,"override":false,"slot_evictions":48,"attempts":[{"t":1162551477,"member":13,"free":193350,"largest":5104,"budget":61513,"sockets":18,"socket_limit":14,"active":2,"verdict":"refused_floor"},{"t":1706642915,"member":15,"free":25230,"largest":49263,"budget":38538,"sockets":18,"socket_limit":20,"active":1,"verdict":"refused_largest"},{"t":3973020489,"member":9,"free":104309,"largest":4207,"budget":28199,"sockets":8,"socket_limit":29,"active":3,"verdict":"refused_budget"},{"t":1637742182,"member":20,"free":151162,"largest":36943,"budget":1975,"sockets":20,"socket_limit":13,"active":0,"verdict":"refused_budget"},{"t":578619097,"member":3,"free":20638,"largest":17153,"budget":71965,"sockets":7,"socket_limit":31,"active":2,"verdict":"refused_sockets"},{"t":1974869097,"member":18,"free":101905,"largest":12103,"budget":54099,"sockets":15,"socket_limit":15,"active":2,"verdict":"refused_sockets"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random5_override0 LEN 790 @@@@
+{"schema":1,"kind":"admission","guard_floor":12110,"override":false,"slot_evictions":91,"attempts":[{"t":3482741761,"member":15,"free":147994,"largest":43987,"budget":52669,"sockets":3,"socket_limit":23,"active":1,"verdict":"refused_floor"},{"t":2613734677,"member":20,"free":60112,"largest":56216,"budget":62671,"sockets":13,"socket_limit":27,"active":2,"verdict":"override"},{"t":4292890529,"member":12,"free":188089,"largest":59052,"budget":65208,"sockets":6,"socket_limit":32,"active":2,"verdict":"start_failed"},{"t":2943610916,"member":1,"free":37738,"largest":14831,"budget":63932,"sockets":11,"socket_limit":8,"active":2,"verdict":"refused_floor"},{"t":2186204107,"member":16,"free":153646,"largest":38410,"budget":50144,"sockets":12,"socket_limit":11,"active":2,"verdict":"ok"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO inbound/zero LEN 582 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":0,"wg_rx_bytes_peak":0,"wg_rx_batch":8,"replay_window":0,"ml":{"udp_rx":0,"udp_rx_empty":0,"udp_unclassified":0,"udp_alloc_fail":0,"udp_recv_err":0,"udp_wg":0,"udp_disco":0,"udp_stun":0,"q_wg_full":0,"q_disco_full":0,"q_stun_full":0,"derp_rx_wg":0,"derp_q_wg_full":0,"q_wg_bytes":0,"q_wg_heap":0,"drain_calls":0,"drain_capped":0,"drain_deep":0,"wg_in":0,"wg_sender_unknown":0,"wg_no_netif":0,"wg_pbuf_fail":0,"wg_to_wireguardif":0,"drain_burst_max":0}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random0 LEN 795 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":10591,"wg_rx_bytes_peak":76,"wg_rx_batch":8,"replay_window":1183,"ml":{"udp_rx":1435196877,"udp_rx_empty":1990167722,"udp_unclassified":1021358539,"udp_alloc_fail":1971606187,"udp_recv_err":3636787153,"udp_wg":3028152293,"udp_disco":2587930050,"udp_stun":378943151,"q_wg_full":3396033463,"q_disco_full":613528029,"q_stun_full":3381495828,"derp_rx_wg":1375788047,"derp_q_wg_full":1819190861,"q_wg_bytes":3840133507,"q_wg_heap":2807208514,"drain_calls":898270127,"drain_capped":2908015315,"drain_deep":3403448449,"wg_in":2436487050,"wg_sender_unknown":2305710806,"wg_no_netif":1079978277,"wg_pbuf_fail":2063394544,"wg_to_wireguardif":1880579591,"drain_burst_max":10}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random1 LEN 793 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":9670,"wg_rx_bytes_peak":4136,"wg_rx_batch":8,"replay_window":1842,"ml":{"udp_rx":840577403,"udp_rx_empty":4096810270,"udp_unclassified":2536821458,"udp_alloc_fail":555699748,"udp_recv_err":2674502073,"udp_wg":4166725375,"udp_disco":1161337402,"udp_stun":2854696995,"q_wg_full":1505945329,"q_disco_full":424493200,"q_stun_full":1244447020,"derp_rx_wg":185244517,"derp_q_wg_full":4044307872,"q_wg_bytes":1600122793,"q_wg_heap":1378372915,"drain_calls":3501734766,"drain_capped":478795735,"drain_deep":3742361338,"wg_in":1716752317,"wg_sender_unknown":3651210842,"wg_no_netif":4045491288,"wg_pbuf_fail":739983217,"wg_to_wireguardif":3753192116,"drain_burst_max":13}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random2 LEN 792 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":9853,"wg_rx_bytes_peak":8446,"wg_rx_batch":8,"replay_window":1667,"ml":{"udp_rx":4222932888,"udp_rx_empty":929380889,"udp_unclassified":3001457767,"udp_alloc_fail":254117894,"udp_recv_err":2627532693,"udp_wg":1091583110,"udp_disco":86988867,"udp_stun":286663977,"q_wg_full":1163226210,"q_disco_full":1608031345,"q_stun_full":1228875262,"derp_rx_wg":2841077863,"derp_q_wg_full":2543289392,"q_wg_bytes":1423216954,"q_wg_heap":4077742839,"drain_calls":4235763979,"drain_capped":1056387681,"drain_deep":1832025644,"wg_in":1070224328,"wg_sender_unknown":384153513,"wg_no_netif":3463030101,"wg_pbuf_fail":2952339093,"wg_to_wireguardif":2842261920,"drain_burst_max":6}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random3 LEN 793 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":4173,"wg_rx_bytes_peak":635,"wg_rx_batch":8,"replay_window":1021,"ml":{"udp_rx":2758939577,"udp_rx_empty":1616159808,"udp_unclassified":283702623,"udp_alloc_fail":592627437,"udp_recv_err":2459053615,"udp_wg":4230794429,"udp_disco":2999221807,"udp_stun":2473035494,"q_wg_full":3884562817,"q_disco_full":1124846898,"q_stun_full":503220599,"derp_rx_wg":2778242229,"derp_q_wg_full":1741434707,"q_wg_bytes":1588195568,"q_wg_heap":4156887231,"drain_calls":1661562995,"drain_capped":2629623146,"drain_deep":2928031757,"wg_in":3581247905,"wg_sender_unknown":2251319999,"wg_no_netif":3877782908,"wg_pbuf_fail":990880234,"wg_to_wireguardif":4082161932,"drain_burst_max":9}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random4 LEN 795 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":5505,"wg_rx_bytes_peak":10719,"wg_rx_batch":8,"replay_window":1618,"ml":{"udp_rx":4189230521,"udp_rx_empty":4186550893,"udp_unclassified":1951624703,"udp_alloc_fail":178468377,"udp_recv_err":2633565292,"udp_wg":2450108647,"udp_disco":1076215453,"udp_stun":3873109743,"q_wg_full":2915737384,"q_disco_full":206672832,"q_stun_full":2251802978,"derp_rx_wg":397552220,"derp_q_wg_full":1652496745,"q_wg_bytes":4286538641,"q_wg_heap":2981175428,"drain_calls":1893238756,"drain_capped":946739321,"drain_deep":1009705767,"wg_in":3250619719,"wg_sender_unknown":4060739707,"wg_no_netif":4218784096,"wg_pbuf_fail":3223914962,"wg_to_wireguardif":3791222711,"drain_burst_max":2}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random5 LEN 795 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":7523,"wg_rx_bytes_peak":11751,"wg_rx_batch":8,"replay_window":628,"ml":{"udp_rx":1087912669,"udp_rx_empty":3606570045,"udp_unclassified":4242193289,"udp_alloc_fail":1698876501,"udp_recv_err":2375856082,"udp_wg":2981789226,"udp_disco":2092079984,"udp_stun":845581274,"q_wg_full":2259939300,"q_disco_full":1235093628,"q_stun_full":3712612206,"derp_rx_wg":1848777197,"derp_q_wg_full":709211401,"q_wg_bytes":2726247026,"q_wg_heap":2445069874,"drain_calls":3410407084,"drain_capped":3537222123,"drain_deep":2612970585,"wg_in":2756439240,"wg_sender_unknown":958020726,"wg_no_netif":3238251287,"wg_pbuf_fail":4121251354,"wg_to_wireguardif":1992116165,"drain_burst_max":0}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random6 LEN 793 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":2754,"wg_rx_bytes_peak":383,"wg_rx_batch":8,"replay_window":634,"ml":{"udp_rx":783316165,"udp_rx_empty":4235002069,"udp_unclassified":3842249704,"udp_alloc_fail":3397137601,"udp_recv_err":107351358,"udp_wg":1054323723,"udp_disco":1631347554,"udp_stun":2466196536,"q_wg_full":2683562864,"q_disco_full":4219068730,"q_stun_full":2918130730,"derp_rx_wg":3121601013,"derp_q_wg_full":2961669661,"q_wg_bytes":1587569627,"q_wg_heap":1438275885,"drain_calls":1488944826,"drain_capped":4003355502,"drain_deep":543429295,"wg_in":1958089484,"wg_sender_unknown":670954420,"wg_no_netif":1202365728,"wg_pbuf_fail":3535682261,"wg_to_wireguardif":1596733531,"drain_burst_max":10}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random7 LEN 794 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":11648,"wg_rx_bytes_peak":883,"wg_rx_batch":8,"replay_window":1076,"ml":{"udp_rx":2632470719,"udp_rx_empty":2797819619,"udp_unclassified":2455578774,"udp_alloc_fail":1180925516,"udp_recv_err":1340577097,"udp_wg":3168627314,"udp_disco":2233296382,"udp_stun":1333916814,"q_wg_full":4210585408,"q_disco_full":1432460940,"q_stun_full":2032769772,"derp_rx_wg":4264542967,"derp_q_wg_full":3374878724,"q_wg_bytes":3729617636,"q_wg_heap":643671787,"drain_calls":2858608407,"drain_capped":762884576,"drain_deep":3264312514,"wg_in":840222432,"wg_sender_unknown":1646955925,"wg_no_netif":3781322571,"wg_pbuf_fail":613744338,"wg_to_wireguardif":530239187,"drain_burst_max":13}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random8 LEN 794 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":10746,"wg_rx_bytes_peak":8253,"wg_rx_batch":8,"replay_window":296,"ml":{"udp_rx":3622299590,"udp_rx_empty":1067477043,"udp_unclassified":3641764437,"udp_alloc_fail":2647535619,"udp_recv_err":2726414826,"udp_wg":3849881677,"udp_disco":3093426833,"udp_stun":252390963,"q_wg_full":813512647,"q_disco_full":3422272795,"q_stun_full":3617312868,"derp_rx_wg":4167318170,"derp_q_wg_full":3629994465,"q_wg_bytes":2139962754,"q_wg_heap":118104220,"drain_calls":1501972945,"drain_capped":2253916847,"drain_deep":3207710609,"wg_in":2185899025,"wg_sender_unknown":2743915213,"wg_no_netif":2397287318,"wg_pbuf_fail":2863483910,"wg_to_wireguardif":889856273,"drain_burst_max":5}
+@@@@ END @@@@
+@@@@ SCENARIO inbound/random9 LEN 791 @@@@
+{"schema":1,"kind":"inbound","udp_recvmbox":6,"drain_cap":16,"wg_rx_queue_depth":12,"wg_rx_queue_bytes":12288,"wg_rx_bytes_queued":11910,"wg_rx_bytes_peak":8226,"wg_rx_batch":8,"replay_window":874,"ml":{"udp_rx":2580095383,"udp_rx_empty":2364943203,"udp_unclassified":3724094202,"udp_alloc_fail":127291170,"udp_recv_err":426161086,"udp_wg":1128152825,"udp_disco":1411620821,"udp_stun":3638536522,"q_wg_full":1214202960,"q_disco_full":1413036072,"q_stun_full":646372047,"derp_rx_wg":3635757931,"derp_q_wg_full":940049393,"q_wg_bytes":3047585255,"q_wg_heap":3522600584,"drain_calls":2787437706,"drain_capped":4053229183,"drain_deep":476479490,"wg_in":3899605602,"wg_sender_unknown":507028885,"wg_no_netif":362025232,"wg_pbuf_fail":1194379043,"wg_to_wireguardif":1993473302,"drain_burst_max":6}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random0 LEN 872 @@@@
+,"owners":{"other":{"live":664633779,"peak":2127385837,"allocs":680203267,"frees":2564975118,"failed":475560536,"denied":824616669},"tls":{"live":2272855374,"peak":442243610,"allocs":3880444167,"frees":598004358,"failed":3717846473,"denied":3959868841},"noise":{"live":307212565,"peak":3695984838,"allocs":1752263552,"frees":1139868384,"failed":1046441226,"denied":283668219},"map":{"live":2348994897,"peak":638320481,"allocs":1946207951,"frees":2614829407,"failed":2211851487,"denied":1914300652},"peer":{"live":1416386297,"peak":1290199003,"allocs":1498278187,"frees":3565255289,"failed":999187956,"denied":549083604},"wireguard":{"live":1535060606,"peak":2879849034,"allocs":1939612914,"frees":2980915056,"failed":2743225290,"denied":3922736689},"packet":{"live":2131796058,"peak":93885799,"allocs":3180065708,"frees":1474369076,"failed":399079667,"denied":1457757506}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random1 LEN 873 @@@@
+,"owners":{"other":{"live":3424622908,"peak":2830466177,"allocs":2163011066,"frees":527891164,"failed":4120038171,"denied":3399494600},"tls":{"live":2841671791,"peak":3049987360,"allocs":668324012,"frees":3977732444,"failed":3771581705,"denied":239358132},"noise":{"live":2989539121,"peak":375483903,"allocs":1691527953,"frees":1598291844,"failed":2800446025,"denied":2312288863},"map":{"live":1660722360,"peak":754823584,"allocs":1089657520,"frees":61212914,"failed":3249047420,"denied":3764935750},"peer":{"live":3565231719,"peak":3473835421,"allocs":974862557,"frees":1534100178,"failed":3409885794,"denied":4143003030},"wireguard":{"live":102384388,"peak":558907060,"allocs":641695488,"frees":539608505,"failed":1065132628,"denied":1310277647},"packet":{"live":919772744,"peak":3053623533,"allocs":1564916872,"frees":1757225319,"failed":2831341837,"denied":3593861059}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random2 LEN 877 @@@@
+,"owners":{"other":{"live":1067040340,"peak":301721938,"allocs":3032380094,"frees":2824145962,"failed":1056536776,"denied":2740263567},"tls":{"live":2828369086,"peak":1761583202,"allocs":3843314163,"frees":3273751690,"failed":1733011765,"denied":290429593},"noise":{"live":2253876228,"peak":2403064395,"allocs":2638642270,"frees":2960174880,"failed":2725633210,"denied":2751104340},"map":{"live":2828962157,"peak":2181995385,"allocs":306705580,"frees":1525786581,"failed":3333903302,"denied":2982727371},"peer":{"live":2072226665,"peak":82947981,"allocs":271161483,"frees":3521396884,"failed":1080354538,"denied":626462366},"wireguard":{"live":3972242666,"peak":2002341940,"allocs":2584948875,"frees":1482758172,"failed":508871172,"denied":959648810},"packet":{"live":3128152782,"peak":2893912971,"allocs":1664246274,"frees":2217362034,"failed":4188621807,"denied":1796419348}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random3 LEN 875 @@@@
+,"owners":{"other":{"live":382628409,"peak":3680782349,"allocs":3767062332,"frees":1783095952,"failed":1875946651,"denied":214011230},"tls":{"live":263077541,"peak":2487265415,"allocs":1636621034,"frees":2607797724,"failed":1770235402,"denied":4152657630},"noise":{"live":820547573,"peak":1147100722,"allocs":3238825861,"frees":3211721971,"failed":2326175562,"denied":344735244},"map":{"live":2123222709,"peak":2574787284,"allocs":624732024,"frees":436123742,"failed":4072456067,"denied":803443962},"peer":{"live":2060428407,"peak":2839773183,"allocs":3024742446,"frees":2301961856,"failed":1771428289,"denied":3261503163},"wireguard":{"live":3302476035,"peak":2818825595,"allocs":3522604837,"frees":2052564116,"failed":4058976817,"denied":2485349621},"packet":{"live":1175517678,"peak":1272028735,"allocs":3404200209,"frees":33387862,"failed":255742531,"denied":3670987363}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random4 LEN 875 @@@@
+,"owners":{"other":{"live":2514009865,"peak":412612257,"allocs":3817487803,"frees":758924062,"failed":3772859844,"denied":3692361998},"tls":{"live":1949849659,"peak":4161994598,"allocs":204603431,"frees":1848342745,"failed":4034234263,"denied":3439226174},"noise":{"live":1243872697,"peak":3315407224,"allocs":645201994,"frees":2582320900,"failed":3358121447,"denied":256575579},"map":{"live":2516020986,"peak":698226781,"allocs":2524279788,"frees":90613993,"failed":4285319670,"denied":612754499},"peer":{"live":3693234432,"peak":3943348234,"allocs":346424506,"frees":2317692977,"failed":1611809651,"denied":1601035526},"wireguard":{"live":1029448794,"peak":4109219059,"allocs":2384089931,"frees":2939814542,"failed":1864740057,"denied":3482922475},"packet":{"live":838519883,"peak":3766514646,"allocs":1137426530,"frees":1092849285,"failed":3452592822,"denied":3933344514}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random5 LEN 879 @@@@
+,"owners":{"other":{"live":3315959449,"peak":2451860693,"allocs":485233689,"frees":2892476292,"failed":1734279420,"denied":337247070},"tls":{"live":2926749345,"peak":3910979426,"allocs":336514903,"frees":2632684269,"failed":1757695537,"denied":2866597381},"noise":{"live":1568637066,"peak":1676261991,"allocs":3888831343,"frees":3457945086,"failed":3460681785,"denied":1195294848},"map":{"live":2503769602,"peak":369580370,"allocs":2189243413,"frees":4113983271,"failed":3411928115,"denied":2633918311},"peer":{"live":3341262849,"peak":3201587257,"allocs":505793818,"frees":2288091502,"failed":2769526663,"denied":4087883794},"wireguard":{"live":3894489771,"peak":1386386670,"allocs":175549489,"frees":2413110497,"failed":2794492232,"denied":4175084595},"packet":{"live":1534838703,"peak":2895573263,"allocs":903840096,"frees":2096449060,"failed":1595903252,"denied":1789906951}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random6 LEN 871 @@@@
+,"owners":{"other":{"live":2279799242,"peak":2357755919,"allocs":1675816656,"frees":477498094,"failed":129629869,"denied":177801432},"tls":{"live":578906354,"peak":1019359462,"allocs":1552513499,"frees":1337034201,"failed":3605328238,"denied":1482592465},"noise":{"live":3182548393,"peak":95886309,"allocs":3893373948,"frees":261867091,"failed":34725751,"denied":1248082335},"map":{"live":3077734630,"peak":4160162898,"allocs":2484528034,"frees":3787865827,"failed":3243474527,"denied":3331763915},"peer":{"live":610137653,"peak":451454521,"allocs":3204918466,"frees":1975243813,"failed":408076114,"denied":2678194318},"wireguard":{"live":1677690935,"peak":4228421783,"allocs":946124600,"frees":2383146673,"failed":2630471116,"denied":4118215225},"packet":{"live":2463738446,"peak":895353060,"allocs":913616414,"frees":1659795988,"failed":4091864451,"denied":3695974377}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random7 LEN 873 @@@@
+,"owners":{"other":{"live":1373564416,"peak":2150457277,"allocs":834071992,"frees":1015334690,"failed":2429897080,"denied":2560251769},"tls":{"live":468004965,"peak":2037991429,"allocs":1994797396,"frees":1105110016,"failed":390750674,"denied":1868650495},"noise":{"live":44129182,"peak":2031702523,"allocs":1049376199,"frees":3960176916,"failed":905734349,"denied":3659339179},"map":{"live":533646068,"peak":3109431217,"allocs":3831372025,"frees":3223235290,"failed":522999041,"denied":2923194325},"peer":{"live":3632728333,"peak":2078516517,"allocs":2543432872,"frees":3992636131,"failed":3103852743,"denied":405507469},"wireguard":{"live":2422509785,"peak":143962195,"allocs":79978800,"frees":3318008236,"failed":1580662664,"denied":1984191621},"packet":{"live":1144604167,"peak":697470020,"allocs":3769200417,"frees":1116730155,"failed":2613839145,"denied":1233764782}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random8 LEN 877 @@@@
+,"owners":{"other":{"live":2241970529,"peak":4017224769,"allocs":1382829923,"frees":2383078587,"failed":3008232858,"denied":3433840544},"tls":{"live":4184528012,"peak":271105866,"allocs":3084200179,"frees":2478912553,"failed":2104901781,"denied":3211166228},"noise":{"live":415377968,"peak":4037905924,"allocs":4235937650,"frees":4184355348,"failed":3133556760,"denied":338230662},"map":{"live":3495974480,"peak":1641129511,"allocs":1945605574,"frees":2453094759,"failed":3856168992,"denied":1210029050},"peer":{"live":4012636264,"peak":2440356174,"allocs":4192239430,"frees":711116645,"failed":4012857003,"denied":1785738297},"wireguard":{"live":3659086136,"peak":2587153358,"allocs":923738720,"frees":808626402,"failed":1881287869,"denied":2525146242},"packet":{"live":1658981211,"peak":3154563717,"allocs":4023457842,"frees":1915545544,"failed":72059039,"denied":883615594}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/random9 LEN 874 @@@@
+,"owners":{"other":{"live":3930422604,"peak":3391377269,"allocs":1457300625,"frees":2273886405,"failed":1668403111,"denied":2159404713},"tls":{"live":38012799,"peak":2528914605,"allocs":2646301561,"frees":1844692686,"failed":1162151528,"denied":221697581},"noise":{"live":1036034696,"peak":3425258885,"allocs":210959643,"frees":3053875538,"failed":3648326025,"denied":1442928172},"map":{"live":342261952,"peak":1811825369,"allocs":154663544,"frees":1096703154,"failed":910659135,"denied":4100756028},"peer":{"live":4093433110,"peak":3579458660,"allocs":3186975295,"frees":2319373532,"failed":939439335,"denied":3497138513},"wireguard":{"live":2469221726,"peak":4283202454,"allocs":420043208,"frees":4020393786,"failed":13159086,"denied":3584165948},"packet":{"live":2354094651,"peak":2456469094,"allocs":1444895598,"frees":810228393,"failed":1331072454,"denied":3773357869}}
+@@@@ END @@@@
+@@@@ SCENARIO owners/zero LEN 508 @@@@
+,"owners":{"other":{"live":0,"peak":0,"allocs":0,"frees":0,"failed":0,"denied":0},"tls":{"live":0,"peak":0,"allocs":0,"frees":0,"failed":0,"denied":0},"noise":{"live":0,"peak":0,"allocs":0,"frees":0,"failed":0,"denied":0},"map":{"live":0,"peak":0,"allocs":0,"frees":0,"failed":0,"denied":0},"peer":{"live":0,"peak":0,"allocs":0,"frees":0,"failed":0,"denied":0},"wireguard":{"live":0,"peak":0,"allocs":0,"frees":0,"failed":0,"denied":0},"packet":{"live":0,"peak":0,"allocs":0,"frees":0,"failed":0,"denied":0}}
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/empty_override1 LEN 102 @@@@
+{"schema":1,"kind":"admission","guard_floor":16384,"override":true,"slot_evictions":0,"attempts":[]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random0_override1 LEN 241 @@@@
+{"schema":1,"kind":"admission","guard_floor":28603,"override":true,"slot_evictions":97,"attempts":[{"t":33565518,"member":5,"free":166938,"largest":24327,"budget":3641,"sockets":8,"socket_limit":28,"active":2,"verdict":"refused_largest"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random1_override1 LEN 917 @@@@
+{"schema":1,"kind":"admission","guard_floor":20961,"override":true,"slot_evictions":91,"attempts":[{"t":1666910645,"member":14,"free":36784,"largest":42302,"budget":79238,"sockets":13,"socket_limit":18,"active":3,"verdict":"ok"},{"t":1428542806,"member":7,"free":42097,"largest":50181,"budget":10226,"sockets":12,"socket_limit":21,"active":1,"verdict":"refused_largest"},{"t":1217227682,"member":3,"free":16960,"largest":42653,"budget":81939,"sockets":9,"socket_limit":14,"active":2,"verdict":"override"},{"t":934729540,"member":17,"free":69106,"largest":30675,"budget":74061,"sockets":6,"socket_limit":11,"active":2,"verdict":"refused_sockets"},{"t":32462444,"member":15,"free":172507,"largest":53972,"budget":23842,"sockets":10,"socket_limit":28,"active":1,"verdict":"ok"},{"t":1366485235,"member":2,"free":142393,"largest":22081,"budget":28111,"sockets":1,"socket_limit":17,"active":1,"verdict":"start_failed"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random2_override1 LEN 1079 @@@@
+{"schema":1,"kind":"admission","guard_floor":6576,"override":true,"slot_evictions":89,"attempts":[{"t":2579177789,"member":19,"free":50740,"largest":50377,"budget":49807,"sockets":19,"socket_limit":25,"active":1,"verdict":"refused_budget"},{"t":4034950664,"member":13,"free":105378,"largest":39642,"budget":105615,"sockets":19,"socket_limit":26,"active":0,"verdict":"ok"},{"t":1991811741,"member":6,"free":198341,"largest":20433,"budget":102416,"sockets":14,"socket_limit":26,"active":0,"verdict":"refused_sockets"},{"t":3698770598,"member":9,"free":132757,"largest":21418,"budget":16794,"sockets":17,"socket_limit":18,"active":3,"verdict":"refused_budget"},{"t":1898807527,"member":20,"free":111000,"largest":51182,"budget":7643,"sockets":13,"socket_limit":11,"active":1,"verdict":"override"},{"t":1489954811,"member":17,"free":80159,"largest":10710,"budget":22764,"sockets":8,"socket_limit":13,"active":0,"verdict":"refused_budget"},{"t":770730695,"member":18,"free":10808,"largest":34085,"budget":82146,"sockets":6,"socket_limit":30,"active":0,"verdict":"refused_sockets"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random3_override1 LEN 657 @@@@
+{"schema":1,"kind":"admission","guard_floor":14241,"override":true,"slot_evictions":80,"attempts":[{"t":4194599658,"member":8,"free":85212,"largest":42218,"budget":105738,"sockets":5,"socket_limit":23,"active":1,"verdict":"start_failed"},{"t":1660118090,"member":20,"free":103800,"largest":32190,"budget":119588,"sockets":14,"socket_limit":8,"active":0,"verdict":"refused_largest"},{"t":2802566571,"member":20,"free":73089,"largest":31960,"budget":95014,"sockets":14,"socket_limit":29,"active":2,"verdict":"ok"},{"t":1700478522,"member":8,"free":62256,"largest":39874,"budget":16697,"sockets":16,"socket_limit":29,"active":0,"verdict":"refused_sockets"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random4_override1 LEN 1190 @@@@
+{"schema":1,"kind":"admission","guard_floor":4295,"override":true,"slot_evictions":46,"attempts":[{"t":2322031773,"member":3,"free":108584,"largest":48236,"budget":64559,"sockets":9,"socket_limit":15,"active":3,"verdict":"ok"},{"t":2937156185,"member":20,"free":151566,"largest":10759,"budget":62463,"sockets":7,"socket_limit":14,"active":2,"verdict":"override"},{"t":4051682418,"member":5,"free":25998,"largest":20502,"budget":15345,"sockets":17,"socket_limit":11,"active":0,"verdict":"refused_floor"},{"t":1305820354,"member":15,"free":44744,"largest":45542,"budget":52239,"sockets":17,"socket_limit":21,"active":2,"verdict":"refused_budget"},{"t":3398748670,"member":6,"free":168990,"largest":49606,"budget":36014,"sockets":12,"socket_limit":9,"active":2,"verdict":"ok"},{"t":3349620990,"member":2,"free":126285,"largest":30052,"budget":102075,"sockets":4,"socket_limit":16,"active":0,"verdict":"refused_sockets"},{"t":3674246177,"member":9,"free":93211,"largest":40204,"budget":32639,"sockets":2,"socket_limit":11,"active":2,"verdict":"ok"},{"t":3725048958,"member":13,"free":153236,"largest":11529,"budget":28198,"sockets":20,"socket_limit":18,"active":0,"verdict":"refused_floor"}]}
+
+@@@@ END @@@@
+@@@@ SCENARIO admission_report/random5_override1 LEN 1080 @@@@
+{"schema":1,"kind":"admission","guard_floor":39382,"override":true,"slot_evictions":11,"attempts":[{"t":744611955,"member":3,"free":36275,"largest":39289,"budget":543,"sockets":16,"socket_limit":30,"active":1,"verdict":"refused_floor"},{"t":3750865094,"member":5,"free":155232,"largest":31222,"budget":97021,"sockets":3,"socket_limit":15,"active":3,"verdict":"refused_sockets"},{"t":42507879,"member":16,"free":1765,"largest":57581,"budget":14728,"sockets":11,"socket_limit":22,"active":3,"verdict":"start_failed"},{"t":3798014511,"member":10,"free":33749,"largest":44399,"budget":5168,"sockets":15,"socket_limit":8,"active":1,"verdict":"refused_largest"},{"t":3582367209,"member":11,"free":132238,"largest":7528,"budget":74742,"sockets":13,"socket_limit":17,"active":1,"verdict":"refused_largest"},{"t":3682833178,"member":13,"free":167092,"largest":24355,"budget":110820,"sockets":19,"socket_limit":11,"active":1,"verdict":"override"},{"t":643884122,"member":4,"free":157479,"largest":13854,"budget":40763,"sockets":14,"socket_limit":20,"active":1,"verdict":"refused_floor"}]}
+
+@@@@ END @@@@
