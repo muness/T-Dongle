@@ -148,7 +148,6 @@ fn tls_err(e: &TlsError) -> &'static str {
         TlsError::Io(_) => "TLS ERROR: Io (replay underflow?)",
         TlsError::DecodeError => "TLS ERROR: DecodeError",
         TlsError::InvalidHandshake => "TLS ERROR: InvalidHandshake",
-        TlsError::UnknownHello => "TLS ERROR: UnknownHello",
         TlsError::InvalidRecord => "TLS ERROR: InvalidRecord",
         _ => "TLS ERROR: other",
     }

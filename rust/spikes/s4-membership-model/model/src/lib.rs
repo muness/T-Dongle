@@ -7,6 +7,7 @@ pub mod coord;
 pub mod disco;
 pub mod meter;
 pub mod rng;
+pub mod scenario;
 pub mod tls;
 pub mod wg;
 

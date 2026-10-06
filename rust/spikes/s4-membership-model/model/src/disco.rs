@@ -103,6 +103,9 @@ pub struct Disco {
     pub disco_sock: udp::Socket<'static>,
     pub stun4: udp::Socket<'static>,
     pub stun6: udp::Socket<'static>,
+    /// control (coord) and DERP TCP sockets; rx = CONFIG_LWIP_TCP_WND_DEFAULT 8,640 (sdkconfig:1641) so the window matches the C.
+    pub coord_tcp: tcp::Socket<'static>,
+    pub derp_tcp: tcp::Socket<'static>,
     pub disco_q: Queue,
     pub stun_q: Queue,
     pub probes: [Probe; 32],
@@ -110,13 +113,33 @@ pub struct Disco {
     pub key: Key,
 }
 
+/// Socket buffer sizes (smoltcp sockets own fixed buffers; lwIP allocates pbufs on demand up to the window).
+#[derive(Clone, Copy)]
+pub struct NetCfg {
+    pub coord_rx: usize,
+    pub coord_tx: usize,
+    pub derp_rx: usize,
+    pub derp_tx: usize,
+    /// DISCO UDP socket: datagram slots (1,536 B each) in the rx / tx buffers.
+    pub disco_rx_pkts: usize,
+    pub disco_tx_pkts: usize,
+}
+impl NetCfg {
+    /// Windows equal to the C's CONFIG_LWIP_TCP_WND_DEFAULT 8,640 (sdkconfig:1641) on receive; tx 2,048 control / 4,096 DERP.
+    pub const C_WINDOW: NetCfg = NetCfg { coord_rx: 8640, coord_tx: 2048, derp_rx: 8640, derp_tx: 4096, disco_rx_pkts: 4, disco_tx_pkts: 2 };
+    /// Minimum-viable sensitivity point (NOT a throughput-validated size): 2 MSS rx / 1 MSS tx control, 3 MSS / 2 MSS DERP (MSS 1,440), DISCO 2 rx / 1 tx datagram slots.
+    pub const SMALL: NetCfg = NetCfg { coord_rx: 2880, coord_tx: 1440, derp_rx: 4320, derp_tx: 2880, disco_rx_pkts: 2, disco_tx_pkts: 1 };
+}
+
 /// `inline_queues` = reserve DEPTH x 1,536 B per queue; false = pointer slots.
-pub fn setup(m: &impl Meter, inline_queues: bool, peers: usize) -> (Disco, bool) {
+pub fn setup(m: &impl Meter, inline_queues: bool, peers: usize, tcp: &NetCfg) -> (Disco, bool) {
     let mut ok = true;
-    m.begin("disco.sockets(3 x smoltcp udp 4 pkts x 1536 rx, 2 x 1536 tx)");
-    let disco_sock = udp_socket(4, 4 * MTU_SLOT, 2, 2 * MTU_SLOT);
-    let stun4 = udp_socket(2, 2 * MTU_SLOT, 1, 512);
-    let stun6 = udp_socket(2, 2 * MTU_SLOT, 1, 512);
+    m.begin("net.sockets(3 udp + 2 tcp, smoltcp)");
+    let disco_sock = udp_socket(tcp.disco_rx_pkts, tcp.disco_rx_pkts * MTU_SLOT, tcp.disco_tx_pkts, tcp.disco_tx_pkts * MTU_SLOT);
+    let stun4 = udp_socket(2, 2 * 576, 1, 128);
+    let stun6 = udp_socket(2, 2 * 576, 1, 128);
+    let coord_tcp = tcp_socket(tcp.coord_rx, tcp.coord_tx);
+    let derp_tcp = tcp_socket(tcp.derp_rx, tcp.derp_tx);
     m.end();
 
     m.begin(if inline_queues { "disco.queues(inline 8+4 x 1536)" } else { "disco.queues(pointer 8+4)" });
@@ -131,7 +154,7 @@ pub fn setup(m: &impl Meter, inline_queues: bool, peers: usize) -> (Disco, bool)
     }
     m.end();
 
-    let mut d = Disco { disco_sock, stun4, stun6, disco_q, stun_q, probes, shared, key: *Key::from_slice(&[7u8; 32]) };
+    let mut d = Disco { disco_sock, stun4, stun6, coord_tcp, derp_tcp, disco_q, stun_q, probes, shared, key: *Key::from_slice(&[7u8; 32]) };
 
     m.begin("disco.exercise(3 queued pkts + seal/open)");
     let pkt = [0xD5u8; 1200];

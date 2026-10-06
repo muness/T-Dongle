@@ -3,6 +3,8 @@
 #![no_std]
 #![no_main]
 
+#[path = "../../common/ops.rs"]
+mod ops;
 mod acm;
 mod ncm;
 
@@ -161,14 +163,10 @@ async fn main(spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
-    // Stable "chip MAC" -> 12 uppercase hex digits for the serial and the NCM iMACAddress string.
+    // Stable "chip MAC" -> 12 uppercase hex digits for the serial and the NCM iMACAddress string (same as the C firmware).
     let mac = esp_hal::efuse::base_mac_address();
     static HEX: StaticCell<[u8; 12]> = StaticCell::new();
-    let hex = HEX.init([0; 12]);
-    for (i, b) in mac.as_bytes().iter().enumerate() {
-        hex[2 * i] = b"0123456789ABCDEF"[(b >> 4) as usize];
-        hex[2 * i + 1] = b"0123456789ABCDEF"[(b & 15) as usize];
-    }
+    let hex = HEX.init(ops::mac_hex(mac.as_bytes().try_into().unwrap()));
     let hex: &'static str = core::str::from_utf8(hex).unwrap();
 
     let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
@@ -332,7 +330,7 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
             reply(
                 port,
                 format_args!(
-                    "status up_ms={} alt={} dtr={} resets={} hold={} rx_ntbs={} rx_frames={} rx_bytes={} rx_runt={} rx_bad_ntb={} rx_drop={} tx_frames={} tx_bytes={} chan_full={} filter={:#x} ntb_in={}",
+                    "status mode=spike_s2 up_ms={} alt={} dtr={} resets={} hold={} rx_ntbs={} rx_frames={} rx_bytes={} rx_runt={} rx_bad_ntb={} rx_drop={} tx_frames={} tx_bytes={} chan_full={} filter={:#x} ntb_in={}",
                     up,
                     ALT.load(Ordering::Relaxed),
                     DTR.load(Ordering::Relaxed) as u8,
@@ -363,7 +361,17 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
             let held = Instant::now().as_millis() as u32 - HOLD_SINCE_MS.load(Ordering::Relaxed);
             reply(port, format_args!("hold off (held {} ms)", held)).await
         }
-        "help" | "?" => reply(port, format_args!("commands: status | hold on | hold off | help")).await,
+        "boot-status" => {
+            let mut l = Line::<320> { buf: [0; 320], len: 0 };
+            ops::boot_status(&mut l, "s2-usb-ncm", ESP_APP_DESC.app_elf_sha256(), Instant::now().as_millis());
+            reply(port, format_args!("{}", core::str::from_utf8(&l.buf[..l.len]).unwrap_or(""))).await
+        }
+        "bootloader" => {
+            reply(port, format_args!("rebooting to ROM download mode")).await;
+            Timer::after(Duration::from_millis(200)).await;
+            ops::enter_bootloader()
+        }
+        "help" | "?" => reply(port, format_args!("commands: status | boot-status | bootloader | hold on | hold off | help")).await,
         _ => reply(port, format_args!("unknown command: {}", cmd)).await,
     }
 }

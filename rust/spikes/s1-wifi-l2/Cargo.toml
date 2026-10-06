@@ -9,12 +9,23 @@ publish = false
 [dependencies]
 esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
 esp-radio = { version = "=1.0.0-beta.1", features = ["esp32s3", "wifi", "unstable"] }
-esp-rtos = { version = "0.4", features = ["esp32s3", "esp-radio", "esp-alloc"] }
+esp-rtos = { version = "0.4", features = ["esp32s3", "esp-radio", "esp-alloc", "embassy"] }
 esp-alloc = { version = "0.11", features = ["esp32s3"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
 esp-println = { version = "0.18", features = ["esp32s3"] }
 esp-backtrace = { version = "0.20", features = ["esp32s3", "panic-handler", "println"] }
 embassy-futures = "0.1"
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-usb = { version = "0.6", default-features = false }
+static_cell = "2.1"
+critical-section = "1"
+tdongle-nvs-read = { path = "../../crates/tdongle-nvs-read" }
+tdongle-nvs-format = { path = "../../crates/tdongle-nvs-format" }
+tdongle-wifi-policy = { path = "../../crates/tdongle-wifi-policy" }
+esp-storage = { version = "0.10", features = ["esp32s3", "embedded-storage"] }
+embedded-storage = "0.3"
 esp-wifi-sys-esp32s3 = "0.3"
 
 [profile.release]

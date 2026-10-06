@@ -1,13 +1,17 @@
 //! Spike S3 (no_std): the transparent Wi-Fi bridge = S1 (esp-radio raw L2 STA) + S2 (embassy-usb CDC-ACM + CDC-NCM),
 //! host -> Wi-Fi through the real `tdongle-bridge` crate (bounded queue, HOLD/RESUME, CoDel/ECN, counters).
 //!
-//! Credentials: compile-time env WIFI_SSID / WIFI_PASS (never in the source). CPU clock: 240 MHz fixed (`CpuClock::max()`).
+//! Credentials: read from the existing NVS partition (read-only; `saved.rs`), never built in. CPU clock: 240 MHz fixed (`CpuClock::max()`).
 //! Console: the CDC-ACM port (`status`, `help`, `heap on|off`, `heap`); USB-Serial-JTAG is unavailable once the OTG core runs.
 #![no_std]
 #![no_main]
 
 extern crate alloc;
 
+#[path = "../../common/ops.rs"]
+mod ops;
+#[path = "../../common/saved.rs"]
+mod saved;
 mod acm;
 mod ncm;
 
@@ -36,6 +40,7 @@ use esp_hal::timer::timg::TimerGroup;
 use esp_hal::usb::otg::Usb;
 use esp_hal::usb::otg::embassy_usb_device::{Config as OtgConfig, Driver as UsbDriver};
 use esp_println::println;
+use esp_radio::wifi::scan::ScanConfig;
 use esp_radio::wifi::{
     AuthenticationMethodConfig, Bandwidth, Config, ControllerConfig, Interface, PowerSaveMode, WifiController,
     sta::StationConfig,
@@ -52,8 +57,6 @@ use tdongle_serial::wifi_link::{Events, Info};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const SSID: Option<&str> = option_env!("WIFI_SSID");
-const PASS: Option<&str> = option_env!("WIFI_PASS");
 
 const FIRMWARE: &str = "0.3.0-s3-spike";
 const MTU: usize = 1514;
@@ -409,21 +412,21 @@ async fn main(spawner: Spawner) -> ! {
         MTU
     );
 
-    let (Some(ssid), Some(pass)) = (SSID, PASS) else {
-        println!("WIFI_SSID / WIFI_PASS not set at build time; rebuild with them. Halting.");
-        loop {
-            Timer::after_secs(60).await;
+    // ---- the saved networks: read-only from the NVS the C firmware wrote ----
+    let mut flash = esp_storage::FlashStorage::new(peripherals.FLASH);
+    let loaded = match saved::load(&mut flash) {
+        Ok(l) => {
+            println!("nvs: {} saved networks", l.saved.list().len());
+            Some(l)
+        }
+        Err(e) => {
+            println!("nvs: no usable saved networks ({:?}); console stays up", e);
+            None
         }
     };
 
     // ---- Wi-Fi (S1) ----
-    let sta_cfg = StationConfig::default()
-        .with_ssid(ssid.try_into().unwrap())
-        .with_authentication(AuthenticationMethodConfig::Wpa2Personal(pass.try_into().unwrap()));
-    let cfg = ControllerConfig::default()
-        .with_tx_queue_size(WIFI_TX_QUEUE)
-        .with_rx_queue_size(WIFI_RX_QUEUE)
-        .with_initial_config(Config::Station(sta_cfg));
+    let cfg = ControllerConfig::default().with_tx_queue_size(WIFI_TX_QUEUE).with_rx_queue_size(WIFI_RX_QUEUE);
     let mut controller: WifiController<'static> = WifiController::new(peripherals.WIFI, cfg).unwrap();
     static IFACE: StaticCell<RefCell<Interface>> = StaticCell::new();
     let iface: &'static RefCell<Interface> = IFACE.init(RefCell::new(Interface::station()));
@@ -443,11 +446,7 @@ async fn main(spawner: Spawner) -> ! {
 
     // ---- USB (S2): the NCM MAC string is the STA MAC ----
     static HEX: StaticCell<[u8; 12]> = StaticCell::new();
-    let hex = HEX.init([0; 12]);
-    for (i, b) in mac.iter().enumerate() {
-        hex[2 * i] = b"0123456789ABCDEF"[(b >> 4) as usize];
-        hex[2 * i + 1] = b"0123456789ABCDEF"[(b & 15) as usize];
-    }
+    let hex = HEX.init(ops::mac_hex(esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap()));
     let hex: &'static str = core::str::from_utf8(hex).unwrap();
 
     let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
@@ -497,17 +496,45 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(usb_tx_task(tx).unwrap());
     spawner.spawn(wifi_rx_task(iface, bridge).unwrap());
     spawner.spawn(worker_task(iface, worker).unwrap());
-    link_loop(&mut controller, bridge).await
+    link_loop(&mut controller, bridge, loaded.map(|l| l.saved)).await
 }
 
 // ======================================================================================================================
 // Wi-Fi link supervision (connect, wait for disconnect, bridge.link)
 // ======================================================================================================================
 
-async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>) -> ! {
+async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>, saved_nets: Option<tdongle_nvs_format::wifi_profiles::SavedNetworks>) -> ! {
+    let Some(saved_nets) = saved_nets.filter(|s| !s.list().is_empty()) else {
+        loop {
+            Timer::after_secs(60).await;
+        }
+    };
+    let loaded_view = tdongle_nvs_format::load::Loaded { saved: saved_nets, meta: tdongle_nvs_format::wifi_meta::MetaSet::defaults(&saved_nets.ssids()) };
+    let mut next = 0usize;
     // SAFETY: this is the link supervisor task; it may block and is not a driver callback.
     let ctx = unsafe { TaskContext::assume() };
     loop {
+        // Strongest saved network that a scan (hidden SSIDs included) sees; none seen: try the saved list in order (directed probes find hidden ones).
+        let slot = match controller.scan_async(&ScanConfig::default().with_show_hidden(true).with_max(40)).await {
+            Ok(aps) => saved::choose(&loaded_view, aps.iter().map(|a| (a.ssid.as_str(), a.signal_strength))),
+            Err(_) => None,
+        };
+        let count = loaded_view.saved.list().len();
+        let slot = slot.unwrap_or_else(|| {
+            next = (next + 1) % count;
+            next
+        });
+        let Some((ssid, pass)) = saved::credentials(&loaded_view.saved, slot) else {
+            Timer::after_secs(2).await;
+            continue;
+        };
+        let auth = if pass.is_empty() { AuthenticationMethodConfig::Open } else { AuthenticationMethodConfig::Wpa2Personal(pass.try_into().unwrap()) };
+        let sta = StationConfig::default().with_ssid(ssid.try_into().unwrap()).with_authentication(auth);
+        println!("joining saved network slot {} ({} B ssid)", slot, ssid.len());
+        if controller.set_config(&Config::Station(sta)).is_err() {
+            Timer::after_secs(2).await;
+            continue;
+        }
         match controller.connect_async().await {
             Ok(info) => {
                 println!("connected: {:?}", info);
@@ -801,6 +828,15 @@ async fn handle(wr: &'static Mutex<NoopRawMutex, AcmWriter>, bridge: &'static Br
     let mut s = String::new();
     match line {
         "heap" => heap_line(&mut s),
+        "boot-status" => {
+            ops::boot_status(&mut s, FIRMWARE, ESP_APP_DESC.app_elf_sha256(), Instant::now().as_millis());
+            s.push_str("\r\n");
+        }
+        "bootloader" => {
+            out(wr, "rebooting to ROM download mode\r\n", 500).await;
+            Timer::after(Duration::from_millis(200)).await;
+            ops::enter_bootloader()
+        }
         "heap on" => {
             HEAP_STREAM.store(true, Ordering::Relaxed);
             s.push_str("heap stream on\r\n");

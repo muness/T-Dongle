@@ -1,0 +1,21 @@
+== TaskStorage<.*__negotiator_task.*>>::poll: 1 symbols
+   31120 B  (indirect calls on the path: 23)  <embassy_executor::raw::TaskStorage<s4_membership_model::__negotiator_task_task::__negotiator_task_t
+         <embassy_executor::raw::TaskStorage<s4_membership_model::__negotiator_task_task::__negotiator_task_task_inner_function::
+         embedded_tls::connection::process_server_verify::<s4_model::tls::Provider>::{closure#0} [8112]
+         embedded_tls::pki::verify_signature [2112]
+         <embedded_tls::der_certificate::DecodedCertificate as der::decode::Decode>::from_der [9312]
+         <der::asn1::context_specific::ContextSpecific<der::asn1::sequence_of::SequenceOf<embedded_tls::der_certificate::Extensio
+== TaskStorage<.*__coord_task.*>>::poll: 1 symbols
+    5856 B  (indirect calls on the path: 57)  <embassy_executor::raw::TaskStorage<s4_membership_model::__coord_task_task::__coord_task_task_inner_
+         <embassy_executor::raw::TaskStorage<s4_membership_model::__coord_task_task::__coord_task_task_inner_function::{closure#0
+         <x25519_dalek::x25519::PublicKey as core::convert::From<&x25519_dalek::x25519::StaticSecret>>::from [2064]
+== TaskStorage<.*__wg_task.*>>::poll: 1 symbols
+    5120 B  (indirect calls on the path: 39)  <embassy_executor::raw::TaskStorage<s4_membership_model::__wg_task_task::__wg_task_task_inner_functi
+         <embassy_executor::raw::TaskStorage<s4_membership_model::__wg_task_task::__wg_task_task_inner_function::{closure#0}>>::p
+         <x25519_dalek::x25519::PublicKey as core::convert::From<&x25519_dalek::x25519::StaticSecret>>::from [2064]
+== TaskStorage<.*__disco_task.*>>::poll: 1 symbols
+    8976 B  (indirect calls on the path: 7)  <embassy_executor::raw::TaskStorage<s4_membership_model::__disco_task_task::__disco_task_task_inner_
+         <embassy_executor::raw::TaskStorage<s4_membership_model::__disco_task_task::__disco_task_task_inner_function::{closure#0
+== TaskStorage<.*__derp_task.*>>::poll: 1 symbols
+    1632 B  (indirect calls on the path: 4)  <embassy_executor::raw::TaskStorage<s4_membership_model::__derp_task_task::__derp_task_task_inner_fu
+         <embassy_executor::raw::TaskStorage<s4_membership_model::__derp_task_task::__derp_task_task_inner_function::{closure#0}>

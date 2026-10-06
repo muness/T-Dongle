@@ -949,6 +949,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ef0e785f54e316f64a1e14a7a2f061a2ea0b038b284902ca71e1e1f5574cf47"
 dependencies = [
  "document-features",
+ "embedded-storage",
  "esp-hal",
  "esp-hal-procmacros",
  "esp-metadata-generated",
@@ -1621,6 +1622,7 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embassy-time",
  "embassy-usb",
+ "embedded-storage",
  "esp-alloc",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
@@ -1628,12 +1630,16 @@ dependencies = [
  "esp-println",
  "esp-radio",
  "esp-rtos",
+ "esp-storage",
  "static_cell",
  "tdongle-aqm",
  "tdongle-bridge",
+ "tdongle-nvs-format",
+ "tdongle-nvs-read",
  "tdongle-serial",
  "tdongle-spsc",
  "tdongle-traffic",
+ "tdongle-wifi-policy",
 ]
 
 [[package]]
@@ -1842,6 +1848,10 @@ name = "tdongle-nvs-format"
 version = "0.3.0-dev"
 
 [[package]]
+name = "tdongle-nvs-read"
+version = "0.3.0-dev"
+
+[[package]]
 name = "tdongle-serial"
 version = "0.3.0-dev"
 dependencies = [
@@ -1860,6 +1870,13 @@ dependencies = [
 [[package]]
 name = "tdongle-traffic"
 version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-wifi-policy"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-nvs-format",
+]
 
 [[package]]
 name = "termcolor"

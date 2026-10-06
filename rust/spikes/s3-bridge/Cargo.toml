@@ -30,6 +30,11 @@ tdongle-aqm = { path = "../../crates/tdongle-aqm" }
 tdongle-spsc = { path = "../../crates/tdongle-spsc" }
 tdongle-serial = { path = "../../crates/tdongle-serial" }
 tdongle-traffic = { path = "../../crates/tdongle-traffic" }
+tdongle-nvs-read = { path = "../../crates/tdongle-nvs-read" }
+tdongle-nvs-format = { path = "../../crates/tdongle-nvs-format" }
+tdongle-wifi-policy = { path = "../../crates/tdongle-wifi-policy" }
+esp-storage = { version = "0.10", features = ["esp32s3", "embedded-storage"] }
+embedded-storage = "0.3"
 
 [profile.release]
 opt-level = "s"

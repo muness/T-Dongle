@@ -1,0 +1,251 @@
+S4 HOST 64-bit aarch64 (requested bytes, no allocator overhead)
+S4 SIZE sizeof(PeerRecC)  [C ml_peer_t mirror, repr(C)] 464
+S4 SIZE sizeof(PeerRec)   [same fields, Rust repr] 448
+S4 SIZE sizeof(StreamParser) 268
+S4 SIZE sizeof(snow::TransportState) 136
+S4 SIZE sizeof(snow::HandshakeState) 856
+S4 SIZE sizeof(Coord) 480
+S4 SIZE sizeof(wg::Peer)      [C wireguard_peer slot: 904 B ADR0013, 1,096 B ml_admission.h:104] 984
+S4 SIZE sizeof(wg::Keypair) 168
+S4 SIZE sizeof(wg::Handshake) 140
+S4 SIZE sizeof(wg::Device)    [C device with 8 inline slots 7,952 B; 228 B + pool ADR0013] 232
+S4 SIZE sizeof(udp::Socket) 176
+S4 SIZE sizeof(tcp::Socket) 408
+S4 SIZE sizeof(Probe) x32 1024
+S4 SIZE sizeof(Disco) 2768
+S4 SIZE sizeof(TlsConnection<Replay,Aes128GcmSha256>) 1384
+S4 SIZE sizeof(CertVerifier<..,CERT_SIZE=2048>) 2552
+S4 SIZE sizeof(TlsConfig) 192
+S4 SIZE sizeof(tls::Replay) 72
+S4 VARIANT SMALL-TCP(streaming coord, 16640/4096 TLS, 2 wg slots, pointer queues, tcp 2880/1440 + 4320/2880)
+S4 MEMBERSHIP 1 begin heap_now=1755
+S4 PHASE coord.noise_handshake base=1755 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=1819 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=1819 retained=6403 peak=6403 allocs=3 maxalloc=4099 stack=na
+S4 PHASE coord.peer_table base=8222 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=11806 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=32734 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=32734 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=32734 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=32734 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=32734 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=34702 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=34702 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=34702 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=34702 retained=18904 peak=18904 allocs=16 maxalloc=4320 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=53606 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=53798 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=53798 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 1 retained=52043 ok=true
+S4 MEMBERSHIP 2 begin heap_now=58686
+S4 PHASE coord.noise_handshake base=58686 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=58750 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=58750 retained=6403 peak=6403 allocs=3 maxalloc=4099 stack=na
+S4 PHASE coord.peer_table base=65153 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=68737 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=89665 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=89665 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=89665 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=89665 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=89665 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=91633 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=91633 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=91633 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=91633 retained=18904 peak=18904 allocs=16 maxalloc=4320 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=110537 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=110729 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=110729 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 2 retained=52043 ok=true
+S4 MEMBERSHIP 3 begin heap_now=115617
+S4 PHASE coord.noise_handshake base=115617 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=115681 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=115681 retained=6403 peak=6403 allocs=3 maxalloc=4099 stack=na
+S4 PHASE coord.peer_table base=122084 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=125668 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=146596 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=146596 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=146596 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=146596 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=146596 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=148564 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=148564 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=148564 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=148564 retained=18904 peak=18904 allocs=16 maxalloc=4320 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=167468 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=167660 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=167660 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 3 retained=52043 ok=true
+S4 VARIANT DEFAULT(streaming coord, 16640/4096 TLS, 2 wg slots, pointer queues)
+S4 MEMBERSHIP 1 begin heap_now=64539
+S4 PHASE coord.noise_handshake base=64539 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=64603 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=64603 retained=6403 peak=6403 allocs=3 maxalloc=4099 stack=na
+S4 PHASE coord.peer_table base=71006 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=74590 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=95518 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=95518 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=95518 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=95518 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=95518 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=97486 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=97486 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=97486 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=97486 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=132974 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=133166 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=133166 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 1 retained=68627 ok=true
+S4 MEMBERSHIP 2 begin heap_now=138054
+S4 PHASE coord.noise_handshake base=138054 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=138118 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=138118 retained=6403 peak=6403 allocs=3 maxalloc=4099 stack=na
+S4 PHASE coord.peer_table base=144521 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=148105 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=169033 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=169033 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=169033 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=169033 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=169033 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=171001 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=171001 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=171001 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=171001 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=206489 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=206681 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=206681 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 2 retained=68627 ok=true
+S4 MEMBERSHIP 3 begin heap_now=211569
+S4 PHASE coord.noise_handshake base=211569 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=211633 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=211633 retained=6403 peak=6403 allocs=3 maxalloc=4099 stack=na
+S4 PHASE coord.peer_table base=218036 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=221620 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=242548 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=242548 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=242548 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=242548 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=242548 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=244516 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=244516 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=244516 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=244516 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=280004 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=280196 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=280196 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 3 retained=68627 ok=true
+S4 VARIANT C-FIGURE-PRIVATE coord buffers (20496+16384), inline queues, 8 wg slots
+S4 MEMBERSHIP 1 begin heap_now=127323
+S4 PHASE coord.noise_handshake base=127323 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=127387 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=127387 retained=36880 peak=36880 allocs=2 maxalloc=20496 stack=na
+S4 PHASE coord.peer_table base=164267 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=167851 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=188779 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=188779 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=188779 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=188779 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=188779 retained=7872 peak=7872 allocs=8 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=196651 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=196651 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=196651 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=196651 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(inline 8+4 x 1536) base=232139 retained=18456 peak=18456 allocs=4 maxalloc=12288 stack=na
+S4 PHASE disco.state(probes32+shared8) base=250595 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=250595 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 MEMBERSHIP 1 retained=123272 ok=true
+S4 MEMBERSHIP 2 begin heap_now=255483
+S4 PHASE coord.noise_handshake base=255483 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=255547 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=255547 retained=36880 peak=36880 allocs=2 maxalloc=20496 stack=na
+S4 PHASE coord.peer_table base=292427 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=296011 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=316939 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=316939 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=316939 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=316939 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=316939 retained=7872 peak=7872 allocs=8 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=324811 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=324811 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=324811 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=324811 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(inline 8+4 x 1536) base=360299 retained=18456 peak=18456 allocs=4 maxalloc=12288 stack=na
+S4 PHASE disco.state(probes32+shared8) base=378755 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=378755 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 MEMBERSHIP 2 retained=123272 ok=true
+S4 MEMBERSHIP 3 begin heap_now=383643
+S4 PHASE coord.noise_handshake base=383643 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=383707 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=383707 retained=36880 peak=36880 allocs=2 maxalloc=20496 stack=na
+S4 PHASE coord.peer_table base=420587 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=424171 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=445099 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=445099 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=445099 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=445099 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=445099 retained=7872 peak=7872 allocs=8 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=452971 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=452971 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=452971 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=452971 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(inline 8+4 x 1536) base=488459 retained=18456 peak=18456 allocs=4 maxalloc=12288 stack=na
+S4 PHASE disco.state(probes32+shared8) base=506915 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=506915 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 MEMBERSHIP 3 retained=123272 ok=true
+S4 VARIANT SHARED coord workspace (0 per membership), 2 wg slots
+S4 MEMBERSHIP 1 begin heap_now=190107
+S4 PHASE coord.noise_handshake base=190107 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=190171 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=190171 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.peer_table base=190171 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=193755 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=214683 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=214683 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=214683 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=214683 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=214683 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=216651 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=216651 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=216651 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=216651 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=252139 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=252331 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=252331 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 1 retained=62224 ok=true
+S4 MEMBERSHIP 2 begin heap_now=257219
+S4 PHASE coord.noise_handshake base=257219 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=257283 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=257283 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.peer_table base=257283 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=260867 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=281795 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=281795 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=281795 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=281795 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=281795 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=283763 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=283763 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=283763 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=283763 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=319251 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=319443 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=319443 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 2 retained=62224 ok=true
+S4 MEMBERSHIP 3 begin heap_now=324331
+S4 PHASE coord.noise_handshake base=324331 retained=64 peak=969 allocs=12 maxalloc=312 stack=na
+S4 PHASE coord.noise_record_decrypt base=324395 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.buffers base=324395 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE coord.peer_table base=324395 retained=3584 peak=3584 allocs=1 maxalloc=3584 stack=na
+S4 PHASE tls.alloc_record_buffers base=327979 retained=20928 peak=20928 allocs=3 maxalloc=16640 stack=na
+S4 PHASE tls.handshake+verify(TLS1.3,P-256 key share,chain->pinned P-384 anchor) base=348907 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_write_100B base=348907 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE tls.app_read_1200B_then_16000B_record base=348907 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.device base=348907 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.peers_resident base=348907 retained=1968 peak=1968 allocs=2 maxalloc=984 stack=na
+S4 PHASE wg.handshake_initiate base=350875 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.handshake_consume_response base=350875 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE wg.transport_1400B_seal_open base=350875 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE net.sockets(3 udp + 2 tcp, smoltcp) base=350875 retained=35488 peak=35488 allocs=16 maxalloc=8640 stack=na
+S4 PHASE disco.queues(pointer 8+4) base=386363 retained=192 peak=192 allocs=2 maxalloc=128 stack=na
+S4 PHASE disco.state(probes32+shared8) base=386555 retained=0 peak=0 allocs=0 maxalloc=0 stack=na
+S4 PHASE disco.exercise(3 queued pkts + seal/open) base=386555 retained=0 peak=3600 allocs=3 maxalloc=1200 stack=na
+S4 MEMBERSHIP 3 retained=62224 ok=true

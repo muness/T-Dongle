@@ -6,14 +6,12 @@ use alloc::vec::Vec;
 use blake2::{Blake2s256, Digest};
 use chacha20poly1305::aead::{AeadInOut, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
-use hmac::{Hmac, KeyInit as HmacKeyInit, Mac};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 pub const MAX_PEERS: usize = 8; // CONFIG_ML_MAX_PEERS=8 (build-release/sdkconfig:2072)
 pub const REPLAY_RING_BITS: usize = 512; // wireguard_replay.h:25
 pub const REPLAY_BLOCKS: usize = REPLAY_RING_BITS / 32;
 
-type HmacB = Hmac<Blake2s256>;
 const CONSTRUCTION: &[u8] = b"Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s";
 const IDENTIFIER: &[u8] = b"WireGuard v1 zx2c4 Jason@zx2c4.com";
 
@@ -23,10 +21,24 @@ fn hash2(a: &[u8], b: &[u8]) -> [u8; 32] {
     h.update(b);
     h.finalize().into()
 }
+/// HMAC-BLAKE2s-256 (block size 64), as WireGuard defines it.
 fn hmac(key: &[u8], data: &[u8]) -> [u8; 32] {
-    let mut m = <HmacB as HmacKeyInit>::new_from_slice(key).unwrap();
-    m.update(data);
-    m.finalize().into_bytes().into()
+    let mut k = [0u8; 64];
+    k[..key.len()].copy_from_slice(key);
+    let mut ipad = [0x36u8; 64];
+    let mut opad = [0x5cu8; 64];
+    for i in 0..64 {
+        ipad[i] ^= k[i];
+        opad[i] ^= k[i];
+    }
+    let mut h = Blake2s256::new();
+    h.update(ipad);
+    h.update(data);
+    let inner: [u8; 32] = h.finalize().into();
+    let mut h = Blake2s256::new();
+    h.update(opad);
+    h.update(inner);
+    h.finalize().into()
 }
 fn kdf2(ck: &[u8; 32], input: &[u8]) -> ([u8; 32], [u8; 32]) {
     let t0 = hmac(ck, input);
@@ -259,7 +271,7 @@ pub struct Init {
 pub fn initiate(my_sk: &[u8; 32], their_pk: &[u8; 32], e_priv: [u8; 32], index: u32) -> Init {
     let my_pk = pubkey(my_sk);
     let e_pub = pubkey(&e_priv);
-    let ck0 = {
+    let ck0: [u8; 32] = {
         let mut h = Blake2s256::new();
         h.update(CONSTRUCTION);
         h.finalize().into()
