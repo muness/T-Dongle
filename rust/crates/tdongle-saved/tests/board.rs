@@ -95,6 +95,19 @@ mod bss {
     }
 
     #[test]
+    fn the_board_run_where_a_stale_best_read_minus_90_and_the_joined_bss_was_the_true_best() {
+        // 19 access points in the table; the saved SSID has a far BSS (-90, ch1) and the one the radio joined (-59, ch11)
+        let joined = [0x84, 0x78, 0x48, 0x04, 0x2f, 0x7c];
+        let rows = [("other", [1; 6], 6, -40), ("217IoT", [0xa2, 5, 0xd6, 0xf1, 0xba, 0xb8], 1, -90), ("217IoT", joined, 11, -59), ("217IoT", [9; 6], 6, -71)];
+        let best = strongest_bss(b"217IoT", scan(&rows)).unwrap();
+        assert_eq!((best.bssid, best.channel, best.rssi), (joined, 11, -59));
+        // a first, partial scan saw only the far one: its answer is stale once a fuller scan exists, so the answer must be recomputed from the latest scan, never cached
+        let partial = strongest_bss(b"217IoT", scan(&rows[1..2])).unwrap();
+        assert_eq!(partial.rssi, -90);
+        assert_ne!(partial, best);
+    }
+
+    #[test]
     fn usable_is_judged_per_access_point() {
         let rows = [("217IoT", FAR, 1, -88), ("217IoT", NEAR, 11, -84)];
         let best = strongest_bss(b"217IoT", scan(&rows)).unwrap();

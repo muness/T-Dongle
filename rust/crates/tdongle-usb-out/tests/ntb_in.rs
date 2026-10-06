@@ -89,22 +89,26 @@ fn unaligned_lengths_keep_every_datagram_aligned_and_the_block_length_exact() {
 fn the_elastic_policy_follows_adr_0023() {
     let chunk = 2 * 1524;
     // idle ring at the base: nothing
-    assert_eq!(elastic::step(0, 8, chunk, 60_000, 0), Step::None);
+    assert_eq!(elastic::step(0, 8, 28, chunk, 60_000, 0), Step::None);
     // a burst fills the base: grow while the heap allows (floor 29,884 + the chunk)
-    assert_eq!(elastic::step(7, 8, chunk, 60_000, 0), Step::Grow);
-    assert_eq!(elastic::step(8, 8, chunk, 60_000, 0), Step::Grow);
-    assert_eq!(elastic::step(7, 8, chunk, elastic::FLOOR_FREE + chunk - 1, 0), Step::DeniedHeap);
-    assert_eq!(elastic::step(7, 8, chunk, elastic::FLOOR_FREE + chunk, 0), Step::Grow);
+    assert_eq!(elastic::step(7, 8, 28, chunk, 60_000, 0), Step::Grow);
+    assert_eq!(elastic::step(8, 8, 28, chunk, 60_000, 0), Step::Grow);
+    assert_eq!(elastic::step(7, 8, 28, chunk, elastic::FLOOR_FREE + chunk - 1, 0), Step::DeniedHeap);
+    assert_eq!(elastic::step(7, 8, 28, chunk, elastic::FLOOR_FREE + chunk, 0), Step::Grow);
     // never past 28 slots
-    assert_eq!(elastic::step(27, 28, chunk, 100_000, 0), Step::None);
+    assert_eq!(elastic::step(27, 28, 28, chunk, 100_000, 0), Step::None);
+    // a raised limit (console `ring max 44`) lets it grow on; a lowered one shrinks without waiting for idle
+    assert_eq!(elastic::step(27, 28, 44, chunk, 100_000, 0), Step::Grow);
+    assert_eq!(elastic::step(0, 28, 12, chunk, 100_000, 0), Step::Shrink);
+    assert_eq!(elastic::step(27, 28, 12, chunk, 100_000, 0), Step::None);
     assert_eq!(elastic::MAX_SLOTS, 28);
     // idle for 2 s with room: shrink one chunk, never below the base
-    assert_eq!(elastic::step(0, 12, chunk, 60_000, 2_000), Step::Shrink);
-    assert_eq!(elastic::step(0, 12, chunk, 60_000, 1_999), Step::None);
-    assert_eq!(elastic::step(0, 8, chunk, 60_000, 10_000), Step::None);
-    assert_eq!(elastic::step(11, 12, chunk, 60_000, 5_000), Step::Grow, "busy wins over idle");
+    assert_eq!(elastic::step(0, 12, 28, chunk, 60_000, 2_000), Step::Shrink);
+    assert_eq!(elastic::step(0, 12, 28, chunk, 60_000, 1_999), Step::None);
+    assert_eq!(elastic::step(0, 8, 28, chunk, 60_000, 10_000), Step::None);
+    assert_eq!(elastic::step(11, 12, 28, chunk, 60_000, 5_000), Step::Grow, "busy wins over idle");
     // a chunk that is still in use is not freed
-    assert_eq!(elastic::step(11, 14, chunk, 60_000, 5_000), Step::None);
+    assert_eq!(elastic::step(11, 14, 28, chunk, 60_000, 5_000), Step::None);
 }
 
 #[test]

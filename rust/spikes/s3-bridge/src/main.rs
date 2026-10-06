@@ -76,7 +76,7 @@ const WIFI_TX_QUEUE: usize = 6;
 const WIFI_RX_QUEUE: usize = 8;
 /// Heap: 64 KiB reclaimed (post-bootloader DRAM) + this regular region.
 const HEAP_RECLAIMED: usize = 64 * 1024;
-const HEAP_REGULAR: usize = 60 * 1024; // +12 KiB: the ring's 8 permanent slots moved from .bss into the heap (elastic ring, ADR 0023)
+const HEAP_REGULAR: usize = 128 * 1024; // DRAM has ~210 KB free beyond .data/.bss: the ring (28 slots = 42 KB) and the TX budget's heap floor (29,884 B) both live in this heap
 const CPU_MHZ: u32 = 240;
 
 type Drv = UsbDriver<'static>;
@@ -121,6 +121,8 @@ static LAST_BUSY_MS: AtomicU32 = AtomicU32::new(0);
 static RX_LAST_US: AtomicU32 = AtomicU32::new(0);
 static RX_BURST_LEN: AtomicU32 = AtomicU32::new(0);
 static RX_BURST_MAX: AtomicU32 = AtomicU32::new(0);
+/// Gap between consecutive Wi-Fi frames: under 100 us, 100-299, 300-999, 1-3 ms, over 3 ms.
+static RX_GAP_HIST: [AtomicU32; 5] = [const { AtomicU32::new(0) }; 5];
 static RX_BURSTS_GE4: AtomicU32 = AtomicU32::new(0);
 static NTB_IN_COUNT: AtomicU32 = AtomicU32::new(0);
 static NTB_IN_FRAMES: AtomicU32 = AtomicU32::new(0);
@@ -162,7 +164,9 @@ static RESUME_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 // ---- Wi-Fi -> host: bounded drop-tail ring of whole frames (the C's slab ring, simplified) ----
 /// The Wi-Fi to host frame ring, ADR 0023: 8 permanent slots and up to 10 elastic chunks of 2, 28 in all (`tdongle_usb_out::elastic`), the C ring's capacity. Slots are heap boxes; only the
 /// housekeeping task (thread executor) allocates or frees them, never the producer in the Wi-Fi task, which just copies into a free one under a short critical section.
-const MAX_SLOTS: usize = tdongle_usb_out::elastic::MAX_SLOTS;
+const MAX_SLOTS: usize = tdongle_usb_out::elastic::STORAGE_SLOTS;
+/// The ring's limit now (console `ring max N`): the C's 28 by default.
+static RING_MAX: AtomicU32 = AtomicU32::new(tdongle_usb_out::elastic::MAX_SLOTS as u32);
 const BASE_SLOTS: usize = tdongle_usb_out::elastic::BASE_SLOTS;
 const RING_SLOTS: usize = BASE_SLOTS;
 
@@ -299,10 +303,19 @@ impl Env for FwEnv {
         if frame.is_empty() || frame.len() > MTU {
             return RingSend::Invalid;
         }
-        // the shape of the Wi-Fi bursts: frames within 2 ms of each other belong to one burst (an A-MPDU delivers its subframes back to back)
+        // the shape of the Wi-Fi bursts: frames within 300 us of each other belong to one burst (an A-MPDU delivers its subframes back to back; at 6 Mbit/s consecutive frames of a
+        // steady flow are about 2 ms apart, so a 2 ms window counted the whole stream as one burst)
         let now = Instant::now().as_micros() as u32;
         let gap = now.wrapping_sub(RX_LAST_US.swap(now, Ordering::Relaxed));
-        let burst = if gap < 2_000 { RX_BURST_LEN.fetch_add(1, Ordering::Relaxed) + 1 } else {
+        RX_GAP_HIST[match gap {
+            0..=99 => 0,
+            100..=299 => 1,
+            300..=999 => 2,
+            1_000..=2_999 => 3,
+            _ => 4,
+        }]
+        .fetch_add(1, Ordering::Relaxed);
+        let burst = if gap < 300 { RX_BURST_LEN.fetch_add(1, Ordering::Relaxed) + 1 } else {
             RX_BURST_LEN.store(1, Ordering::Relaxed);
             1
         };
@@ -1166,7 +1179,7 @@ async fn ring_housekeeping_task() -> ! {
         });
         let now = Instant::now().as_millis() as u32;
         let idle = now.wrapping_sub(LAST_BUSY_MS.load(Ordering::Relaxed));
-        match elastic::step(used, cap, elastic::CHUNK_SLOTS * core::mem::size_of::<RingSlot>(), esp_alloc::HEAP.free(), idle) {
+        match elastic::step(used, cap, RING_MAX.load(Ordering::Relaxed) as usize, elastic::CHUNK_SLOTS * core::mem::size_of::<RingSlot>(), esp_alloc::HEAP.free(), idle) {
             Step::Grow => {
                 let a = alloc::boxed::Box::new(RingSlot { len: 0, data: [0; MTU] });
                 let b = alloc::boxed::Box::new(RingSlot { len: 0, data: [0; MTU] });
@@ -1251,6 +1264,38 @@ fn scan_text(out: &mut String) {
     let _ = write!(out, "scan_done seen={} listed={} seq={}\r\n", seen, count, seq);
 }
 
+/// The strongest access point of the joined network's SSID in the latest scan table.
+fn best_from_latest_scan() -> Option<Bss> {
+    let selected = SELECTED.load(Ordering::Relaxed);
+    let ssid: heapless_ssid::Ssid = SAVED.lock(|c| c.borrow().as_ref().and_then(|l| l.saved.list().get(usize::try_from(selected).ok()?).map(|p| heapless_ssid::Ssid::from(p.ssid_bytes()))))?;
+    critical_section::with(|cs| {
+        let t = SCAN_TABLE.borrow_ref(cs);
+        tdongle_saved::strongest_bss(ssid.as_bytes(), t.rows[..t.count].iter().map(|r| (&r.ssid[..usize::from(r.ssid_len)], r.bss.bssid, r.bss.channel, r.bss.rssi)))
+    })
+}
+
+/// A copy of an SSID (up to 32 bytes) that can leave a lock.
+mod heapless_ssid {
+    #[derive(Clone, Copy)]
+    pub struct Ssid {
+        b: [u8; 32],
+        n: usize,
+    }
+    impl From<&[u8]> for Ssid {
+        fn from(s: &[u8]) -> Self {
+            let n = s.len().min(32);
+            let mut b = [0; 32];
+            b[..n].copy_from_slice(&s[..n]);
+            Self { b, n }
+        }
+    }
+    impl Ssid {
+        pub fn as_bytes(&self) -> &[u8] {
+            &self.b[..self.n]
+        }
+    }
+}
+
 fn bssid_text(b: Option<Bss>, out: &mut String) {
     match b {
         Some(b) => {
@@ -1324,7 +1369,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         dropped_full: RING_FULL.load(Ordering::Relaxed),
         dropped_link_down: RING_NOT_READY.load(Ordering::Relaxed),
         flushed_link_down: RING_FLUSHED.load(Ordering::Relaxed),
-        max_bytes: (MAX_SLOTS * MTU) as u32,
+        max_bytes: RING_MAX.load(Ordering::Relaxed) * MTU as u32,
         grow_events: RING_GROWS.load(Ordering::Relaxed),
         shrink_events: RING_SHRINKS.load(Ordering::Relaxed),
         grow_denied_heap: RING_GROW_DENIED.load(Ordering::Relaxed),
@@ -1388,7 +1433,9 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
     let frames = NTB_IN_FRAMES.load(Ordering::Relaxed);
     let _ = write!(
         out,
-        "s3_ring cap={} used={} high={} full={} grows={} shrinks={} grow_denied={} rx_burst_max={} rx_bursts_ge4={} ntb_in={} ntb_in_frames={} ntb_in_frames_max={} ntb_hist_1_2_4_8={}/{}/{}/{} avg_x100={}\r\n",
+        "s3_ring max={} heap_min={} cap={} used={} high={} full={} grows={} shrinks={} grow_denied={} rx_gap_hist={}/{}/{}/{}/{} rx_burst_max={} rx_bursts_ge4={} ntb_in={} ntb_in_frames={} ntb_in_frames_max={} ntb_hist_1_2_4_8={}/{}/{}/{} avg_x100={}\r\n",
+        RING_MAX.load(Ordering::Relaxed),
+        l2::HEAP_MIN.load(Ordering::Relaxed),
         cap,
         used,
         RING_HIGH.load(Ordering::Relaxed),
@@ -1396,6 +1443,11 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         RING_GROWS.load(Ordering::Relaxed),
         RING_SHRINKS.load(Ordering::Relaxed),
         RING_GROW_DENIED.load(Ordering::Relaxed),
+        RX_GAP_HIST[0].load(Ordering::Relaxed),
+        RX_GAP_HIST[1].load(Ordering::Relaxed),
+        RX_GAP_HIST[2].load(Ordering::Relaxed),
+        RX_GAP_HIST[3].load(Ordering::Relaxed),
+        RX_GAP_HIST[4].load(Ordering::Relaxed),
         RX_BURST_MAX.load(Ordering::Relaxed),
         RX_BURSTS_GE4.load(Ordering::Relaxed),
         ntbs,
@@ -1409,6 +1461,9 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
     );
     // where the radio is: the access point it joined and the strongest one the scan saw for the chosen SSID (they must agree unless the driver chose otherwise)
     let (joined, best) = critical_section::with(|cs| (*BSS_JOINED.borrow_ref(cs), *BSS_BEST.borrow_ref(cs)));
+    // `best` while connected: the strongest access point of the joined SSID in the LATEST scan (`scan` refreshes it); the one computed before the join is only what the
+    // first, possibly partial scan saw (it once read -90 dBm while the joined BSS was -59)
+    let best = if CONNECTED_NOW.load(Ordering::Relaxed) { best_from_latest_scan().or(best) } else { best };
     out.push_str("s3_bss joined=");
     bssid_text(if CONNECTED_NOW.load(Ordering::Relaxed) { joined } else { None }, out);
     out.push_str(" best=");
@@ -1509,6 +1564,13 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 supervise::selftest(kind);
             }
             None => s.push_str("usage: selftest spin|irqoff|panic|console\r\n"),
+        },
+        r if r.starts_with("ring max ") => match r["ring max ".len()..].trim().parse::<u32>() {
+            Ok(n) if (8..=tdongle_usb_out::elastic::STORAGE_SLOTS as u32).contains(&n) => {
+                RING_MAX.store(n, Ordering::Relaxed);
+                let _ = write!(s, "ring max {} slots (the C: 28); the housekeeping task grows or shrinks to it\r\n", n);
+            }
+            _ => s.push_str("usage: ring max 8..48\r\n"),
         },
         "init" => {
             let note = critical_section::with(|cs| *INIT_NOTE.borrow_ref(cs));

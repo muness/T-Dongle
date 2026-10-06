@@ -59,6 +59,8 @@ pub static RX_IGNORED: AtomicU32 = AtomicU32::new(0);
 /// `esp_wifi_internal_tx` refusals by the driver (not budget refusals).
 pub static TX_DRIVER_ERR: AtomicU32 = AtomicU32::new(0);
 pub static TX_LAST_ERR: AtomicU32 = AtomicU32::new(0);
+/// The lowest free heap seen at a TX admission (the budget refuses past its band when free heap minus the frame would fall under 29,884 B): shows whether `refused_heap` is the heap or the threshold.
+pub static HEAP_MIN: AtomicU32 = AtomicU32::new(u32::MAX);
 /// Woken by every tx-done: the worker waits on it for room.
 pub static TX_DONE_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
@@ -115,6 +117,7 @@ pub fn register() {
 /// Send one frame on the STA interface, charged to the budget (`wifi_pins_tx`). `NoMem`: refused for buffers; the bridge retries for a few milliseconds.
 pub fn tx(frame: &[u8]) -> Result<(), TxError> {
     let length = frame.len() as u16;
+    HEAP_MIN.fetch_min(esp_alloc::HEAP.free() as u32, Ordering::Relaxed);
     let sent = PINS.tx(TX_DONE_OK.load(Ordering::Acquire), u32::from(length), esp_alloc::HEAP.free(), now_ms(), || {
         // SAFETY: `frame` is readable for `length` bytes; the driver copies it into its own buffer before returning.
         let code = unsafe { sys::esp_wifi_internal_tx(sys::wifi_interface_t_WIFI_IF_STA, frame.as_ptr().cast_mut().cast(), length) };
