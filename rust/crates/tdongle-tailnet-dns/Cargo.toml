@@ -1,0 +1,17 @@
+[package]
+name = "tdongle-tailnet-dns"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The DNS responder/forwarder the gateway offers the USB host (192.168.77.1:53): tailnet and MagicDNS names answered with peer aliases, everything else forwarded to the Wi-Fi resolver with ID mapping. Sans-IO, bounded parser, allocation free."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
