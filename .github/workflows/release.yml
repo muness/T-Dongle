@@ -34,8 +34,7 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dryrun"; fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
-      - if: env.PREPARED_IDF != 'true'
-        name: Install Go for control protocol interoperability tests
+      - name: Install Go for control protocol interoperability tests
         uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
@@ -57,7 +56,7 @@ jobs:
         run: |
           set -e
           export TDONGLE_VERSION='${{ steps.ver.outputs.version }}'
-          # Tools (including Go) are baked into the approved runner; no Docker socket, image pull or download.
+          # ESP-IDF and build tools are baked into the approved runner (Go is installed by setup-go above); no Docker socket, image pull or download.
           git config --global --add safe.directory /opt/esp/idf
           . /opt/esp/idf/export.sh
           idf.py --version | grep -Fx 'ESP-IDF v5.5.5'

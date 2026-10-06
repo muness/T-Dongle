@@ -21,8 +21,7 @@ jobs:
       PREPARED_IDF: ${{ vars.LOCAL_LINUX_CI_ENABLED == 'true' && github.repository == 'muness/T-Dongle' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: actions/checkout@v4
-      - if: env.PREPARED_IDF != 'true'
-        name: Install Go for control protocol interoperability tests
+      - name: Install Go for control protocol interoperability tests
         uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
@@ -42,7 +41,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          # Tools (including Go) are baked into the approved runner; no Docker socket, image pull or download.
+          # ESP-IDF and build tools are baked into the approved runner (Go is installed by setup-go above); no Docker socket, image pull or download.
           git config --global --add safe.directory /opt/esp/idf
           . /opt/esp/idf/export.sh
           idf.py --version | grep -Fx 'ESP-IDF v5.5.5'
