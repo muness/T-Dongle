@@ -17,6 +17,8 @@ const FIXTURES: &[(&str, &[u8], &str)] = &[
     ("many_v2", include_bytes!("fixtures/many_v2.bin"), include_str!("fixtures/many_v2.expected")),
     ("overwrite_v2", include_bytes!("fixtures/overwrite_v2.bin"), include_str!("fixtures/overwrite_v2.expected")),
     ("overwrite_v1", include_bytes!("fixtures/overwrite_v1.bin"), include_str!("fixtures/overwrite_v1.expected")),
+    ("board_v01", include_bytes!("fixtures/board_v01.bin"), include_str!("fixtures/board_v01.expected")),
+    ("board_v03", include_bytes!("fixtures/board_v03.bin"), include_str!("fixtures/board_v03.expected")),
     ("tiny_v2", include_bytes!("fixtures/tiny_v2.bin"), include_str!("fixtures/tiny_v2.expected")),
 ];
 

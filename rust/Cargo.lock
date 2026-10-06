@@ -1500,6 +1500,15 @@ name = "tdongle-pm"
 version = "0.3.0-dev"
 
 [[package]]
+name = "tdongle-saved"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-nvs-format",
+ "tdongle-nvs-read",
+ "tdongle-wifi-policy",
+]
+
+[[package]]
 name = "tdongle-serial"
 version = "0.3.0-dev"
 dependencies = [

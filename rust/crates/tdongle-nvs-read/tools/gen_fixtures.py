@@ -113,6 +113,77 @@ def rows_overwrite():
     ]
 
 
+BOARD_NETS = [('217IoT', 'iot-password-217', 'Home', 50), ('iPhone', 'phone-password', 'Phone', 80), ('217IoT_EXT', 'iot-password-217', 'Extender', 60)]
+
+
+def legacy_blob(nets, preferred):
+    """adapter/config of the v0.1.x firmware: u32 version=1, 8 x profile_t {name[25], ssid[33], pass[65], priority}, preferred @996, brightness, rotation,
+    pad, dim_seconds u16 @1000, 2 bytes of tail padding (1004 bytes)."""
+    b = struct.pack('<I', 1)
+    for i in range(8):
+        if i < len(nets):
+            ssid, pw, name, prio = nets[i]
+            b += name.encode().ljust(25, b'\0') + ssid.encode().ljust(33, b'\0') + pw.encode().ljust(65, b'\0') + bytes([prio])
+        else:
+            b += bytes(124)
+    b += bytes([preferred, 60, 0, 0]) + struct.pack('<H', 30) + bytes(2)
+    assert len(b) == 1004
+    return b
+
+
+def wifi_config_blob(ssid, password):
+    """tn_settings/wifi: a wifi_config_t (184 bytes in IDF v5.5.5: sta = ssid[32], password[64], ...), as `nvs_set_blob(store, "wifi", &wifi_config)`."""
+    b = ssid.encode().ljust(32, b'\0') + password.encode().ljust(64, b'\0')
+    return b + bytes(184 - len(b))
+
+
+def meta_blob_for(nets, preferred_ssid):
+    b = struct.pack('<II', 1, len(nets)) + preferred_ssid.encode().ljust(33, b'\0')
+    for i in range(8):
+        if i < len(nets):
+            ssid, _pw, name, prio = nets[i]
+            b += ssid.encode().ljust(33, b'\0') + name.encode().ljust(25, b'\0') + bytes([prio])
+        else:
+            b += bytes(59)
+    b += bytes(3)
+    assert len(b) == 516
+    return b
+
+
+def profiles_for(nets):
+    b = struct.pack('<II', 1, len(nets))
+    for i in range(8):
+        s, p = (nets[i][0], nets[i][1]) if i < len(nets) else ('', '')
+        b += s.encode().ljust(33, b'\0') + p.encode().ljust(64, b'\0')
+    assert len(b) == 784
+    return b
+
+
+def rows_board_v01():
+    """A board that ran the v0.1.x bridge firmware, then the unified firmware without ever saving the list: the first network is the driver's
+    single `tn_settings/wifi` config, the others are only in `adapter/config`. There is no `wifi_profiles` key."""
+    return [
+        ('tn_settings', 'namespace', '', ''),
+        ('mode', 'data', 'u8', 1),
+        ('wifi', 'blob', 'binary', wifi_config_blob('217IoT', 'iot-password-217')),
+        ('adapter', 'namespace', '', ''),
+        ('config', 'blob', 'binary', legacy_blob([BOARD_NETS[1], BOARD_NETS[2], BOARD_NETS[0]], 0)),
+    ]
+
+
+def rows_board_v03():
+    """A board that saved its list with the unified firmware: `wifi_profiles` and `wifi_meta` (preferred = iPhone), and the old keys still there."""
+    return [
+        ('tn_settings', 'namespace', '', ''),
+        ('mode', 'data', 'u8', 1),
+        ('wifi', 'blob', 'binary', wifi_config_blob('217IoT', 'iot-password-217')),
+        ('wifi_profiles', 'blob', 'binary', profiles_for(BOARD_NETS)),
+        ('wifi_meta', 'blob', 'binary', meta_blob_for(BOARD_NETS, 'iPhone')),
+        ('adapter', 'namespace', '', ''),
+        ('config', 'blob', 'binary', legacy_blob([BOARD_NETS[1]], 0)),
+    ]
+
+
 def write_csv(rows, path, tmp):
     with open(path, 'w', newline='') as f:
         w = csv.writer(f)
@@ -193,6 +264,8 @@ def main():
     generate('many_v2', rows_many())
     generate('overwrite_v2', rows_overwrite())
     generate('overwrite_v1', [r for r in rows_overwrite() if r[0] != 'big'], version=1)
+    generate('board_v01', rows_board_v01())
+    generate('board_v03', rows_board_v03())
     # A one-page image (the generator emits 0x1000 bytes for a 0x2000 request).
     generate('tiny_v2', rows_main()[:4], size=0x2000)
 

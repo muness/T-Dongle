@@ -1,0 +1,15 @@
+[package]
+name = "tdongle-saved"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-nvs-read = { path = "../tdongle-nvs-read" }
+tdongle-nvs-format = { path = "../tdongle-nvs-format" }
+tdongle-wifi-policy = { path = "../tdongle-wifi-policy" }

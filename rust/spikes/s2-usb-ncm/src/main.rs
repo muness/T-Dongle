@@ -42,6 +42,15 @@ static HOLD_SINCE_MS: AtomicU32 = AtomicU32::new(0);
 static ALT: AtomicU8 = AtomicU8::new(0);
 static DTR: AtomicBool = AtomicBool::new(false);
 static RESETS: AtomicU32 = AtomicU32::new(0);
+/// What the data path does with OUT datagrams and the IN endpoint (console `reflect`, `sink`, `source`): measure each USB direction alone.
+const MODE_REFLECT: u8 = 0;
+const MODE_SINK: u8 = 1;
+const MODE_SOURCE: u8 = 2;
+static MODE: AtomicU8 = AtomicU8::new(MODE_REFLECT);
+/// `source` rate in kbit/s of frame bytes; 0 = as fast as the endpoint takes them.
+static SOURCE_KBPS: AtomicU32 = AtomicU32::new(0);
+/// Length of the dummy frames `source` sends (a 1,442 B Ethernet frame, header included).
+const SOURCE_FRAME: usize = 1442;
 
 struct Frame {
     len: usize,
@@ -240,7 +249,9 @@ async fn rx_task(mut rx: NcmReceiver) -> ! {
                     f.len = n;
                     RX_FRAMES.fetch_add(1, Ordering::Relaxed);
                     RX_BYTES.fetch_add(n as u32, Ordering::Relaxed);
-                    if n >= 14 {
+                    if MODE.load(Ordering::Relaxed) != MODE_REFLECT {
+                        // `sink`/`source`: counted above, not echoed
+                    } else if n >= 14 {
                         let (dst, rest) = f.data.split_at_mut(6);
                         dst.swap_with_slice(&mut rest[..6]);
                         if REFLECT.is_full() {
@@ -266,8 +277,44 @@ async fn rx_task(mut rx: NcmReceiver) -> ! {
 
 #[embassy_executor::task]
 async fn tx_task(mut tx: NcmSender) -> ! {
+    let mut dummy = [0u8; SOURCE_FRAME];
+    dummy[0..6].fill(0xff); // broadcast
+    dummy[6..12].copy_from_slice(&[0x02, 0x54, 0x44, 0x53, 0x32, 0x01]); // locally administered source
+    dummy[12..14].copy_from_slice(&0x88b5u16.to_be_bytes()); // IEEE 802 local experimental ethertype
+    let mut seq = 0u32;
+    let mut next = Instant::now();
     loop {
-        let f = REFLECT.receive().await;
+        if MODE.load(Ordering::Relaxed) == MODE_SOURCE {
+            dummy[14..18].copy_from_slice(&seq.to_be_bytes());
+            match tx.write_packet(&dummy).await {
+                Ok(()) => {
+                    seq = seq.wrapping_add(1);
+                    TX_FRAMES.fetch_add(1, Ordering::Relaxed);
+                    TX_BYTES.fetch_add(SOURCE_FRAME as u32, Ordering::Relaxed);
+                }
+                Err(_) => Timer::after(Duration::from_millis(10)).await, // not configured / endpoint disabled
+            }
+            let kbps = SOURCE_KBPS.load(Ordering::Relaxed);
+            if kbps != 0 {
+                // frame bits / (kbit/s) = ms per 1000 frames-bits: interval in us = bytes * 8 * 1000 / kbps
+                next += Duration::from_micros(SOURCE_FRAME as u64 * 8 * 1000 / u64::from(kbps));
+                let now = Instant::now();
+                if next > now {
+                    Timer::at(next).await;
+                } else if now - next > Duration::from_millis(100) {
+                    next = now; // the endpoint cannot keep up with this rate: do not bank a backlog
+                }
+            } else {
+                next = Instant::now();
+            }
+            continue;
+        }
+        next = Instant::now();
+        // reflect: echo what rx_task queued; wake regularly to notice a mode change
+        let Ok(f) = embassy_time::with_timeout(Duration::from_millis(50), REFLECT.receive()).await else { continue };
+        if MODE.load(Ordering::Relaxed) != MODE_REFLECT {
+            continue; // a frame queued before the switch to `sink`/`source`: dropped
+        }
         if tx.write_packet(&f.data[..f.len]).await.is_ok() {
             TX_FRAMES.fetch_add(1, Ordering::Relaxed);
             TX_BYTES.fetch_add(f.len as u32, Ordering::Relaxed);
@@ -330,7 +377,9 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
             reply(
                 port,
                 format_args!(
-                    "status mode=spike_s2 up_ms={} alt={} dtr={} resets={} hold={} rx_ntbs={} rx_frames={} rx_bytes={} rx_runt={} rx_bad_ntb={} rx_drop={} tx_frames={} tx_bytes={} chan_full={} filter={:#x} ntb_in={}",
+                    "status mode=spike_s2 path={}{} up_ms={} alt={} dtr={} resets={} hold={} rx_ntbs={} rx_frames={} rx_bytes={} rx_runt={} rx_bad_ntb={} rx_drop={} tx_frames={} tx_bytes={} chan_full={} filter={:#x} ntb_in={}",
+                    ["reflect", "sink", "source"][usize::from(MODE.load(Ordering::Relaxed)).min(2)],
+                    if MODE.load(Ordering::Relaxed) == MODE_SOURCE { if SOURCE_KBPS.load(Ordering::Relaxed) == 0 { "(max)" } else { "(rate)" } } else { "" },
                     up,
                     ALT.load(Ordering::Relaxed),
                     DTR.load(Ordering::Relaxed) as u8,
@@ -350,6 +399,30 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
                 ),
             )
             .await
+        }
+        "reflect" => {
+            MODE.store(MODE_REFLECT, Ordering::Relaxed);
+            reply(port, format_args!("path reflect: OUT datagrams are echoed (default)")).await
+        }
+        "sink" => {
+            MODE.store(MODE_SINK, Ordering::Relaxed);
+            reply(port, format_args!("path sink: OUT datagrams are counted (rx_frames, rx_bytes) and dropped, nothing is sent on IN")).await
+        }
+        c if c == "source" || c.starts_with("source ") => {
+            let arg = c.strip_prefix("source").unwrap_or("").trim();
+            let kbps = if arg == "max" { Some(0) } else { arg.parse::<u32>().ok().filter(|k| *k > 0) };
+            match kbps {
+                Some(k) => {
+                    SOURCE_KBPS.store(k, Ordering::Relaxed);
+                    MODE.store(MODE_SOURCE, Ordering::Relaxed);
+                    if k == 0 {
+                        reply(port, format_args!("path source: {} B broadcast frames on IN as fast as the endpoint takes them (tx_frames, tx_bytes)", SOURCE_FRAME)).await
+                    } else {
+                        reply(port, format_args!("path source: {} B broadcast frames on IN at {} kbit/s (tx_frames, tx_bytes)", SOURCE_FRAME, k)).await
+                    }
+                }
+                None => reply(port, format_args!("usage: source RATE_KBPS|max")).await,
+            }
         }
         "hold on" => {
             HOLD_SINCE_MS.store(Instant::now().as_millis() as u32, Ordering::Relaxed);
@@ -371,7 +444,7 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
             Timer::after(Duration::from_millis(200)).await;
             ops::enter_bootloader()
         }
-        "help" | "?" => reply(port, format_args!("commands: status | boot-status | bootloader | hold on | hold off | help")).await,
+        "help" | "?" => reply(port, format_args!("commands: status | boot-status | bootloader | reflect | sink | source RATE_KBPS|max | hold on | hold off | help")).await,
         _ => reply(port, format_args!("unknown command: {}", cmd)).await,
     }
 }
