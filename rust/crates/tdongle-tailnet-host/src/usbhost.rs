@@ -76,11 +76,43 @@ impl UsbFrames for FakeUsb {
 enum Cmd {
     WaitDhcp(mpsc::Sender<Result<[u8; 4], String>>, Duration),
     Resolve(String, mpsc::Sender<Result<[u8; 4], String>>, Duration),
-    Echo { addr: [u8; 4], port: u16, payload: Vec<u8>, reply: mpsc::Sender<Result<Vec<u8>, String>>, timeout: Duration },
-    Get { addr: [u8; 4], port: u16, bytes: usize, reply: mpsc::Sender<Result<(usize, Duration), String>>, timeout: Duration },
-    Upload { addr: [u8; 4], port: u16, bytes: usize, reply: mpsc::Sender<Result<(usize, Duration), String>>, timeout: Duration },
-    EchoLoop { addr: [u8; 4], port: u16, payload: Vec<u8>, interval: Duration, stop: Arc<AtomicBool>, counts: (Arc<AtomicU32>, Arc<AtomicU32>), reply: mpsc::Sender<()> },
-    UdpEcho { addr: [u8; 4], port: u16, payload: Vec<u8>, reply: mpsc::Sender<Result<Vec<u8>, String>>, timeout: Duration },
+    Echo {
+        addr: [u8; 4],
+        port: u16,
+        payload: Vec<u8>,
+        reply: mpsc::Sender<Result<Vec<u8>, String>>,
+        timeout: Duration,
+    },
+    Get {
+        addr: [u8; 4],
+        port: u16,
+        bytes: usize,
+        reply: mpsc::Sender<Result<(usize, Duration), String>>,
+        timeout: Duration,
+    },
+    Upload {
+        addr: [u8; 4],
+        port: u16,
+        bytes: usize,
+        reply: mpsc::Sender<Result<(usize, Duration), String>>,
+        timeout: Duration,
+    },
+    EchoLoop {
+        addr: [u8; 4],
+        port: u16,
+        payload: Vec<u8>,
+        interval: Duration,
+        stop: Arc<AtomicBool>,
+        counts: (Arc<AtomicU32>, Arc<AtomicU32>),
+        reply: mpsc::Sender<()>,
+    },
+    UdpEcho {
+        addr: [u8; 4],
+        port: u16,
+        payload: Vec<u8>,
+        reply: mpsc::Sender<Result<Vec<u8>, String>>,
+        timeout: Duration,
+    },
     Stop,
 }
 

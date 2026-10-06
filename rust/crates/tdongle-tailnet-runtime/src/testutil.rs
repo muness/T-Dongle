@@ -66,10 +66,12 @@ impl Platform for TestPlatform {
     }
 }
 
+type Store = BTreeMap<(String, String), Vec<u8>>;
+
 /// NVS in memory; clones share.
 #[derive(Clone, Debug, Default)]
 pub struct TestStorage {
-    pub map: Arc<Mutex<BTreeMap<(String, String), Vec<u8>>>>,
+    pub map: Arc<Mutex<Store>>,
     pub fail: Arc<std::sync::atomic::AtomicBool>,
 }
 

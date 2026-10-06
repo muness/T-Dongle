@@ -1,8 +1,9 @@
 //! Any Ethernet frame the USB host sends the runtime's USB side (ARP, DHCP, ICMP to the dongle, DNS, alias traffic, everything the NAT would take): no
 //! panic, every frame ends as exactly one `UsbAction`, and what the runtime builds for the host is a well-formed frame.
 //!
-//! Needs `tdongle-tailnet-runtime = { path = "../crates/tdongle-tailnet-runtime", features = ["size-probe"] }` in `rust/fuzz/Cargo.toml` (the feature brings the
-//! stub platform and storage; it also needs `tdongle-tailnet-usbnet`).
+//! Needs in `rust/fuzz/Cargo.toml`: `tdongle-tailnet-runtime = { path = "../crates/tdongle-tailnet-runtime", features = ["size-probe"] }` (the feature brings the
+//! stub platform and storage), plus `embassy-time = { version = "0.5", features = ["std", "generic-queue-64"] }` and
+//! `critical-section = { version = "1.2", features = ["std"] }` (the runtime links a time driver and a critical-section implementation).
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use std::cell::RefCell;

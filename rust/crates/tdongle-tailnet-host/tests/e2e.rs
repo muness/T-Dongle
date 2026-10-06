@@ -47,6 +47,8 @@ fn derp_only_end_to_end() {
     assert_eq!(&hip[..3], &[192, 168, 77]);
     let alias = gw.host.resolve("gopeer.lab.tailnet", Duration::from_secs(10)).expect("dns");
     assert_eq!(&alias[..2], &[198, 18]);
+    // the MagicDNS name of the tailnet resolves to the same alias (the domain is the membership's own published name minus its first label)
+    assert_eq!(gw.host.resolve("gopeer.tailnet.test", Duration::from_secs(10)).expect("magicdns"), alias);
     let echoed = gw.host.echo(alias, 7, b"hello over derp", Duration::from_secs(30)).expect("echo");
     assert_eq!(echoed, b"hello over derp");
     let (derp, direct) = gw.sent();

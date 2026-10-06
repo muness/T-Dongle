@@ -222,5 +222,5 @@ fn the_handle_life_cycle_over_a_real_embassy_stack() {
 fn buffer_accounting_matches_the_const_generics() {
     assert_eq!(GatewayBuffers::PER_MEMBER, 4096 + 2048 + 5760 + 2048 + 6400 + 3200 + 2 * 4 * core::mem::size_of::<embassy_net::udp::PacketMetadata>());
     assert_eq!(GatewayBuffers::BYTES, 3 * GatewayBuffers::PER_MEMBER + GatewayBuffers::GATEWAY);
-    assert_eq!(core::mem::size_of::<GatewayBuffers>() >= GatewayBuffers::BYTES, true);
+    assert!(core::mem::size_of::<GatewayBuffers>() >= GatewayBuffers::BYTES);
 }

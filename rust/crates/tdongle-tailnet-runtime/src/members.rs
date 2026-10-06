@@ -536,7 +536,7 @@ mod tests {
         let (idx, slot) = sh.slot_of(id).expect("a slot runs it");
         assert_eq!(slot.status().state, SlotState::Running);
         assert!(sh.token.holds(key_control(id)), "the hand-over: the start path's token is the control task's");
-        assert_eq!(sh.with_engine(|e, _| e.member(id).is_some()), true);
+        assert!(sh.with_engine(|e, _| e.member(id).is_some()));
         assert_eq!(slot.run.try_get(), Some(SlotRun { epoch: slot.run.try_get().unwrap().epoch, id }));
         let charged: usize = crate::shared::member_charges::<crate::testutil::Dir>().iter().map(|c| c.1).sum();
         assert_eq!(ledger_live(&sh) as usize, charged);
