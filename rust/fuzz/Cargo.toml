@@ -19,6 +19,7 @@ tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
 tdongle-nvs-write = { path = "../crates/tdongle-nvs-write", features = ["sim"] }
 tdongle-usb-descriptors = { path = "../crates/tdongle-usb-descriptors" }
 tdongle-setup = { path = "../crates/tdongle-setup" }
+tdongle-dhcp = { path = "../crates/tdongle-dhcp" }
 
 [[bin]]
 name = "ecn_classify"
@@ -71,5 +72,11 @@ doc = false
 [[bin]]
 name = "nvs_ops"
 path = "fuzz_targets/nvs_ops.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "dhcp_server"
+path = "fuzz_targets/dhcp_server.rs"
 test = false
 doc = false

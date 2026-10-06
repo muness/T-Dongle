@@ -81,6 +81,9 @@ pub struct Reply {
     pub yiaddr: [u8; 4],
     /// Client hardware address.
     pub mac: [u8; 6],
+    /// lwIP installs a temporary static ARP entry `dest.ip` -> `mac` for this send (and removes it after). False for broadcasts and for
+    /// the answer to an INFORM sent to `ciaddr` (that client already owns the address and is resolved normally).
+    pub static_arp: bool,
 }
 
 /// Why a [`Config`] is rejected (lwIP: `dhcps_start` returns `ERR_ARG`).
@@ -433,7 +436,11 @@ impl Server {
                 }
             }
         };
-        Some(Reply { len: rlen, dest, kind, yiaddr, mac })
+        let static_arp = match dest {
+            Dest::Broadcast => false,
+            Dest::Unicast { ip, .. } => ip == giaddr || yiaddr != [0; 4],
+        };
+        Some(Reply { len: rlen, dest, kind, yiaddr, mac, static_arp })
     }
 
     /// lwIP `parse_msg` after the INFORM check: find or create the client's lease, then decide the state from the options.
@@ -518,7 +525,6 @@ impl Server {
             RELEASE => st = State::Release,
             _ => {}
         }
-        let mut client = client;
         if matches!(st, State::Release | State::Nak | State::Decline) {
             if let Some(i) = pnode {
                 self.remove(i);

@@ -223,11 +223,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-dhcp"
+version = "0.3.0-dev"
+
+[[package]]
 name = "tdongle-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "tdongle-aqm",
+ "tdongle-dhcp",
  "tdongle-lcd",
  "tdongle-nvs-format",
  "tdongle-nvs-write",

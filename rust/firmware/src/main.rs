@@ -101,6 +101,8 @@ static HEAP_STREAM: AtomicBool = AtomicBool::new(true);
 static RSSI: AtomicI32 = AtomicI32::new(0);
 static RSSI_VALID: AtomicBool = AtomicBool::new(false);
 static CHANNEL: AtomicU8 = AtomicU8::new(0);
+/// Moves to another access point of the same network without a disconnect (802.11k/v steering or the driver's own roam).
+static ROAMS: AtomicU32 = AtomicU32::new(0);
 static CONNECTS: AtomicU32 = AtomicU32::new(0);
 static LAST_CONNECT_MS: AtomicU32 = AtomicU32::new(0);
 static DISCONNECTS: AtomicU32 = AtomicU32::new(0);
@@ -1041,7 +1043,24 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                             let _ = &LAST_REASON; // reason code: DisconnectedInfo field not mapped in the spike
                             break;
                         }
-                        Either::Second(()) => match { publish_link_snapshot(); controller.rssi() } {
+                        Either::Second(()) => match {
+                            publish_link_snapshot();
+                            guard::op("joined_bss");
+                            let now_bss = l2::joined_bss();
+                            guard::op("");
+                            critical_section::with(|cs| {
+                                let mut j = BSS_JOINED.borrow_ref_mut(cs);
+                                if let (Some(old), Some(new)) = (*j, now_bss) {
+                                    if old.bssid != new.bssid {
+                                        ROAMS.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                }
+                                if now_bss.is_some() {
+                                    *j = now_bss;
+                                }
+                            });
+                            controller.rssi()
+                        } {
                             Ok(r) => {
                                 RSSI.store(r, Ordering::Relaxed);
                                 RSSI_VALID.store(true, Ordering::Relaxed);
@@ -1268,6 +1287,7 @@ async fn ring_housekeeping_task() -> ! {
     use tdongle_usb_out::elastic::{self, Step};
     loop {
         let _ = with_timeout(Duration::from_millis(100), HOUSEKEEP_SIG.wait()).await;
+        l2::HEAP_MIN.fetch_min(esp_alloc::HEAP.free() as u32, Ordering::Relaxed);
         let (used, cap) = critical_section::with(|cs| {
             let r = RING.borrow_ref(cs);
             (r.count, r.cap)
@@ -1443,6 +1463,7 @@ fn write_pm(out: &mut String) {
 }
 
 fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
+    l2::HEAP_MIN.fetch_min(esp_alloc::HEAP.free() as u32, Ordering::Relaxed);
     let st = bridge.stats();
     let none: [Record; 0] = [];
     let linked = st.linked;
@@ -1482,9 +1503,10 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
             connects: CONNECTS.load(Ordering::Relaxed),
             disconnects: DISCONNECTS.load(Ordering::Relaxed),
             last_reason: LAST_REASON.load(Ordering::Relaxed) as u16,
+            roams: ROAMS.load(Ordering::Relaxed),
             ..Default::default()
         },
-        prefs: Prefs { saved: saved_count, preferred: preferred, priorities: &priorities[..saved_count as usize], roaming_assist: false },
+        prefs: Prefs { saved: saved_count, preferred: preferred, priorities: &priorities[..saved_count as usize], roaming_assist: true },
         display: {
             let d = critical_section::with(|cs| STORED.borrow(cs).get()).map(|x| x.display).unwrap_or_default();
             DisplayState { brightness: d.brightness, rotation: d.rotation, dim_seconds: d.dim_seconds, page: 0 }
