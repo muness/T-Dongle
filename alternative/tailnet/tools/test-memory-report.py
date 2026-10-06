@@ -72,14 +72,21 @@ assert bridge["to_host_frames"] == bridge["to_host_forwarded"] + bridge["to_host
 assert bridge["to_wifi_frames"] == bridge["to_wifi_queued"] + bridge["to_wifi_invalid"] + bridge["to_wifi_foreign_mac"] + bridge["to_wifi_link_down"]
 assert bridge["to_wifi_queued"] == bridge["to_wifi_sent"] + bridge["to_wifi_stale"] + bridge["to_wifi_sojourn_drop"] + bridge["to_wifi_link_down_queued"] + bridge["to_wifi_tx_failed"] + bridge["to_wifi_queue_depth"]
 assert bridge["timing_pm_note_us_max"] == 400 and bridge["timing_wait_us_max"] == 800 and bridge["to_host_raced"] == 1 and bridge["timing_cold_starts"] == 21
+assert bridge["rx_class_datagrams"] == 55 and bridge["rx_class_ntbs"] == 30 and bridge["to_wifi_sparse"] == 5 and bridge["timing_room_wait_us_max"] == 1500
+# bridgetune: show, set (applied to the real setters in the other tests), reject, and not confused with other commands.
+tune = [x for x in sections["bridgetune_show"] if isinstance(x, str)]
+assert "bridgetune q=3 resume=1 inflight=6 ring=6 sojourn_ms=100 prio=0" in tune and any(x.startswith("bridgetune_bounds q=1..8") for x in tune) and "#handled 1" in tune
+assert "bridgetune q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 prio=1" in sections["bridgetune_set"]
+assert any("ERR bridgetune: q out of range" in x for x in sections["bridgetune_bad"]) and any("q=2 resume=1 inflight=8 ring=4" in x for x in sections["bridgetune_bad"])
+assert any("ERR bridgetune: unknown key" in x for x in sections["bridgetune_bad2"]) and "#handled 0" in sections["bridgetune_other"]
 assert bridge["to_wifi_last_tx_error"] == -1 and bridge["usb_ring_ring_bytes"] == 9144 and bridge["usb_ring_dropped_full"] == 7 and bridge["usb_ring_enqueued"] == 90
 assert bridge["wifi_tx_installed"] == 1 and bridge["wifi_tx_tx_done_cb"] == 1 and bridge["wifi_tx_charged"] == 10 and bridge["wifi_tx_refused_pool"] == 5
 assert bridge["wifi_tx_charged"] == bridge["wifi_tx_done"] + bridge["wifi_tx_aborted"] + bridge["wifi_tx_flushed"] + bridge["wifi_tx_stale"] + bridge["wifi_tx_inflight"]
 assert reports("bridge_tailnet", "bridge")[0]["active"] is False and "#handled 1" in sections["bridge"]
 # The serial status lines: new lines only, one per section, every field of the report, every line within the console buffer.
 lines = [x for x in sections["bridge_status_lines"] if isinstance(x, str) and x.startswith("bridge_")]
-assert [l.split()[0] for l in lines] == ["bridge_link", "bridge_to_host", "bridge_to_wifi", "bridge_usb_ring", "bridge_timing", "bridge_wifi_tx"], lines
-assert all(len(l) < 384 for l in lines)
+assert [l.split()[0] for l in lines] == ["bridge_link", "bridge_to_host", "bridge_to_wifi", "bridge_rx_class", "bridge_usb_ring", "bridge_timing", "bridge_wifi_tx"], lines
+assert all(len(l) < 448 for l in lines)
 assert sum(l.count("=") for l in lines) == len([k for k in bridge if k not in ("schema", "kind", "active")]), lines
 fields = {(l.split()[0][7:], w.split("=")[0]): int(w.split("=")[1]) for l in lines for w in l.split()[1:]}
 assert fields[("to_host", "frames")] == 100 and fields[("to_wifi", "frames")] == 76 and fields[("to_wifi", "last_tx_error")] == -1
@@ -205,5 +212,5 @@ assert [x["kind"] for x in kinds] == ["wifi_link", "lwip_stats"] and kinds[1]["e
 for command, lines in sections.items():
     for item in lines:
         if isinstance(item, dict):
-            assert len(json.dumps(item, separators=(",", ":"))) < 1800, (command, item["kind"])  # bounded, fits the console queue in a few chunks
+            assert len(json.dumps(item, separators=(",", ":"))) < (2800 if item["kind"] == "bridge" else 1800), (command, item["kind"])   # the bridge report lists every counter of seven sections  # bounded, fits the console queue in a few chunks
 print("Serial reports: heap, attribution, lwip, usb, route, phases, admission, bench, guard and wifistats parse as bounded one-line JSON.")

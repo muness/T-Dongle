@@ -851,6 +851,8 @@ bool gateway_memory_command(const char *line) {
         report_usb(&w);
     } else if (!strcmp(line, "bridge")) {
         report_bridge(&w);
+    } else if (!strncmp(line, "bridgetune", 10) && (!line[10] || line[10] == ' ')) {
+        bridge_tune_command(line + 10);     /* diagnostics build: the bridge's queue constants as knobs (bridge_status.inc) */
     } else if (!strcmp(line, "memory low")) {
         report_heap_low(&w);
     } else if (!strcmp(line, "wifistats")) {

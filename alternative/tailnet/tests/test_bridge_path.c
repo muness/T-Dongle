@@ -513,20 +513,77 @@ static void test_status_lines(void) {
     /* The serial lines: one per section, every field present (none was dropped for length), each line within the buffer, none an old line. */
     serial_used = 0; serial_out[0] = 0;
     bridge_status_lines();
-    static const char *const sections[] = {"link", "to_host", "to_wifi", "usb_ring", "timing", "wifi_tx"};
+    static const char *const sections[] = {"link", "to_host", "to_wifi", "rx_class", "usb_ring", "timing", "wifi_tx"};
     unsigned lines = 0, fields = 0;
     for (char *line = serial_out; *line;) {
         char *end = strstr(line, "\r\n");
         assert(end && (size_t)(end - line) < BRIDGE_LINE_MAX - 2);
-        assert(!strncmp(line, "bridge_", 7) && lines < 6 && !strncmp(line + 7, sections[lines], strlen(sections[lines])));
+        assert(!strncmp(line, "bridge_", 7) && lines < 7 && !strncmp(line + 7, sections[lines], strlen(sections[lines])));
         for (char *p = line; p < end; p++) if (*p == '=') fields++;
         lines++;
         line = end + 2;
     }
-    assert(lines == 6 && fields == seen_n);
+    assert(lines == 7 && fields == seen_n);
     assert(strstr(serial_out, "bridge_to_host frames=") && strstr(serial_out, " ring_full=") && strstr(serial_out, " last_tx_error=") && strstr(serial_out, "bridge_wifi_tx installed=1"));
     /* The diagnostics report, built the way memory_diagnostics.inc builds it, is the same set. */
-    assert(seen_n == 3 + 8 + 16 + 12 + 10 + 12);
+    assert(seen_n == 3 + 8 + 17 + 9 + 12 + 13 + 12);
+}
+
+
+/* `bridgetune`: parsed and applied against the REAL setters (l2, ring, Wi-Fi budget); a rejected command changes nothing; the knobs take effect. */
+static void tune(const char *args) { serial_used = 0; serial_out[0] = 0; bridge_tune_command(args); }
+static void test_bridge_tune(void) {
+    world_reset(HEAP_BRIDGE, true);
+    restart_sequences();
+    wifi_connect();
+    air_may_reorder = true;                          /* prio=1 below: sparse frames may overtake bulk */
+    tune("");
+    assert(strstr(serial_out, "bridgetune q=3 resume=1 inflight=6 ring=6 sojourn_ms=100 prio=0") && strstr(serial_out, "bridgetune_bounds q=1..8 resume=0..q-1 inflight=4..16 ring=0..12 sojourn_ms=5..190"));
+    tune("q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 prio=1");
+    assert(strstr(serial_out, "bridgetune q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 prio=1") && !strstr(serial_out, "ERR"));
+    tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
+    assert(t.queue_limit == 5 && t.resume_depth == 2 && t.sojourn_ms == 60 && t.prio && wifi_pins_tx_limit_now() == 8 && tinyusb_net_tx_ring_max_chunks() == 3);
+    assert(ring_stats().max_bytes == (BRIDGE_RING_BASE + 3 * TINYUSB_NET_TX_CHUNK_SLABS) * TINYUSB_NET_TX_SLAB_BYTES);
+    assert(atomic_load(&wifi_pins.tx_sparse_extra) == GATEWAY_BRIDGE_SPARSE_RESERVE);
+    /* Partial commands change only what they name. */
+    tune("inflight=5");
+    assert(strstr(serial_out, "q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 prio=1"));
+    /* Every rejection leaves everything as it was, even when only one field is bad. */
+    const char *bad[] = {"q=0", "q=9", "resume=5", "inflight=3", "inflight=17", "ring=13", "sojourn_ms=4", "sojourn_ms=191", "prio=2", "q=2 sojourn_ms=1",
+                         "bogus=1", "q", "q=", "q=x", "=3", "q=3 q"};
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        tune(bad[i]);
+        assert(strstr(serial_out, "ERR bridgetune:") && strstr(serial_out, "bridgetune q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 prio=1"));
+        tdongle_l2_get_tuning(&t);
+        assert(t.queue_limit == 5 && t.sojourn_ms == 60 && wifi_pins_tx_limit_now() == 5 && tinyusb_net_tx_ring_max_chunks() == 3);
+    }
+    /* The knobs bite: the queue limit holds the host at 2, the radio allowance is 4 (the minimum), the ring cap is 0 (8 frames). */
+    tune("q=2 resume=0 inflight=4 ring=0 sojourn_ms=100 prio=0");
+    assert(!strstr(serial_out, "ERR"));
+    for (int i = 0; i < 3; i++) { build_frame(frame_buf, 1000, true, KIND_UNICAST, hseq); const esp_err_t r = host_tx(frame_buf, 1000); if (r == ESP_OK) hseq++; else assert(r == TUSB_NET_RX_HOLD); }
+    assert(l2_stats().h2w_queue_depth == 2 && l2_stats().h2w_held == 1);
+    for (int i = 0; i < 8; i++) { pump_l2(); send_to_wifi(1000, KIND_UNICAST); }
+    assert(drv_depth() == 4);
+    ntb_credit = 0;
+    for (int i = 0; i < 40; i++) { send_to_host(1514, KIND_UNICAST); pump_ring(); }
+    assert(l2_stats().w2h_forwarded == BRIDGE_RING_BASE && ring_stats().max_bytes == BRIDGE_RING_BASE * TINYUSB_NET_TX_SLAB_BYTES);
+    ntb_credit = -1;
+    settle();
+    check_world();
+    /* The priority reserve in the real budget: with the radio full, a sparse frame still goes (reserve 2), bulk waits. */
+    tune("q=3 resume=1 inflight=4 ring=6 prio=1");
+    for (int i = 0; i < 4; i++) { send_to_wifi(1000, KIND_UNICAST); pump_l2(); }
+    assert(drv_depth() == 4 && gw_wtx_outstanding(&wifi_pins) == 4);
+    assert(!wifi_pins_tx_room(false) && wifi_pins_tx_room(true));
+    uint8_t ping[100];
+    build_frame(ping, 100, true, KIND_UNICAST, hseq);                       /* build_frame's ethertype cycles ARP / IPv4 / IPv6 by sequence: use ARP */
+    ping[12] = 0x08; ping[13] = 0x06;
+    assert(host_tx(ping, 100) == ESP_OK && l2_stats().h2w_sparse == 1);
+    pump_l2();                                                              /* served at once through the reserve: the radio now holds 5 */
+    assert(drv_depth() == 5 && l2_stats().h2w_sent >= 1);
+    hseq++;
+    settle();
+    check_world();
 }
 
 /* A long random run: every operation, in any order, with the checks after each one. */
@@ -565,7 +622,14 @@ static void soak(unsigned seed, long total, bool dfs, unsigned steps, unsigned t
         else if (r < 97) drv_force_error = rnd(4) == 0 ? (rnd(2) ? ESP_FAIL : ESP_ERR_NO_MEM) : 0;
         else if (r < 98) drv_pool = drv_pool == GATEWAY_WIFI_TX_POOL ? 3 + rnd(6) : GATEWAY_WIFI_TX_POOL;
         else if (r < 99) { if (wifi_up && rnd(2)) { wifi_disconnect(); wifi_connect(); flaps++; } }
-        else if (rnd(4) == 0) class_reset();           /* a USB reset: the class driver forgets what it held */
+        else if (rnd(4) == 0) class_reset();
+        else if (rnd(3) == 0) {                         /* any tuning, within bounds, mid-flight */
+            bridge_tune_t t = {.q = 1 + rnd(TDONGLE_L2_HOST_SLOTS), .inflight = GATEWAY_WIFI_TX_BAND_MAX + rnd(GATEWAY_WIFI_TX_POOL - GATEWAY_WIFI_TX_BAND_MAX + 1),
+                               .ring = rnd(TINYUSB_NET_TX_MAX_CHUNKS + 1), .sojourn_ms = TDONGLE_L2_SOJOURN_MS_MIN + rnd(TDONGLE_L2_SOJOURN_MS_MAX - TDONGLE_L2_SOJOURN_MS_MIN + 1), .prio = rnd(2)};
+            t.resume = rnd(t.q);
+            assert(bridge_tune_apply(&t) == NULL);
+            if (t.prio) air_may_reorder = true;
+        }           /* a USB reset: the class driver forgets what it held */
         else allow_tx = !allow_tx || rnd(2);
         if (drv_force_error) errors++;
         check_world();
@@ -601,6 +665,7 @@ int main(void) {
     test_wifi_budget();
     test_dfs();
     test_status_lines();
+    test_bridge_tune();
     for (unsigned seed = 1; seed <= 6; seed++) soak(seed, HEAP_BRIDGE, true, 60000, 0);
     for (unsigned seed = 11; seed <= 16; seed++) soak(seed, ML_HB_FLOOR + 8 * TINYUSB_NET_TX_SLAB_BYTES + 6000, true, 60000, 1);
     for (unsigned seed = 21; seed <= 22; seed++) soak(seed, HEAP_BRIDGE, false, 60000, 0);

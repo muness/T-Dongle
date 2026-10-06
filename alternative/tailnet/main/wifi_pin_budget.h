@@ -125,6 +125,7 @@ typedef struct {
     gw_wp_lock_t lock;
     uint32_t tx_stamp[GW_WTX_RING];   /* ms at which each outstanding TX charge was made, oldest first from tx_head */
     uint32_t tx_head, tx_count;       /* guarded by lock */
+    atomic_uint tx_sparse_extra;      /* bridge priority: charges above tx_limit a sparse frame (ACK, ICMP, DNS, ARP) may take, so it never waits behind bulk for room */
     atomic_uint tx_limit;             /* 0: the driver's pool (GATEWAY_WIFI_TX_POOL); else the most TX charges outstanding (the transparent bridge keeps the radio
                                        * fed with a few frames, not the whole pool: every frame beyond that is delay, ADR 0023 amendment 2) */
     atomic_uint pins;                 /* RX buffers delivered to lwIP and not yet freed (bits 0-7) and TX charges outstanding (bits 8-15), one word
@@ -145,10 +146,13 @@ static inline bool gw_wp_tx_in_band(unsigned word) { return gw_wp_tx(word) < GAT
 /* Readers without the lock (status, diagnostics, the tests). */
 static inline unsigned gw_wtx_outstanding(const gateway_wifi_pins *b) { return gw_wp_tx(atomic_load_explicit(&b->pins, memory_order_relaxed)); }
 /* Room for one more charge under the limit now (a relaxed read, for a caller that would rather wait than be refused and count a refusal). */
-static inline bool gw_wtx_room(const gateway_wifi_pins *b) {
+static inline bool gw_wtx_room_x(const gateway_wifi_pins *b, unsigned extra) {
     const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);
-    return gw_wtx_outstanding(b) < (limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL);
+    unsigned cap = (limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL) + extra;
+    if (cap > (unsigned)GATEWAY_WIFI_TX_POOL) cap = (unsigned)GATEWAY_WIFI_TX_POOL;
+    return gw_wtx_outstanding(b) < cap;
 }
+static inline bool gw_wtx_room(const gateway_wifi_pins *b) { return gw_wtx_room_x(b, 0); }
 static inline unsigned gw_wrx_inflight(const gateway_wifi_pins *b) { return gw_wp_rx(atomic_load_explicit(&b->pins, memory_order_relaxed)); }
 
 typedef enum { GW_WTX_BAND, GW_WTX_ELASTIC, GW_WTX_POOL, GW_WTX_HEAP } gw_wtx_verdict;
@@ -175,7 +179,7 @@ static inline IRAM_ATTR void gw_wtx_pop_head(gateway_wifi_pins *b) {
 /* TX, before esp_wifi_internal_tx. `free_internal` is the free internal heap measured by the caller (injected for the tests), `now_ms`
  * a millisecond clock (wraps are fine). On GW_WTX_BAND or GW_WTX_ELASTIC the frame is charged and the caller MUST release it exactly
  * once: gw_wtx_abort if esp_wifi_internal_tx fails, otherwise the driver's tx-done, a flush or the lease does. */
-static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, size_t free_internal, uint32_t now_ms) {
+static inline gw_wtx_verdict gw_wtx_admit_x(gateway_wifi_pins *b, unsigned len, size_t free_internal, uint32_t now_ms, unsigned extra) {
     gw_wtx_verdict v;
     unsigned stale = 0, count;
     GW_WP_ENTER(b);
@@ -188,7 +192,10 @@ static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, si
     unsigned word = atomic_load_explicit(&b->pins, memory_order_relaxed);
     for (;;) {                                             /* RX changes the word without our lock: decide on a snapshot, commit with a CAS */
         const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);
-        if (b->tx_count >= (limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL)) v = GW_WTX_POOL;
+        /* `extra` is a reserve a sparse frame (bridge priority) may use above the limit; the driver's pool is still the hard cap */
+        unsigned cap = (limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL) + extra;
+        if (cap > (unsigned)GATEWAY_WIFI_TX_POOL) cap = (unsigned)GATEWAY_WIFI_TX_POOL;
+        if (b->tx_count >= cap) v = GW_WTX_POOL;
         else if (gw_wp_tx_in_band(word)) v = GW_WTX_BAND;
         else if (ml_hb_ok(free_internal, gw_wtx_cost(len))) v = GW_WTX_ELASTIC;
         else v = GW_WTX_HEAP;
@@ -210,6 +217,8 @@ static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, si
     }
     return v;
 }
+
+static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, size_t free_internal, uint32_t now_ms) { return gw_wtx_admit_x(b, len, free_internal, now_ms, 0); }
 
 /* esp_wifi_internal_tx failed: no driver buffer exists for the charge just made, so no tx-done will come. The newest charge goes (the
  * charges are indistinguishable but for their time, and the lease reads only the head). */

@@ -28,6 +28,7 @@ static uint32_t check_frame(const uint8_t *f, uint16_t len, bool from_host) {
 
 /* ---- observers ---- */
 static uint32_t usb_last_seq, air_last_seq;
+static bool air_may_reorder;                  /* sparse-flow priority is allowed to put an ACK or a ping ahead of bulk: the air order is then not the host's */
 static bool usb_have, air_have;
 static _Atomic unsigned usb_delivered, air_delivered;
 static void usb_observe(const uint8_t *f, uint16_t len) {              /* inside tud_network_xmit: the frame enters an NTB */
@@ -39,8 +40,9 @@ static void usb_observe(const uint8_t *f, uint16_t len) {              /* inside
 }
 static void air_observe(const uint8_t *f, uint16_t len) {              /* the pp task: a frame leaves the antenna */
     const uint32_t seq = check_frame(f, len, true);
-    assert(!air_have || seq > air_last_seq);
-    air_have = true; air_last_seq = seq;
+    assert(air_may_reorder || !air_have || seq > air_last_seq);
+    if (!air_have || seq > air_last_seq) air_last_seq = seq;
+    air_have = true;
     atomic_fetch_add(&air_delivered, 1);
 }
 
@@ -116,7 +118,7 @@ static void world_reset(long total, bool dfs) {
     drv_pool = GATEWAY_WIFI_TX_POOL; drv_force_error = 0; drv_cb_result = 0; drv_done_cb = NULL; atomic_store(&drv_rxcb, NULL);
     drv_accepted = drv_aired = drv_cleared = drv_refused_pool = drv_calls = 0;
     atomic_store(&rx_frees, 0);
-    usb_have = air_have = false; atomic_store(&usb_delivered, 0); atomic_store(&air_delivered, 0);
+    usb_have = air_have = false; air_may_reorder = false; atomic_store(&usb_delivered, 0); atomic_store(&air_delivered, 0);
     atomic_store(&host_carrier, 0); atomic_store(&host_carrier_changes, 0);
     xmit_hook = usb_observe;
     recv_renew_hook = class_pump; cls_n = cls_naks = cls_taken = 0; cls_active = cls_again = false; recv_renew_calls = 0;
@@ -142,7 +144,7 @@ static void world_reset(long total, bool dfs) {
     assert(tinyusb_net_tx_ring_start(&tx) == ESP_OK);
     free(l2.slots);
     memset(&l2, 0, sizeof(l2));
-    const tdongle_l2_config_t bridge = {.wifi_tx = wifi_pins_tx, .wifi_room = wifi_pins_tx_room, .rx_resume = tinyusb_net_rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
+    const tdongle_l2_config_t bridge = {.wifi_tx = wifi_pins_bridge_tx, .wifi_room = wifi_pins_tx_room, .rx_resume = tinyusb_net_rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
     assert(tdongle_l2_start(sta_mac, &bridge) == ESP_OK);
     wifi_up = false;
 }
@@ -194,19 +196,19 @@ static void check_world(void) {
     assert(s.w2h_frames == s.w2h_forwarded + s.w2h_invalid + s.w2h_own_mac + s.w2h_link_down + s.w2h_usb_not_ready + s.w2h_ring_full);
     assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down);   /* a held offer is not a frame */
     assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
-    assert(s.h2w_queue_depth <= TDONGLE_L2_HOST_QUEUE_LIMIT && s.h2w_queue_high_water <= TDONGLE_L2_HOST_QUEUE_LIMIT && cls_n <= CLASS_CAP_FRAMES);
+    assert(s.h2w_queue_depth <= TDONGLE_L2_HOST_SLOTS + TDONGLE_L2_SPARSE_SLOTS && s.h2w_queue_high_water <= TDONGLE_L2_HOST_SLOTS && cls_n <= CLASS_CAP_FRAMES);
     /* The ring: every frame the bridge handed it is queued, delivered to an NTB or flushed, and the USB side saw exactly the delivered ones. */
     const tinyusb_net_tx_stats_t r = ring_stats();
     assert(s.w2h_forwarded == r.enqueued_frames);
     assert(r.enqueued_frames == r.sent_frames + r.flushed_link_down + s_tx.frames_queued);
     assert(r.sent_frames == atomic_load(&usb_delivered));
-    assert(r.ring_bytes <= BRIDGE_RING_FRAMES * TINYUSB_NET_TX_SLAB_BYTES && r.max_bytes == BRIDGE_RING_FRAMES * TINYUSB_NET_TX_SLAB_BYTES);
+    assert(r.ring_bytes <= r.max_bytes + TINYUSB_NET_TX_CHUNK_BYTES * TINYUSB_NET_TX_MAX_CHUNKS && r.max_bytes == (BRIDGE_RING_BASE + tinyusb_net_tx_ring_max_chunks() * TINYUSB_NET_TX_CHUNK_SLABS) * TINYUSB_NET_TX_SLAB_BYTES);
     assert(heap_live_blocks == 1 + (long)s_tx.chunks_present);
     /* The Wi-Fi budget (wifi_pin_budget.h): the accounting identity, in bridge mode. */
     const unsigned charged = atomic_load(&wifi_pins.tx_charged), inflight = gw_wtx_outstanding(&wifi_pins);
     assert(charged == atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_aborted) + atomic_load(&wifi_pins.tx_flushed) +
                       atomic_load(&wifi_pins.tx_stale) + inflight);
-    assert(inflight <= BRIDGE_WIFI_INFLIGHT && drv_depth() <= GATEWAY_WIFI_TX_POOL);       /* the radio's allowance (charges), not the pool; a lease-expired charge may outlive its frame */
+    assert(inflight <= GATEWAY_WIFI_TX_POOL && drv_depth() <= GATEWAY_WIFI_TX_POOL);       /* the radio's allowance (charges), not the pool; a lease-expired charge may outlive its frame */
     assert(charged == drv_calls && charged == drv_accepted + atomic_load(&wifi_pins.tx_aborted));     /* every charge reached the driver; a refusal was aborted */
     assert(s.h2w_sent == drv_accepted && drv_accepted == drv_aired + drv_cleared + drv_depth());
     assert(drv_aired <= atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_unmatched));       /* every aired frame produced a tx-done event */

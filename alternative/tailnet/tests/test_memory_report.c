@@ -137,9 +137,22 @@ void tdongle_l2_stats(tdongle_l2_stats_t *s) {
     *s = (tdongle_l2_stats_t){.linked = true, .link_changes = 5, .worker_stack_free = 1900,
         .w2h_frames = 100, .w2h_forwarded = 90, .w2h_invalid = 2, .w2h_own_mac = 3, .w2h_link_down = 1, .w2h_usb_not_ready = 1, .w2h_ring_full = 3, .w2h_raced = 1, .pm_notes = 50, .pm_note_us_sum = 900, .pm_note_us_max = 400, .h2w_wait_us_sum = 5000, .h2w_wait_us_max = 800, .h2w_tx_us_sum = 3000, .h2w_tx_us_max = 120,
         .h2w_frames = 76, .h2w_queued = 70, .h2w_invalid = 1, .h2w_foreign_mac = 2, .h2w_link_down = 3, .h2w_held = 9, .h2w_resumes = 8,
-        .h2w_sent = 58, .h2w_stale = 4, .h2w_sojourn_drop = 2, .h2w_link_down_queued = 2, .h2w_tx_failed = 3, .h2w_tx_retries = 11, .h2w_last_tx_error = -1,
+        .h2w_sparse = 5, .h2w_room_waits = 7, .h2w_room_wait_us_sum = 7000, .h2w_room_wait_us_max = 1500, .h2w_sent = 58, .h2w_stale = 4, .h2w_sojourn_drop = 2, .h2w_link_down_queued = 2, .h2w_tx_failed = 3, .h2w_tx_retries = 11, .h2w_last_tx_error = -1,
         .h2w_queue_depth = 1, .h2w_queue_high_water = 9};
 }
+/* the run-time knobs (bridgetune): the setters the command calls */
+#define GATEWAY_BRIDGE_TUNE 1
+static tdongle_l2_tuning_t tuning = {.queue_limit = 3, .resume_depth = 1, .sojourn_ms = 100, .prio = false};
+esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *t) { tuning = *t; return ESP_OK; }
+void tdongle_l2_get_tuning(tdongle_l2_tuning_t *t) { *t = tuning; }
+static unsigned ring_chunks = 6;
+esp_err_t tinyusb_net_tx_ring_set_max_chunks(unsigned n) { ring_chunks = n; return ESP_OK; }
+unsigned tinyusb_net_tx_ring_max_chunks(void) { return ring_chunks; }
+void tinyusb_net_rx_stats(tinyusb_net_rx_stats_t *o) { *o = (tinyusb_net_rx_stats_t){.ntbs = 30, .ntb_bytes = 60000, .ntb_max_bytes = 3190, .datagrams = 55, .dwell_us_sum = 5000, .dwell_us_max = 900, .holds = 4, .hold_us_sum = 3000, .hold_us_max = 1500}; }
+static unsigned tx_limit_stub = 6, sparse_stub;
+static unsigned wifi_pins_tx_limit_now(void) { return tx_limit_stub; }
+static void wifi_pins_set_tx_limit(unsigned n) { tx_limit_stub = n; }
+static void wifi_pins_set_sparse_extra(unsigned n) { sparse_stub = n; }
 #include "bridge_status.inc"
 #include "memory_diagnostics.inc"
 int main(void) {
@@ -180,6 +193,16 @@ int main(void) {
     }
     atomic_store(&wifi_pins.tx_charged, 10); atomic_store(&wifi_pins.tx_done, 6); atomic_store(&wifi_pins.tx_aborted, 1); atomic_store(&wifi_pins.tx_flushed, 2);
     atomic_store(&wifi_pins.tx_stale, 1); atomic_store(&wifi_pins.tx_refused_heap, 4); atomic_store(&wifi_pins.tx_refused_pool, 5);
+    puts("#> bridgetune_show");
+    printf("#handled %d\n", gateway_memory_command("bridgetune"));
+    puts("#> bridgetune_set");
+    printf("#handled %d\n", gateway_memory_command("bridgetune q=2 inflight=8 ring=4 prio=1"));
+    puts("#> bridgetune_bad");
+    gateway_memory_command("bridgetune q=99");
+    puts("#> bridgetune_bad2");
+    gateway_memory_command("bridgetune zz=1");
+    puts("#> bridgetune_other");
+    printf("#handled %d\n", gateway_memory_command("bridgetunes"));
     puts("#> bridge");
     printf("#handled %d\n", gateway_memory_command("bridge"));
     bridge_mode = false;

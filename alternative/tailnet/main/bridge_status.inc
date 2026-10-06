@@ -1,7 +1,7 @@
 /* The transparent bridge's counters (ADR 0023): where every frame went, and what the buffers and the Wi-Fi budget did meanwhile.
  * Included by gateway_main.c after wifi_pins.inc. One visitor lists them, two renderers print them, so the serial `status` lines and the
  * diagnostics `bridge` report cannot drift apart:
- *   serial `status` (bridge mode)  new lines only, one per section: bridge_link, bridge_to_host, bridge_to_wifi, bridge_usb_ring,
+ *   serial `status` (bridge mode)  new lines only, one per section: bridge_link, bridge_to_host, bridge_to_wifi, bridge_rx_class, bridge_usb_ring,
  *                                  bridge_timing, bridge_wifi_tx. Android parses the first status lines with end-anchored patterns, so nothing is ever
  *                                  appended to a line that existed before (tools/check-android-status.py holds that line);
  *   `bridge` (diagnostics build)   one JSON line, keys "<section>_<name>".
@@ -16,6 +16,8 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
     tdongle_l2_stats(&l2);
     tinyusb_net_tx_stats_t ring;
     tinyusb_net_tx_ring_stats(&ring);
+    tinyusb_net_rx_stats_t rx;
+    tinyusb_net_rx_stats(&rx);
 #define E(section, name, value) emit(ctx, section, name, (int64_t)(value))
     E("link", "linked", l2.linked);
     E("link", "changes", l2.link_changes);
@@ -44,6 +46,18 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
     E("to_wifi", "last_tx_error", l2.h2w_last_tx_error);
     E("to_wifi", "queue_depth", l2.h2w_queue_depth);
     E("to_wifi", "queue_high_water", l2.h2w_queue_high_water);
+    E("to_wifi", "sparse", l2.h2w_sparse);
+    /* The host side of the standing queue: the class driver's OUT NTBs. datagrams / ntbs is frames per NTB (how many its 3 buffers can hold); dwell is
+     * the time since the newest NTB arrived (a held datagram ages here); hold_us is how long the host was kept waiting for room, per hold episode. */
+    E("rx_class", "ntbs", rx.ntbs);
+    E("rx_class", "ntb_bytes", rx.ntb_bytes);
+    E("rx_class", "ntb_max_bytes", rx.ntb_max_bytes);
+    E("rx_class", "datagrams", rx.datagrams);
+    E("rx_class", "dwell_us_sum", rx.dwell_us_sum);
+    E("rx_class", "dwell_us_max", rx.dwell_us_max);
+    E("rx_class", "holds", rx.holds);
+    E("rx_class", "hold_us_sum", rx.hold_us_sum);
+    E("rx_class", "hold_us_max", rx.hold_us_max);
     E("usb_ring", "ring_bytes", ring.ring_bytes);
     E("usb_ring", "high_water_slabs", ring.high_water_slabs);
     E("usb_ring", "enqueued", ring.enqueued_frames);
@@ -69,6 +83,10 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
     E("timing", "wait_us_max", l2.h2w_wait_us_max);
     E("timing", "tx_us_sum", l2.h2w_tx_us_sum);
     E("timing", "tx_us_max", l2.h2w_tx_us_max);
+    /* The radio's dwell: frames that found the allowance full, and how long each waited for a tx-done to free a charge. */
+    E("timing", "room_waits", l2.h2w_room_waits);
+    E("timing", "room_wait_us_sum", l2.h2w_room_wait_us_sum);
+    E("timing", "room_wait_us_max", l2.h2w_room_wait_us_max);
     E("wifi_tx", "installed", wifi_pins_installed);
     E("wifi_tx", "tx_done_cb", wifi_pins_tx_done_ok);
     E("wifi_tx", "charged", atomic_load(&wifi_pins.tx_charged));
@@ -85,7 +103,7 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
 }
 
 extern void mgmt_write(const char *s);
-enum { BRIDGE_LINE_MAX = 384 };
+enum { BRIDGE_LINE_MAX = 448 };
 typedef struct {
     char line[BRIDGE_LINE_MAX];
     size_t used;
@@ -115,3 +133,85 @@ static void bridge_status_lines(void) {
     bridge_visit(bridge_line_emit, &c);
     bridge_line_flush(&c);
 }
+
+#ifdef GATEWAY_BRIDGE_TUNE
+/* `bridgetune` (diagnostics build only; not persisted): the bridge's queue constants as run-time knobs, so one flashed image can be swept on the board.
+ *   bridgetune                                  print the current values and the bounds
+ *   bridgetune q=3 resume=1 inflight=6 ring=6 sojourn_ms=100 prio=0      any subset; all bounds are checked first, a rejected command changes nothing
+ *     q          host -> Wi-Fi standing queue limit before the host is NAKed (1..TDONGLE_L2_HOST_SLOTS)
+ *     resume     drain to this depth before the held datagram is offered again (0..q-1)
+ *     inflight   frames the radio is given at once (GATEWAY_WIFI_TX_BAND_MAX..GATEWAY_WIFI_TX_POOL)
+ *     ring       elastic chunks of the Wi-Fi -> host ring, 2 frames each on top of the 8 permanent (0..TINYUSB_NET_TX_MAX_CHUNKS)
+ *     sojourn_ms age at which a queued frame is dropped (TDONGLE_L2_SOJOURN_MS_MIN..MAX)
+ *     prio       0/1: sparse-flow priority (ACKs, ICMP, UDP/ARP up to 200 B ahead of bulk, plus a reserve of GATEWAY_BRIDGE_SPARSE_RESERVE radio charges) */
+#define GATEWAY_BRIDGE_SPARSE_RESERVE 2u
+typedef struct { unsigned q, resume, inflight, ring, sojourn_ms, prio; } bridge_tune_t;
+static void bridge_tune_get(bridge_tune_t *t) {
+    tdongle_l2_tuning_t l;
+    tdongle_l2_get_tuning(&l);
+    unsigned inflight = wifi_pins_tx_limit_now();
+    *t = (bridge_tune_t){.q = l.queue_limit, .resume = l.resume_depth, .inflight = inflight ? inflight : (unsigned)GATEWAY_WIFI_TX_POOL,
+                         .ring = tinyusb_net_tx_ring_max_chunks(), .sojourn_ms = l.sojourn_ms, .prio = l.prio};
+}
+static const char *bridge_tune_check(const bridge_tune_t *t) {
+    if (t->q < 1 || t->q > TDONGLE_L2_HOST_SLOTS) return "q out of range";
+    if (t->resume >= t->q) return "resume must be below q";
+    if (t->inflight < GATEWAY_WIFI_TX_BAND_MAX || t->inflight > GATEWAY_WIFI_TX_POOL) return "inflight out of range";
+    if (t->ring > TINYUSB_NET_TX_MAX_CHUNKS) return "ring out of range";
+    if (t->sojourn_ms < TDONGLE_L2_SOJOURN_MS_MIN || t->sojourn_ms > TDONGLE_L2_SOJOURN_MS_MAX) return "sojourn_ms out of range";
+    if (t->prio > 1) return "prio must be 0 or 1";
+    return NULL;
+}
+/* Parse "key=value ..." over the current values. NULL: ok; else the error text. */
+static const char *bridge_tune_parse(const char *args, bridge_tune_t *t) {
+    char text[96];
+    if (strlcpy(text, args, sizeof(text)) >= sizeof(text)) return "too long";
+    char *save = NULL;
+    for (char *tok = strtok_r(text, " ", &save); tok; tok = strtok_r(NULL, " ", &save)) {
+        char *eq = strchr(tok, '=');
+        if (!eq || eq == tok || !eq[1]) return "expected key=value";
+        *eq = 0;
+        char *end;
+        const unsigned long v = strtoul(eq + 1, &end, 10);
+        if (*end || v > 100000ul) return "value is not a number";
+        unsigned *field = !strcmp(tok, "q") ? &t->q : !strcmp(tok, "resume") ? &t->resume : !strcmp(tok, "inflight") ? &t->inflight :
+                          !strcmp(tok, "ring") ? &t->ring : !strcmp(tok, "sojourn_ms") ? &t->sojourn_ms : !strcmp(tok, "prio") ? &t->prio : NULL;
+        if (!field) return "unknown key";
+        *field = (unsigned)v;
+    }
+    return NULL;
+}
+/* Check everything, then apply everything. */
+static const char *bridge_tune_apply(const bridge_tune_t *t) {
+    const char *error = bridge_tune_check(t);
+    if (error) return error;
+    const tdongle_l2_tuning_t l = {.queue_limit = t->q, .resume_depth = t->resume, .sojourn_ms = t->sojourn_ms, .prio = t->prio != 0};
+    if (tdongle_l2_set_tuning(&l) != ESP_OK) return "the bridge is not running";
+    wifi_pins_set_tx_limit(t->inflight);
+    wifi_pins_set_sparse_extra(t->prio ? GATEWAY_BRIDGE_SPARSE_RESERVE : 0);
+    if (tinyusb_net_tx_ring_set_max_chunks(t->ring) != ESP_OK) return "the ring is not running";
+    return NULL;
+}
+static void bridge_tune_command(const char *args) {
+    bridge_tune_t t;
+    bridge_tune_get(&t);
+    while (*args == ' ') args++;
+    if (*args) {
+        bridge_tune_t wanted = t;
+        const char *error = bridge_tune_parse(args, &wanted);
+        if (!error) error = bridge_tune_apply(&wanted);
+        if (error) {
+            char line[96];
+            snprintf(line, sizeof(line), "ERR bridgetune: %s\r\n", error);
+            mgmt_write(line);
+        }
+        bridge_tune_get(&t);
+    }
+    char line[160];
+    snprintf(line, sizeof(line), "bridgetune q=%u resume=%u inflight=%u ring=%u sojourn_ms=%u prio=%u\r\n", t.q, t.resume, t.inflight, t.ring, t.sojourn_ms, t.prio);
+    mgmt_write(line);
+    snprintf(line, sizeof(line), "bridgetune_bounds q=1..%u resume=0..q-1 inflight=%u..%u ring=0..%u sojourn_ms=%u..%u prio=0..1\r\n", (unsigned)TDONGLE_L2_HOST_SLOTS,
+             (unsigned)GATEWAY_WIFI_TX_BAND_MAX, (unsigned)GATEWAY_WIFI_TX_POOL, (unsigned)TINYUSB_NET_TX_MAX_CHUNKS, (unsigned)TDONGLE_L2_SOJOURN_MS_MIN, (unsigned)TDONGLE_L2_SOJOURN_MS_MAX);
+    mgmt_write(line);
+}
+#endif

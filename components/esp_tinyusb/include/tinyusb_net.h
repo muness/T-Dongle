@@ -256,6 +256,24 @@ void tinyusb_net_tx_ring_flush(void);
  */
 void tinyusb_net_rx_resume(void);
 
+/** Receive-side counters (the unified image, once the ring is enabled): see tinyusb_net.c. Microseconds wrap at 71 minutes. */
+typedef struct {
+    uint32_t ntbs, ntb_bytes, ntb_max_bytes;       /*!< OUT NTBs completed, their bytes, the largest */
+    uint32_t datagrams;                            /*!< datagrams offered to the receive callback (a held one is offered again) */
+    uint32_t dwell_us_sum, dwell_us_max;           /*!< per offer: time since the newest OUT NTB completed */
+    uint32_t holds, hold_us_sum, hold_us_max;      /*!< hold episodes, and how long each kept the host waiting for room */
+} tinyusb_net_rx_stats_t;
+void tinyusb_net_rx_stats(tinyusb_net_rx_stats_t *out);
+
+/**
+ * @brief Move the elastic cap of the transmit ring at run time (a tuning knob; not persisted)
+ *
+ * Raising lets the worker grow further; lowering retires chunks above the new cap (frames in them drain first, nothing is dropped).
+ * @return ESP_OK, ESP_ERR_INVALID_ARG (more than TINYUSB_NET_TX_MAX_CHUNKS), ESP_ERR_INVALID_STATE (ring not started)
+ */
+esp_err_t tinyusb_net_tx_ring_set_max_chunks(unsigned chunks);
+unsigned tinyusb_net_tx_ring_max_chunks(void);
+
 /** @brief Snapshot the transmit-ring counters */
 void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out);
 

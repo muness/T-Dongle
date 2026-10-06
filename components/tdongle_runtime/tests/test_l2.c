@@ -98,7 +98,9 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t us) { (void)h; ass
 esp_err_t esp_timer_delete(esp_timer_handle_t h) { (void)h; return 0; }
 unsigned uxTaskGetStackHighWaterMark(TaskHandle_t h) { (void)h; return 1234; }
 void tdongle_pm_note_activity(void) { note_activity_calls++; }
-static esp_err_t wifi_tx(void *b, uint16_t n) {
+static bool last_sparse;
+static esp_err_t wifi_tx(void *b, uint16_t n, bool sparse) {
+    last_sparse = sparse;
     assert(!in_callback);                /* the Wi-Fi driver is called by the worker only */
     esp_err_t r = tx_calls < tx_script_n ? tx_script[tx_calls] : tx_default;
     tx_calls++;
@@ -135,7 +137,7 @@ static esp_err_t host_in(const uint8_t *f, uint16_t len) {   /* TinyUSB task */
 static unsigned pump(void) { return drain(); }              /* one wake-up of the worker */
 static unsigned resumes;
 static bool room = true;
-static bool wifi_room(void) { assert(!in_callback); return room; }
+static bool wifi_room(bool sparse) { (void)sparse; assert(!in_callback); return room; }
 static void rx_resume(void) { assert(!in_callback); resumes++; }
 static tdongle_l2_config_t config(void) {
     return (tdongle_l2_config_t){.wifi_tx = wifi_tx, .wifi_room = wifi_room, .rx_resume = rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
@@ -468,6 +470,116 @@ static void test_rx_race(void) {
     check_identities();
 }
 
+static void open_room_after_three(void) { if (++hook_calls == 3) room = true; }
+
+/* Packets for the classifier: Ethernet + IPv4/IPv6 + TCP/UDP/ICMP headers, built by hand. */
+static unsigned build_ip(uint8_t *f, unsigned ethertype, unsigned proto, unsigned payload, bool v6, unsigned tcp_doff) {
+    memset(f, 0, 400);
+    memcpy(f, peer, 6); memcpy(f + 6, mac, 6);
+    f[12] = (uint8_t)(ethertype >> 8); f[13] = (uint8_t)ethertype;
+    if (!v6) {
+        f[14] = 0x45; unsigned total = 20 + payload; f[16] = (uint8_t)(total >> 8); f[17] = (uint8_t)total; f[23] = (uint8_t)proto;
+        if (proto == 6) f[14 + 20 + 12] = (uint8_t)(tcp_doff / 4 << 4);
+        return 14 + total;
+    }
+    f[14] = 0x60; f[18] = (uint8_t)(payload >> 8); f[19] = (uint8_t)payload; f[20] = (uint8_t)proto;
+    if (proto == 6) f[14 + 40 + 12] = (uint8_t)(tcp_doff / 4 << 4);
+    return 14 + 40 + payload;
+}
+static void test_classifier(void) {
+    uint8_t f[400];
+    unsigned n = build_ip(f, 0x0800, 6, 20, false, 20); assert(is_sparse(f, n));            /* pure ACK */
+    n = build_ip(f, 0x0800, 6, 32, false, 32); assert(is_sparse(f, n));                     /* ACK with options */
+    n = build_ip(f, 0x0800, 6, 20 + 100, false, 20); assert(!is_sparse(f, n));              /* TCP data, however small: never reordered ahead of its flow */
+    n = build_ip(f, 0x0800, 1, 64, false, 0); assert(is_sparse(f, n));                      /* ICMP echo */
+    n = build_ip(f, 0x0800, 17, 60, false, 0); assert(is_sparse(f, n));                     /* DNS-sized UDP */
+    n = build_ip(f, 0x0800, 17, 400 - 34, false, 0); assert(!is_sparse(f, 400));            /* bigger than the sparse limit */
+    n = build_ip(f, 0x86dd, 58, 32, true, 0); assert(is_sparse(f, n));                      /* ICMPv6 */
+    n = build_ip(f, 0x86dd, 6, 20, true, 20); assert(is_sparse(f, n));                      /* IPv6 pure ACK */
+    n = build_ip(f, 0x86dd, 6, 20 + 50, true, 20); assert(!is_sparse(f, n));
+    n = build_ip(f, 0x0806, 0, 28, false, 0); assert(is_sparse(f, 42));                     /* ARP */
+    n = build_ip(f, 0x0800, 47, 20, false, 0); assert(!is_sparse(f, n));                    /* GRE: unknown is bulk */
+    f[14] = 0x41; assert(!is_sparse(f, 60));                                                /* a bad header length is bulk, not a crash */
+    assert(!is_sparse(f, 13));
+}
+
+/* Priority: off by default; on, sparse frames take the priority queue and are served first; data stays in order in the bulk queue. */
+static void test_priority(void) {
+    uint8_t f[400];
+    start(); tdongle_l2_link(true);
+    tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
+    unsigned n = build_ip(f, 0x0800, 1, 64, false, 0);
+    assert(host_in(f, n) == ESP_OK && stats().h2w_sparse == 0 && l2.sp_head == 0);          /* off: an ordinary frame */
+    pump();
+    t.prio = true; assert(tdongle_l2_set_tuning(&t) == ESP_OK);
+    uint8_t d[200]; frame(d, 200, peer, mac, 1);
+    for (unsigned i = 0; i < 3; i++) { d[20] = (uint8_t)i; assert(host_in(d, 200) == ESP_OK); }      /* three bulk frames (not sparse: unknown ethertype) */
+    n = build_ip(f, 0x0800, 1, 64, false, 0); f[40] = 0xAA;
+    assert(host_in(f, n) == ESP_OK && stats().h2w_sparse == 1 && stats().h2w_queue_depth == 4);
+    n = build_ip(f, 0x0800, 6, 20, false, 20); f[40] = 0xBB;
+    assert(host_in(f, n) == ESP_OK && stats().h2w_sparse == 2);
+    n = build_ip(f, 0x0800, 1, 64, false, 0); f[40] = 0xCC;
+    assert(host_in(f, n) == TUSB_NET_RX_HOLD && stats().h2w_sparse == 2);   /* the priority queue was full (2): this one is bulk, and the bulk queue is at its limit: held */
+    check_identities();
+    /* Served: sparse first (in arrival order), then the bulk frames in order. */
+    uint8_t order_seen[8]; unsigned k = 0;
+    tx_script_n = 0;
+    while (stats().h2w_queue_depth) {
+        const unsigned sp_before = l2.sp_tail;
+        if (l2.sp_tail != l2.sp_head) { deliver_frame(&l2.sp_slots[l2.sp_tail & SPARSE_MASK], true); atomic_store(&l2.sp_tail, sp_before + 1); assert(last_sparse); }
+        else { unsigned tail = atomic_load(&l2.tail); deliver(&l2.slots[tail & SLOT_MASK]); atomic_store(&l2.tail, tail + 1); assert(!last_sparse); }
+        order_seen[k++] = tx_seen[tx_seen_len > 40 ? 40 : 20];
+    }
+    assert(k == 5 && order_seen[0] == 0xAA && order_seen[1] == 0xBB);
+    check_identities();
+    /* Through the real worker pass the same way: sparse before bulk. */
+    for (unsigned i = 0; i < 2; i++) { d[20] = (uint8_t)i; assert(host_in(d, 200) == ESP_OK); }
+    n = build_ip(f, 0x0800, 1, 64, false, 0); f[40] = 0xDD; assert(host_in(f, n) == ESP_OK);
+    assert(pump() == 3 && last_sparse == false && tx_seen[20] == 1);   /* the last frame sent was bulk frame 1; the sparse one went first */
+    check_identities();
+}
+
+/* Tuning: bounds are checked as a whole, a rejected set changes nothing, a set takes effect at once. */
+static void test_tuning(void) {
+    start();
+    tdongle_l2_tuning_t t, back; tdongle_l2_get_tuning(&t);
+    assert(t.queue_limit == TDONGLE_L2_HOST_QUEUE_LIMIT && t.resume_depth == TDONGLE_L2_HOST_RESUME_DEPTH && t.sojourn_ms == TDONGLE_L2_SOJOURN_MS && !t.prio);
+    tdongle_l2_tuning_t bad = t;
+    bad.queue_limit = 0; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.queue_limit = TDONGLE_L2_HOST_SLOTS + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.resume_depth = t.queue_limit; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.sojourn_ms = TDONGLE_L2_SOJOURN_MS_MIN - 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.sojourn_ms = TDONGLE_L2_SOJOURN_MS_MAX + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.queue_limit = 5; bad.sojourn_ms = 0; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);   /* one bad field: nothing applied */
+    tdongle_l2_get_tuning(&back); assert(!memcmp(&back, &t, sizeof(t)));
+    t.queue_limit = 5; t.resume_depth = 2; t.sojourn_ms = 40;
+    assert(tdongle_l2_set_tuning(&t) == ESP_OK);
+    tdongle_l2_get_tuning(&back); assert(!memcmp(&back, &t, sizeof(t)));
+    uint8_t f[200]; frame(f, 200, peer, mac, 1);
+    tdongle_l2_link(true);
+    for (unsigned i = 0; i < 5; i++) assert(host_in(f, 200) == ESP_OK);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD);                                         /* the new limit */
+    assert(pump() == 5 && resumes == 1);                                                  /* resumed at depth 2 (once) */
+    advance_us(40000); assert(host_in(f, 200) == ESP_OK);
+    advance_us(40000); tx_calls = 0; assert(pump() == 1 && tx_calls == 0 && stats().h2w_sojourn_drop == 1);   /* the new sojourn limit: 40 ms */
+    check_identities();
+}
+
+/* The radio's dwell: a frame that waited for room is counted, with how long. */
+static void test_room_wait_stats(void) {
+    uint8_t f[200]; frame(f, 200, peer, mac, 1);
+    start(); tdongle_l2_link(true);
+    room = false;
+    assert(host_in(f, 200) == ESP_OK);
+    hook_calls = 0;
+    wait_hook = open_room_after_three;
+    assert(pump() == 1);
+    wait_hook = NULL;
+    tdongle_l2_stats_t s = stats();
+    assert(s.h2w_room_waits == 1 && s.h2w_room_wait_us_max == 3 * TDONGLE_L2_RETRY_US && s.h2w_room_wait_us_sum == 3 * TDONGLE_L2_RETRY_US && s.h2w_sent == 1);
+    check_identities();
+}
+
 static void test_tick_scale(void) {
     printf("  retry period %u us, sojourn limit %u ms, queue limit %u of %u slots (tick %d ms: unused by the worker)\n", TDONGLE_L2_RETRY_US, TDONGLE_L2_SOJOURN_MS,
            TDONGLE_L2_HOST_QUEUE_LIMIT, TDONGLE_L2_HOST_SLOTS, TEST_TICK_MS);
@@ -486,6 +598,10 @@ int main(void) {
     test_sojourn();
     test_depth_never_wraps();
     test_rx_race();
+    test_classifier();
+    test_priority();
+    test_tuning();
+    test_room_wait_stats();
     test_tick_scale();
     free(l2.slots);
     puts("Bridge l2: filters, both directions, every drop counted once, the driver buffer freed once, queue order and wrap, stale links, bounded retry, clock notes");

@@ -25,7 +25,7 @@ inc = ['-I', str(root / 'tests/mocks/include'), '-I', str(root / 'components/esp
        '-I', str(here / 'tests/host_pins'), '-I', str(here / 'components/microlink/include'), '-I', str(here / 'main'), '-I', str(here / 'tests')]
 pm = str(root / 'components/tdongle_runtime/tdongle_pm_burst.c')
 cc = shlex.split(os.environ.get('CC', 'cc'))
-warn = ['-std=gnu11', '-pthread', '-Wall', '-Wextra', '-Wno-unused-function', '-Wno-unused-variable', '-Wno-unused-parameter', '-Wno-unused-but-set-variable']
+warn = ['-std=gnu11', '-pthread', '-DGATEWAY_BRIDGE_TUNE=1', '-Wall', '-Wextra', '-Wno-unused-function', '-Wno-unused-variable', '-Wno-unused-parameter', '-Wno-unused-but-set-variable']
 
 def assemble(name, case):
     # The order matters: mocks, the stand-ins the sources name, the real sources, the helpers and the cases.

@@ -95,7 +95,7 @@ _Static_assert(TDONGLE_L2_HOST_QUEUE_LIMIT * TDONGLE_L2_SLOT_BYTES / 875 <= 6,
                "the host -> Wi-Fi standing queue must drain, at the USB OUT limit, in a few milliseconds: it is behind the host's own backpressure");
 /* Boot-heap neutrality against the original bridge: its permanent buffering was 32 pool frames of 1,524 B, its worker's stack and TCB. */
 _Static_assert(GATEWAY_BRIDGE_TX_BASE_FRAMES * TINYUSB_NET_TX_SLAB_BYTES + 1536 + 340 +
-               TDONGLE_L2_HOST_SLOTS * TDONGLE_L2_SLOT_BYTES + GATEWAY_BRIDGE_TASK_STACK + 340 <=
+               (TDONGLE_L2_HOST_SLOTS + TDONGLE_L2_SPARSE_SLOTS) * TDONGLE_L2_SLOT_BYTES + GATEWAY_BRIDGE_TASK_STACK + 340 <=
                32 * 1524 + 3072 + 340,   /* the original l2.c: 32 pool frames, the 3,072 B stack of its worker, its TCB */
                "the bridge's permanent buffering (ring base, ring worker, host queue, forwarder) grew past what the original bridge held");
 /* Bridge task scheme (gateway.h): the same core and the same constants as the tailnet mode, with the l2 forwarder where usb_routes is. */
@@ -231,6 +231,9 @@ static wifi_config_t wifi_config;
 #include "wifi_profiles.inc"
 #include "wifi_link.inc"
 #include "wifi_pins.inc"
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+#define GATEWAY_BRIDGE_TUNE 1
+#endif
 #include "bridge_status.inc"
 void gateway_bridge_status(void){if(!gateway_tailnet_mode())bridge_status_lines();}
 #include "serial_setup.inc"
@@ -1495,7 +1498,7 @@ static esp_err_t start_wifi(void) {
     if(!gateway_tailnet_mode()){
         uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);
         wifi_pins_set_tx_limit(GATEWAY_BRIDGE_WIFI_TX_INFLIGHT);   /* the radio's allowance in bridge mode (ADR 0023 amendment 2) */
-        const tdongle_l2_config_t bridge={.wifi_tx=wifi_pins_tx,.wifi_room=wifi_pins_tx_room,.rx_resume=tinyusb_net_rx_resume,.task_priority=GATEWAY_TASK_BRIDGE_PRIO,.task_core=GATEWAY_TASK_BRIDGE_CORE,.task_stack=GATEWAY_BRIDGE_TASK_STACK};
+        const tdongle_l2_config_t bridge={.wifi_tx=wifi_pins_bridge_tx,.wifi_room=wifi_pins_tx_room,.rx_resume=tinyusb_net_rx_resume,.task_priority=GATEWAY_TASK_BRIDGE_PRIO,.task_core=GATEWAY_TASK_BRIDGE_CORE,.task_stack=GATEWAY_BRIDGE_TASK_STACK};
         START_TRY(tdongle_l2_start(mac,&bridge));
     }
     wifi_init_config_t w=WIFI_INIT_CONFIG_DEFAULT();

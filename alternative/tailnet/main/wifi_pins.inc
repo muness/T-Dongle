@@ -42,10 +42,10 @@ static uint32_t wifi_pins_now_ms(void) { return (uint32_t)(xTaskGetTickCount() *
 
 /* Send one frame on the STA interface, charged to the budget. ESP_ERR_NO_MEM: refused for buffers (the bridge retries it for a few
  * milliseconds, lwIP's TCP keeps the segment). Any context that may call esp_wifi_internal_tx. */
-static esp_err_t wifi_pins_tx(void *buffer, uint16_t len) {
+static esp_err_t wifi_pins_tx_x(void *buffer, uint16_t len, unsigned extra) {
     const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     if (wifi_pins_tx_done_ok) {
-        if (!gw_wtx_admitted(gw_wtx_admit(&wifi_pins, (unsigned)len, free_internal, wifi_pins_now_ms())))
+        if (!gw_wtx_admitted(gw_wtx_admit_x(&wifi_pins, (unsigned)len, free_internal, wifi_pins_now_ms(), extra)))
             return ESP_ERR_NO_MEM;     /* wlanif: ERR_MEM; tcp_output keeps the segment and retries (no loss, no window cut) */
         const int result = esp_wifi_internal_tx(WIFI_IF_STA, buffer, len);
         if (result != ESP_OK) gw_wtx_abort(&wifi_pins);     /* no driver buffer exists, so no tx-done will come */
@@ -59,9 +59,15 @@ static esp_err_t wifi_pins_tx(void *buffer, uint16_t len) {
     return esp_wifi_internal_tx(WIFI_IF_STA, buffer, len);
 }
 /* Bridge: the worker waits for a free charge instead of being refused (and counting a refusal) every retry period. */
-static bool wifi_pins_tx_room(void) { return gw_wtx_room(&wifi_pins); }
+/* The bridge's adapters for tdongle_l2_config_t: a sparse frame may use the reserve (0 unless priority is on). */
+static unsigned wifi_pins_sparse_extra(bool sparse) { return sparse ? atomic_load_explicit(&wifi_pins.tx_sparse_extra, memory_order_relaxed) : 0; }
+static bool wifi_pins_tx_room(bool sparse) { return gw_wtx_room_x(&wifi_pins, wifi_pins_sparse_extra(sparse)); }
+static esp_err_t wifi_pins_bridge_tx(void *buffer, uint16_t len, bool sparse) { return wifi_pins_tx_x(buffer, len, wifi_pins_sparse_extra(sparse)); }
+__attribute__((unused)) static void wifi_pins_set_sparse_extra(unsigned extra) { atomic_store_explicit(&wifi_pins.tx_sparse_extra, extra, memory_order_relaxed); }
+__attribute__((unused)) static unsigned wifi_pins_tx_limit_now(void) { return atomic_load_explicit(&wifi_pins.tx_limit, memory_order_relaxed); }
 /* Bridge: the most frames the radio is given at once (0: the driver's pool). See GATEWAY_BRIDGE_WIFI_TX_INFLIGHT in gateway_main.c. */
 static void wifi_pins_set_tx_limit(unsigned limit) { atomic_store_explicit(&wifi_pins.tx_limit, limit, memory_order_relaxed); }
+static esp_err_t wifi_pins_tx(void *buffer, uint16_t len) { return wifi_pins_tx_x(buffer, len, 0); }
 static esp_err_t wifi_pins_transmit_wrap(void *h, void *buffer, size_t len, void *netstack_buffer) {
     (void)h;
     (void)netstack_buffer;
