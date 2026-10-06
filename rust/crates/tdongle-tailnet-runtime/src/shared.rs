@@ -37,7 +37,14 @@ use zeroize::Zeroize;
 
 /// Memberships that can run at once (the engine's `M`). The registry may hold more saved ones ([`tdongle_tailnet_members::MAX_MEMBERS`]); a saved membership
 /// without a free slot waits in the supervisor's list with the error "Cannot allocate another membership".
+#[cfg(not(any(feature = "max-run-1", feature = "max-run-2")))]
 pub const MAX_RUN: usize = 3;
+/// See above: the `max-run-1` / `max-run-2` features lower the cap for a board whose DRAM cannot hold three slots (each costs about 86 KB of statics).
+#[cfg(all(feature = "max-run-2", not(feature = "max-run-1")))]
+pub const MAX_RUN: usize = 2;
+/// See above.
+#[cfg(feature = "max-run-1")]
+pub const MAX_RUN: usize = 1;
 /// Capacity of a slot's UDP egress queue (DISCO, STUN, WireGuard datagrams: records of up to 1,536 + 21 bytes; one full packet always fits an empty queue).
 pub const UDP_Q: usize = 3072;
 /// Capacity of a slot's DERP egress queue (one full relay packet: 3-byte header, 32-byte key, 1,500 bytes; the link has its own transmit ring behind it).

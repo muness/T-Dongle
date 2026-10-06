@@ -19,6 +19,9 @@ wifimux = ["dep:tdongle-tailnet-wifimux"]
 # A concrete instantiation of every task with stub platform, storage and USB, so the sizes of the futures can be read with `-Zprint-type-sizes` on the device
 # target (see `probe`). Needs `embassy-net`.
 size-probe = ["embassy-net"]
+# Lower the number of memberships that can run at once (default 3): the statics of a slot are about 86 KB, so a board with less DRAM left builds with one of these.
+max-run-1 = ["tdongle-tailnet-engine/max-run-1"]
+max-run-2 = ["tdongle-tailnet-engine/max-run-2"]
 
 [dependencies]
 tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }

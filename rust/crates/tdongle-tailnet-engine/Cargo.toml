@@ -16,6 +16,9 @@ default = []
 fuzzing = ["tdongle-tailnet-types/test-util"]
 # Mapping of the engine's StatusSnapshot onto the status crate's input structs.
 status = ["dep:tdongle-tailnet-status"]
+# Fewer membership records in the engine (see the runtime's features of the same names).
+max-run-1 = []
+max-run-2 = []
 
 [dependencies]
 tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }

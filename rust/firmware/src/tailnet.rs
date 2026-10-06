@@ -1,0 +1,845 @@
+//! Tailnet gateway mode (Phase 3, ADR 0002): everything the image adds to run `tdongle_tailnet_runtime` when the stored mode is `tailnet_gateway`.
+//!
+//! The runtime owns the protocol; this file owns the hardware seam (`tdongle_tailnet_fw`): the platform, NVS storage, the NCM data interface as Ethernet frames,
+//! the Wi-Fi data path as an `embassy-net` driver (over `l2`, the C's `esp_wifi_internal_*` path, not esp-radio's token API), the SNTP wall clock, the heap probe
+//! admission reads, the serial and LCD hooks. `main.rs` carries only small hooks into this module (each marked `tailnet::`), so the rest of the image is the bridge
+//! image unchanged.
+//!
+//! # Threading
+//!
+//! Every task that touches [`Shared`] runs in the **thread executor**: the runtime, the settings worker, the serial worker ([`console`]) and the LCD task. The
+//! console and the USB device run in the interrupt-mode executor and reach the gateway only through channels, so the shared state needs no interrupt-masking
+//! lock. [`TaskLock`] is that lock: it never masks interrupts (an engine call is a WireGuard handshake, tens of milliseconds) and **panics** if it is ever
+//! contended, which can only happen if a second executor (or an interrupt) used the shared state, a bug the guard's panic record then names.
+//!
+//! # Memory
+//!
+//! The runtime has no heap: its statics are in `.bss` ([`SHARED`], [`NET_BUFFERS`], [`NAPT`], [`MUX`], [`STACK_RES`] and the one task future of [`runtime_task`]).
+//! `tn-mem` on the console prints the linker's view (`.data`, `.bss`, the stack) and the heap.
+
+use alloc::string::String;
+use core::cell::RefCell;
+use core::fmt::Write as _;
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
+use embassy_executor::Spawner;
+use embassy_net::{Config as NetConfig, Runner, Stack, StackResources};
+use embassy_net_driver::{Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken};
+use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, RawMutex};
+use embassy_sync::channel::Channel;
+use embassy_sync::once_lock::OnceLock;
+use embassy_sync::signal::Signal;
+use embassy_sync::waitqueue::AtomicWaker;
+use embassy_time::{Duration, Instant, Timer, with_timeout};
+use static_cell::{ConstStaticCell, StaticCell};
+use tdongle_bridge::{Env, RingSend};
+use tdongle_tailnet_engine::RamDirectory;
+use tdongle_tailnet_fw::{HeapProbe, MemberCounts, Platform, Storage, StorageError, TailnetApi, UsbFrames};
+use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, GatewayBuffers, LinkGen};
+use tdongle_tailnet_runtime::shared::{Config as RtConfig, MAX_RUN, PlatformRng, SlotState};
+use tdongle_tailnet_runtime::wifi_mux::MuxWifi;
+use tdongle_tailnet_runtime::{Shared, run};
+use tdongle_tailnet_usbnet::napt::NaptConfig;
+use tdongle_tailnet_wifimux::tap::{NaptTap, SharedNapt};
+use tdongle_tailnet_wifimux::{StackDriver, WifiMux};
+
+use crate::{ALT, CONFIGURED, CONNECTS, FIRMWARE, FwEnv, USB_GEN};
+
+/// Memberships that can run at once in this build (the `members-N` features).
+pub const MEMBERS: usize = MAX_RUN;
+/// NAT flows (the C's `IP_NAPT_MAX` is 512; see the memory notes in the report).
+pub const NAPT_FLOWS: usize = 512;
+/// Mux queue slots (1,500 bytes each): towards the radio (NAT traffic) and towards the USB host.
+pub const MUX_TXQ: usize = 4;
+/// See [`MUX_TXQ`].
+pub const MUX_RXQ: usize = 4;
+/// Frames the radio's receive callback can hold for the stack (the mux pulls up to `RX_BURST` = 8 per poll; more than that so one pull never empties it).
+pub const RX_RING: usize = 10;
+/// Ethernet frames the USB side can hold between the NCM receiver task and the runtime (backpressure beyond that: the OUT endpoint is not re-armed).
+pub const USB_RX_FRAMES: usize = 2;
+/// Peer records per membership of the in-RAM directory (the C keeps the directory in flash; see the report).
+pub const DIR_PEERS: usize = 24;
+/// Staged directory updates per membership.
+pub const DIR_STAGED: usize = 32;
+/// Sockets of the embassy-net stack: 3 per membership (control, DERP, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + 1 spare.
+const STACK_SOCKETS: usize = 3 * MEMBERS + 5;
+
+/// The stack's interrupt-free lock (see the module docs).
+#[derive(Debug)]
+pub struct TaskLock(core::sync::atomic::AtomicBool);
+
+// SAFETY: `lock` is a try-acquire that panics on contention, so the closure never runs concurrently with another holder; the state is one atomic. All users are
+// tasks of the single thread executor, which never preempts one another between `.await`s (the closure never awaits).
+unsafe impl RawMutex for TaskLock {
+    #[allow(clippy::declare_interior_mutable_const)]
+    const INIT: Self = TaskLock(AtomicBool::new(false));
+    fn lock<R>(&self, f: impl FnOnce() -> R) -> R {
+        if self.0.swap(true, Ordering::Acquire) {
+            panic!("tailnet lock contended");
+        }
+        struct Release<'a>(&'a AtomicBool);
+        impl Drop for Release<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+        let _release = Release(&self.0);
+        f()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Platform
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/// Unix seconds at boot (`unix - uptime_s` when SNTP last answered), 0 = never set.
+static CLOCK_BASE: AtomicU32 = AtomicU32::new(0);
+/// Lowest free heap seen by the probe.
+static HEAP_MIN: AtomicU32 = AtomicU32::new(u32::MAX);
+/// The last largest-block measurement and when it was taken (ms).
+static LARGEST: AtomicU32 = AtomicU32::new(0);
+static LARGEST_AT: AtomicU32 = AtomicU32::new(0);
+
+/// The heap as admission reads it: the `esp-alloc` regions (all internal RAM on this board).
+#[derive(Debug)]
+pub struct FwHeap;
+
+/// Largest single allocation the heap can serve right now, by trial (binary search over `try_reserve_exact`: a block is taken and given straight back). Cached for
+/// a second: the engine reads it with every input.
+fn probe_largest(free: usize) -> usize {
+    let (mut lo, mut hi) = (0usize, free);
+    while hi - lo > 256 {
+        let mid = lo + (hi - lo) / 2;
+        let mut v: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        if v.try_reserve_exact(mid).is_ok() {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+impl HeapProbe for FwHeap {
+    fn free(&self) -> usize {
+        let f = esp_alloc::HEAP.free();
+        HEAP_MIN.fetch_min(f as u32, Ordering::Relaxed);
+        f
+    }
+    fn largest_block(&self) -> usize {
+        let now = Instant::now().as_millis() as u32;
+        let at = LARGEST_AT.load(Ordering::Relaxed);
+        if at != 0 && now.wrapping_sub(at) < 1000 {
+            return LARGEST.load(Ordering::Relaxed) as usize;
+        }
+        let l = probe_largest(esp_alloc::HEAP.free());
+        LARGEST.store(l as u32, Ordering::Relaxed);
+        LARGEST_AT.store(now | 1, Ordering::Relaxed);
+        l
+    }
+    fn minimum_free(&self) -> usize {
+        HEAP_MIN.load(Ordering::Relaxed) as usize
+    }
+}
+
+/// One serial line the runtime wants on the console (the Android app parses the `tailnet` / `route` lines).
+type Line = heapless_line::Line;
+mod heapless_line {
+    /// A console line of up to 240 bytes.
+    #[derive(Clone, Copy)]
+    pub struct Line {
+        pub len: u8,
+        pub data: [u8; 240],
+    }
+}
+static LINES: Channel<CriticalSectionRawMutex, Line, 6> = Channel::new();
+
+/// What the image can tell the runtime about the board.
+#[derive(Debug)]
+pub struct FwPlatform;
+
+impl Platform for FwPlatform {
+    fn now_ms(&self) -> u64 {
+        Instant::now().as_millis()
+    }
+    fn unix_seconds(&self) -> Option<u64> {
+        let base = CLOCK_BASE.load(Ordering::Relaxed);
+        (base != 0).then(|| u64::from(base) + Instant::now().as_secs())
+    }
+    fn fill_random(&self, buf: &mut [u8]) {
+        esp_hal::rng::Rng::new().read(buf);
+    }
+    fn sta_mac(&self) -> [u8; 6] {
+        esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or([0; 6])
+    }
+    fn heap(&self) -> &dyn HeapProbe {
+        &FwHeap
+    }
+    fn console_line(&self, line: &str) {
+        let b = line.as_bytes();
+        let n = b.len().min(240);
+        let mut l = Line { len: n as u8, data: [0; 240] };
+        l.data[..n].copy_from_slice(&b[..n]);
+        let _ = LINES.try_send(l); // a full queue drops the line: the console is a convenience, never a reason to wait
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Storage: the NVS store of `settings.rs`
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/// The `tn_settings/members` string and the per-membership blobs, over the same mounted store the settings commands use.
+#[derive(Debug)]
+pub struct FwStorage;
+
+fn is_string_key(key: &str) -> bool {
+    key == "members"
+}
+
+impl Storage for FwStorage {
+    fn get(&mut self, namespace: &str, key: &str, out: &mut [u8]) -> Result<usize, StorageError> {
+        let mut g = crate::settings::STORE.try_lock().map_err(|_| StorageError::Failed)?;
+        let store = g.as_mut().ok_or(StorageError::Failed)?;
+        let r = if is_string_key(key) { store.nvs().get_str(namespace, key, out) } else { store.nvs().get_blob(namespace, key, out) };
+        match r {
+            Ok(Some(n)) => Ok(n),
+            Ok(None) => Err(StorageError::NotFound),
+            Err(tdongle_nvs_write::Error::TooSmall) => Err(StorageError::TooSmall),
+            Err(_) => Err(StorageError::Failed),
+        }
+    }
+    fn set(&mut self, namespace: &str, key: &str, data: &[u8]) -> Result<(), StorageError> {
+        let mut g = crate::settings::STORE.try_lock().map_err(|_| StorageError::Failed)?;
+        let store = g.as_mut().ok_or(StorageError::Failed)?;
+        crate::guard::op("nvs_write");
+        let r = if is_string_key(key) {
+            match core::str::from_utf8(data) {
+                Ok(s) => store.nvs().set_str(namespace, key, s),
+                Err(_) => return Err(StorageError::Failed),
+            }
+        } else {
+            store.nvs().set_blob(namespace, key, data)
+        };
+        crate::guard::op("");
+        if r.is_err() {
+            let _ = store.remount();
+            return Err(StorageError::Failed);
+        }
+        Ok(())
+    }
+    fn erase_namespace(&mut self, namespace: &str) -> Result<(), StorageError> {
+        let mut g = crate::settings::STORE.try_lock().map_err(|_| StorageError::Failed)?;
+        let store = g.as_mut().ok_or(StorageError::Failed)?;
+        crate::guard::op("nvs_erase");
+        let r = store.nvs().erase_namespace(namespace);
+        crate::guard::op("");
+        if r.is_err() {
+            let _ = store.remount();
+            return Err(StorageError::Failed);
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// USB frames (the NCM data interface)
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/// One Ethernet frame from the host.
+#[derive(Clone, Copy)]
+pub struct Frame {
+    len: u16,
+    data: [u8; crate::MTU],
+}
+
+static USB_RX: Channel<CriticalSectionRawMutex, Frame, USB_RX_FRAMES> = Channel::new();
+static CARRIER: AtomicBool = AtomicBool::new(false);
+
+/// Called by the NCM receiver task for every datagram while tailnet mode owns the data path: hand it to the runtime, waiting (and so not re-arming the OUT
+/// endpoint: the host's driver sees NAKs) while the runtime cannot take it. `false`: the host left the data interface while we waited.
+pub async fn usb_rx(datagram: &[u8]) -> bool {
+    let n = datagram.len().min(crate::MTU);
+    let mut f = Frame { len: n as u16, data: [0; crate::MTU] };
+    f.data[..n].copy_from_slice(&datagram[..n]);
+    loop {
+        match with_timeout(Duration::from_millis(250), USB_RX.send(f)).await {
+            Ok(()) => return true,
+            Err(_) if ALT.load(Ordering::Relaxed) == 0 => return false,
+            Err(_) => {}
+        }
+    }
+}
+
+/// The runtime's USB side. Frames to the host go through the bridge's Wi-Fi to host ring (`usb_tx_task` drains it into NTBs), frames from it come from [`usb_rx`].
+#[derive(Debug)]
+pub struct FwUsb;
+
+impl UsbFrames for FwUsb {
+    async fn recv(&mut self, buf: &mut [u8]) -> usize {
+        let f = USB_RX.receive().await;
+        let n = usize::from(f.len).min(buf.len());
+        buf[..n].copy_from_slice(&f.data[..n]);
+        n
+    }
+    fn send(&mut self, frame: &[u8]) -> bool {
+        FwEnv.usb_ring_send(frame) == RingSend::Accepted
+    }
+    fn host_ready(&self) -> bool {
+        ALT.load(Ordering::Relaxed) != 0 && CONFIGURED.load(Ordering::Relaxed)
+    }
+    fn link_generation(&self) -> u32 {
+        USB_GEN.load(Ordering::Relaxed)
+    }
+    fn set_carrier(&mut self, up: bool) {
+        // Deviation shared with bridge mode: no NETWORK_CONNECTION notification on a carrier change (the NCM receiver sends it once when the host selects alt 1).
+        CARRIER.store(up, Ordering::Relaxed);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Wi-Fi data path: an embassy-net driver over `l2`
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/// The tailnet runtime owns the radio's receive callback (`l2::rx_cb` hands it every frame).
+static RX_ON: AtomicBool = AtomicBool::new(false);
+static LINK_UP: AtomicBool = AtomicBool::new(false);
+static RX_WAKER: AtomicWaker = AtomicWaker::new();
+static TX_WAKER: AtomicWaker = AtomicWaker::new();
+static LINK_WAKER: AtomicWaker = AtomicWaker::new();
+/// Frames the callback dropped because the ring was full, and frames the stack's transmit refused (budget or driver).
+pub static RX_DROPPED: AtomicU32 = AtomicU32::new(0);
+/// See [`RX_DROPPED`].
+pub static TX_REFUSED: AtomicU32 = AtomicU32::new(0);
+/// Frames handed to the stack.
+pub static RX_FRAMES: AtomicU32 = AtomicU32::new(0);
+
+struct RxSlot {
+    len: u16,
+    data: [u8; crate::MTU],
+}
+struct RxRing {
+    slots: [RxSlot; RX_RING],
+    head: usize,
+    count: usize,
+}
+static RING: critical_section::Mutex<RefCell<RxRing>> = critical_section::Mutex::new(RefCell::new(RxRing {
+    slots: [const { RxSlot { len: 0, data: [0; crate::MTU] } }; RX_RING],
+    head: 0,
+    count: 0,
+}));
+
+/// The radio's receive callback (Wi-Fi task): copy the frame and return. `true`: tailnet mode took it (the bridge must not see it).
+pub fn wifi_rx(frame: &[u8]) -> bool {
+    if !RX_ON.load(Ordering::Acquire) {
+        return false;
+    }
+    if frame.len() > crate::MTU {
+        RX_DROPPED.fetch_add(1, Ordering::Relaxed);
+        return true;
+    }
+    let pushed = critical_section::with(|cs| {
+        let mut r = RING.borrow_ref_mut(cs);
+        if r.count == RX_RING {
+            return false;
+        }
+        let at = (r.head + r.count) % RX_RING;
+        r.slots[at].data[..frame.len()].copy_from_slice(frame);
+        r.slots[at].len = frame.len() as u16;
+        r.count += 1;
+        true
+    });
+    if pushed {
+        RX_WAKER.wake();
+    } else {
+        RX_DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+    true
+}
+
+fn pop_rx(out: &mut [u8; crate::MTU]) -> Option<usize> {
+    critical_section::with(|cs| {
+        let mut r = RING.borrow_ref_mut(cs);
+        if r.count == 0 {
+            return None;
+        }
+        let h = r.head;
+        let n = usize::from(r.slots[h].len);
+        out[..n].copy_from_slice(&r.slots[h].data[..n]);
+        r.head = (h + 1) % RX_RING;
+        r.count -= 1;
+        Some(n)
+    })
+}
+
+/// The station as an Ethernet `embassy-net` driver. Receive does not need a TX credit (the S1 wedge of esp-radio's tokens): a reply the budget refuses is a
+/// counted drop, which TCP retransmits.
+#[derive(Debug)]
+pub struct L2Driver {
+    mac: [u8; 6],
+}
+
+/// A received frame.
+#[derive(Debug)]
+pub struct L2Rx {
+    buf: [u8; crate::MTU],
+    len: usize,
+}
+/// Permission to send one frame.
+#[derive(Debug)]
+pub struct L2Tx;
+
+impl RxToken for L2Rx {
+    fn consume<R, F: FnOnce(&mut [u8]) -> R>(mut self, f: F) -> R {
+        f(&mut self.buf[..self.len])
+    }
+}
+
+impl TxToken for L2Tx {
+    fn consume<R, F: FnOnce(&mut [u8]) -> R>(self, len: usize, f: F) -> R {
+        let mut buf = [0u8; crate::MTU];
+        let n = len.min(crate::MTU);
+        let r = f(&mut buf[..n]);
+        if crate::l2::tx(&buf[..n]).is_err() {
+            TX_REFUSED.fetch_add(1, Ordering::Relaxed);
+        }
+        r
+    }
+}
+
+impl Driver for L2Driver {
+    type RxToken<'a> = L2Rx;
+    type TxToken<'a> = L2Tx;
+
+    fn receive(&mut self, cx: &mut core::task::Context<'_>) -> Option<(L2Rx, L2Tx)> {
+        RX_WAKER.register(cx.waker());
+        let mut buf = [0u8; crate::MTU];
+        let len = pop_rx(&mut buf)?;
+        RX_FRAMES.fetch_add(1, Ordering::Relaxed);
+        Some((L2Rx { buf, len }, L2Tx))
+    }
+    fn transmit(&mut self, cx: &mut core::task::Context<'_>) -> Option<L2Tx> {
+        TX_WAKER.register(cx.waker());
+        crate::l2::room().then_some(L2Tx)
+    }
+    fn link_state(&mut self, cx: &mut core::task::Context<'_>) -> LinkState {
+        LINK_WAKER.register(cx.waker());
+        if LINK_UP.load(Ordering::Acquire) { LinkState::Up } else { LinkState::Down }
+    }
+    fn capabilities(&self) -> Capabilities {
+        let mut c = Capabilities::default();
+        c.max_transmission_unit = crate::MTU;
+        c
+    }
+    fn hardware_address(&self) -> HardwareAddress {
+        HardwareAddress::Ethernet(self.mac)
+    }
+}
+
+/// The association generation the runtime restarts its sockets on: every successful join of the link task.
+#[derive(Debug)]
+struct Association;
+impl LinkGen for Association {
+    fn generation(&self) -> u32 {
+        CONNECTS.load(Ordering::Relaxed)
+    }
+}
+static ASSOCIATION: Association = Association;
+
+/// The link task's hook (replaces `bridge.link`): the radio is associated (`true`) or not.
+pub fn link(up: bool) {
+    LINK_UP.store(up, Ordering::Release);
+    LINK_WAKER.wake();
+    if up {
+        RX_WAKER.wake();
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// The statics and the types they have
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+type Dir = RamDirectory<MEMBERS, DIR_PEERS, DIR_STAGED>;
+/// The shared state of the runtime.
+pub type Sh = Shared<TaskLock, FwPlatform, FwStorage, Dir>;
+type Tap = NaptTap<'static, NAPT_FLOWS>;
+type Mux = WifiMux<L2Driver, Tap, MUX_TXQ, MUX_RXQ>;
+type MuxDrv = StackDriver<'static, L2Driver, Tap, MUX_TXQ, MUX_RXQ>;
+type Wifi = MuxWifi<'static, Stack<'static>, NAPT_FLOWS, MUX_TXQ, MUX_RXQ>;
+
+static SHARED: StaticCell<Sh> = StaticCell::new();
+static NET_BUFFERS: ConstStaticCell<GatewayBuffers> = ConstStaticCell::new(GatewayBuffers::new());
+static STACK_RES: ConstStaticCell<StackResources<STACK_SOCKETS>> = ConstStaticCell::new(StackResources::new());
+static NAPT: StaticCell<SharedNapt<NAPT_FLOWS>> = StaticCell::new();
+static MUX: StaticCell<Mux> = StaticCell::new();
+static SNTP_BUFS: ConstStaticCell<SntpBufs> = ConstStaticCell::new(SntpBufs::new());
+static SHARED_REF: OnceLock<&'static Sh> = OnceLock::new();
+
+/// Tailnet mode is running (set by [`start`], never cleared).
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Tailnet mode is running in this boot.
+pub fn active() -> bool {
+    ACTIVE.load(Ordering::Acquire)
+}
+
+/// The gateway's API for the setup HTTP server (`add`/`enable`/`disable`/`remove`, `/status`): `None` outside tailnet mode, **and the HTTP server must refuse the
+/// member actions on the setup access point itself** (`tdongle_tailnet_members::command::ActionKind::allowed(Origin::SetupAp)`), as the C does.
+pub fn api() -> Option<&'static dyn TailnetApi> {
+    SHARED_REF.try_get().map(|s| *s as &'static dyn TailnetApi)
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Start
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/// Start tailnet mode: the embassy-net stack over the mux over the radio, the runtime, SNTP and the workers. Called by the init task once the radio is up (never
+/// from safe mode: the init task returns before that).
+pub fn start(spawner: Spawner) {
+    let platform = FwPlatform;
+    let sh: &'static Sh = SHARED.init_with(|| Shared::new(RtConfig { firmware: FIRMWARE, ..RtConfig::tailscale() }, FwPlatform, FwStorage, Dir::new()));
+    let _ = SHARED_REF.init(sh);
+
+    let mut rng = PlatformRng(&platform);
+    let napt: &'static SharedNapt<NAPT_FLOWS> = NAPT.init(SharedNapt::new(NaptConfig::C, &mut rng));
+    let mac = platform.sta_mac();
+    let mux: &'static mut Mux = MUX.init_with(|| match WifiMux::new(L2Driver { mac }, NaptTap::new(napt)) {
+        Ok(m) => m,
+        Err(_) => panic!("wifimux"),
+    });
+    let (driver, port) = mux.split();
+    let mut seed = [0u8; 8];
+    platform.fill_random(&mut seed);
+    let (stack, runner) = embassy_net::new(driver, NetConfig::dhcpv4(Default::default()), STACK_RES.take(), u64::from_le_bytes(seed));
+    let wifi: Wifi = MuxWifi::new(port, napt, stack);
+    let net = EmbassyNet::new(stack, &ASSOCIATION, NET_BUFFERS.take().slots());
+
+    RX_ON.store(true, Ordering::Release);
+    ACTIVE.store(true, Ordering::Release);
+    if let Ok(t) = net_task(runner) {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = runtime_task(sh, net, wifi) {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = sntp_task(stack, SNTP_BUFS.take()) {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = tx_wake_task() {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = console_worker() {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = lines_task() {
+        spawner.spawn(t);
+    }
+}
+
+#[embassy_executor::task]
+async fn net_task(mut runner: Runner<'static, MuxDrv>) -> ! {
+    runner.run().await
+}
+
+#[embassy_executor::task]
+async fn runtime_task(sh: &'static Sh, net: EmbassyNet, wifi: Wifi) {
+    run(sh, net, FwUsb, wifi).await
+}
+
+/// `l2::tx_done` (the Wi-Fi task, IRAM) signals one `Signal`; this task turns it into the stack's TX waker so the IRAM callback calls nothing new.
+#[embassy_executor::task]
+async fn tx_wake_task() -> ! {
+    loop {
+        crate::l2::TX_DONE_SIG.wait().await;
+        TX_WAKER.wake();
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// SNTP (the C's clock_sync: pool.ntp.org, time.cloudflare.com, time.google.com in turn)
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/// Socket buffers of the SNTP client.
+pub struct SntpBufs {
+    rx_meta: [embassy_net::udp::PacketMetadata; 1],
+    tx_meta: [embassy_net::udp::PacketMetadata; 1],
+    rx: [u8; 128],
+    tx: [u8; 64],
+}
+impl SntpBufs {
+    const fn new() -> Self {
+        Self { rx_meta: [embassy_net::udp::PacketMetadata::EMPTY; 1], tx_meta: [embassy_net::udp::PacketMetadata::EMPTY; 1], rx: [0; 128], tx: [0; 64] }
+    }
+}
+
+/// Seconds between 1900-01-01 and 1970-01-01.
+const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
+
+async fn sntp_once(stack: Stack<'static>, sock: &mut embassy_net::udp::UdpSocket<'_>, host: &str) -> Option<u64> {
+    use embassy_net::dns::DnsQueryType;
+    let addrs = with_timeout(Duration::from_secs(5), stack.dns_query(host, DnsQueryType::A)).await.ok()?.ok()?;
+    let embassy_net::IpAddress::Ipv4(ip) = *addrs.first()?;
+    let mut req = [0u8; 48];
+    req[0] = 0x23; // LI 0, version 4, mode 3 (client)
+    sock.send_to(&req, (ip, 123)).await.ok()?;
+    let mut resp = [0u8; 64];
+    let (n, _) = with_timeout(Duration::from_secs(4), sock.recv_from(&mut resp)).await.ok()?.ok()?;
+    if n < 48 || resp[0] & 7 != 4 || resp[1] == 0 {
+        return None; // not a server answer, or "kiss of death" (stratum 0)
+    }
+    let secs = u64::from(u32::from_be_bytes([resp[40], resp[41], resp[42], resp[43]]));
+    let unix = secs.checked_sub(NTP_UNIX_OFFSET)?;
+    (unix > 1_700_000_000).then_some(unix) // the C's validity rule
+}
+
+#[embassy_executor::task]
+async fn sntp_task(stack: Stack<'static>, bufs: &'static mut SntpBufs) -> ! {
+    let SntpBufs { rx_meta, tx_meta, rx, tx } = bufs;
+    let mut sock = embassy_net::udp::UdpSocket::new(stack, rx_meta, rx, tx_meta, tx);
+    let mut clock = tdongle_serial::clock::Clock::default();
+    loop {
+        let up = LINK_UP.load(Ordering::Acquire) && stack.config_v4().is_some();
+        let valid = CLOCK_BASE.load(Ordering::Relaxed) != 0;
+        let now = Instant::now().as_millis();
+        let _ = clock.poll(now, valid, up);
+        if !up {
+            Timer::after_secs(2).await;
+            continue;
+        }
+        if sock.endpoint().port == 0 && sock.bind(0).is_err() {
+            Timer::after_secs(2).await;
+            continue;
+        }
+        let host = clock.server_name();
+        if let Some(unix) = sntp_once(stack, &mut sock, host).await {
+            CLOCK_BASE.store(u32::try_from(unix.saturating_sub(Instant::now().as_secs())).unwrap_or(u32::MAX).max(1), Ordering::Relaxed);
+            // resynchronise every hour (lwIP's default is the same order)
+            Timer::after_secs(3600).await;
+        } else {
+            Timer::after_secs(5).await;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// Serial: the commands the gateway owns, run in the thread executor
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+static CON_REQ: Channel<CriticalSectionRawMutex, String, 1> = Channel::new();
+static CON_RESP: Signal<CriticalSectionRawMutex, Option<String>> = Signal::new();
+static CON_CALL: embassy_sync::mutex::Mutex<CriticalSectionRawMutex, ()> = embassy_sync::mutex::Mutex::new(());
+
+/// The console's hook: `Some(reply)` if the gateway owns `line` (`route`, `members`, `memory`, `inbound`, `member ...`, `tn-mem`, `tailnet-status`, ...), else `None`.
+/// The console runs in the interrupt executor, so the work is done by [`console_worker`] in the thread executor.
+pub async fn console(line: &str) -> Option<String> {
+    if !active() {
+        return None;
+    }
+    let _one = CON_CALL.lock().await;
+    CON_RESP.reset();
+    CON_REQ.send(String::from(line)).await;
+    // the console must never wedge on the gateway: a worker that does not answer in 3 s is reported
+    match with_timeout(Duration::from_secs(3), CON_RESP.wait()).await {
+        Ok(r) => r,
+        Err(_) => Some(String::from("ERR tailnet worker busy\r\n")),
+    }
+}
+
+/// The extra lines of `status` (a hook after the image's own lines).
+pub async fn status_extra() -> Option<String> {
+    console("\u{1}status-extra").await
+}
+
+#[embassy_executor::task]
+async fn console_worker() -> ! {
+    loop {
+        let line = CON_REQ.receive().await;
+        let mut out = String::new();
+        let handled = match SHARED_REF.try_get() {
+            Some(sh) => handle(sh, &line, &mut out),
+            None => false,
+        };
+        CON_RESP.signal(handled.then_some(out));
+    }
+}
+
+fn crlf(s: &mut String) {
+    // the runtime's reports end in a newline; the console wants CR LF
+    if s.ends_with('\n') && !s.ends_with("\r\n") {
+        s.pop();
+        s.push_str("\r\n");
+    }
+}
+
+fn handle(sh: &'static Sh, line: &str, out: &mut String) -> bool {
+    let api: &dyn TailnetApi = sh;
+    if line == "\u{1}status-extra" {
+        api.serial_status_extra(out);
+        let _ = write!(out, "tailnet_rust members={} napt_flows={} mux_tx={} mux_rx={} wifi_rx={} wifi_rx_dropped={} wifi_tx_refused={} usb_rx_queue={}\r\n", MEMBERS, NAPT_FLOWS, MUX_TXQ, MUX_RXQ, RX_FRAMES.load(Ordering::Relaxed), RX_DROPPED.load(Ordering::Relaxed), TX_REFUSED.load(Ordering::Relaxed), USB_RX_FRAMES);
+        return true;
+    }
+    if line == "tn-mem" {
+        memory_report(sh, out);
+        return true;
+    }
+    if line == "tailnet-status" {
+        // the `/status` JSON the setup page serves, on the console (until the setup HTTP server lands in this image)
+        let mut sink = |chunk: &[u8]| {
+            out.push_str(&String::from_utf8_lossy(chunk));
+            true
+        };
+        let _ = api.render_status(&mut sink);
+        out.push_str("\r\n");
+        return true;
+    }
+    if let Some(rest) = line.strip_prefix("member ") {
+        member_command(api, rest, out);
+        return true;
+    }
+    let handled = api.serial_command(line, out);
+    if handled {
+        crlf(out);
+    }
+    handled
+}
+
+/// `member add LABEL KEY | enable ID | disable ID | remove ID`: the setup page's member actions for the USB origin, on the console. (The setup page itself goes
+/// through [`api`]; this is the board-test path until the HTTP server is part of this image.)
+fn member_command(api: &dyn TailnetApi, rest: &str, out: &mut String) {
+    use tdongle_tailnet_fw::MemberAction;
+    let mut it = rest.split_whitespace();
+    let verb = it.next().unwrap_or("");
+    let a = it.next().unwrap_or("");
+    let b = it.next().unwrap_or("");
+    let action = match verb {
+        "add" if !a.is_empty() && !b.is_empty() => MemberAction::add(a.as_bytes(), b.as_bytes()),
+        "enable" | "disable" | "remove" => match a.parse::<u32>() {
+            Ok(id) => match verb {
+                "enable" => MemberAction::Enable(id),
+                "disable" => MemberAction::Disable(id),
+                _ => MemberAction::Remove(id),
+            },
+            Err(_) => {
+                out.push_str("usage: member add LABEL KEY | enable ID | disable ID | remove ID\r\n");
+                return;
+            }
+        },
+        _ => {
+            out.push_str("usage: member add LABEL KEY | enable ID | disable ID | remove ID\r\n");
+            return;
+        }
+    };
+    let reply = api.member_action(&action);
+    let _ = reply.write_body(out);
+    out.push_str("\r\n");
+}
+
+unsafe extern "C" {
+    static _data_start: u32;
+    static _data_end: u32;
+    static _bss_start: u32;
+    static _bss_end: u32;
+    static _stack_end: u32;
+    static _stack_start: u32;
+}
+
+/// The linker's view of the DRAM plus the heap, and the runtime's own figures.
+fn memory_report(sh: &Sh, out: &mut String) {
+    // the linker defines these symbols; only their addresses are taken, nothing is read
+    let (ds, de, bs, be, se, st) = {
+        (
+            core::ptr::addr_of!(_data_start) as usize,
+            core::ptr::addr_of!(_data_end) as usize,
+            core::ptr::addr_of!(_bss_start) as usize,
+            core::ptr::addr_of!(_bss_end) as usize,
+            core::ptr::addr_of!(_stack_end) as usize,
+            core::ptr::addr_of!(_stack_start) as usize,
+        )
+    };
+    let h = esp_alloc::HEAP.stats();
+    let _ = write!(
+        out,
+        "tn_mem data={} bss={} stack_region={} heap_size={} heap_used={} heap_free={} heap_min={} largest={} members={}\r\n",
+        de - ds,
+        be - bs,
+        st - se,
+        h.size,
+        esp_alloc::HEAP.used(),
+        esp_alloc::HEAP.free(),
+        HEAP_MIN.load(Ordering::Relaxed),
+        FwHeap.largest_block(),
+        MEMBERS
+    );
+    let _ = write!(
+        out,
+        "tn_statics shared={} net_buffers={} napt={} mux={} stack_res={} rx_ring={} usb_rx={} runtime_future={}\r\n",
+        core::mem::size_of::<Sh>(),
+        core::mem::size_of::<GatewayBuffers>(),
+        core::mem::size_of::<SharedNapt<NAPT_FLOWS>>(),
+        core::mem::size_of::<Mux>(),
+        core::mem::size_of::<StackResources<STACK_SOCKETS>>(),
+        RX_RING * (crate::MTU + 2),
+        USB_RX_FRAMES * (crate::MTU + 2),
+        tdongle_tailnet_runtime::sizes::future_bytes(sh, tdongle_tailnet_runtime::sizes::FUT_RUN)
+    );
+    for (i, name) in tdongle_tailnet_runtime::sizes::FUTURE_NAMES.iter().enumerate() {
+        let _ = write!(out, "tn_future {}={}\r\n", name, tdongle_tailnet_runtime::sizes::future_bytes(sh, i));
+    }
+}
+
+/// Drains the runtime's console lines (`tailnet` / `route` for the Android app) to the CDC-ACM port.
+#[embassy_executor::task]
+async fn lines_task() -> ! {
+    loop {
+        let l = LINES.receive().await;
+        if let (Some(wr), Ok(text)) = (WRITER.try_get(), core::str::from_utf8(&l.data[..usize::from(l.len)])) {
+            let mut s = String::from(text);
+            s.push_str("\r\n");
+            crate::out(wr, &s, 200).await;
+        }
+    }
+}
+
+/// The ACM writer (set by `main` once it exists), for [`lines_task`].
+pub static WRITER: OnceLock<&'static embassy_sync::mutex::Mutex<CriticalSectionRawMutex, crate::AcmWriter>> = OnceLock::new();
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// LCD
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/// What the front panel shows of the gateway (`gateway_display_state`): memberships stored / enabled / ready / waiting for a sign-in / in error.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Panel {
+    /// Memberships stored.
+    pub saved: u32,
+    /// Enabled.
+    pub enabled: u32,
+    /// Connected and ready.
+    pub ready: u32,
+    /// Waiting for a sign-in.
+    pub login: u32,
+    /// In error.
+    pub failed: u32,
+    /// Peers with a live tunnel.
+    pub tunnels: u32,
+}
+
+/// The counts for the panel; `None` outside tailnet mode.
+pub fn panel() -> Option<Panel> {
+    let sh = SHARED_REF.try_get()?;
+    let c: MemberCounts = TailnetApi::counts(*sh);
+    let (mut ready, mut login, mut failed) = (0, 0, 0);
+    for s in sh.slots.iter() {
+        let st = s.status();
+        if st.state != SlotState::Running {
+            continue;
+        }
+        if st.ready {
+            ready += 1;
+        } else if !st.auth_url.as_str().is_empty() {
+            login += 1;
+        } else if !st.last_error.as_str().is_empty() {
+            failed += 1;
+        }
+    }
+    Some(Panel { saved: u32::from(c.configured), enabled: u32::from(c.enabled), ready, login, failed, tunnels: u32::from(c.tunnels) })
+}

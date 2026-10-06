@@ -57,7 +57,14 @@ impl<D, const M: usize, const P: usize, const K: usize, const A: usize, const F:
 }
 
 /// The firmware's configuration: three memberships, eight resident peers each, a twelve-slot WireGuard pool, 64 aliases, 64 flows, 24 arena blocks.
+#[cfg(not(any(feature = "max-run-1", feature = "max-run-2")))]
 pub type GatewayEngine<D> = Engine<D, 3, 8, 12, 64, 64, 24>;
+/// Two memberships (the `max-run-2` feature): the same pools, fewer membership records.
+#[cfg(all(feature = "max-run-2", not(feature = "max-run-1")))]
+pub type GatewayEngine<D> = Engine<D, 2, 8, 12, 64, 64, 24>;
+/// One membership (the `max-run-1` feature).
+#[cfg(feature = "max-run-1")]
+pub type GatewayEngine<D> = Engine<D, 1, 8, 12, 64, 64, 24>;
 
 impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: usize, const F: usize, const JB: usize> Engine<D, M, P, K, A, F, JB> {
     /// Bytes of the engine (host size) without its directory; see also [`Self::per_member_bytes`].

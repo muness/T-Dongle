@@ -328,8 +328,17 @@ pub async fn ui_task(hw: Hardware) -> ! {
         let active_name = if active_slot >= 1 { names[(active_slot - 1) as usize] } else { Text::new() };
         let connected = crate::CONNECTED_NOW.load(Ordering::Relaxed);
         let heap = esp_alloc::HEAP.free() as u32;
+        // tailnet mode: the member counts of the gateway (`gateway_display_state`); bridge mode: none
+        #[cfg(feature = "tailnet")]
+        let panel = crate::tailnet::panel();
+        #[cfg(not(feature = "tailnet"))]
+        let panel: Option<()> = None;
+        #[cfg(feature = "tailnet")]
+        let counts = panel.unwrap_or_default();
+        #[cfg(not(feature = "tailnet"))]
+        let counts = ();
         let snapshot = Snapshot {
-            bridge: true,
+            bridge: panel.is_none(),
             wifi: connected,
             recovery: false,
             saved_wifi: saved_count > 0,
@@ -351,8 +360,19 @@ pub async fn ui_task(hw: Hardware) -> ! {
             heap_min: crate::l2::HEAP_MIN.load(Ordering::Relaxed).min(heap),
             heap_largest: heap,
             reset_reason: 0,
+            #[cfg(feature = "tailnet")]
+            saved: counts.saved,
+            #[cfg(feature = "tailnet")]
+            enabled: counts.enabled,
+            #[cfg(feature = "tailnet")]
+            ready: counts.ready,
+            #[cfg(feature = "tailnet")]
+            login: counts.login,
+            #[cfg(feature = "tailnet")]
+            failed: counts.failed,
             ..Snapshot::default()
         };
+        let _ = counts;
         let lookup = |slot: u32| -> Option<&str> { names.get((slot as usize).wrapping_sub(1)).map(Text::as_str) };
         let inputs = Inputs {
             button_down: down,
