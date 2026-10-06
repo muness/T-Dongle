@@ -128,6 +128,19 @@ typedef void *esp_timer_handle_t;
 typedef struct { void (*callback)(void *); const char *name; } esp_timer_create_args_t;
 static int esp_timer_create(const esp_timer_create_args_t *a, esp_timer_handle_t *h) { (void)a; (void)h; return 0; }
 static int esp_timer_start_periodic(esp_timer_handle_t h, uint64_t us) { (void)h; (void)us; return 0; }
+/* The bridge's counters (bridge_status.inc), the numbers the `bridge` report must print. */
+#include "tdongle_l2.h"
+static bool wifi_pins_installed = true, wifi_pins_tx_done_ok = true;
+static bool bridge_mode = true;
+bool gateway_tailnet_mode(void) { return !bridge_mode; }
+void tdongle_l2_stats(tdongle_l2_stats_t *s) {
+    *s = (tdongle_l2_stats_t){.linked = true, .link_changes = 5, .worker_stack_free = 1900,
+        .w2h_frames = 100, .w2h_forwarded = 90, .w2h_invalid = 2, .w2h_own_mac = 3, .w2h_link_down = 1, .w2h_usb_not_ready = 1, .w2h_ring_full = 3,
+        .h2w_frames = 80, .h2w_queued = 70, .h2w_invalid = 1, .h2w_foreign_mac = 2, .h2w_link_down = 3, .h2w_queue_full = 4,
+        .h2w_sent = 60, .h2w_stale = 4, .h2w_link_down_queued = 2, .h2w_tx_failed = 3, .h2w_tx_retries = 11, .h2w_last_tx_error = -1,
+        .h2w_queue_depth = 1, .h2w_queue_high_water = 9};
+}
+#include "bridge_status.inc"
 #include "memory_diagnostics.inc"
 int main(void) {
     microlink_t client = {(void *)3000, true, false, 0, NULL};
@@ -165,6 +178,16 @@ int main(void) {
         assert(heap_low_rec[1 + (11 - 1 - 1) % 7].min_free == 23500);   /* the newest record is the lowest */
         assert(heap_low_free_hi == 40000);
     }
+    atomic_store(&wifi_pins.tx_charged, 10); atomic_store(&wifi_pins.tx_done, 6); atomic_store(&wifi_pins.tx_aborted, 1); atomic_store(&wifi_pins.tx_flushed, 2);
+    atomic_store(&wifi_pins.tx_stale, 1); atomic_store(&wifi_pins.tx_refused_heap, 4); atomic_store(&wifi_pins.tx_refused_pool, 5);
+    puts("#> bridge");
+    printf("#handled %d\n", gateway_memory_command("bridge"));
+    bridge_mode = false;
+    puts("#> bridge_tailnet");
+    gateway_memory_command("bridge");
+    bridge_mode = true;
+    puts("#> bridge_status_lines");
+    bridge_status_lines();
     const char *commands[] = {"memory", "memory low", "route", "inbound", "members", "memory bench", "memory locks", "wgperf", "wgperf logbench", "wgperf reset", "wgperf", "cpu", "memory guard 4096", "memory guard", "memory guard 70000", "memory guard 12x", "memory nonsense"};
     for (unsigned i = 0; i < sizeof(commands) / sizeof(commands[0]); i++) {
         printf("#> %s\n", commands[i]);

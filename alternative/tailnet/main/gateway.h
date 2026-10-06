@@ -33,6 +33,14 @@ typedef struct membership {
 #define GATEWAY_TASK_USB_TX_PRIO 10
 #define GATEWAY_TASK_USB_TX_WORK_PRIO 6
 #define GATEWAY_TASK_USB_TX_CORE 1
+/* The transparent bridge (wifi_bridge mode) uses the same core-1 scheme with the same constants (ADR 0023): the usb_txq relay and the
+ * TinyUSB task exactly as above, and its host -> Wi-Fi forwarder (the tdongle_l2 worker) is that mode's forwarding task, so it takes the
+ * place usb_routes has in the tailnet mode:
+ *   usb_txq relay 10 > TinyUSB 9 > l2 forwarder 8 > usb_txq heap work 6.
+ * The Wi-Fi task (23) is on core 0 and calls the Wi-Fi RX callback, which only copies into the ring. Asserted in gateway_main.c. */
+#define GATEWAY_TASK_BRIDGE_PRIO GATEWAY_TASK_USB_ROUTES_PRIO
+#define GATEWAY_TASK_BRIDGE_CORE GATEWAY_TASK_USB_ROUTES_CORE
+#define GATEWAY_BRIDGE_TASK_STACK 3072   /* esp_wifi_internal_tx plus the budget; the high-water mark is in the serial `status` */
 extern membership_t *members;
 extern esp_netif_t *usb_interface;
 extern SemaphoreHandle_t members_lock;
@@ -45,6 +53,8 @@ uint32_t gateway_route_stat(unsigned which);
 void gateway_dns_domains_refresh(void);
 
 bool gateway_tailnet_mode(void);
+/* Bridge mode: the transparent bridge's counters as new serial `status` lines (bridge_status.inc). A no-op in tailnet mode. */
+void gateway_bridge_status(void);
 
 bool gateway_serial_command(const char *line);
 #ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS

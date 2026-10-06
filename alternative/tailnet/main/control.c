@@ -86,6 +86,7 @@ static void command_task(void *arg) {
             pm_report();
         } else if (!strcmp(line, "status")) {
             gateway_serial_command(line);
+            gateway_bridge_status();    /* bridge mode: new lines after the established ones, from this task's frame rather than that call's */
         } else if (!strcmp(line, "boot-status")) {
             gateway_boot_report(NULL,boot_sink);mgmt_write("\r\n");
         } else if (!strcmp(line, "retry-startup")) {

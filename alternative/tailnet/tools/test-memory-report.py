@@ -65,6 +65,26 @@ assert low["records"][0]["min"] == 29000 and min(x["min"] for x in low["records"
 assert low["records"][0]["wifi_rx_pins"] == 4 and low["records"][0]["wifi_tx_inflight"] == 2
 assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 22 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
+# The transparent bridge's counters (bridge_status.inc): one report, keys "<section>_<name>", the identities readable from what it prints.
+bridge = reports("bridge", "bridge")[0]
+assert bridge["active"] is True and bridge["link_linked"] == 1 and bridge["link_changes"] == 5 and bridge["link_worker_stack_free"] == 1900
+assert bridge["to_host_frames"] == bridge["to_host_forwarded"] + bridge["to_host_invalid"] + bridge["to_host_own_mac"] + bridge["to_host_link_down"] + bridge["to_host_usb_not_ready"] + bridge["to_host_ring_full"]
+assert bridge["to_wifi_frames"] == bridge["to_wifi_queued"] + bridge["to_wifi_invalid"] + bridge["to_wifi_foreign_mac"] + bridge["to_wifi_link_down"] + bridge["to_wifi_queue_full"]
+assert bridge["to_wifi_queued"] == bridge["to_wifi_sent"] + bridge["to_wifi_stale"] + bridge["to_wifi_link_down_queued"] + bridge["to_wifi_tx_failed"] + bridge["to_wifi_queue_depth"]
+assert bridge["to_wifi_last_tx_error"] == -1 and bridge["usb_ring_ring_bytes"] == 9144 and bridge["usb_ring_dropped_full"] == 7 and bridge["usb_ring_enqueued"] == 90
+assert bridge["wifi_tx_installed"] == 1 and bridge["wifi_tx_tx_done_cb"] == 1 and bridge["wifi_tx_charged"] == 10 and bridge["wifi_tx_refused_pool"] == 5
+assert bridge["wifi_tx_charged"] == bridge["wifi_tx_done"] + bridge["wifi_tx_aborted"] + bridge["wifi_tx_flushed"] + bridge["wifi_tx_stale"] + bridge["wifi_tx_inflight"]
+assert reports("bridge_tailnet", "bridge")[0]["active"] is False and "#handled 1" in sections["bridge"]
+# The serial status lines: new lines only, one per section, every field of the report, every line within the console buffer.
+lines = [x for x in sections["bridge_status_lines"] if isinstance(x, str) and x.startswith("bridge_")]
+assert [l.split()[0] for l in lines] == ["bridge_link", "bridge_to_host", "bridge_to_wifi", "bridge_usb_ring", "bridge_wifi_tx"], lines
+assert all(len(l) < 384 for l in lines)
+assert sum(l.count("=") for l in lines) == len([k for k in bridge if k not in ("schema", "kind", "active")]), lines
+fields = {(l.split()[0][7:], w.split("=")[0]): int(w.split("=")[1]) for l in lines for w in l.split()[1:]}
+assert fields[("to_host", "frames")] == 100 and fields[("to_wifi", "frames")] == 80 and fields[("to_wifi", "last_tx_error")] == -1
+assert fields[("to_host", "ring_full")] == 3 and fields[("wifi_tx", "installed")] == 1
+assert all(fields[(sec, name)] == bridge[sec + "_" + name] for (sec, name) in fields), "the serial lines and the report print the same numbers"
+
 members = sections["members"]
 phases = reports("members", "phases")
 assert len(phases) == 1 and phases[0]["member"] == 7 and phases[0]["attempt"] == 1 and len(phases[0]["owner_order"]) == 8

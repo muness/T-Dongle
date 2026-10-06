@@ -532,6 +532,28 @@ static void report_usb(jw_writer *w) {
     report_field(w, "rx_dropped_invalid", atomic_load(&usb_rx_budget.dropped_invalid));
     report_end(w);
 }
+/* The transparent bridge (ADR 0023): every counter of bridge_status.inc as one JSON line, keys "<section>_<name>". `active` is whether the
+ * image is in bridge mode (in tailnet mode they all read zero). Read it with `memory` (the ring's own report) before and after a run: a frame
+ * that did not arrive is in exactly one drop counter. */
+static void bridge_json_emit(void *ctx, const char *section, const char *name, int64_t value) {
+    jw_writer *w = ctx;
+    char key[48];
+    snprintf(key, sizeof(key), "%s_%s", section, name);
+    jw_char(w, ',');
+    jw_key(w, key);
+    if (value < 0) {
+        jw_char(w, '-');
+        value = -value;
+    }
+    jw_number(w, (uint64_t)value);
+}
+static void report_bridge(jw_writer *w) {
+    report_begin(w, "bridge");
+    jw_raw(w, ",\"active\":");
+    jw_bool(w, !gateway_tailnet_mode());
+    bridge_visit(bridge_json_emit, w);
+    report_end(w);
+}
 /* How long the lwIP core lock was held by the shared wg_mgr task, by call site: a histogram, so a board run can show whether
  * any single hold exceeds the ~1 ms budget (over_1ms) and how long the worst one was. */
 static void report_locks(jw_writer *w) {
@@ -827,6 +849,8 @@ bool gateway_memory_command(const char *line) {
         report_attribution(&w);
         report_lwip(&w);
         report_usb(&w);
+    } else if (!strcmp(line, "bridge")) {
+        report_bridge(&w);
     } else if (!strcmp(line, "memory low")) {
         report_heap_low(&w);
     } else if (!strcmp(line, "wifistats")) {
