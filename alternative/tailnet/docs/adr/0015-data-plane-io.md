@@ -23,7 +23,7 @@ The same lock serves Wi-Fi RX delivery, NAT, the router and every socket, so a U
 
 ### A. Transmit ring (`tinyusb_net_tx_ring_send`)
 
-The shared wrapper `components/esp_tinyusb/tinyusb_net.c` gains a second send contract beside `tinyusb_net_send_sync()`. The bridge (`main/bridge.c`) and `tdongle_l2` keep the sync call and their tests; they allocate nothing for the ring (it is created only by `tinyusb_net_tx_ring_start`, which only the gateway calls).
+The shared wrapper `components/esp_tinyusb/tinyusb_net.c` gains a second send contract beside `tinyusb_net_send_sync()`. The bridge (`main/bridge.c`) and `tdongle_l2` keep the sync call and their tests (*ADR 0023: `tdongle_l2`, the unified image's bridge, moved to the ring; `main/bridge.c`, the legacy image, keeps the sync call*); they allocate nothing for the ring (it is created only by `tinyusb_net_tx_ring_start`, which only the gateway calls).
 
 ```
 lwIP core lock holder                 usb_txq worker (prio 6)        TinyUSB task

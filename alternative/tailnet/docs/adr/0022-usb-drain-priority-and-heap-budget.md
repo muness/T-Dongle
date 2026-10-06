@@ -32,7 +32,7 @@ What ADR 0015's loop already did right and is unchanged: every IN completion dra
 
 | | before | now |
 |---|---|---|
-| TinyUSB task (tailnet mode only; the legacy bridge keeps 5) | 5 | **9** |
+| TinyUSB task (tailnet mode only; the legacy bridge keeps 5; *ADR 0023: also the unified image's bridge mode*) | 5 | **9** |
 | `usb_txq` relay (notify, then `usbd_defer_func`) | 6 | **10** |
 | `usb_txq` growth (the largest-block walks, the allocation, the gate) | 6 | **6** (it drops there with `vTaskPrioritySet` only for a pass that is about to grow, `tinyusb_net_tx_config_t.work_priority`); idle shrink and retire stay at 10 |
 | usb_routes / wg_mgr / coord | 8 / 7 / 5 | unchanged |

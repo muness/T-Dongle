@@ -18,6 +18,9 @@ cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g tests/test_wif
 build-host/test_wifi_link
 # The USB wrapper is shared with the original bridge; test its real code too.
 (cd ../.. && TEST_CFLAGS="-fsanitize=address,undefined -g" python3 tools/test_net.py)
+# The transparent bridge end to end (ADR 0023): the real USB ring, bridge, Wi-Fi TX budget and CPU-clock code over strict mocks; ASan/UBSan at a 1 ms
+# and the firmware's 10 ms tick, then seven real threads under ThreadSanitizer.
+python3 tools/test-bridge-path.py
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g tests/test_usb_identity.c -o build-host/test_usb_identity
 build-host/test_usb_identity
 cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I main tests/test_usb_rx_budget.c -o build-host/test_usb_rx_budget
