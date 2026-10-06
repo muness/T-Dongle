@@ -14,6 +14,7 @@ mod supervise;
 mod saved;
 mod l2;
 mod pm;
+mod ui;
 mod acm;
 mod ncm;
 
@@ -99,6 +100,7 @@ static RSSI: AtomicI32 = AtomicI32::new(0);
 static RSSI_VALID: AtomicBool = AtomicBool::new(false);
 static CHANNEL: AtomicU8 = AtomicU8::new(0);
 static CONNECTS: AtomicU32 = AtomicU32::new(0);
+static LAST_CONNECT_MS: AtomicU32 = AtomicU32::new(0);
 static DISCONNECTS: AtomicU32 = AtomicU32::new(0);
 static LAST_REASON: AtomicU32 = AtomicU32::new(0);
 
@@ -710,6 +712,22 @@ async fn main(spawner: Spawner) -> ! {
     int_spawner.spawn(usb_tx_task(SendTx(tx)).unwrap());
     spawner.spawn(ring_housekeeping_task().unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
+    spawner.spawn(
+        ui::ui_task(ui::Hardware {
+            spi: peripherals.SPI2,
+            mosi: peripherals.GPIO3,
+            clk: peripherals.GPIO5,
+            cs: peripherals.GPIO4,
+            dc: peripherals.GPIO2,
+            rst: peripherals.GPIO1,
+            bl: peripherals.GPIO38,
+            button: peripherals.GPIO0,
+            led_data: peripherals.GPIO40,
+            led_clk: peripherals.GPIO39,
+            ledc: peripherals.LEDC,
+        })
+        .unwrap(),
+    );
     spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, spawner, bridge, worker, state.boot.safe_mode).unwrap());
     loop {
         Timer::after_secs(3600).await;
@@ -872,6 +890,13 @@ mod heapless_order {
     }
 }
 
+/// A button gesture that needs the setup boot, the factory reset or the NVS writer (milestone C): not available yet, said on the console.
+fn ui_command(cmd: tdongle_ui::ui::Command) {
+    let mut t = String::new();
+    let _ = write!(t, "ui command `{}` needs the setup/storage layer (not in this image yet)", cmd);
+    init_note(&t);
+}
+
 /// A pinned slot that cannot be joined is released, so the dongle falls back to ranking instead of retrying one dead network for ever.
 fn drop_failed_pin(slot: usize) {
     if PINNED.compare_exchange(slot as i32, -1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
@@ -954,6 +979,7 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 println!("connected: {:?}", info);
                 guard::stage(Stage::Running);
                 CONNECTS.fetch_add(1, Ordering::Relaxed);
+                LAST_CONNECT_MS.store(Instant::now().as_millis() as u32, Ordering::Relaxed);
                 if let Ok((ch, _)) = controller.channel() {
                     CHANNEL.store(ch, Ordering::Relaxed);
                 }

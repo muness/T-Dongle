@@ -30,6 +30,8 @@ tdongle-wifi-budget = { path = "../crates/tdongle-wifi-budget" }
 esp-wifi-sys-esp32s3 = "0.3"
 critical-section = "1"
 esp-rom-sys = { version = "0.1", features = ["esp32s3"] }
+tdongle-lcd = { path = "../crates/tdongle-lcd" }
+tdongle-ui = { path = "../crates/tdongle-ui" }
 tdongle-pm = { path = "../crates/tdongle-pm" }
 
 # the pure logic (host-tested crates)
