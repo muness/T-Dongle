@@ -247,24 +247,33 @@ pub fn use_network(slot: i64) {
     }
 }
 
-/// `boot-status`: the JSON report `gateway_boot_report` writes, with the fields phase 1 has (schema, firmware, `elf`, recovery, stage, reset reason, heap,
-/// usb health, errors, crash) plus `"rust_port":1`. `elf` is the SHA-256 of the running app's ELF as the IDF app descriptor carries it
-/// (`esp_app_get_elf_sha256`, the 32 bytes at offset 144 of `esp_app_desc_t`, printed as 64 hex digits): `tools/flash_wait.py` compares it with the
-/// ELF it just flashed. Crash evidence and the stage machine arrive with phase 2.
+/// `boot-status`: the JSON report `gateway_boot_report` writes, with the fields a flashing tool uses (`tdongle_boot_guard::report`: schema, firmware, `elf`,
+/// recovery, stage, previous stage, reset reason, previous panic, safe mode, unstable boots, uptime, free memory) plus `"rust_port":1`. `elf` is the SHA-256
+/// of the running app's ELF as the IDF app descriptor carries it (`esp_app_get_elf_sha256`, the 32 bytes at offset 144 of `esp_app_desc_t`):
+/// `tools/flash_wait.py` compares it with the ELF it just flashed.
 pub fn boot_status<W: Write>(out: &mut W) {
-    let mut elf = [0u8; 65];
-    // SAFETY: `elf` is 65 writable bytes; the IDF writes at most `size - 1` hex digits and a NUL.
-    unsafe { esp_idf_svc::sys::esp_app_get_elf_sha256(elf.as_mut_ptr().cast(), elf.len()) };
-    let length = elf.iter().position(|&b| b == 0).unwrap_or(0);
-    let elf = core::str::from_utf8(&elf[..length]).unwrap_or("");
-    infallible(write!(
-        out,
-        "{{\"schema\":1,\"firmware\":\"{VERSION}\",\"elf\":\"{elf}\",\"recovery\":false,\"stage\":\"complete\",\"previous_stage\":\"none\",\"reset_reason\":{},\
-         \"free_memory\":{},\"minimum_free_memory\":{},\"usb\":{{\"suspend_count\":0,\"resume_count\":0,\"configured\":{},\"ready\":{}}},\"errors\":[],\"crash\":null,\"rust_port\":1}}\r\n",
-        crate::sys::reset_reason(),
-        heap::free_heap_size(),
-        heap::minimum_free_internal(),
-        usb::task::mounted(),
-        usb::task::ready()
-    ));
+    let mut hex = [0u8; 65];
+    // SAFETY: `hex` is 65 writable bytes; the IDF writes at most `size - 1` hex digits and a NUL.
+    unsafe { esp_idf_svc::sys::esp_app_get_elf_sha256(hex.as_mut_ptr().cast(), hex.len()) };
+    let mut elf = [0u8; 32];
+    for (byte, pair) in elf.iter_mut().zip(hex.chunks(2)) {
+        *byte = core::str::from_utf8(pair).ok().and_then(|p| u8::from_str_radix(p, 16).ok()).unwrap_or(0);
+    }
+    let state = crate::guard::state();
+    let reason = format!("{}", crate::sys::reset_reason());
+    let previous_stage = state.and_then(|s| s.boot.previous.stage).map_or("none", tdongle_boot_guard::Stage::name);
+    let status = tdongle_boot_guard::report::BootStatus {
+        firmware: VERSION,
+        elf: &elf,
+        reset_reason: &reason,
+        stage: crate::guard::current_stage().name(),
+        previous_stage,
+        previous_panic: state.map_or("", |s| s.boot.previous.panic_text()),
+        safe_mode: crate::guard::safe_mode(),
+        unstable_boots: state.map_or(0, |s| s.boot.previous.unstable_boots),
+        uptime_ms: crate::sys::now_us64() / 1000,
+        free_heap: Some(heap::free_heap_size() as u32),
+    };
+    infallible(tdongle_boot_guard::report::write_boot_status(out, &status));
+    infallible(out.write_str("\r\n"));
 }

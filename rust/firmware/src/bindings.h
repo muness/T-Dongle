@@ -13,5 +13,6 @@
 #include "esp_private/esp_clk.h"
 // Power management and the temperature sensor.
 #include "esp_app_desc.h"
+#include "esp_task_wdt.h"
 #include "esp_pm.h"
 #include "driver/temperature_sensor.h"

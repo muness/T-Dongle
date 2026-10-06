@@ -844,7 +844,6 @@ dependencies = [
  "esp-metadata-generated",
  "esp-sync",
  "log",
- "portable-atomic",
 ]
 
 [[package]]
@@ -1632,6 +1631,7 @@ dependencies = [
  "esp-storage",
  "esp-wifi-sys-esp32s3",
  "static_cell",
+ "tdongle-boot-guard",
  "tdongle-nvs-format",
  "tdongle-nvs-read",
  "tdongle-wifi-policy",
@@ -1825,6 +1825,10 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "tdongle-boot-guard"
+version = "0.3.0-dev"
 
 [[package]]
 name = "tdongle-nvs-format"

@@ -16,6 +16,7 @@ esp-idf-svc = { version = "0.53", default-features = false, features = ["std", "
 esp-idf-sys = { version = "0.38", default-features = false, features = ["std", "binstart"] }
 log = "0.4"
 tdongle-aqm = { path = "../crates/tdongle-aqm" }
+tdongle-boot-guard = { path = "../crates/tdongle-boot-guard" }
 tdongle-bridge = { path = "../crates/tdongle-bridge" }
 tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
 tdongle-pm = { path = "../crates/tdongle-pm" }

@@ -32,6 +32,22 @@ pub fn now_ms() -> u32 {
     (now_us64() / 1000) as u32
 }
 
+/// Subscribe the calling task to the task watchdog with `timeout_ms`; a task that stops calling [`watchdog_feed`] resets the chip (`trigger_panic`), whatever
+/// it is blocked in. The IDF only watches the idle tasks by default, which a blocked `main` does not starve.
+pub fn watchdog_start(timeout_ms: u32) -> Result<(), sys::EspError> {
+    let config = sys::esp_task_wdt_config_t { timeout_ms, idle_core_mask: (1 << sys::SOC_CPU_CORES_NUM) - 1, trigger_panic: true };
+    // SAFETY: `config` outlives the call; the task watchdog is initialised by the IDF start-up (`CONFIG_ESP_TASK_WDT_INIT`).
+    sys::esp!(unsafe { sys::esp_task_wdt_reconfigure(&config) })?;
+    // SAFETY: a null handle subscribes the calling task.
+    sys::esp!(unsafe { sys::esp_task_wdt_add(core::ptr::null_mut()) })
+}
+
+/// Feed the task watchdog for the calling task (a no-op error if it is not subscribed).
+pub fn watchdog_feed() {
+    // SAFETY: no preconditions; fails harmlessly for a task that is not subscribed.
+    let _ = unsafe { sys::esp_task_wdt_reset() }; // best effort by design: an unsubscribed caller has nothing to feed
+}
+
 /// `esp_restart`: never returns.
 pub fn restart() -> ! {
     // SAFETY: `esp_restart` has no preconditions.

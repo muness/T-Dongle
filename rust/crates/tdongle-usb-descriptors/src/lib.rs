@@ -140,6 +140,7 @@ impl Writer {
     }
 
     /// An interface descriptor.
+    #[allow(clippy::too_many_arguments)] // one USB interface descriptor: the seven fields are the descriptor's own
     const fn interface(self, number: u8, alternate: u8, endpoints: u8, class: u8, subclass: u8, protocol: u8, string: u8) -> Self {
         self.put(&[9, 4, number, alternate, endpoints, class, subclass, protocol, string])
     }

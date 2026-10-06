@@ -9,6 +9,7 @@ mod boot;
 mod bridge;
 mod console;
 mod diag;
+mod guard;
 mod pm;
 mod report;
 mod settings;
@@ -37,13 +38,34 @@ pub fn stored_mode() -> Mode {
 /// The manager's period (`vTaskDelay(pdMS_TO_TICKS(10000))`).
 const MANAGER_PERIOD: Duration = Duration::from_secs(10);
 
+/// The main task must report in at least this often (every stage, and every manager period) or the task watchdog resets the chip.
+const WATCHDOG_MS: u32 = 30_000;
+
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
     log::info!("T-Dongle-S3 {VERSION} (Rust port, phase 1: bridge)");
 
-    // The settings are read first and only read: see `settings`.
-    let settings = settings::load();
+    // Rule 13 (ADR 0001): the record of what the last boot was doing, the panic hook and the task watchdog come before anything that can block. Two
+    // boots in a row that did not stay up make this one a safe-mode boot: console only, no saved settings, no Wi-Fi.
+    let state = guard::begin();
+    if let Err(error) = sys::watchdog_start(WATCHDOG_MS) {
+        log::error!("task watchdog for the main task did not start: {error}");
+    }
+    if state.boot.safe_mode {
+        log::error!(
+            "safe mode: the last {} boots did not stay up (stage {:?}, panic {:?}): no saved settings, no Wi-Fi",
+            state.boot.previous.unstable_boots,
+            state.boot.previous.stage,
+            state.boot.previous.panic_text()
+        );
+    }
+
+    // The settings are read only (see `settings`). Until the setup boot exists (phase 2) the boot decision, and with it the USB identity, depends on
+    // them, so they are read before USB; the step is recorded, the watchdog bounds it, and safe mode skips it. (The no_std images, whose
+    // descriptors do not depend on the mode, bring USB up first.)
+    guard::stage(tdongle_boot_guard::Stage::Settings);
+    let settings = if guard::safe_mode() { settings::Settings::empty(false) } else { settings::load() };
     if STORED_MODE.set(settings.mode).is_err() || report::DISPLAY.set(settings.display).is_err() {
         log::warn!("settings were published twice");
     }
@@ -56,6 +78,7 @@ fn main() {
         log::error!("this image has no setup or tailnet boot yet");
         return;
     };
+    guard::stage(tdongle_boot_guard::Stage::Usb);
     let mac = sys::read_sta_mac();
     let identity = usb::Identity { station_mac: mac, product: tdongle_usb_descriptors::PRODUCT_BRIDGE };
     if let Err(error) = usb::start(identity) {
@@ -69,6 +92,7 @@ fn main() {
     }
 
     let network = bridge_boot.usb_network();
+    guard::stage(tdongle_boot_guard::Stage::RadioInit);
     if settings.ok {
         if let Err(error) = wifi::start(&network, &settings, mac) {
             log::error!("Wi-Fi did not start: {error}; management stays available over USB");
@@ -76,6 +100,7 @@ fn main() {
     } else {
         log::error!("settings stage failed; the Wi-Fi stage does not start");
     }
+    guard::stage(tdongle_boot_guard::Stage::Running);
     manage();
 }
 
@@ -83,6 +108,10 @@ fn main() {
 fn manage() -> ! {
     let mut maintainer = wifi::Maintainer::new();
     loop {
+        sys::watchdog_feed();
+        if u64::from(sys::now_ms()) >= tdongle_boot_guard::STABLE_AFTER_MS {
+            guard::mark_stable();
+        }
         diag::sample_temperature();
         diag::note_memory(diag::OP_TICK, 0, false);
         if let Some(wifi) = wifi::get() {

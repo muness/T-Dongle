@@ -95,14 +95,30 @@ const T_BLOB: u8 = 0x41;
 const T_BLOB_DATA: u8 = 0x42;
 const T_BLOB_IDX: u8 = 0x48;
 
+/// Nibble-wise CRC-32 table (reflected polynomial `0xEDB88320`): 64 bytes of flash instead of the 1 KiB byte table.
+const CRC_NIBBLE: [u32; 16] = {
+    let mut t = [0u32; 16];
+    let mut i = 0;
+    while i < 16 {
+        let mut c = i as u32;
+        let mut k = 0;
+        while k < 4 {
+            c = if c & 1 != 0 { (c >> 1) ^ 0xEDB8_8320 } else { c >> 1 };
+            k += 1;
+        }
+        t[i] = c;
+        i += 1;
+    }
+    t
+};
+
 /// zlib-style incremental CRC-32 (what `esp_rom_crc32_le` computes); start from `0xffff_ffff`.
 fn crc32(crc: u32, data: &[u8]) -> u32 {
     let mut c = !crc;
     for &b in data {
         c ^= u32::from(b);
-        for _ in 0..8 {
-            c = if c & 1 != 0 { (c >> 1) ^ 0xEDB8_8320 } else { c >> 1 };
-        }
+        c = (c >> 4) ^ CRC_NIBBLE[(c & 0xf) as usize];
+        c = (c >> 4) ^ CRC_NIBBLE[(c & 0xf) as usize];
     }
     !c
 }

@@ -37,7 +37,8 @@ const NAMES: &[(&str, &str)] = &[
 fn exercise(img: &[u8], size: u32) {
     let mut n = Nvs::new(SliceFlash(img), size);
     let mut out = [0u8; 8192];
-    for &(ns, key) in NAMES {
+    let names = if cfg!(miri) { &NAMES[..3] } else { NAMES };
+    for &(ns, key) in names {
         let _ = n.get_u8(ns, key);
         let _ = n.blob_len(ns, key);
         let _ = n.get_blob(ns, key, &mut out);
@@ -69,7 +70,7 @@ fn random_garbage() {
 fn mutated_valid_images() {
     let mut rng = XorShift(0x1234_5678_9ABC_DEF1);
     for base in [MAIN_V2, BIG_V2, MANY] {
-        for _ in 0..scale() * 10 {
+        for _ in 0..if cfg!(miri) { 1 } else { 400 } {
             let mut img = base.to_vec();
             for _ in 0..1 + rng.next() % 12 {
                 let at = (rng.next() % img.len() as u64) as usize;
@@ -100,7 +101,7 @@ fn recrc_mutations_reach_the_bounds_checks() {
     }
     let mut rng = XorShift(0xDEAD_BEEF_CAFE_F00D);
     for base in [MAIN_V2, BIG_V2] {
-        for _ in 0..scale() * 25 {
+        for _ in 0..if cfg!(miri) { 1 } else { 1000 } {
             let mut img = base.to_vec();
             for _ in 0..4 {
                 let page = (rng.next() % 3) as usize;

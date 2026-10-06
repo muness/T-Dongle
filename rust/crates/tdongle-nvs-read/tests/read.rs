@@ -80,7 +80,8 @@ fn fix_page_crc(img: &mut [u8], page: usize) {
 fn every_item_matches_what_idf_parser_reads() {
     for (name, img, text) in FIXTURES {
         let mut n = nvs(img);
-        for e in expected(text) {
+        // Miri is ~1000x slower: spot-check the big corpus there.
+        for e in expected(text).into_iter().take(if cfg!(miri) { 4 } else { usize::MAX }) {
             // IDF's offset of the item header is where our key must be.
             assert!(img[e.offset + 8..].starts_with(e.key.as_bytes()), "{name} {}/{}", e.ns, e.key);
             match e.ty {
@@ -400,4 +401,48 @@ fn reads_are_piecewise_and_stay_inside_the_partition() {
     assert_eq!(n.get_blob("big", "blob8000", &mut [0; 8000]), Ok(Some(8000)));
     let spy = n.into_inner();
     assert!(spy.max_len.get() <= 4000, "{}", spy.max_len.get());
+}
+
+/// A flash that counts its reads. On the board every read is a flash-driver call with the cache and interrupts held off, so the number of reads is the cost of a
+/// load, and a load must be bounded (a loop that is merely long looks like a hang to a watchdog).
+struct Counting<'a> {
+    inner: SliceFlash<'a>,
+    reads: std::cell::Cell<u32>,
+    bytes: std::cell::Cell<u64>,
+}
+
+impl Flash for Counting<'_> {
+    type Error = OutOfRange;
+    fn read(&self, offset: u32, buf: &mut [u8]) -> Result<(), OutOfRange> {
+        self.reads.set(self.reads.get() + 1);
+        self.bytes.set(self.bytes.get() + buf.len() as u64);
+        self.inner.read(offset, buf)
+    }
+}
+
+/// The load the spikes do at boot (profiles, meta, v0.1.x config, with absent keys looked up too) is bounded on every fixture, on an erased partition and on one full of
+/// garbage; the numbers are the reason the console can come up before storage without risking a watchdog.
+#[test]
+fn a_boot_time_load_is_bounded_in_flash_reads() {
+    let erased = vec![0xffu8; SIZE as usize];
+    let garbage: Vec<u8> = (0..SIZE as usize).map(|i| (i.wrapping_mul(2654435761) >> 7) as u8).collect();
+    let mut images: Vec<(&str, &[u8])> = FIXTURES.iter().map(|(n, b, _)| (*n, *b)).collect();
+    images.push(("erased", &erased));
+    images.push(("garbage", &garbage));
+    for (name, img) in images {
+        let flash = Counting { inner: SliceFlash(img), reads: 0.into(), bytes: 0.into() };
+        let mut n = Nvs::new(flash, SIZE);
+        let mut buf = [0u8; 1100];
+        for (ns, key) in
+            [("tn_settings", "wifi_profiles"), ("tn_settings", "wifi_meta"), ("adapter", "config"), ("tn_settings", "mode"), ("tn_settings", "nothing")]
+        {
+            let _ = n.get_blob(ns, key, &mut buf);
+        }
+        let f = n.into_inner();
+        let (reads, bytes) = (f.reads.get(), f.bytes.get());
+        eprintln!("{name}: {reads} reads, {bytes} bytes");
+        // 16 pages x (header + 126 entries): five lookups plus chunk lookups stay far below this; a runaway loop would not.
+        assert!(reads < 10_000, "{name}: {reads} flash reads");
+        assert!(bytes < 300_000, "{name}: {bytes} bytes read");
+    }
 }

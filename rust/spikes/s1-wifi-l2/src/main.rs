@@ -10,6 +10,8 @@ extern crate alloc;
 mod acm;
 #[path = "../../common/ops.rs"]
 mod ops;
+#[path = "../../common/guard.rs"]
+mod guard;
 #[path = "../../common/saved.rs"]
 mod saved;
 
@@ -26,6 +28,7 @@ use embassy_usb::types::{InterfaceNumber, StringIndex};
 use embassy_usb::{Builder, Handler, UsbDevice, UsbVersion};
 use esp_backtrace as _;
 use esp_hal::{clock::CpuClock, timer::timg::TimerGroup};
+use tdongle_boot_guard::Stage;
 use esp_hal::usb::otg::Usb;
 use esp_hal::usb::otg::embassy_usb_device::{Config as OtgConfig, Driver as UsbDriver};
 use static_cell::StaticCell;
@@ -221,7 +224,7 @@ async fn reply(port: &mut acm::Acm<'static, Drv>, text: &[u8]) {
 }
 
 #[embassy_executor::task]
-async fn console_task(mut port: acm::Acm<'static, Drv>) -> ! {
+async fn console_task(mut port: acm::Acm<'static, Drv>, state: &'static guard::State) -> ! {
     let mut line = [0u8; 64];
     let mut n = 0usize;
     loop {
@@ -240,14 +243,21 @@ async fn console_task(mut port: acm::Acm<'static, Drv>) -> ! {
                                 let _ = write!(l, "status mode=spike_s1 linked={} up_ms={} ", linked as u8, Instant::now().as_millis());
                                 counters_line(&mut l);
                             }
-                            "boot-status" => ops::boot_status(&mut l, "s1-wifi-l2", ESP_APP_DESC.app_elf_sha256(), Instant::now().as_millis()),
+                            "boot-status" => guard::boot_status(&mut l, "s1-wifi-l2", ESP_APP_DESC.app_elf_sha256(), state, Instant::now().as_millis(), Some(esp_alloc::HEAP.free() as u32)),
+                            "normal" => {
+                                guard::leave_safe_mode();
+                                reply(&mut port, b"leaving safe mode: resetting\r\n").await;
+                                Timer::after(Duration::from_millis(200)).await;
+                                esp_hal::system::software_reset()
+                            }
                             "bootloader" => {
+                                guard::leave_safe_mode(); // a deliberate reset is not a failed boot
                                 reply(&mut port, b"rebooting to ROM download mode\r\n").await;
                                 Timer::after(Duration::from_millis(200)).await;
                                 ops::enter_bootloader()
                             }
                             "help" | "?" => {
-                                let _ = write!(l, "commands: status | boot-status | bootloader | gw A.B.C.D | help");
+                                let _ = write!(l, "commands: status | boot-status | bootloader | normal | gw A.B.C.D | help");
                             }
                             other if other.starts_with("gw ") => {
                                 let ip = parse_ip(other[3..].trim());
@@ -272,8 +282,24 @@ async fn console_task(mut port: acm::Acm<'static, Drv>) -> ! {
     }
 }
 
+/// Feeds the watchdogs every 500 ms and marks the boot stable after `STABLE_AFTER_MS`.
+#[embassy_executor::task]
+async fn heartbeat_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
+    let mut marked = false;
+    loop {
+        dogs.feed();
+        if !marked && Instant::now().as_millis() >= tdongle_boot_guard::STABLE_AFTER_MS {
+            guard::mark_stable(safe_mode);
+            marked = true;
+        }
+        Timer::after_millis(500).await;
+    }
+}
+
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
+    static STATE: StaticCell<guard::State> = StaticCell::new();
+    let state: &'static guard::State = STATE.init(guard::begin());
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
 
     // Heap: 64 KiB of reclaimed (post-bootloader) RAM + 36 KiB regular. Measured use printed below.
@@ -283,17 +309,14 @@ async fn main(spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
+    let dogs = guard::Dogs::arm(peripherals.TIMG1, peripherals.RTC_TIMER);
+    guard::stage(Stage::Usb);
     println!("S1 boot. heap total={} used={} free={}", esp_alloc::HEAP.stats().size, esp_alloc::HEAP.used(), esp_alloc::HEAP.free());
-
-    // ---- saved networks: read-only from the existing NVS ----
-    let mut flash = esp_storage::FlashStorage::new(peripherals.FLASH);
-    let loaded = saved::load(&mut flash).ok().filter(|l| !l.saved.list().is_empty());
-    println!("nvs: {} saved networks", loaded.as_ref().map_or(0, |l| l.saved.list().len()));
 
     // ---- USB console (CDC-ACM only), serial = chip MAC ----
     static HEX: StaticCell<[u8; 12]> = StaticCell::new();
-    let hex = HEX.init(ops::mac_hex(esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap()));
-    let hex: &'static str = core::str::from_utf8(hex).unwrap();
+    let hex = HEX.init(ops::mac_hex(&esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or([0; 6])));
+    let hex: &'static str = core::str::from_utf8(hex).unwrap_or("000000000000");
     let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
     static EP_OUT: StaticCell<[u8; 128]> = StaticCell::new();
     let driver = UsbDriver::new(usb, EP_OUT.init([0; 128]), OtgConfig::default());
@@ -313,7 +336,20 @@ async fn main(spawner: Spawner) -> ! {
     b.handler(CTL.init(Ctl { acm_if: ids.comm_if, acm_str: ids.iface_string, hex }));
     let dev = b.build();
     spawner.spawn(usb_task(dev).unwrap());
-    spawner.spawn(console_task(port).unwrap());
+    spawner.spawn(console_task(port, state).unwrap());
+    spawner.spawn(heartbeat_task(dogs, state.boot.safe_mode).unwrap());
+    // The console is up and enumerating: now the steps that can block or fail, each one recorded.
+    Timer::after_millis(300).await;
+    if state.boot.safe_mode {
+        println!("safe mode: storage and radio not started");
+        loop {
+            Timer::after_secs(60).await;
+        }
+    }
+    guard::stage(Stage::Settings);
+    let mut flash = esp_storage::FlashStorage::new(peripherals.FLASH);
+    let loaded = saved::load(&mut flash).ok().filter(|l| !l.saved.list().is_empty());
+    println!("nvs: {} saved networks", loaded.as_ref().map_or(0, |l| l.saved.list().len()));
 
     let Some(loaded) = loaded else {
         println!("no saved networks: console stays up");
@@ -322,16 +358,34 @@ async fn main(spawner: Spawner) -> ! {
         }
     };
 
-    let mut controller: WifiController<'_> = WifiController::new(peripherals.WIFI, ControllerConfig::default()).unwrap();
+    guard::stage(Stage::RadioInit);
+    let Ok(mut controller) = WifiController::new(peripherals.WIFI, ControllerConfig::default()) else {
+        println!("radio init failed");
+        loop {
+            Timer::after_secs(60).await;
+        }
+    };
     let mut sta = Interface::station();
     let mac = sta.mac_address();
     println!("STA MAC {:02x?}", mac);
     println!("after radio init: heap used={} free={}", esp_alloc::HEAP.used(), esp_alloc::HEAP.free());
 
-    controller.set_power_saving(PowerSaveMode::None).unwrap();
-    let bw = controller.bandwidths().unwrap().with_2_4(Bandwidth::_20MHz);
-    controller.set_bandwidths(bw).unwrap();
-    controller.set_max_tx_power(80).unwrap(); // 0.25 dBm units: 80 = 20 dBm (range 8..84)
+    // Tunings, not requirements: a failure is logged and the run goes on.
+    if controller.set_power_saving(PowerSaveMode::None).is_err() {
+        println!("set_power_saving failed");
+    }
+    match controller.bandwidths() {
+        Ok(bw) => {
+            if controller.set_bandwidths(bw.with_2_4(Bandwidth::_20MHz)).is_err() {
+                println!("set_bandwidths failed");
+            }
+        }
+        Err(_) => println!("bandwidths failed"),
+    }
+    if controller.set_max_tx_power(80).is_err() {
+        // 0.25 dBm units: 80 = 20 dBm (range 8..84)
+        println!("set_max_tx_power failed");
+    }
 
     // 802.11k/v (rm_enabled / btm_enabled): not exposed by esp-radio (it zeroes the bitfields), so go through esp-wifi-sys.
     // SAFETY: plain FFI calls with a zeroed, correctly sized wifi_config_t; the Wi-Fi driver is initialised above.
@@ -349,13 +403,15 @@ async fn main(spawner: Spawner) -> ! {
     // Strongest saved network the scan sees (hidden SSIDs included); none seen: the saved list in order (directed probe finds hidden ones).
     let mut next = 0usize;
     loop {
-        let slot = match controller.scan_async(&ScanConfig::default().with_show_hidden(true).with_max(40)).await {
+        guard::stage(Stage::Scan);
+        let scan = embassy_time::with_timeout(Duration::from_secs(8), controller.scan_async(&ScanConfig::default().with_show_hidden(true).with_max(40))).await;
+        let slot = match scan.map_err(|_| ()).and_then(|r| r.map_err(|_| ())) {
             Ok(aps) => {
                 println!("scan(show_hidden): {} APs", aps.len());
                 saved::choose(&loaded, aps.iter().map(|a| (a.ssid.as_str(), a.signal_strength)))
             }
-            Err(e) => {
-                println!("scan failed: {:?}", e);
+            Err(()) => {
+                println!("scan failed or timed out");
                 None
             }
         };
@@ -367,24 +423,33 @@ async fn main(spawner: Spawner) -> ! {
             Timer::after_secs(2).await;
             continue;
         };
-        let auth = if pass.is_empty() { AuthenticationMethodConfig::Open } else { AuthenticationMethodConfig::Wpa2Personal(pass.try_into().unwrap()) };
-        let sta_cfg = StationConfig::default().with_ssid(ssid.try_into().unwrap()).with_authentication(auth);
+        let auth = match pass.try_into() {
+            Ok(p) if !pass.is_empty() => AuthenticationMethodConfig::Wpa2Personal(p),
+            _ => AuthenticationMethodConfig::Open,
+        };
+        let Ok(ssid_t) = ssid.try_into() else {
+            Timer::after_secs(2).await;
+            continue;
+        };
+        let sta_cfg = StationConfig::default().with_ssid(ssid_t).with_authentication(auth);
         println!("joining saved slot {}", slot);
         if controller.set_config(&Config::Station(sta_cfg)).is_err() {
             Timer::after_secs(2).await;
             continue;
         }
-        match controller.connect_async().await {
-            Ok(info) => {
+        guard::stage(Stage::Connect);
+        match embassy_time::with_timeout(Duration::from_secs(30), controller.connect_async()).await {
+            Ok(Ok(info)) => {
                 println!("connected: {:?}", info);
                 break;
             }
-            Err(e) => {
-                println!("connect failed: {:?}, trying again", e);
+            Ok(Err(_)) | Err(_) => {
+                println!("connect failed or timed out, trying again");
                 Timer::after_secs(2).await;
             }
         }
     }
+    guard::stage(Stage::Running);
     LINKED.store(true, Ordering::Relaxed);
     println!("after connect: heap used={} free={}", esp_alloc::HEAP.used(), esp_alloc::HEAP.free());
 

@@ -186,11 +186,13 @@ fn dispatch(line: &str) {
         Command::Use(SlotArg::TrailingGarbage) => mgmt_write(reply::USE_INVALID),
         Command::Display(DisplayArgs::Show) => crate::report::display(&mut out),
         Command::Reboot => {
+            crate::guard::leave_safe_mode();
             mgmt_write(reply::REBOOT_OK);
             std::thread::sleep(std::time::Duration::from_millis(200));
             crate::sys::restart();
         }
         Command::Bootloader => {
+            crate::guard::leave_safe_mode(); // a deliberate reset is not a failed boot
             mgmt_write(reply::BOOTLOADER_OK);
             std::thread::sleep(std::time::Duration::from_millis(200));
             crate::sys::reboot_to_rom_download();

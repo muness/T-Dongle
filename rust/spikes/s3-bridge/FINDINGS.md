@@ -30,3 +30,11 @@ IRAM ~42 KB; `.data` 12.3 KB; `.bss` 95.2 KB (includes the 48 KiB heap, `BRIDGE`
 Same host, AP, channel and cable as the C runs. `status` before and 5 s after each 60 s test: TCP down `iperf3 -c SRV -R -t 60`; TCP up `-t 60`; UDP `-u -b 4M` and `-R`; load ping `ping -i 0.2 SRV`.
 Capture `bridge_to_host`, `bridge_to_wifi`, `bridge_ecn`, `bridge_rx_class`, `bridge_usb_ring`, `bridge_timing`, `bridge_wifi_tx`, `s3`, `heap`, `traffic`.
 Down short: `ring_full`/`dropped_full` rising -> USB IN (items 4, 5); zeros with `bridge_link` fine -> Wi-Fi. Up short: `h2w_held` and `rx_class holds/hold_us_max`, `tx_failed/tx_retries` -> Wi-Fi side; low with no holds -> OTG single-packet OUT (`rx_class ntbs` per second); ACK stalls -> `wifi_room_no` (item 1).
+
+## Board result (coordinator, 2026-10-06): FAIL, and the rebuild
+The first `s3-app.bin` flashed and verified, then the board never enumerated and left the USB bus entirely (no ROM port, no app port); it needed BOOT held to recover. Not a crash loop.
+That build read the NVS, initialised the radio and scanned **before** the USB device attached, with a `println!` after `Usb::new_fs` had moved the pads to the OTG PHY. Rule 13 (ADR 0001) rebuilt it:
+`guard::begin()` first, watchdogs, USB + console spawned before anything that can block, then `init_task` (storage, radio, scan, connect) with stages recorded in RTC memory, every `unwrap` in the radio
+setup turned into a reported error, timeouts on scan (8 s) and connect (30 s), esp-println on the UART (not USB-Serial-JTAG), a panic handler that records `file:line message` and resets, safe mode after two boots
+that did not stay up. New console commands: `boot-status` (now with `reset_reason`, `stage`, `previous_stage`, `previous_panic`, `safe_mode`, `unstable_boots`), `init` (stage and the last note), `normal` (leave safe mode).
+The cause of the original stall is not established; candidates are in the ADR. If the rebuild still stalls, `boot-status` after the next boot says in which stage.

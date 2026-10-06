@@ -71,3 +71,9 @@ Expect `/dev/cu.usbmodem*` and the service "T-Dongle-S3 NCM", VID 0x303A PID 0x4
 (`--features hold-rx` boots held). Reflector: the host adopts the chip MAC as its own; send raw frames (scapy `sendp` as root) and watch `tcpdump -e`; `rx_frames` should equal `tx_frames`.
 Backpressure: flood with `iperf3 -u`, `hold on` -> `rx_frames` freezes and the OUT pipe stalls; `hold off` resumes with the same datagram. Throughput: increasing UDP rates against the reflector; that
 single number decides whether the OTG driver needs the multi-packet patch.
+
+## Board result (coordinator, 2026-10-06): PASS
+Flashed app-only and verified against the running ELF; boots under the C bootloader; `bootloader` and `boot-status` work. Enumerates as "T-Dongle-S3 NCM", serial and NCM MAC = chip MAC.
+The reflector carries 2, 4, 8 and max Mbit/s of UDP broadcast with no drops (rx_drop 0, chan_full 0) and saturates at **4.58 Mbit/s in each direction at the same time (9.2 Mbit/s on the bus)**;
+the full-speed bulk ceiling at 64-byte packets is about 9.7. **The single-packet, non-DMA OTG driver is not the bandwidth bottleneck here; the multi-packet patch listed above is not needed for bandwidth.**
+Backpressure: `hold on` under a 3 Mbit/s flood froze `rx_frames`; `hold off` resumed with no drops, bad NTBs, runts or resets.

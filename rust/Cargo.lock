@@ -1445,6 +1445,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-boot-guard"
+version = "0.3.0-dev"
+dependencies = [
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
 name = "tdongle-bridge"
 version = "0.3.0-dev"
 dependencies = [
@@ -1463,6 +1471,7 @@ dependencies = [
  "esp-idf-sys",
  "log",
  "tdongle-aqm",
+ "tdongle-boot-guard",
  "tdongle-bridge",
  "tdongle-nvs-format",
  "tdongle-pm",

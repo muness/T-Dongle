@@ -336,7 +336,7 @@ mod tests {
     fn abandoned_reservation_publishes_nothing() {
         let q = queue();
         let (mut p, mut c) = (q.producer().unwrap(), q.consumer().unwrap());
-        drop(p.reserve(4).unwrap());
+        let _abandoned = p.reserve(4).unwrap(); // a reservation that is never published is simply released
         assert!(c.claim().is_none());
         assert_eq!(q.depth(), 0);
     }
