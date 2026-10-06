@@ -1,0 +1,30 @@
+[package]
+name = "tdongle-fw"
+description = "T-Dongle-S3 firmware (Rust port): USB NCM <-> Wi-Fi STA transparent bridge. ADR: rust/docs/adr/0001-rust-port.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+esp-idf-svc = { version = "0.53", default-features = false, features = ["std", "alloc", "binstart", "critical-section"] }
+esp-idf-sys = { version = "0.38", default-features = false, features = ["std", "binstart"] }
+log = "0.4"
+
+[build-dependencies]
+embuild = "0.33"
+
+# The TinyUSB component is the same one the C firmware pins (dependencies.lock: espressif/tinyusb 0.21.0~2). Only the library: the
+# esp_tinyusb glue (descriptors, CDC, the NCM transmit ring and its hold/resume logic) is Rust (src/usb/).
+[package.metadata.esp-idf-sys]
+esp_idf_tools_install_dir = "fromenv"
+esp_idf_sdkconfig_defaults = ["firmware/sdkconfig.defaults"]
+
+[[package.metadata.esp-idf-sys.extra_components]]
+remote_component = { name = "espressif/tinyusb", version = "0.21.0~2" }
+component_dirs = ["components/tdongle_usb_cfg"]
+bindings_header = "src/bindings.h"

@@ -1,0 +1,6 @@
+/target/
+/sdkconfig
+/sdkconfig.old
+/.embuild/
+/components_*.lock.bak
+*.orig

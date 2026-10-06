@@ -1,0 +1,14 @@
+# The Xtensa (ESP32-S3) Rust toolchain, installed by espup; see docs/adr/0001-rust-port.md for the full pinned set.
+#
+#   espup           0.17.1   (cargo binstall espup / github.com/esp-rs/espup/releases/tag/v0.17.1)
+#   Xtensa Rust     1.97.0.0 (rustc 1.97.0-nightly (8ea53bcd7 2026-07-08) (1.97.0.0))
+#   LLVM (clang)    esp-20.1.1_20250829
+#   GCC (linker)    xtensa-esp-elf esp-15.2.0_20250920
+#
+# Installed with:
+#   espup install --targets esp32s3 --toolchain-version 1.97.0.0 --export-file ~/.cache/tdongle/export-esp.sh
+#   . ~/.cache/tdongle/export-esp.sh
+#
+# The pure crates (crates/*) are plain no_std Rust and also build and test on stable: `cargo +stable test` from this directory.
+[toolchain]
+channel = "esp"
