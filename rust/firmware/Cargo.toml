@@ -44,6 +44,7 @@ tdongle-rescue = { path = "../crates/tdongle-rescue", features = ["hal"] }
 tdongle-boot-guard = { path = "../crates/tdongle-boot-guard" }
 tdongle-saved = { path = "../crates/tdongle-saved" }
 tdongle-nvs-read = { path = "../crates/tdongle-nvs-read" }
+tdongle-nvs-write = { path = "../crates/tdongle-nvs-write", features = ["embedded-storage"] }
 tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
 tdongle-wifi-policy = { path = "../crates/tdongle-wifi-policy" }
 esp-storage = { version = "0.10", features = ["esp32s3", "embedded-storage"] }
