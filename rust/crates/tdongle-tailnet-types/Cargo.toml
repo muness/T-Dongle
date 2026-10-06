@@ -1,0 +1,21 @@
+[package]
+name = "tdongle-tailnet-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Shared vocabulary of the tailnet crates: keys, monotonic time, entropy, counters and the fixed-capacity string/bytes buffers."
+
+[lints]
+workspace = true
+
+[dependencies]
+subtle = { version = "2.6", default-features = false }
+zeroize = { version = "1", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+
+[features]
+test-util = []

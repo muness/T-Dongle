@@ -1,0 +1,27 @@
+[package]
+name = "tdongle-tailnet-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Crypto primitives for the tailnet gateway (X25519, ChaCha20-Poly1305, XChaCha20-Poly1305, BLAKE2s, HMAC/HKDF-BLAKE2s, NaCl box) over RustCrypto: allocation free, constant-time compares, zeroizing keys."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets", "zeroize"] }
+chacha20poly1305 = { version = "0.11", default-features = false }
+blake2 = { version = "0.11", default-features = false }
+salsa20 = { version = "0.11", default-features = false }
+poly1305 = { version = "0.9", default-features = false }
+subtle = { version = "2.6", default-features = false }
+zeroize = { version = "1", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
+hex-literal = "1"
+crypto_box = { version = "0.9", default-features = false, features = ["salsa20", "alloc"] }
