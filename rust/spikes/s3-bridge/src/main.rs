@@ -28,7 +28,10 @@ use embassy_executor::Spawner;
 use tdongle_boot_guard::Stage;
 use embassy_futures::select::{Either, select};
 use embassy_futures::yield_now;
-use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use esp_hal::interrupt::Priority;
+use esp_rtos::embassy::InterruptExecutor;
+use tdongle_boot_guard::watch::{Verdict, Watch};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
@@ -409,6 +412,32 @@ fn heap_line(out: &mut String) {
 /// The saved networks (set by the init task once read), the slot joined, and the last scan's reading per slot (for `list` and `status`).
 static SAVED: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<Option<tdongle_nvs_format::load::Loaded>>> =
     embassy_sync::blocking_mutex::Mutex::new(RefCell::new(None));
+/// What `status` shows of the link: read from the driver by the link task (never by the console, which must not call the radio) and kept here.
+static LINK_SNAPSHOT: CsMutex<core::cell::Cell<tdongle_serial::wifi_link::Info>> = CsMutex::new(core::cell::Cell::new(tdongle_serial::wifi_link::Info {
+    connected: false,
+    rssi_valid: false,
+    rssi: 0,
+    channel: 0,
+    secondary: tdongle_serial::wifi_link::SECOND_UNKNOWN,
+    phy: tdongle_serial::wifi_link::PHY_UNKNOWN,
+    bw_cfg_mhz: 0,
+    ap_bw_mhz: 0,
+    ap_modes: 0,
+    ps: tdongle_serial::wifi_link::PS_UNKNOWN,
+    tx_power_valid: false,
+    tx_power_qdbm: 0,
+    selected_slot: 0,
+    pinned: false,
+    pin_failed_slot: 0,
+}));
+
+/// Read the link from the driver (link task only) and publish it.
+fn publish_link_snapshot() {
+    guard::op("link_read");
+    let info = l2::link_read();
+    guard::op("");
+    critical_section::with(|cs| LINK_SNAPSHOT.borrow(cs).set(info));
+}
 static SELECTED: AtomicI32 = AtomicI32::new(-1);
 static CONNECTED_NOW: AtomicBool = AtomicBool::new(false);
 static SCAN_SEEN: AtomicU32 = AtomicU32::new(0);
@@ -467,6 +496,11 @@ async fn main(spawner: Spawner) -> ! {
     let dogs = guard::Dogs::arm(peripherals.TIMG1, peripherals.RTC_TIMER);
     guard::stage(Stage::Usb);
 
+    // The console and the USB device run in an interrupt-mode executor above everything else (rule 13: always reachable). A bridge task that spins, a radio call that
+    // takes seconds or a scan cannot stop them being polled; they therefore never call the radio driver (status reads a snapshot the link task keeps).
+    static INT_EXEC: StaticCell<InterruptExecutor<1>> = StaticCell::new();
+    let int_spawner = INT_EXEC.init(InterruptExecutor::new(peripherals.FROM_CPU_INTR1)).start(Priority::Priority3);
+
     // ---- the bridge (no radio needed yet: the interface is filled in by `init_task`) ----
     let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or([0; 6]); // STA MAC = base MAC
     static BRIDGE: StaticCell<Bridge<FwEnv>> = StaticCell::new();
@@ -522,14 +556,16 @@ async fn main(spawner: Spawner) -> ! {
     static NTB: StaticCell<[u8; ncm::NTB_OUT_MAX]> = StaticCell::new();
     let (tx, rx) = ncm.split(NTB.init([0; ncm::NTB_OUT_MAX]));
     let (acm_rd, acm_wr) = acm.split();
-    static ACM_WR: StaticCell<Mutex<NoopRawMutex, AcmWriter>> = StaticCell::new();
-    let acm_wr: &'static Mutex<NoopRawMutex, AcmWriter> = ACM_WR.init(Mutex::new(acm_wr));
+    static ACM_WR: StaticCell<Mutex<CriticalSectionRawMutex, AcmWriter>> = StaticCell::new();
+    let acm_wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter> = ACM_WR.init(Mutex::new(acm_wr));
     let dev = b.build();
 
     // The USB device attaches when `usb_task` first runs: spawn it before anything else and do not block between here and the first `.await`.
-    spawner.spawn(usb_task(dev).unwrap());
-    spawner.spawn(console_task(acm_rd, acm_wr, bridge, state).unwrap());
-    spawner.spawn(heartbeat_task(dogs, state.boot.safe_mode).unwrap());
+    int_spawner.spawn(usb_task(SendDevice(dev)).unwrap());
+    int_spawner.spawn(console_task(acm_rd, acm_wr, bridge, state).unwrap());
+    int_spawner.spawn(console_pulse_task().unwrap());
+    int_spawner.spawn(supervisor_task(dogs, state.boot.safe_mode).unwrap());
+    spawner.spawn(thread_pulse_task().unwrap());
     spawner.spawn(usb_rx_task(rx, producer).unwrap());
     spawner.spawn(usb_tx_task(tx).unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
@@ -539,13 +575,45 @@ async fn main(spawner: Spawner) -> ! {
     }
 }
 
-/// Feeds the watchdogs every 500 ms and marks the boot stable after `STABLE_AFTER_MS`.
+/// Liveness counters, one per executor, bumped by a task that runs in it. The supervisor (in the interrupt executor) checks both: a spinning task in the thread executor stops
+/// `PULSE_THREAD`, a stuck console stops `PULSE_CONSOLE`, and the watchdog is fed only while both advance (`tdongle_boot_guard::watch`).
+static PULSE_THREAD: AtomicU32 = AtomicU32::new(0);
+static PULSE_CONSOLE: AtomicU32 = AtomicU32::new(0);
+
 #[embassy_executor::task]
-async fn heartbeat_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
+async fn thread_pulse_task() -> ! {
+    loop {
+        PULSE_THREAD.fetch_add(1, Ordering::Relaxed);
+        Timer::after_millis(500).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn console_pulse_task() -> ! {
+    loop {
+        PULSE_CONSOLE.fetch_add(1, Ordering::Relaxed);
+        Timer::after_millis(500).await;
+    }
+}
+
+/// Feeds the watchdogs while every executor makes progress, and otherwise records which one did not and resets, so `boot-status` names it. Marks the boot stable after
+/// `STABLE_AFTER_MS`. Runs in the interrupt executor: nothing in the thread executor can starve it.
+#[embassy_executor::task]
+async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
+    // deadlines: the thread executor may be inside a long synchronous call (radio init takes seconds) but must come back well inside the 10 s hardware watchdog
+    let mut watch = Watch::new(["thread", "console"], [8_000, 3_000], Instant::now().as_millis());
     let mut marked = false;
     loop {
-        dogs.feed();
-        if !marked && Instant::now().as_millis() >= tdongle_boot_guard::STABLE_AFTER_MS {
+        let now = Instant::now().as_millis();
+        match watch.check(now, [PULSE_THREAD.load(Ordering::Relaxed), PULSE_CONSOLE.load(Ordering::Relaxed)]) {
+            Verdict::Healthy => dogs.feed(),
+            Verdict::Stalled(task) => {
+                guard::hang(task);
+                println!("hang: {} made no progress", task);
+                esp_hal::system::software_reset()
+            }
+        }
+        if !marked && now >= tdongle_boot_guard::STABLE_AFTER_MS {
             guard::mark_stable(safe_mode);
             marked = true;
         }
@@ -766,7 +834,9 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
         if controller.set_protocols(Protocols::default()).is_err() {
             init_note("set_protocols failed"); // default is b/g/n: never LR
         }
+        guard::op("roaming_assist");
         l2::roaming_assist(); // bridge mode: 802.11k/v on, as C (`wifi_roaming_assist`)
+        guard::op("");
         guard::stage(Stage::Connect);
         match with_timeout(Duration::from_secs(30), controller.connect_async()).await {
             Ok(Ok(info)) => {
@@ -776,11 +846,18 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 if let Ok((ch, _)) = controller.channel() {
                     CHANNEL.store(ch, Ordering::Relaxed);
                 }
+                guard::op("register");
                 l2::register(); // the driver is started now: (re-)register the callbacks (the tx-done registration needs a started driver)
+                guard::op("");
                 l2::link_changed(); // the driver cleared its queues when the link came up
                 SELECTED.store(slot as i32, Ordering::Relaxed);
                 CONNECTED_NOW.store(true, Ordering::Relaxed);
-                critical_section::with(|cs| *BSS_JOINED.borrow_ref_mut(cs) = l2::joined_bss());
+                publish_link_snapshot();
+                // A driver call: never inside a critical section (it can wait for the Wi-Fi task, which cannot run while interrupts are off: that was the S3 regression).
+                guard::op("joined_bss");
+                let joined = l2::joined_bss();
+                guard::op("");
+                critical_section::with(|cs| *BSS_JOINED.borrow_ref_mut(cs) = joined);
                 bridge.link(true, &ctx);
                 loop {
                     match select(select(controller.wait_for_disconnect_async(), SCAN_REQ.wait()), Timer::after_secs(2)).await {
@@ -793,7 +870,7 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                             let _ = &LAST_REASON; // reason code: DisconnectedInfo field not mapped in the spike
                             break;
                         }
-                        Either::Second(()) => match controller.rssi() {
+                        Either::Second(()) => match { publish_link_snapshot(); controller.rssi() } {
                             Ok(r) => {
                                 RSSI.store(r, Ordering::Relaxed);
                                 RSSI_VALID.store(true, Ordering::Relaxed);
@@ -844,9 +921,16 @@ async fn worker_task(mut worker: tdongle_bridge::Worker<'static, FwEnv>) -> ! {
 // USB tasks
 // ======================================================================================================================
 
+/// The USB device, moved to the interrupt executor. `UsbDevice` is not `Send` only because its handler list is `dyn Handler` without the bound; the one handler (`Ctl`) holds
+/// interface numbers and `&'static str`s and touches only atomics and critical-section statics, and after this move nothing else uses the device.
+struct SendDevice(UsbDevice<'static, Drv>);
+
+// SAFETY: see above: single owner after the move, handler state is atomics and critical-section guarded statics.
+unsafe impl Send for SendDevice {}
+
 #[embassy_executor::task]
-async fn usb_task(mut dev: UsbDevice<'static, Drv>) -> ! {
-    dev.run().await
+async fn usb_task(mut dev: SendDevice) -> ! {
+    dev.0.run().await
 }
 
 /// host -> Wi-Fi: one datagram at a time into `Producer::host`. HOLD keeps the datagram in the NTB buffer and does not read the next
@@ -976,7 +1060,7 @@ async fn usb_tx_task(mut tx: NcmSender) -> ! {
 // Console (CDC-ACM)
 // ======================================================================================================================
 
-async fn out(w: &'static Mutex<NoopRawMutex, AcmWriter>, s: &str, timeout_ms: u64) {
+async fn out(w: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, s: &str, timeout_ms: u64) {
     let mut g = w.lock().await;
     // Do not wedge the console if nobody reads the port.
     let _ = with_timeout(Duration::from_millis(timeout_ms), g.write_all(s.as_bytes())).await;
@@ -984,31 +1068,37 @@ async fn out(w: &'static Mutex<NoopRawMutex, AcmWriter>, s: &str, timeout_ms: u6
 
 /// `scan`: every access point of the last scan, strongest first (C `scan` prints `ssid= rssi= auth=`; the BSSID and channel are added), then a summary.
 fn scan_text(out: &mut String) {
-    critical_section::with(|cs| {
+    // One row is copied out of the table at a time: formatting (which allocates) happens outside any critical section.
+    let (count, seen, seq, joined) = critical_section::with(|cs| {
         let t = SCAN_TABLE.borrow_ref(cs);
-        let joined = *BSS_JOINED.borrow_ref(cs);
-        let connected = CONNECTED_NOW.load(Ordering::Relaxed);
-        for row in &t.rows[..t.count] {
-            let ssid: String = row.ssid[..usize::from(row.ssid_len)].iter().map(|&b| if (32..127).contains(&b) { b as char } else { '?' }).collect();
-            let b = row.bss.bssid;
-            let slot = SAVED.lock(|c| {
-                c.borrow().as_ref().and_then(|l| l.saved.list().iter().position(|p| p.ssid_bytes() == &row.ssid[..usize::from(row.ssid_len)]))
-            });
-            let _ = write!(
-                out,
-                "ssid={} bssid={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} channel={} rssi={} auth={} usable={}",
-                ssid, b[0], b[1], b[2], b[3], b[4], b[5], row.bss.channel, row.bss.rssi, row.auth, u8::from(row.bss.usable())
-            );
-            if let Some(i) = slot {
-                let _ = write!(out, " saved={}", i + 1);
-            }
-            if connected && joined.is_some_and(|j| j.bssid == row.bss.bssid) {
-                out.push_str(" joined=1");
-            }
-            out.push_str("\r\n");
-        }
-        let _ = write!(out, "scan_done seen={} listed={} seq={}\r\n", t.seen, t.count, t.seq);
+        (t.count, t.seen, t.seq, *BSS_JOINED.borrow_ref(cs))
     });
+    let connected = CONNECTED_NOW.load(Ordering::Relaxed);
+    for i in 0..count {
+        let Some(row) = critical_section::with(|cs| {
+            let t = SCAN_TABLE.borrow_ref(cs);
+            (i < t.count && t.seq == seq).then(|| t.rows[i])
+        }) else {
+            break; // a newer scan replaced the table while we were printing
+        };
+        let name = &row.ssid[..usize::from(row.ssid_len)];
+        let ssid: String = name.iter().map(|&b| if (32..127).contains(&b) { b as char } else { '?' }).collect();
+        let b = row.bss.bssid;
+        let slot = SAVED.lock(|c| c.borrow().as_ref().and_then(|l| l.saved.list().iter().position(|p| p.ssid_bytes() == name)));
+        let _ = write!(
+            out,
+            "ssid={} bssid={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} channel={} rssi={} auth={} usable={}",
+            ssid, b[0], b[1], b[2], b[3], b[4], b[5], row.bss.channel, row.bss.rssi, row.auth, u8::from(row.bss.usable())
+        );
+        if let Some(i) = slot {
+            let _ = write!(out, " saved={}", i + 1);
+        }
+        if connected && joined.is_some_and(|j| j.bssid == row.bss.bssid) {
+            out.push_str(" joined=1");
+        }
+        out.push_str("\r\n");
+    }
+    let _ = write!(out, "scan_done seen={} listed={} seq={}\r\n", seen, count, seq);
 }
 
 fn bssid_text(b: Option<Bss>, out: &mut String) {
@@ -1050,7 +1140,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         clock_valid: false,
         link: {
             // the driver's own view (`wifi_link_read`): unknown stays unknown (an all-zero Info prints phy=lr)
-            let mut info = l2::link_read();
+            let mut info = critical_section::with(|cs| LINK_SNAPSHOT.borrow(cs).get());
             let selected = SELECTED.load(Ordering::Relaxed);
             info.selected_slot = if linked && (0..8).contains(&selected) { selected as u8 + 1 } else { 0 };
             info
@@ -1160,7 +1250,7 @@ fn tdongle_traffic_reading() -> tdongle_traffic::Reading {
 }
 
 #[embassy_executor::task]
-async fn console_task(mut rd: AcmReader, wr: &'static Mutex<NoopRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State) -> ! {
+async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State) -> ! {
     let mut reader = LineReader::new();
     loop {
         rd.wait_connection().await;
@@ -1182,7 +1272,7 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<NoopRawMutex, AcmWri
     }
 }
 
-async fn handle(wr: &'static Mutex<NoopRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
+async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
     let mut s = String::new();
     match line {
         "heap" => heap_line(&mut s),
@@ -1278,7 +1368,7 @@ async fn handle(wr: &'static Mutex<NoopRawMutex, AcmWriter>, bridge: &'static Br
 
 /// `heap` line every 5 s: to the console when the host holds DTR (`heap off` silences it) and to esp-println.
 #[embassy_executor::task]
-async fn heap_task(wr: &'static Mutex<NoopRawMutex, AcmWriter>) -> ! {
+async fn heap_task(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>) -> ! {
     loop {
         Timer::after_secs(5).await;
         let mut s = String::new();

@@ -269,6 +269,8 @@ pub fn boot_status<W: Write>(out: &mut W) {
         stage: crate::guard::current_stage().name(),
         previous_stage,
         previous_panic: state.map_or("", |s| s.boot.previous.panic_text()),
+        previous_hang: state.map_or("", |s| s.boot.previous.hang.as_str()),
+        previous_op: state.map_or("", |s| s.boot.previous.op.as_str()),
         safe_mode: crate::guard::safe_mode(),
         unstable_boots: state.map_or(0, |s| s.boot.previous.unstable_boots),
         uptime_ms: crate::sys::now_us64() / 1000,

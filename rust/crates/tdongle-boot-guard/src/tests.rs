@@ -104,6 +104,8 @@ fn boot_status_is_one_valid_json_line_with_escaped_text() {
         reset_reason: "CoreMwdt0",
         stage: "usb",
         previous_stage: "radio_init",
+        previous_hang: "thread",
+        previous_op: "joined_bss",
         previous_panic: "src/a.rs:1 \"quote\" back\\slash \u{1} tab\t newline\n ünïcode",
         safe_mode: true,
         unstable_boots: 2,
@@ -148,4 +150,27 @@ fn stage_bytes_round_trip() {
         assert_eq!(Stage::from_byte(s as u8), Some(s));
     }
     assert_eq!(Stage::from_byte(7), None);
+}
+
+#[test]
+fn hang_and_op_tags_survive_a_reset_and_are_cleared_by_the_right_events() {
+    let mut rec = Record::EMPTY;
+    let _ = rec.begin_boot();
+    rec.note_op("esp_wifi_sta_get_ap_info");
+    rec.note_hang("console");
+    let mut after = Record::from_words(&rec.to_words());
+    let boot = after.begin_boot();
+    assert_eq!(boot.previous.op.as_str(), "esp_wifi_sta_get_ap_info");
+    assert_eq!(boot.previous.hang.as_str(), "console");
+    // the op is per boot; the hang is remembered until a stable boot
+    let boot = after.begin_boot();
+    assert_eq!(boot.previous.op.as_str(), "");
+    assert_eq!(boot.previous.hang.as_str(), "console");
+    after.mark_stable(false);
+    assert_eq!(after.begin_boot().previous.hang.as_str(), "");
+    // long tags are cut on a character boundary
+    let mut r = Record::EMPTY;
+    r.note_op(&"ä".repeat(40));
+    let b = Record::from_words(&r.to_words()).begin_boot();
+    assert!(b.previous.op.as_str().len() <= TAG_MAX && b.previous.op.as_str().chars().all(|c| c == 'ä'));
 }

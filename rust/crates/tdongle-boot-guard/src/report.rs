@@ -18,6 +18,10 @@ pub struct BootStatus<'a> {
     pub previous_stage: &'a str,
     /// The previous panic, `""` if none.
     pub previous_panic: &'a str,
+    /// The task a supervisor found stalled before the previous reset, `""` if none.
+    pub previous_hang: &'a str,
+    /// The operation in progress when the previous boot ended, `""` if none.
+    pub previous_op: &'a str,
     /// This is a safe-mode boot.
     pub safe_mode: bool,
     /// Consecutive unstable boots before this one.
@@ -62,6 +66,10 @@ pub fn write_boot_status<W: Write>(w: &mut W, s: &BootStatus<'_>) -> fmt::Result
     json_str(w, s.reset_reason)?;
     w.write_str(",\"previous_panic\":")?;
     json_str(w, s.previous_panic)?;
+    w.write_str(",\"previous_hang\":")?;
+    json_str(w, s.previous_hang)?;
+    w.write_str(",\"previous_op\":")?;
+    json_str(w, s.previous_op)?;
     write!(w, ",\"safe_mode\":{},\"unstable_boots\":{},\"uptime_ms\":{}", s.safe_mode, s.unstable_boots, s.uptime_ms)?;
     if let Some(free) = s.free_heap {
         write!(w, ",\"free_memory\":{free}")?;

@@ -64,6 +64,20 @@ pub fn stage(stage: Stage) {
     store(&rec);
 }
 
+/// Record the risky operation about to run (a driver call that can block); call `op("")` after it. A reset in between is reported as `previous_op` by the next boot.
+pub fn op(tag: &str) {
+    let mut rec = load();
+    rec.note_op(tag);
+    store(&rec);
+}
+
+/// A supervisor found `task` stalled: record it (the caller resets the chip right after).
+pub fn hang(task: &str) {
+    let mut rec = load();
+    rec.note_hang(task);
+    store(&rec);
+}
+
 /// The step recorded last.
 pub fn current_stage() -> Stage {
     load().stage().unwrap_or(Stage::Boot)
@@ -125,6 +139,8 @@ pub fn boot_status<W: Write>(w: &mut W, firmware: &str, elf: &[u8; 32], state: &
             stage: current_stage().name(),
             previous_stage: prev_stage,
             previous_panic: state.boot.previous.panic_text(),
+            previous_hang: state.boot.previous.hang.as_str(),
+            previous_op: state.boot.previous.op.as_str(),
             safe_mode: state.boot.safe_mode,
             unstable_boots: state.boot.previous.unstable_boots,
             uptime_ms: up_ms,

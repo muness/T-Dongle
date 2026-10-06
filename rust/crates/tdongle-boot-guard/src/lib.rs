@@ -20,6 +20,7 @@
 use core::fmt::{self, Write};
 
 pub mod report;
+pub mod watch;
 
 #[cfg(test)]
 extern crate std;
@@ -30,8 +31,10 @@ pub const SAFE_MODE_AFTER: u8 = 2;
 pub const STABLE_AFTER_MS: u64 = 30_000;
 /// Longest stored panic text, in bytes.
 pub const MSG_MAX: usize = 96;
-/// Size of the record in 32-bit words.
-pub const WORDS: usize = 2 + MSG_MAX / 4 + 1;
+/// Longest stored hang culprit or operation tag, in bytes.
+pub const TAG_MAX: usize = 24;
+/// Size of the record in 32-bit words: header, panic text, two tags.
+pub const WORDS: usize = 2 + MSG_MAX / 4 + 2 * (TAG_MAX / 4) + 2;
 
 const MAGIC: u32 = 0x7d6c_b007;
 
@@ -89,6 +92,44 @@ pub struct Record {
     panics: u8,
     msg_len: u8,
     msg: [u8; MSG_MAX],
+    /// The task the supervisor found making no progress, recorded just before it reset the chip.
+    hang: Tag,
+    /// The risky operation in progress (a driver call, a long step) when the chip last reset: set before it, cleared after. A reset with this set names the call that never returned.
+    op: Tag,
+}
+
+/// A short text that survives in RTC memory.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Tag {
+    len: u8,
+    text: [u8; TAG_MAX],
+}
+
+impl Tag {
+    /// No text.
+    pub const EMPTY: Self = Self { len: 0, text: [0; TAG_MAX] };
+
+    /// `s`, cut at a character boundary to [`TAG_MAX`] bytes.
+    #[must_use]
+    pub fn new(s: &str) -> Self {
+        let mut n = s.len().min(TAG_MAX);
+        while !s.is_char_boundary(n) {
+            n -= 1;
+        }
+        let mut text = [0; TAG_MAX];
+        text[..n].copy_from_slice(&s.as_bytes()[..n]);
+        Self { len: n as u8, text }
+    }
+
+    /// The text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        core::str::from_utf8(&self.text[..usize::from(self.len).min(TAG_MAX)]).unwrap_or("")
+    }
+
+    fn valid(&self) -> bool {
+        usize::from(self.len) <= TAG_MAX && core::str::from_utf8(&self.text[..usize::from(self.len)]).is_ok()
+    }
 }
 
 /// What the previous boot left behind, captured by [`Record::begin_boot`].
@@ -102,6 +143,10 @@ pub struct Previous {
     pub panics: u8,
     msg_len: u8,
     msg: [u8; MSG_MAX],
+    /// The task a supervisor found stalled before the previous reset, or empty.
+    pub hang: Tag,
+    /// The operation that was in progress when the previous boot ended, or empty.
+    pub op: Tag,
 }
 
 impl Previous {
@@ -143,7 +188,7 @@ impl Write for Fixed<'_> {
 
 impl Record {
     /// A record with nothing in it (what a power-on boot starts from).
-    pub const EMPTY: Self = Self { magic: MAGIC, unstable_boots: 0, stage: 0, panics: 0, msg_len: 0, msg: [0; MSG_MAX] };
+    pub const EMPTY: Self = Self { magic: MAGIC, unstable_boots: 0, stage: 0, panics: 0, msg_len: 0, msg: [0; MSG_MAX], hang: Tag::EMPTY, op: Tag::EMPTY };
 
     /// Decode RTC memory. Anything that is not a well-formed record (power-on garbage, a write cut short by a reset) is an empty record.
     #[must_use]
@@ -152,10 +197,30 @@ impl Record {
         for (i, word) in words.iter().enumerate() {
             bytes[4 * i..4 * i + 4].copy_from_slice(&word.to_le_bytes());
         }
+        let tag_at = |at: usize| {
+            let mut text = [0u8; TAG_MAX];
+            text.copy_from_slice(&bytes[at + 1..at + 1 + TAG_MAX]);
+            Tag { len: bytes[at], text }
+        };
         let mut msg = [0u8; MSG_MAX];
         msg.copy_from_slice(&bytes[8..8 + MSG_MAX]);
-        let rec = Self { magic: words[0], unstable_boots: bytes[4], stage: bytes[5], panics: bytes[6], msg_len: bytes[7], msg };
-        if rec.magic != MAGIC || usize::from(rec.msg_len) > MSG_MAX || core::str::from_utf8(&rec.msg[..usize::from(rec.msg_len)]).is_err() {
+        let hang_at = 8 + MSG_MAX;
+        let rec = Self {
+            magic: words[0],
+            unstable_boots: bytes[4],
+            stage: bytes[5],
+            panics: bytes[6],
+            msg_len: bytes[7],
+            msg,
+            hang: tag_at(hang_at),
+            op: tag_at(hang_at + 1 + TAG_MAX),
+        };
+        if rec.magic != MAGIC
+            || usize::from(rec.msg_len) > MSG_MAX
+            || core::str::from_utf8(&rec.msg[..usize::from(rec.msg_len)]).is_err()
+            || !rec.hang.valid()
+            || !rec.op.valid()
+        {
             return Self::EMPTY;
         }
         rec
@@ -171,6 +236,12 @@ impl Record {
         bytes[6] = self.panics;
         bytes[7] = self.msg_len;
         bytes[8..8 + MSG_MAX].copy_from_slice(&self.msg);
+        let hang_at = 8 + MSG_MAX;
+        bytes[hang_at] = self.hang.len;
+        bytes[hang_at + 1..hang_at + 1 + TAG_MAX].copy_from_slice(&self.hang.text);
+        let op_at = hang_at + 1 + TAG_MAX;
+        bytes[op_at] = self.op.len;
+        bytes[op_at + 1..op_at + 1 + TAG_MAX].copy_from_slice(&self.op.text);
         let mut words = [0u32; WORDS];
         for (i, word) in words.iter_mut().enumerate() {
             *word = u32::from_le_bytes([bytes[4 * i], bytes[4 * i + 1], bytes[4 * i + 2], bytes[4 * i + 3]]);
@@ -186,10 +257,13 @@ impl Record {
             panics: self.panics,
             msg_len: self.msg_len,
             msg: self.msg,
+            hang: self.hang,
+            op: self.op,
         };
         let safe_mode = self.unstable_boots >= SAFE_MODE_AFTER;
         self.unstable_boots = self.unstable_boots.saturating_add(1);
         self.stage = Stage::Boot as u8;
+        self.op = Tag::EMPTY;
         // The previous panic text stays in the record until a stable boot clears it, so a second boot that is also cut short still reports it.
         Boot { safe_mode, previous }
     }
@@ -197,6 +271,16 @@ impl Record {
     /// Record the step about to run.
     pub fn note_stage(&mut self, stage: Stage) {
         self.stage = stage as u8;
+    }
+
+    /// Record the operation about to run (an empty `tag` when it is over). If the chip resets with this set, the next boot reports it as `previous_op`.
+    pub fn note_op(&mut self, tag: &str) {
+        self.op = Tag::new(tag);
+    }
+
+    /// Record the task a supervisor found stalled, just before it resets the chip.
+    pub fn note_hang(&mut self, task: &str) {
+        self.hang = Tag::new(task);
     }
 
     /// The step recorded last.
@@ -231,6 +315,7 @@ impl Record {
         self.panics = 0;
         self.msg_len = 0;
         self.msg = [0; MSG_MAX];
+        self.hang = Tag::EMPTY;
     }
 }
 
