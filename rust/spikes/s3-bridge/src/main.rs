@@ -12,6 +12,8 @@ extern crate alloc;
 mod ops;
 #[path = "../../common/guard.rs"]
 mod guard;
+#[path = "../../common/supervise.rs"]
+mod supervise;
 #[path = "../../common/saved.rs"]
 mod saved;
 mod l2;
@@ -31,7 +33,6 @@ use embassy_futures::yield_now;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_hal::interrupt::Priority;
 use esp_rtos::embassy::InterruptExecutor;
-use tdongle_boot_guard::watch::{Verdict, Watch};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
@@ -288,6 +289,7 @@ struct Ctl {
 
 impl Handler for Ctl {
     fn reset(&mut self) {
+        supervise::USB_CONFIGURED.store(false, Ordering::Relaxed);
         RESETS.fetch_add(1, Ordering::Relaxed);
         DTR.store(false, Ordering::Relaxed);
         ALT.store(0, Ordering::Relaxed);
@@ -296,6 +298,7 @@ impl Handler for Ctl {
 
     fn configured(&mut self, configured: bool) {
         CONFIGURED.store(configured, Ordering::Relaxed);
+        supervise::USB_CONFIGURED.store(configured, Ordering::Relaxed);
         if !configured {
             ALT.store(0, Ordering::Relaxed);
         }
@@ -488,12 +491,13 @@ async fn main(spawner: Spawner) -> ! {
     static STATE: StaticCell<guard::State> = StaticCell::new();
     let state: &'static guard::State = STATE.init(guard::begin());
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    tdongle_rescue::arm();
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: HEAP_RECLAIMED);
     esp_alloc::heap_allocator!(size: HEAP_REGULAR);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
-    let dogs = guard::Dogs::arm(peripherals.TIMG1, peripherals.RTC_TIMER);
+    let dogs = guard::Dogs::arm(peripherals.TIMG1);
     guard::stage(Stage::Usb);
 
     // The console and the USB device run in an interrupt-mode executor above everything else (rule 13: always reachable). A bridge task that spins, a radio call that
@@ -563,61 +567,15 @@ async fn main(spawner: Spawner) -> ! {
     // The USB device attaches when `usb_task` first runs: spawn it before anything else and do not block between here and the first `.await`.
     int_spawner.spawn(usb_task(SendDevice(dev)).unwrap());
     int_spawner.spawn(console_task(acm_rd, acm_wr, bridge, state).unwrap());
-    int_spawner.spawn(console_pulse_task().unwrap());
-    int_spawner.spawn(supervisor_task(dogs, state.boot.safe_mode).unwrap());
-    spawner.spawn(thread_pulse_task().unwrap());
+    int_spawner.spawn(supervise::supervisor_task(dogs, state.boot.safe_mode).unwrap());
+    supervise::THREAD_SPAWNER.get_or_init(|| spawner.make_send());
+    spawner.spawn(supervise::thread_pulse_task().unwrap());
     spawner.spawn(usb_rx_task(rx, producer).unwrap());
     spawner.spawn(usb_tx_task(tx).unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
     spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, spawner, bridge, worker, state.boot.safe_mode).unwrap());
     loop {
         Timer::after_secs(3600).await;
-    }
-}
-
-/// Liveness counters, one per executor, bumped by a task that runs in it. The supervisor (in the interrupt executor) checks both: a spinning task in the thread executor stops
-/// `PULSE_THREAD`, a stuck console stops `PULSE_CONSOLE`, and the watchdog is fed only while both advance (`tdongle_boot_guard::watch`).
-static PULSE_THREAD: AtomicU32 = AtomicU32::new(0);
-static PULSE_CONSOLE: AtomicU32 = AtomicU32::new(0);
-
-#[embassy_executor::task]
-async fn thread_pulse_task() -> ! {
-    loop {
-        PULSE_THREAD.fetch_add(1, Ordering::Relaxed);
-        Timer::after_millis(500).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn console_pulse_task() -> ! {
-    loop {
-        PULSE_CONSOLE.fetch_add(1, Ordering::Relaxed);
-        Timer::after_millis(500).await;
-    }
-}
-
-/// Feeds the watchdogs while every executor makes progress, and otherwise records which one did not and resets, so `boot-status` names it. Marks the boot stable after
-/// `STABLE_AFTER_MS`. Runs in the interrupt executor: nothing in the thread executor can starve it.
-#[embassy_executor::task]
-async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
-    // deadlines: the thread executor may be inside a long synchronous call (radio init takes seconds) but must come back well inside the 10 s hardware watchdog
-    let mut watch = Watch::new(["thread", "console"], [8_000, 3_000], Instant::now().as_millis());
-    let mut marked = false;
-    loop {
-        let now = Instant::now().as_millis();
-        match watch.check(now, [PULSE_THREAD.load(Ordering::Relaxed), PULSE_CONSOLE.load(Ordering::Relaxed)]) {
-            Verdict::Healthy => dogs.feed(),
-            Verdict::Stalled(task) => {
-                guard::hang(task);
-                println!("hang: {} made no progress", task);
-                esp_hal::system::software_reset()
-            }
-        }
-        if !marked && now >= tdongle_boot_guard::STABLE_AFTER_MS {
-            guard::mark_stable(safe_mode);
-            marked = true;
-        }
-        Timer::after_millis(500).await;
     }
 }
 
@@ -1253,10 +1211,19 @@ fn tdongle_traffic_reading() -> tdongle_traffic::Reading {
 async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State) -> ! {
     let mut reader = LineReader::new();
     loop {
-        rd.wait_connection().await;
+        // every wait has a 500 ms timer so the loop proves it is being polled (`supervise::console_alive`) even with no host attached
+        supervise::console_alive().await;
+        if matches!(select(rd.wait_connection(), Timer::after_millis(500)).await, Either::Second(())) {
+            continue;
+        }
         loop {
+            supervise::console_alive().await;
             let mut pkt = [0u8; 64];
-            let Ok(len) = rd.read_packet(&mut pkt).await else { break };
+            let len = match select(rd.read_packet(&mut pkt), Timer::after_millis(500)).await {
+                Either::First(Ok(len)) => len,
+                Either::First(Err(_)) => break,
+                Either::Second(()) => continue,
+            };
             for &c in &pkt[..len] {
                 let Some(ev) = reader.feed(c) else { continue };
                 if let Some(text) = ev.reply() {
@@ -1313,6 +1280,13 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             PIN_BSS.store(b.ends_with("on"), Ordering::Relaxed);
             let _ = write!(s, "bss pin {} (applies to the next join)\r\n", if b.ends_with("on") { "on: BSSID and channel of the strongest usable access point" } else { "off: all-channel scan, join by signal (C)" });
         }
+        st if st.starts_with("selftest ") => match tdongle_rescue::Selftest::parse(&st["selftest ".len()..]) {
+            Some(kind) => {
+                out(wr, "selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)\r\n", 300).await;
+                supervise::selftest(kind);
+            }
+            None => s.push_str("usage: selftest spin|irqoff|panic|console\r\n"),
+        },
         "init" => {
             let note = critical_section::with(|cs| *INIT_NOTE.borrow_ref(cs));
             let _ = write!(s, "init stage={} note={}\r\n", guard::current_stage().name(), note.as_str());
@@ -1321,7 +1295,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             guard::leave_safe_mode();
             out(wr, "leaving safe mode: resetting\r\n", 500).await;
             Timer::after(Duration::from_millis(200)).await;
-            esp_hal::system::software_reset()
+            tdongle_rescue::deliberate_reset()
         }
         "bootloader" => {
             guard::leave_safe_mode(); // a deliberate reset is not a failed boot

@@ -36,6 +36,7 @@ tdongle-aqm = { path = "../../crates/tdongle-aqm" }
 tdongle-spsc = { path = "../../crates/tdongle-spsc" }
 tdongle-serial = { path = "../../crates/tdongle-serial" }
 tdongle-traffic = { path = "../../crates/tdongle-traffic" }
+tdongle-rescue = { path = "../../crates/tdongle-rescue", features = ["hal"] }
 tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
 tdongle-saved = { path = "../../crates/tdongle-saved" }
 tdongle-nvs-read = { path = "../../crates/tdongle-nvs-read" }

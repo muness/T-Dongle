@@ -1492,6 +1492,7 @@ dependencies = [
  "esp-rtos",
  "static_cell",
  "tdongle-boot-guard",
+ "tdongle-rescue",
  "tdongle-usb-out",
 ]
 
@@ -1687,6 +1688,14 @@ dependencies = [
 [[package]]
 name = "tdongle-boot-guard"
 version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-rescue"
+version = "0.3.0-dev"
+dependencies = [
+ "critical-section",
+ "esp-hal",
+]
 
 [[package]]
 name = "tdongle-usb-out"

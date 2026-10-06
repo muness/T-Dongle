@@ -91,8 +91,20 @@ pub fn write_help<W: fmt::Write>(w: &mut W, tailnet: bool, memory_commands: &str
 
 /// The commands the phase 1 firmware implements, in the form `help` prints them. Every one parses (`Command::parse`) to something other than `Unknown`; a test keeps
 /// that true. The C `help` lists commands phase 1 answers with "not available yet", which a client reads as a promise.
-pub const PHASE1_FIRMWARE_COMMANDS: &[&str] =
-    &["status", "list", "use N", "display", "mode wifi_bridge", "capabilities", "pm", "boot-status", "reboot", "bootloader", "help"];
+pub const PHASE1_FIRMWARE_COMMANDS: &[&str] = &[
+    "status",
+    "list",
+    "use N",
+    "display",
+    "mode wifi_bridge",
+    "capabilities",
+    "pm",
+    "boot-status",
+    "reboot",
+    "bootloader",
+    "selftest spin|irqoff|panic|console",
+    "help",
+];
 
 /// The commands of the S3 spike (`status` and `list` are the C replies; the rest are spike tools).
 pub const SPIKE_S3_COMMANDS: &[&str] =

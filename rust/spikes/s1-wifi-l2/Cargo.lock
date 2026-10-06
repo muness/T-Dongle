@@ -1634,6 +1634,7 @@ dependencies = [
  "tdongle-boot-guard",
  "tdongle-nvs-format",
  "tdongle-nvs-read",
+ "tdongle-rescue",
  "tdongle-saved",
  "tdongle-wifi-policy",
 ]
@@ -1838,6 +1839,14 @@ version = "0.3.0-dev"
 [[package]]
 name = "tdongle-nvs-read"
 version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-rescue"
+version = "0.3.0-dev"
+dependencies = [
+ "critical-section",
+ "esp-hal",
+]
 
 [[package]]
 name = "tdongle-saved"

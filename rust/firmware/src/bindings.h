@@ -14,5 +14,8 @@
 // Power management and the temperature sensor.
 #include "esp_app_desc.h"
 #include "esp_task_wdt.h"
+#include "hal/wdt_hal.h"
+#include "soc/rtc.h"
+#include "soc/rtc_cntl_struct.h"
 #include "esp_pm.h"
 #include "driver/temperature_sensor.h"

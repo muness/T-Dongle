@@ -104,6 +104,8 @@ fn boot_status_is_one_valid_json_line_with_escaped_text() {
         reset_reason: "CoreMwdt0",
         stage: "usb",
         previous_stage: "radio_init",
+        rescue_state: "armed",
+        rescue_count: 1,
         previous_hang: "thread",
         previous_op: "joined_bss",
         previous_panic: "src/a.rs:1 \"quote\" back\\slash \u{1} tab\t newline\n ünïcode",
@@ -121,6 +123,8 @@ fn boot_status_is_one_valid_json_line_with_escaped_text() {
     assert_eq!(v["recovery"], true);
     assert_eq!(v["previous_stage"], "radio_init");
     assert_eq!(v["free_memory"], 99_000);
+    assert_eq!(v["rescue"]["state"], "armed");
+    assert_eq!(v["rescue"]["count"], 1);
 }
 
 proptest! {

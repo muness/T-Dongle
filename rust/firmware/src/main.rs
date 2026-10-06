@@ -12,6 +12,7 @@ mod diag;
 mod guard;
 mod pm;
 mod report;
+mod rescue;
 mod settings;
 mod sys;
 mod usb;
@@ -42,6 +43,7 @@ const MANAGER_PERIOD: Duration = Duration::from_secs(10);
 const WATCHDOG_MS: u32 = 30_000;
 
 fn main() {
+    rescue::arm();
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
     log::info!("T-Dongle-S3 {VERSION} (Rust port, phase 1: bridge)");
@@ -49,6 +51,9 @@ fn main() {
     // Rule 13 (ADR 0001): the record of what the last boot was doing, the panic hook and the task watchdog come before anything that can block. Two
     // boots in a row that did not stay up make this one a safe-mode boot: console only, no saved settings, no Wi-Fi.
     let state = guard::begin();
+    if let Err(error) = rescue::start_supervisor() {
+        log::error!("progress supervisor did not start: {error}");
+    }
     if let Err(error) = sys::watchdog_start(WATCHDOG_MS) {
         log::error!("task watchdog for the main task did not start: {error}");
     }
@@ -109,9 +114,7 @@ fn manage() -> ! {
     let mut maintainer = wifi::Maintainer::new();
     loop {
         sys::watchdog_feed();
-        if u64::from(sys::now_ms()) >= tdongle_boot_guard::STABLE_AFTER_MS {
-            guard::mark_stable();
-        }
+        rescue::pulse_main();
         diag::sample_temperature();
         diag::note_memory(diag::OP_TICK, 0, false);
         if let Some(wifi) = wifi::get() {

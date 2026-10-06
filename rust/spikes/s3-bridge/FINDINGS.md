@@ -77,3 +77,7 @@ After `normal`, boots A and B would hang the same way and be reset by the hardwa
 4. `boot-status` has `previous_hang` and `previous_op` (the operation in progress when the chip last reset, named for every driver call that can block).
 5. Host tests: `tdongle-boot-guard/tests/watch.rs` (starvation model: a spinning bridge task must not stop the console answering, and is named; stuck console; healthy board; interrupts off; wrap) and the RTC tag tests.
 Not verified on a board: that the interrupt executor at priority 3 coexists with the radio's interrupts (if the Wi-Fi interrupt needs to preempt the console, lower it); that `esp_wifi_sta_get_ap_info` really blocks on the Wi-Fi task (the tags will say if another call is the culprit).
+
+## Rescue (every image): `tdongle_rescue::arm()` first, supervised watchdog, self-tests
+All of S1, S2, S3 and the std firmware now follow the bootloader rescue protocol (ADR 0001 rule 13 item 6): `arm()` right after `esp_hal::init`, the RTC watchdog fed only by the supervisor when both executors advance, HEALTHY only after USB configured and 30 s of progress, `boot-status` with `"rescue":{"state","count"}`, and `selftest spin|irqoff|panic|console`.
+Board test plan: flash the rescue bootloader, then an image; `selftest spin` -> reset with `"rescue":{"count":1}` in `boot-status`; `selftest spin` again -> ROM download mode. Repeat for `irqoff` and `console`. A self-test demotes the image first, so the sequence works whether or not the image had become healthy.

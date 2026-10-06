@@ -60,12 +60,20 @@ pub fn safe_mode() -> bool {
     state().is_some_and(|s| s.boot.safe_mode)
 }
 
+/// A supervisor found `task` stalled: record it (the caller resets the chip right after).
+pub fn hang(task: &str) {
+    let mut record = load();
+    record.note_hang(task);
+    store(&record);
+}
+
 /// Record the step about to run and feed the task watchdog.
 pub fn stage(stage: Stage) {
     let mut record = load();
     record.note_stage(stage);
     store(&record);
     crate::sys::watchdog_feed();
+    crate::rescue::pulse_main();
 }
 
 /// The step recorded last.

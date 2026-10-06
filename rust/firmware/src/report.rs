@@ -262,6 +262,7 @@ pub fn boot_status<W: Write>(out: &mut W) {
     let state = crate::guard::state();
     let reason = format!("{}", crate::sys::reset_reason());
     let previous_stage = state.and_then(|s| s.boot.previous.stage).map_or("none", tdongle_boot_guard::Stage::name);
+    let rescue = crate::rescue::report();
     let status = tdongle_boot_guard::report::BootStatus {
         firmware: VERSION,
         elf: &elf,
@@ -269,6 +270,8 @@ pub fn boot_status<W: Write>(out: &mut W) {
         stage: crate::guard::current_stage().name(),
         previous_stage,
         previous_panic: state.map_or("", |s| s.boot.previous.panic_text()),
+        rescue_state: rescue.state,
+        rescue_count: rescue.count,
         previous_hang: state.map_or("", |s| s.boot.previous.hang.as_str()),
         previous_op: state.map_or("", |s| s.boot.previous.op.as_str()),
         safe_mode: crate::guard::safe_mode(),

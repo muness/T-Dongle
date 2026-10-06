@@ -1,0 +1,18 @@
+[package]
+name = "tdongle-rescue"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# The hardware half (RTC_CNTL_STORE0, the RTC watchdog, the self-tests) for the esp-hal images; the pure half builds and tests on the host.
+hal = ["dep:esp-hal", "dep:critical-section"]
+
+[dependencies]
+esp-hal = { version = "~1.2", optional = true, features = ["esp32s3", "unstable"] }
+critical-section = { version = "1", optional = true }

@@ -12,6 +12,8 @@ mod acm;
 mod ops;
 #[path = "../../common/guard.rs"]
 mod guard;
+#[path = "../../common/supervise.rs"]
+mod supervise;
 #[path = "../../common/saved.rs"]
 mod saved;
 
@@ -153,7 +155,11 @@ struct Ctl {
 }
 
 impl Handler for Ctl {
+    fn configured(&mut self, configured: bool) {
+        supervise::USB_CONFIGURED.store(configured, Ordering::Relaxed);
+    }
     fn reset(&mut self) {
+        supervise::USB_CONFIGURED.store(false, Ordering::Relaxed);
         DTR.store(false, Ordering::Relaxed);
     }
     fn control_out(&mut self, req: Request, _data: &[u8]) -> Option<OutResponse> {
@@ -189,9 +195,18 @@ impl Handler for Ctl {
     }
 }
 
+/// The USB device and the ACM port, moved to the interrupt executor (see S3/S2: `UsbDevice` is not `Send` only because of `dyn Handler`; `Ctl` is atomics only).
+struct SendDevice(UsbDevice<'static, Drv>);
+struct SendPort(acm::Acm<'static, Drv>);
+
+// SAFETY: single owner after the move.
+unsafe impl Send for SendDevice {}
+// SAFETY: as above.
+unsafe impl Send for SendPort {}
+
 #[embassy_executor::task]
-async fn usb_task(mut dev: UsbDevice<'static, Drv>) -> ! {
-    dev.run().await
+async fn usb_task(mut dev: SendDevice) -> ! {
+    dev.0.run().await
 }
 
 struct Line<const N: usize> {
@@ -224,14 +239,23 @@ async fn reply(port: &mut acm::Acm<'static, Drv>, text: &[u8]) {
 }
 
 #[embassy_executor::task]
-async fn console_task(mut port: acm::Acm<'static, Drv>, state: &'static guard::State) -> ! {
+async fn console_task(port: SendPort, state: &'static guard::State) -> ! {
+    let mut port = port.0;
     let mut line = [0u8; 64];
     let mut n = 0usize;
     loop {
-        port.wait_connection().await;
+        supervise::console_alive().await;
+        if matches!(embassy_futures::select::select(port.wait_connection(), Timer::after(Duration::from_millis(500))).await, embassy_futures::select::Either::Second(())) {
+            continue;
+        }
         loop {
+            supervise::console_alive().await;
             let mut pkt = [0u8; 64];
-            let Ok(len) = port.read_packet(&mut pkt).await else { break };
+            let len = match embassy_futures::select::select(port.read_packet(&mut pkt), Timer::after(Duration::from_millis(500))).await {
+                embassy_futures::select::Either::First(Ok(len)) => len,
+                embassy_futures::select::Either::First(Err(_)) => break,
+                embassy_futures::select::Either::Second(()) => continue,
+            };
             for &c in &pkt[..len] {
                 if c == b'\r' || c == b'\n' {
                     if n > 0 {
@@ -248,7 +272,7 @@ async fn console_task(mut port: acm::Acm<'static, Drv>, state: &'static guard::S
                                 guard::leave_safe_mode();
                                 reply(&mut port, b"leaving safe mode: resetting\r\n").await;
                                 Timer::after(Duration::from_millis(200)).await;
-                                esp_hal::system::software_reset()
+                                tdongle_rescue::deliberate_reset()
                             }
                             "bootloader" => {
                                 guard::leave_safe_mode(); // a deliberate reset is not a failed boot
@@ -256,8 +280,17 @@ async fn console_task(mut port: acm::Acm<'static, Drv>, state: &'static guard::S
                                 Timer::after(Duration::from_millis(200)).await;
                                 ops::enter_bootloader()
                             }
+                            st if st.starts_with("selftest ") => match tdongle_rescue::Selftest::parse(&st["selftest ".len()..]) {
+                                Some(kind) => {
+                                    reply(&mut port, b"selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)\r\n").await;
+                                    supervise::selftest(kind);
+                                }
+                                None => {
+                                    let _ = write!(l, "usage: selftest spin|irqoff|panic|console");
+                                }
+                            },
                             "help" | "?" => {
-                                let _ = write!(l, "commands: status | boot-status | bootloader | normal | gw A.B.C.D | help");
+                                let _ = write!(l, "commands: status | boot-status | bootloader | normal | selftest spin|irqoff|panic|console | gw A.B.C.D | help");
                             }
                             other if other.starts_with("gw ") => {
                                 let ip = parse_ip(other[3..].trim());
@@ -282,25 +315,12 @@ async fn console_task(mut port: acm::Acm<'static, Drv>, state: &'static guard::S
     }
 }
 
-/// Feeds the watchdogs every 500 ms and marks the boot stable after `STABLE_AFTER_MS`.
-#[embassy_executor::task]
-async fn heartbeat_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
-    let mut marked = false;
-    loop {
-        dogs.feed();
-        if !marked && Instant::now().as_millis() >= tdongle_boot_guard::STABLE_AFTER_MS {
-            guard::mark_stable(safe_mode);
-            marked = true;
-        }
-        Timer::after_millis(500).await;
-    }
-}
-
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     static STATE: StaticCell<guard::State> = StaticCell::new();
     let state: &'static guard::State = STATE.init(guard::begin());
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
+    tdongle_rescue::arm();
 
     // Heap: 64 KiB of reclaimed (post-bootloader) RAM + 36 KiB regular. Measured use printed below.
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: 64 * 1024);
@@ -309,7 +329,10 @@ async fn main(spawner: Spawner) -> ! {
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
 
-    let dogs = guard::Dogs::arm(peripherals.TIMG1, peripherals.RTC_TIMER);
+    let dogs = guard::Dogs::arm(peripherals.TIMG1);
+    // The USB device and the console run in an interrupt-mode executor above the radio loop (rule 13).
+    static INT_EXEC: StaticCell<esp_rtos::embassy::InterruptExecutor<1>> = StaticCell::new();
+    let int_spawner = INT_EXEC.init(esp_rtos::embassy::InterruptExecutor::new(peripherals.FROM_CPU_INTR1)).start(esp_hal::interrupt::Priority::Priority3);
     guard::stage(Stage::Usb);
     println!("S1 boot. heap total={} used={} free={}", esp_alloc::HEAP.stats().size, esp_alloc::HEAP.used(), esp_alloc::HEAP.free());
 
@@ -335,9 +358,11 @@ async fn main(spawner: Spawner) -> ! {
     static CTL: StaticCell<Ctl> = StaticCell::new();
     b.handler(CTL.init(Ctl { acm_if: ids.comm_if, acm_str: ids.iface_string, hex }));
     let dev = b.build();
-    spawner.spawn(usb_task(dev).unwrap());
-    spawner.spawn(console_task(port, state).unwrap());
-    spawner.spawn(heartbeat_task(dogs, state.boot.safe_mode).unwrap());
+    int_spawner.spawn(usb_task(SendDevice(dev)).unwrap());
+    int_spawner.spawn(console_task(SendPort(port), state).unwrap());
+    int_spawner.spawn(supervise::supervisor_task(dogs, state.boot.safe_mode).unwrap());
+    supervise::THREAD_SPAWNER.get_or_init(|| spawner.make_send());
+    spawner.spawn(supervise::thread_pulse_task().unwrap());
     // The console is up and enumerating: now the steps that can block or fail, each one recorded.
     Timer::after_millis(300).await;
     if state.boot.safe_mode {

@@ -97,39 +97,34 @@ pub fn leave_safe_mode() {
     store(&rec);
 }
 
-/// The task watchdog (MWDT of TIMG1) and the RTC watchdog, both resetting the system; the heartbeat task feeds them. The timeouts are longer than any
-/// single blocking step of the images (radio init, storage read) and far shorter than "the user must replug it".
+/// The second hardware watchdog (MWDT of TIMG1, 10 s, reset the system) next to the RTC watchdog that `tdongle_rescue::arm` owns. Both are fed by the progress supervisor, and only
+/// by it: `feed` is called once per check in which every heartbeat advanced.
 pub struct Dogs {
     mwdt: esp_hal::timer::timg::Wdt<esp_hal::peripherals::TIMG1<'static>>,
-    rwdt: esp_hal::rtc_cntl::Rwdt,
 }
 
 impl Dogs {
-    /// Arm both watchdogs.
-    pub fn arm(timg1: esp_hal::peripherals::TIMG1<'static>, rtc: esp_hal::peripherals::RTC_TIMER<'static>) -> Self {
-        use esp_hal::rtc_cntl::{Rtc, RwdtStage, RwdtStageAction};
+    /// Arm the TIMG1 watchdog.
+    pub fn arm(timg1: esp_hal::peripherals::TIMG1<'static>) -> Self {
         use esp_hal::timer::timg::{MwdtStage, MwdtStageAction, TimerGroup};
         let mut mwdt = TimerGroup::new(timg1).wdt;
         mwdt.set_timeout(MwdtStage::Stage0, Duration::from_millis(10_000));
         mwdt.set_stage_action(MwdtStage::Stage0, MwdtStageAction::ResetSystem);
         mwdt.enable();
-        let mut rwdt = Rtc::new(rtc).rwdt;
-        rwdt.set_timeout(RwdtStage::Stage0, Duration::from_millis(20_000));
-        rwdt.set_stage_action(RwdtStage::Stage0, RwdtStageAction::ResetSystem);
-        rwdt.enable();
-        Self { mwdt, rwdt }
+        Self { mwdt }
     }
 
-    /// Feed both. Called every 500 ms from a task on the same executor as everything else, so a blocked executor stops the feeding.
+    /// Feed both watchdogs.
     pub fn feed(&mut self) {
         self.mwdt.feed();
-        self.rwdt.feed();
+        tdongle_rescue::feed();
     }
 }
 
 /// The `boot-status` line.
 pub fn boot_status<W: Write>(w: &mut W, firmware: &str, elf: &[u8; 32], state: &State, up_ms: u64, free_heap: Option<u32>) {
     let prev_stage = state.boot.previous.stage.map_or("none", Stage::name);
+    let rescue = tdongle_rescue::report();
     let _ = write_boot_status(
         w,
         &BootStatus {
@@ -141,6 +136,8 @@ pub fn boot_status<W: Write>(w: &mut W, firmware: &str, elf: &[u8; 32], state: &
             previous_panic: state.boot.previous.panic_text(),
             previous_hang: state.boot.previous.hang.as_str(),
             previous_op: state.boot.previous.op.as_str(),
+            rescue_state: rescue.state,
+            rescue_count: rescue.count,
             safe_mode: state.boot.safe_mode,
             unstable_boots: state.boot.previous.unstable_boots,
             uptime_ms: up_ms,

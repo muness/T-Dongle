@@ -141,6 +141,7 @@ fn report_static() {
     );
 }
 
+// rescue: exempt (USB-Serial-JTAG only: this image never starts the OTG device, so esptool can always reset it into the ROM loader without BOOT)
 #[esp_rtos::main]
 async fn main(spawner: Spawner) {
     let p = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));

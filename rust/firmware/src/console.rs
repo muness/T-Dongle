@@ -154,6 +154,7 @@ fn control() {
     let mut sampler = tdongle_traffic::Sampler::new();
     let mut last_sample = 0u32;
     loop {
+        crate::rescue::console_alive();
         let now = crate::sys::now_ms();
         if now.wrapping_sub(last_sample) >= 250 || last_sample == 0 {
             sampler.sample(&usb::net::TRAFFIC.read(), now);
@@ -173,6 +174,16 @@ fn control() {
 const NOT_YET: &str = "ERR Not available in the Rust port yet (phase 2: setup, display and saved-network editing)\r\n";
 
 fn dispatch(line: &str) {
+    if let Some(arg) = line.strip_prefix("selftest ") {
+        match tdongle_rescue::Selftest::parse(arg) {
+            Some(kind) => {
+                mgmt_write("selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)\r\n");
+                crate::rescue::selftest(kind);
+            }
+            None => mgmt_write("ERR usage: selftest spin|irqoff|panic|console\r\n"),
+        }
+        return;
+    }
     let mut out = Out;
     match Command::parse(line) {
         Command::Help => infallible(reply::write_help_implemented(&mut out, "T-Dongle Wi-Fi bridge", reply::PHASE1_FIRMWARE_COMMANDS)),
@@ -189,7 +200,7 @@ fn dispatch(line: &str) {
             crate::guard::leave_safe_mode();
             mgmt_write(reply::REBOOT_OK);
             std::thread::sleep(std::time::Duration::from_millis(200));
-            crate::sys::restart();
+            crate::rescue::deliberate_reset();
         }
         Command::Bootloader => {
             crate::guard::leave_safe_mode(); // a deliberate reset is not a failed boot

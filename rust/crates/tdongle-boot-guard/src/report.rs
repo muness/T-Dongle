@@ -26,6 +26,10 @@ pub struct BootStatus<'a> {
     pub safe_mode: bool,
     /// Consecutive unstable boots before this one.
     pub unstable_boots: u8,
+    /// The bootloader rescue state of this boot (`armed`, `healthy`, ...).
+    pub rescue_state: &'a str,
+    /// Consecutive unhealthy boots the bootloader counted before this one.
+    pub rescue_count: u8,
     /// Milliseconds since boot.
     pub uptime_ms: u64,
     /// Free heap in bytes, if the image can tell.
@@ -70,6 +74,9 @@ pub fn write_boot_status<W: Write>(w: &mut W, s: &BootStatus<'_>) -> fmt::Result
     json_str(w, s.previous_hang)?;
     w.write_str(",\"previous_op\":")?;
     json_str(w, s.previous_op)?;
+    write!(w, ",\"rescue\":{{\"state\":")?;
+    json_str(w, s.rescue_state)?;
+    write!(w, ",\"count\":{}}}", s.rescue_count)?;
     write!(w, ",\"safe_mode\":{},\"unstable_boots\":{},\"uptime_ms\":{}", s.safe_mode, s.unstable_boots, s.uptime_ms)?;
     if let Some(free) = s.free_heap {
         write!(w, ",\"free_memory\":{free}")?;

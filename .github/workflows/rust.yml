@@ -32,6 +32,8 @@ jobs:
       - run: cargo test --workspace --exclude tdongle-fw
       - name: Boot order of the no_std images (rule 13)
         run: python3 tools/check_boot_order.py spikes/s1-wifi-l2/src/main.rs spikes/s3-bridge/src/main.rs
+      - name: Rescue arm first (every image)
+        run: python3 tools/check_rescue_first.py
       - name: Golden files are reproducible from the C sources
         run: |
           crates/tdongle-serial/tools/regen.sh

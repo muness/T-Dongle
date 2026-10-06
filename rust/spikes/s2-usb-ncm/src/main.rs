@@ -7,6 +7,8 @@
 mod ops;
 #[path = "../../common/guard.rs"]
 mod guard;
+#[path = "../../common/supervise.rs"]
+mod supervise;
 mod acm;
 mod ncm;
 
@@ -74,7 +76,12 @@ struct Ctl {
 }
 
 impl Handler for Ctl {
+    fn configured(&mut self, configured: bool) {
+        supervise::USB_CONFIGURED.store(configured, Ordering::Relaxed);
+    }
+
     fn reset(&mut self) {
+        supervise::USB_CONFIGURED.store(false, Ordering::Relaxed);
         RESETS.fetch_add(1, Ordering::Relaxed);
         DTR.store(false, Ordering::Relaxed);
         ALT.store(0, Ordering::Relaxed);
@@ -172,27 +179,17 @@ type AcmPort = acm::Acm<'static, Drv>;
 
 static STATE: embassy_sync::once_lock::OnceLock<guard::State> = embassy_sync::once_lock::OnceLock::new();
 
-/// Feeds the watchdogs every 500 ms and marks the boot stable after `STABLE_AFTER_MS`.
-#[embassy_executor::task]
-async fn heartbeat_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
-    let mut marked = false;
-    loop {
-        dogs.feed();
-        if !marked && Instant::now().as_millis() >= tdongle_boot_guard::STABLE_AFTER_MS {
-            guard::mark_stable(safe_mode);
-            marked = true;
-        }
-        Timer::after_millis(500).await;
-    }
-}
-
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     let state = STATE.get_or_init(guard::begin);
     let peripherals = esp_hal::init(esp_hal::Config::default());
+    tdongle_rescue::arm();
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
-    let dogs = guard::Dogs::arm(peripherals.TIMG1, peripherals.RTC_TIMER);
+    let dogs = guard::Dogs::arm(peripherals.TIMG1);
+    // The USB device and the console run in an interrupt-mode executor above the data path (rule 13); a heartbeat in each executor feeds the supervisor.
+    static INT_EXEC: StaticCell<esp_rtos::embassy::InterruptExecutor<1>> = StaticCell::new();
+    let int_spawner = INT_EXEC.init(esp_rtos::embassy::InterruptExecutor::new(peripherals.FROM_CPU_INTR1)).start(esp_hal::interrupt::Priority::Priority3);
     guard::stage(tdongle_boot_guard::Stage::Usb);
 
     // Stable "chip MAC" -> 12 uppercase hex digits for the serial and the NCM iMACAddress string (same as the C firmware).
@@ -245,17 +242,29 @@ async fn main(spawner: Spawner) -> ! {
     let (tx, rx) = ncm.split(NTB.init([0; ncm::NTB_OUT_MAX]));
 
     let dev = b.build();
-    spawner.spawn(usb_task(dev).unwrap());
-    spawner.spawn(console_task(acm).unwrap());
-    spawner.spawn(heartbeat_task(dogs, state.boot.safe_mode).unwrap());
+    int_spawner.spawn(usb_task(SendDevice(dev)).unwrap());
+    int_spawner.spawn(console_task(SendPort(acm)).unwrap());
+    int_spawner.spawn(supervise::supervisor_task(dogs, state.boot.safe_mode).unwrap());
+    supervise::THREAD_SPAWNER.get_or_init(|| spawner.make_send());
+    spawner.spawn(supervise::thread_pulse_task().unwrap());
     spawner.spawn(rx_task(rx).unwrap());
     spawner.spawn(tx_task(tx).unwrap());
     core::future::pending().await
 }
 
+/// The USB device and the ACM port, moved to the interrupt executor. `UsbDevice` is not `Send` only because its handler list is `dyn Handler` without the bound; the one handler
+/// (`Ctl`) touches only atomics and critical-section statics, and after the move nothing else uses either.
+struct SendDevice(UsbDevice<'static, Drv>);
+struct SendPort(AcmPort);
+
+// SAFETY: see above: single owner after the move.
+unsafe impl Send for SendDevice {}
+// SAFETY: as above; the ACM endpoints are used only by the console task from here on.
+unsafe impl Send for SendPort {}
+
 #[embassy_executor::task]
-async fn usb_task(mut dev: UsbDevice<'static, Drv>) -> ! {
-    dev.run().await
+async fn usb_task(mut dev: SendDevice) -> ! {
+    dev.0.run().await
 }
 
 /// Receive NCM OUT NTBs, reflect every datagram (src/dst MAC swapped) into the TX channel.
@@ -375,14 +384,24 @@ async fn reply(port: &mut AcmPort, args: core::fmt::Arguments<'_>) {
 }
 
 #[embassy_executor::task]
-async fn console_task(mut port: AcmPort) -> ! {
+async fn console_task(port: SendPort) -> ! {
+    let mut port = port.0;
     let mut line = [0u8; 64];
     let mut n = 0usize;
     loop {
-        port.wait_connection().await;
+        // every wait has a 500 ms timer so the loop proves it is being polled even with no host attached
+        supervise::console_alive().await;
+        if matches!(embassy_futures::select::select(port.wait_connection(), Timer::after(Duration::from_millis(500))).await, embassy_futures::select::Either::Second(())) {
+            continue;
+        }
         loop {
+            supervise::console_alive().await;
             let mut pkt = [0u8; 64];
-            let Ok(len) = port.read_packet(&mut pkt).await else { break };
+            let len = match embassy_futures::select::select(port.read_packet(&mut pkt), Timer::after(Duration::from_millis(500))).await {
+                embassy_futures::select::Either::First(Ok(len)) => len,
+                embassy_futures::select::Either::First(Err(_)) => break,
+                embassy_futures::select::Either::Second(()) => continue,
+            };
             for &c in &pkt[..len] {
                 if c == b'\r' || c == b'\n' {
                     if n > 0 {
@@ -476,15 +495,22 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
             guard::leave_safe_mode();
             reply(port, format_args!("leaving safe mode: resetting")).await;
             Timer::after(Duration::from_millis(200)).await;
-            esp_hal::system::software_reset()
+            tdongle_rescue::deliberate_reset()
         }
+        st if st.starts_with("selftest ") => match tdongle_rescue::Selftest::parse(&st["selftest ".len()..]) {
+            Some(kind) => {
+                reply(port, format_args!("selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)")).await;
+                supervise::selftest(kind);
+            }
+            None => reply(port, format_args!("usage: selftest spin|irqoff|panic|console")).await,
+        },
         "bootloader" => {
             guard::leave_safe_mode(); // a deliberate reset is not a failed boot
             reply(port, format_args!("rebooting to ROM download mode")).await;
             Timer::after(Duration::from_millis(200)).await;
             ops::enter_bootloader()
         }
-        "help" | "?" => reply(port, format_args!("commands: status | boot-status | bootloader | normal | reflect | sink | source RATE_KBPS|max | hold on | hold off | help")).await,
+        "help" | "?" => reply(port, format_args!("commands: status | boot-status | bootloader | normal | selftest spin|irqoff|panic|console | reflect | sink | source RATE_KBPS|max | hold on | hold off | help")).await,
         _ => reply(port, format_args!("unknown command: {}", cmd)).await,
     }
 }
