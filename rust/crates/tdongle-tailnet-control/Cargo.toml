@@ -1,0 +1,19 @@
+[package]
+name = "tdongle-tailnet-control"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The control client above the Noise record layer and below the map JSON: ts2021 HTTP upgrade, /key fetch, a minimal bounded HTTP/2 client, register/map request writers and the length-prefixed map framing. Sans-IO, allocation free."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+
+[dev-dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
