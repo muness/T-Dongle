@@ -1,0 +1,29 @@
+[package]
+name = "tdongle-tailnet-host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Host (std, tokio) adapter for the tailnet control client driver, and the ts2021 interop test against a real Tailscale control server."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+tdongle-tailnet-control = { path = "../tdongle-tailnet-control" }
+tdongle-tailnet-map = { path = "../tdongle-tailnet-map" }
+tdongle-tailnet-noise = { path = "../tdongle-tailnet-noise" }
+tdongle-tailnet-ctl = { path = "../tdongle-tailnet-ctl" }
+tokio = { version = "1", features = ["rt", "net", "time", "macros", "io-util", "sync"] }
+embedded-io-adapters = { version = "0.7", features = ["tokio-1"] }
+embedded-io-async = "0.7"
+serde_json = "1"
+
+[dev-dependencies]
+
+[[bin]]
+name = "ts2021-interop"
+path = "src/main.rs"
