@@ -1,0 +1,6 @@
+# Pseudo-random times, button gestures, facts and traffic (xorshift32, seed 4).
+start 1000
+set saved 3
+set saved_wifi 1
+set dim_seconds 20
+fuzz 4 3000

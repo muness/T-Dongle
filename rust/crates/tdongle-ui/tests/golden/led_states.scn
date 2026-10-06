@@ -1,0 +1,31 @@
+# The status light through its states, written only on change (and once a second), bit for bit.
+start 1000
+set saved_wifi 0
+tick 1000 4000 20
+set saved_wifi 1
+set saved 1
+tick 4000 7000 20
+set wifi 1
+set online 1
+tick 7000 8000 20
+set usb 1
+tick 8000 11000 20
+set wifi 0
+set online 0
+set last_reason 201
+tick 11000 16000 20
+set last_reason 8
+tick 16000 17000 20
+set wifi 1
+set online 1
+set bridge 0
+tick 17000 18000 20
+set ready 1
+tick 18000 21000 20
+set ready 0
+set failed 1
+tick 21000 26000 20
+set login 1
+tick 26000 29000 20
+set recovery 1
+tick 29000 34000 20

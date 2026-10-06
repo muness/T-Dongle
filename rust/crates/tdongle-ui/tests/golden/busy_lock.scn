@@ -1,0 +1,18 @@
+# The state lock busy: no draw, tried again next poll. The menu name keeps its previous value while the lock is busy.
+start 1000
+set saved 3
+set saved_wifi 1
+set usb 1
+set state_ok 0
+tick 1000 2000 20
+set state_ok 1
+tick 2000 2500 20
+press 3000 4700
+tick 2500 5000 20
+set lock_busy 1
+press 5500 5600
+tick 5000 6000 20
+set lock_busy 0
+set name2 Second
+press 6500 6600
+tick 6000 8000 20

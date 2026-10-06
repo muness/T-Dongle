@@ -1,0 +1,188 @@
+t=1000 apply backlight=60 rotation=0
+t=1000 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=1 wifi_up_s=0 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=1000 led 00000000e278b478ffffffff
+t=1060 led 00000000e272b472ffffffff
+t=1120 led 00000000e26cb46cffffffff
+t=1180 led 00000000e266b466ffffffff
+t=1240 led 00000000e260b460ffffffff
+t=1260 apply backlight=60 rotation=0
+t=1260 show status same
+t=1300 led 00000000e25ab45affffffff
+t=1360 led 00000000e254b454ffffffff
+t=1420 led 00000000e24eb44effffffff
+t=1480 led 00000000e248b448ffffffff
+t=1520 apply backlight=60 rotation=0
+t=1520 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=1 wifi_up_s=1 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=1540 led 00000000e242b442ffffffff
+t=1600 led 00000000e23cb43cffffffff
+t=1660 led 00000000e236b436ffffffff
+t=1720 led 00000000e230b430ffffffff
+t=1780 apply backlight=60 rotation=0
+t=1780 show status same
+t=1780 led 00000000e22ab42affffffff
+t=1840 led 00000000e224b424ffffffff
+t=1900 led 00000000e21eb41effffffff
+t=1960 led 00000000e218b418ffffffff
+t=2020 led 00000000e212b412ffffffff
+t=2040 apply backlight=60 rotation=0
+t=2040 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=2 wifi_up_s=1 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=2080 led 00000000e20cb40cffffffff
+t=2140 apply backlight=60 rotation=0
+t=2140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=2 wifi_up_s=1 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=2140 led 00000000e206b406ffffffff
+t=2200 led 00000000e200b400ffffffff
+t=2400 apply backlight=60 rotation=0
+t=2400 show status same
+t=2660 apply backlight=60 rotation=0
+t=2660 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=2 wifi_up_s=2 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=2920 apply backlight=60 rotation=0
+t=2920 show status same
+t=3140 apply backlight=60 rotation=0
+t=3140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=3 wifi_up_s=2 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=3220 led 00000000e200b400ffffffff
+t=3400 apply backlight=60 rotation=0
+t=3400 show status same
+t=3660 apply backlight=60 rotation=0
+t=3660 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=3 wifi_up_s=3 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=3920 apply backlight=60 rotation=0
+t=3920 show status same
+t=4140 apply backlight=60 rotation=0
+t=4140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=3 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=4 wifi_up_s=3 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=4240 led 00000000e200b400ffffffff
+t=4400 apply backlight=60 rotation=0
+t=4400 show status same
+t=4660 apply backlight=60 rotation=0
+t=4660 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=3 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=4 wifi_up_s=4 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=4920 apply backlight=60 rotation=0
+t=4920 show status same
+t=5140 apply backlight=60 rotation=0
+t=5140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=5 wifi_up_s=4 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=5260 led 00000000e200b400ffffffff
+t=5400 apply backlight=60 rotation=0
+t=5400 show status same
+t=5660 apply backlight=60 rotation=0
+t=5660 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=5 wifi_up_s=5 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=5920 apply backlight=60 rotation=0
+t=5920 show status same
+t=6180 apply backlight=60 rotation=0
+t=6180 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=6 wifi_up_s=5 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=6280 led 00000000e200b400ffffffff
+t=6440 apply backlight=60 rotation=0
+t=6440 show status same
+t=6700 apply backlight=60 rotation=0
+t=6700 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=6 wifi_up_s=6 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=6960 apply backlight=60 rotation=0
+t=6960 show status same
+t=7220 apply backlight=60 rotation=0
+t=7220 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=7 wifi_up_s=6 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=7300 led 00000000e200b400ffffffff
+t=7480 apply backlight=60 rotation=0
+t=7480 show status same
+t=7740 apply backlight=60 rotation=0
+t=7740 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=7 wifi_up_s=7 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=8000 apply backlight=60 rotation=0
+t=8000 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=8 wifi_up_s=7 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=2 active_slot=1 active_name=[Home]
+t=8260 apply backlight=60 rotation=0
+t=8260 show status same
+t=8320 led 00000000e200b400ffffffff
+t=8520 apply backlight=60 rotation=0
+t=8520 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=8 wifi_up_s=8 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=2 active_slot=1 active_name=[Home]
+t=8780 apply backlight=60 rotation=0
+t=8780 show status same
+t=9040 apply backlight=60 rotation=0
+t=9040 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=9 wifi_up_s=8 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=2 active_slot=1 active_name=[Home]
+t=9300 apply backlight=60 rotation=0
+t=9300 show status same
+t=9340 led 00000000e200b400ffffffff
+t=9560 apply backlight=60 rotation=0
+t=9560 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=9 wifi_up_s=9 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=2 active_slot=1 active_name=[Home]
+t=9820 apply backlight=60 rotation=0
+t=9820 show status same
+t=10080 apply backlight=60 rotation=0
+t=10080 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=10 wifi_up_s=9 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=2 active_slot=1 active_name=[Home]
+t=10340 apply backlight=60 rotation=0
+t=10340 show status same
+t=10360 led 00000000e200b400ffffffff
+t=10600 apply backlight=60 rotation=0
+t=10600 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=10 wifi_up_s=10 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=2 active_slot=1 active_name=[Home]
+t=10860 apply backlight=60 rotation=0
+t=10860 show status same
+t=11120 apply backlight=60 rotation=0
+t=11120 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=11 wifi_up_s=10 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=2 active_slot=1 active_name=[Home]
+t=11380 apply backlight=60 rotation=0
+t=11380 show status same
+t=11380 led 00000000e200b400ffffffff
+t=11640 apply backlight=60 rotation=0
+t=11640 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=11 wifi_up_s=11 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=2 active_slot=1 active_name=[Home]
+t=11900 apply backlight=60 rotation=0
+t=11900 show status same
+t=12160 apply backlight=60 rotation=0
+t=12160 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=12 wifi_up_s=11 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=12400 led 00000000e200b400ffffffff
+t=12420 apply backlight=60 rotation=0
+t=12420 show status same
+t=12680 apply backlight=60 rotation=0
+t=12680 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=12 wifi_up_s=12 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=12940 apply backlight=60 rotation=0
+t=12940 show status same
+t=13200 apply backlight=60 rotation=0
+t=13200 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=13 wifi_up_s=12 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=13420 led 00000000e200b400ffffffff
+t=13460 apply backlight=60 rotation=0
+t=13460 show status same
+t=13720 apply backlight=60 rotation=0
+t=13720 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=13 wifi_up_s=13 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=13980 apply backlight=60 rotation=0
+t=13980 show status same
+t=14240 apply backlight=60 rotation=0
+t=14240 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=14 wifi_up_s=13 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=14440 led 00000000e200b400ffffffff
+t=14500 apply backlight=60 rotation=0
+t=14500 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=14 wifi_up_s=14 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=14760 apply backlight=60 rotation=0
+t=14760 show status same
+t=15020 apply backlight=60 rotation=0
+t=15020 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=15 wifi_up_s=14 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=15280 apply backlight=60 rotation=0
+t=15280 show status same
+t=15460 led 00000000e200b400ffffffff
+t=15540 apply backlight=60 rotation=0
+t=15540 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=15 wifi_up_s=15 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=0 active_slot=1 active_name=[Home]
+t=15800 apply backlight=60 rotation=0
+t=15800 show status same
+t=16060 apply backlight=60 rotation=0
+t=16060 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=16 wifi_up_s=15 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=16320 apply backlight=60 rotation=0
+t=16320 show status same
+t=16480 led 00000000e200b400ffffffff
+t=16580 apply backlight=60 rotation=0
+t=16580 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=16 wifi_up_s=16 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=16840 apply backlight=60 rotation=0
+t=16840 show status same
+t=17100 apply backlight=60 rotation=0
+t=17100 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=17 wifi_up_s=16 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=17360 apply backlight=60 rotation=0
+t=17360 show status same
+t=17500 led 00000000e200b400ffffffff
+t=17620 apply backlight=60 rotation=0
+t=17620 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=17 wifi_up_s=17 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=17880 apply backlight=60 rotation=0
+t=17880 show status same
+t=18140 apply backlight=60 rotation=0
+t=18140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=18 wifi_up_s=17 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=18400 apply backlight=60 rotation=0
+t=18400 show status same
+t=18520 led 00000000e200b400ffffffff
+t=18660 apply backlight=60 rotation=0
+t=18660 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=18 wifi_up_s=18 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=18920 apply backlight=60 rotation=0
+t=18920 show status same
+t=19180 apply backlight=60 rotation=0
+t=19180 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=19 wifi_up_s=18 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=19440 apply backlight=60 rotation=0
+t=19440 show status same
+t=19540 led 00000000e200b400ffffffff
+t=19700 apply backlight=60 rotation=0
+t=19700 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=1 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=1 rssi=-61 ssid=[HomeNet] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=19 wifi_up_s=19 connects=2 last_reason=0 usb_resets=4 heap_free=123456 heap_min=90000 heap_largest=0 reset_reason=3 boots=3 watchdogs=2 panics=1 health_view=1 active_slot=1 active_name=[Home]
+t=19960 apply backlight=60 rotation=0
+t=19960 show status same

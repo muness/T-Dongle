@@ -1,0 +1,232 @@
+t=1000 apply backlight=60 rotation=0
+t=1000 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=1 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=1000 led 00000000e278b478ffffffff
+t=1060 led 00000000e272b472ffffffff
+t=1120 led 00000000e26cb46cffffffff
+t=1180 led 00000000e266b466ffffffff
+t=1240 led 00000000e260b460ffffffff
+t=1260 apply backlight=60 rotation=0
+t=1260 show status same
+t=1300 led 00000000e25ab45affffffff
+t=1360 led 00000000e254b454ffffffff
+t=1420 led 00000000e24eb44effffffff
+t=1480 led 00000000e248b448ffffffff
+t=1520 apply backlight=60 rotation=0
+t=1520 show status same
+t=1540 led 00000000e242b442ffffffff
+t=1600 led 00000000e23cb43cffffffff
+t=1660 led 00000000e236b436ffffffff
+t=1720 led 00000000e230b430ffffffff
+t=1780 apply backlight=60 rotation=0
+t=1780 show status same
+t=1780 led 00000000e22ab42affffffff
+t=1840 led 00000000e224b424ffffffff
+t=1900 led 00000000e21eb41effffffff
+t=1960 led 00000000e218b418ffffffff
+t=2020 led 00000000e212b412ffffffff
+t=2040 apply backlight=60 rotation=0
+t=2040 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=2 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=2080 led 00000000e20cb40cffffffff
+t=2140 led 00000000e206b406ffffffff
+t=2200 led 00000000e200b400ffffffff
+t=2300 apply backlight=60 rotation=0
+t=2300 show status same
+t=2560 apply backlight=60 rotation=0
+t=2560 show status same
+t=2820 apply backlight=60 rotation=0
+t=2820 show status same
+t=3080 apply backlight=60 rotation=0
+t=3080 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=3 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=3220 led 00000000e200b400ffffffff
+t=3340 apply backlight=60 rotation=0
+t=3340 show status same
+t=3540 apply backlight=60 rotation=0
+t=3540 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=3800 apply backlight=60 rotation=0
+t=3800 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=4060 apply backlight=60 rotation=0
+t=4060 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=4140 apply backlight=60 rotation=0
+t=4140 show rows attention=0 |SETUP MENU |1 Home | |Short: next  Hold: select |
+t=4240 led 00000000e200b400ffffffff
+t=4400 apply backlight=60 rotation=0
+t=4400 show rows attention=0 |SETUP MENU |1 Home | |Short: next  Hold: select |
+t=4660 apply backlight=60 rotation=0
+t=4660 show rows attention=0 |SETUP MENU |1 Home | |Short: next  Hold: select |
+t=4920 apply backlight=60 rotation=0
+t=4920 show rows attention=0 |SETUP MENU |1 Home | |Short: next  Hold: select |
+t=5140 apply backlight=60 rotation=0
+t=5140 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=5260 led 00000000e200b400ffffffff
+t=5400 apply backlight=60 rotation=0
+t=5400 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=5660 apply backlight=60 rotation=0
+t=5660 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=5920 apply backlight=60 rotation=0
+t=5920 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=6180 apply backlight=60 rotation=0
+t=6180 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=6280 led 00000000e200b400ffffffff
+t=6440 apply backlight=60 rotation=0
+t=6440 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=6700 apply backlight=60 rotation=0
+t=6700 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=6960 apply backlight=60 rotation=0
+t=6960 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=7220 apply backlight=60 rotation=0
+t=7220 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=7300 led 00000000e200b400ffffffff
+t=7480 apply backlight=60 rotation=0
+t=7480 show rows attention=0 |SETUP MENU |2 Phone hotspot | |Short: next  Hold: select |
+t=7540 apply backlight=60 rotation=0
+t=7540 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=7 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=7540 cmd use 2
+t=7800 apply backlight=60 rotation=0
+t=7800 show status same
+t=8060 apply backlight=60 rotation=0
+t=8060 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=8 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=8320 apply backlight=60 rotation=0
+t=8320 show status same
+t=8320 led 00000000e200b400ffffffff
+t=8580 apply backlight=60 rotation=0
+t=8580 show status same
+t=8840 apply backlight=60 rotation=0
+t=8840 show status same
+t=9100 apply backlight=60 rotation=0
+t=9100 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=9 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=9340 led 00000000e200b400ffffffff
+t=9360 apply backlight=60 rotation=0
+t=9360 show status same
+t=9620 apply backlight=60 rotation=0
+t=9620 show status same
+t=9880 apply backlight=60 rotation=0
+t=9880 show status same
+t=10140 apply backlight=60 rotation=0
+t=10140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=10 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=10360 led 00000000e200b400ffffffff
+t=10400 apply backlight=60 rotation=0
+t=10400 show status same
+t=10540 apply backlight=60 rotation=0
+t=10540 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=10800 apply backlight=60 rotation=0
+t=10800 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=11060 apply backlight=60 rotation=0
+t=11060 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=11320 apply backlight=60 rotation=0
+t=11320 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=11380 led 00000000e200b400ffffffff
+t=11580 apply backlight=60 rotation=0
+t=11580 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=11840 apply backlight=60 rotation=0
+t=11840 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=12100 apply backlight=60 rotation=0
+t=12100 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=12360 apply backlight=60 rotation=0
+t=12360 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=12400 led 00000000e200b400ffffffff
+t=12620 apply backlight=60 rotation=0
+t=12620 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=12880 apply backlight=60 rotation=0
+t=12880 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=13140 apply backlight=60 rotation=0
+t=13140 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=13400 apply backlight=60 rotation=0
+t=13400 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=13420 led 00000000e200b400ffffffff
+t=13540 apply backlight=60 rotation=0
+t=13540 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=13 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=13540 cmd setup
+t=13800 apply backlight=60 rotation=0
+t=13800 show status same
+t=14060 apply backlight=60 rotation=0
+t=14060 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=14 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=14140 apply backlight=60 rotation=0
+t=14140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=14 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=14400 apply backlight=60 rotation=0
+t=14400 show status same
+t=14440 led 00000000e200b400ffffffff
+t=14660 apply backlight=60 rotation=0
+t=14660 show status same
+t=14920 apply backlight=60 rotation=0
+t=14920 show status same
+t=15140 apply backlight=60 rotation=0
+t=15140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=15 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=15400 apply backlight=60 rotation=0
+t=15400 show status same
+t=15460 led 00000000e200b400ffffffff
+t=15660 apply backlight=60 rotation=0
+t=15660 show status same
+t=15920 apply backlight=60 rotation=0
+t=15920 show status same
+t=16140 apply backlight=60 rotation=0
+t=16140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=3 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=16 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=16400 apply backlight=60 rotation=0
+t=16400 show status same
+t=16480 led 00000000e200b400ffffffff
+t=16660 apply backlight=60 rotation=0
+t=16660 show status same
+t=16920 apply backlight=60 rotation=0
+t=16920 show status same
+t=17140 apply backlight=60 rotation=0
+t=17140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=17 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=17400 apply backlight=60 rotation=0
+t=17400 show status same
+t=17500 led 00000000e200b400ffffffff
+t=17660 apply backlight=60 rotation=0
+t=17660 show status same
+t=17920 apply backlight=60 rotation=0
+t=17920 show status same
+t=18140 apply backlight=60 rotation=0
+t=18140 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=18 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=18400 apply backlight=60 rotation=0
+t=18400 show status same
+t=18520 led 00000000e200b400ffffffff
+t=18660 apply backlight=60 rotation=0
+t=18660 show status same
+t=18920 apply backlight=60 rotation=0
+t=18920 show status same
+t=19180 apply backlight=60 rotation=0
+t=19180 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=19 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=19440 apply backlight=60 rotation=0
+t=19440 show status same
+t=19540 led 00000000e200b400ffffffff
+t=19700 apply backlight=60 rotation=0
+t=19700 show status same
+t=19960 apply backlight=60 rotation=0
+t=19960 show status same
+t=20220 apply backlight=60 rotation=0
+t=20220 show status bridge=1 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=20 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=20480 apply backlight=60 rotation=0
+t=20480 show status same
+t=20540 apply backlight=60 rotation=0
+t=20540 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=20560 led 00000000e200b400ffffffff
+t=20800 apply backlight=60 rotation=0
+t=20800 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=21060 apply backlight=60 rotation=0
+t=21060 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=21320 apply backlight=60 rotation=0
+t=21320 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=21580 apply backlight=60 rotation=0
+t=21580 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=21580 led 00000000e200b400ffffffff
+t=21840 apply backlight=60 rotation=0
+t=21840 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=22100 apply backlight=60 rotation=0
+t=22100 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=22360 apply backlight=60 rotation=0
+t=22360 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=22600 led 00000000e200b400ffffffff
+t=22620 apply backlight=60 rotation=0
+t=22620 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=22880 apply backlight=60 rotation=0
+t=22880 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=23140 apply backlight=60 rotation=0
+t=23140 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=23400 apply backlight=60 rotation=0
+t=23400 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=23620 led 00000000e200b400ffffffff
+t=23660 apply backlight=60 rotation=0
+t=23660 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=23920 apply backlight=60 rotation=0
+t=23920 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
