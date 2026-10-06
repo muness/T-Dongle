@@ -261,7 +261,7 @@ impl<F: Flash> Nvs<F> {
                 if total > out.len() {
                     return Err(Error::TooSmall);
                 }
-                if (start != 0 && start != 0x80) || count > 127 || (count == 0) != (total == 0) {
+                if (start != 0 && start != 0x80) || count > 127 || (count == 0 && total != 0) {
                     return Err(Error::Corrupt);
                 }
                 let ns = found.item.ns;

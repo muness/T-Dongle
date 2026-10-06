@@ -1,0 +1,23 @@
+[package]
+name = "tdongle-nvs-write"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# `SimFlash`: an in-memory NOR flash with power-loss injection, for host tests, the fuzz target and the firmware's host builds.
+sim = []
+
+[dependencies]
+tdongle-nvs-format = { path = "../tdongle-nvs-format" }
+
+[dev-dependencies]
+tdongle-nvs-write = { path = ".", features = ["sim"] }
+tdongle-nvs-read = { path = "../tdongle-nvs-read" }
+proptest = { version = "1", default-features = false, features = ["std"] }
