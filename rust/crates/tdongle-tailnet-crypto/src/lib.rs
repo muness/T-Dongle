@@ -16,7 +16,6 @@ pub mod blake;
 pub mod nacl;
 pub mod x25519;
 
-
 pub use aead::{AuthError, TAG_LEN};
 pub use blake::{hash, hash2, hmac, kdf1, kdf2, kdf3, mac128};
 
