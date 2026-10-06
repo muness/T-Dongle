@@ -210,7 +210,36 @@ int main(void) {
     assert(sta.cfg.transmit_wrap(any_handle, (void *)"x", 1514, NULL) == ESP_ERR_NO_MEM && wifi_pins_tx_outstanding() == 0);
     g_free_heap = 1u << 20;
     assert(sta.cfg.transmit_wrap(any_handle, (void *)"x", 1514, NULL) == ESP_OK && wifi_pins_tx_outstanding() == 0);
+    /* 4. Bridge mode (ADR 0023): no netif. The budget installs with NULL, the same tx-done callback and counters serve wifi_pins_tx(), the RX hooks
+     *    have nothing to attach to and stay out of the way, and a link event still flushes the charges the driver dropped. */
+    memset(&wifi_pins, 0, sizeof(wifi_pins));
+    pthread_mutex_init(&wifi_pins.lock, NULL);
+    wifi_pins_installed = wifi_pins_tx_done_ok = wifi_pins_rx_hooked = false;
+    wifi_pins_sta = NULL; wifi_pins_orig_input = NULL; g_done_cb = NULL; g_cb_result = ESP_OK;
+    wifi_pins_start();                                         /* before install: nothing registered */
+    assert(!wifi_pins_tx_done_ok && g_done_cb == NULL);
+    wifi_pins_install(NULL);
+    assert(wifi_pins_installed && wifi_pins_sta == NULL);
+    wifi_pins_hook_rx();                                       /* no netif: no hook, no crash */
+    assert(!wifi_pins_rx_hooked);
+    wifi_pins_start();
+    assert(wifi_pins_tx_done_ok && g_done_cb == wifi_pins_tx_done);
+    g_free_heap = 1u << 20; g_tx_calls = 0; g_tx_result = ESP_OK;
+    assert(wifi_pins_tx((void *)"x", 1514) == ESP_OK && wifi_pins_tx_outstanding() == 1 && g_tx_calls == 1);
+    g_done_cb(WIFI_IF_STA, NULL, NULL, true);
+    assert(wifi_pins_tx_outstanding() == 0 && atomic_load(&wifi_pins.tx_done) == 1);
+    g_tx_result = ESP_ERR_NO_MEM;                              /* the driver refuses: aborted, the error comes back */
+    assert(wifi_pins_tx((void *)"x", 1514) == ESP_ERR_NO_MEM && wifi_pins_tx_outstanding() == 0 && atomic_load(&wifi_pins.tx_aborted) == 1);
+    g_tx_result = ESP_OK;
+    g_free_heap = ML_HB_FLOOR - 1;                             /* the band, then the heap floor: the same rule as through the netif */
+    for (unsigned i = 0; i < GATEWAY_WIFI_TX_BAND_MAX; i++) assert(wifi_pins_tx((void *)"x", 1514) == ESP_OK);
+    g_tx_calls = 0;
+    assert(wifi_pins_tx((void *)"x", 1514) == ESP_ERR_NO_MEM && g_tx_calls == 0 && atomic_load(&wifi_pins.tx_refused_heap) == 1);
+    wifi_pins_link_changed();                                  /* the driver cleared its queues: the charges go, no netif needed */
+    assert(wifi_pins_tx_outstanding() == 0 && atomic_load(&wifi_pins.tx_flushed) == GATEWAY_WIFI_TX_BAND_MAX);
+    assert(atomic_load(&wifi_pins.tx_charged) == atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_aborted) +
+                                                  atomic_load(&wifi_pins.tx_flushed) + atomic_load(&wifi_pins.tx_stale) + wifi_pins_tx_outstanding());
     (void)g_ticks;
-    puts("wifi pins hooks: TX installs before the netif exists, the RX hook follows netif_add and survives re-adds; RX/TX release exactly once");
+    puts("wifi pins hooks: TX installs before the netif exists (or with none, in bridge mode), the RX hook follows netif_add and survives re-adds; RX/TX release exactly once");
     return 0;
 }

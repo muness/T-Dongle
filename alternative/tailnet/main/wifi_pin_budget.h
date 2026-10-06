@@ -4,6 +4,8 @@
  *   RX  The driver copies each received frame into a dynamic RX buffer and hands it to lwIP; the buffer stays pinned until the pbuf
  *       that wraps it is freed (CONFIG_LWIP_L2_TO_L3_COPY is off), possibly in a socket mailbox, the TCP window or the tcpip mailbox.
  *   TX  esp_wifi_internal_tx() copies the frame into a dynamic TX buffer, which stays until the frame is sent or dropped.
+ * (Transparent bridge mode, ADR 0023: it has no netif and copies each received frame out of the driver buffer at once, so only the TX half
+ * applies, at wifi_pins_tx() in wifi_pins.inc: the same counters, callback and floor.)
  * Both are bounded only by the driver's pool sizes (16 dynamic RX and TX buffers, 26.6 KB each), which is far more than the 6
  * buffers the budget has room for (ml_heap_budget.h). ADR 0022 held TX to 6 by shrinking the pool, which cost upload throughput
  * (board: pool 16, TCP up +25 %, but heap minimum 2,536 B). Here both directions are counted at the one place each starts, and
