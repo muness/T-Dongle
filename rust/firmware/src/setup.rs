@@ -360,13 +360,14 @@ pub async fn run(
     let _ = controller.set_power_saving(esp_radio::wifi::PowerSaveMode::None);
 
     let device = Interface::access_point();
+    let ap_mac = device.mac_address();
     static RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
     let config = embassy_net::Config::ipv4_static(StaticConfigV4 { address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 4, 1), 24), gateway: None, dns_servers: Default::default() });
     let seed = u64::from(esp_hal::rng::Rng::new().random()) << 32 | u64::from(esp_hal::rng::Rng::new().random());
     let (stack, runner) = embassy_net::new(device, config, RESOURCES.init(StackResources::new()), seed);
     spawner.spawn(net_task(runner).unwrap());
     spawner.spawn(dns_task(stack).unwrap());
-    spawner.spawn(crate::dhcp::task(stack).unwrap());
+    spawner.spawn(crate::dhcp::task(stack, ap_mac).unwrap());
     for _ in 0..2 {
         spawner.spawn(http_task(stack, portal).unwrap());
     }

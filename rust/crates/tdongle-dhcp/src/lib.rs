@@ -17,6 +17,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod frame;
+
 /// A request longer than this is dropped (lwIP: `p->tot_len > 1500`).
 pub const MAX_REQUEST: usize = 1500;
 /// The shortest request that can hold the fixed BOOTP header and the magic cookie.

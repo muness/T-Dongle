@@ -1,14 +1,15 @@
 //! The setup access point's DHCP server: `tdongle-dhcp` (the lwIP server's behaviour) over one embassy-net UDP socket on port 67.
 //!
-//! Every reply goes out as a broadcast to 255.255.255.255:68: a client that does not have its address yet cannot answer an ARP request for it, and DHCP clients accept a
-//! broadcast reply whatever their BROADCAST flag says (lwIP unicasts through a temporary ARP entry; the on-air difference is only the destination MAC).
+//! Replies are sent the way lwIP sends them: a unicast reply is an Ethernet frame to the client's MAC with IPv4 destination `yiaddr` (lwIP installs a temporary static ARP entry;
+//! the TCP/IP stack here has no such call, and a client that does not hold its address yet cannot answer ARP), a broadcast reply goes to ff:ff:ff:ff:ff:ff. The frame is built by
+//! `tdongle_dhcp::frame` and handed to the Wi-Fi driver on the AP interface; embassy-net's socket only receives.
 
 use embassy_net::udp::{PacketMetadata, UdpSocket};
-use embassy_net::{IpAddress, IpEndpoint, Ipv4Address, Stack};
+use embassy_net::Stack;
 use embassy_time::{Instant, Timer};
 
 #[embassy_executor::task]
-pub async fn task(stack: Stack<'static>) -> ! {
+pub async fn task(stack: Stack<'static>, ap_mac: [u8; 6]) -> ! {
     let mut rx_meta = [PacketMetadata::EMPTY; 4];
     let mut tx_meta = [PacketMetadata::EMPTY; 4];
     let mut rx = [0u8; 4 * 600];
@@ -28,11 +29,15 @@ pub async fn task(stack: Stack<'static>) -> ! {
     }
     let mut request = [0u8; tdongle_dhcp::MAX_REQUEST];
     let mut reply = [0u8; tdongle_dhcp::MIN_REPLY + 64];
-    let broadcast = IpEndpoint::new(IpAddress::Ipv4(Ipv4Address::new(255, 255, 255, 255)), 68);
+    let mut frame = [0u8; tdongle_dhcp::frame::HEADERS + tdongle_dhcp::MIN_REPLY + 64];
     loop {
         let Ok((n, _from)) = socket.recv_from(&mut request).await else { continue };
         if let Some(r) = server.handle(&request[..n], Instant::now().as_millis() as u32, &mut reply) {
-            let _ = socket.send_to(&reply[..r.len], broadcast).await;
+            if let Some(n) = tdongle_dhcp::frame::build(&r, &reply[..r.len], tdongle_dhcp::Config::setup_ap().server_ip, ap_mac, &mut frame) {
+                if !crate::l2::tx_ap(&frame[..n]) {
+                    crate::init_note("setup: DHCP reply not sent");
+                }
+            }
         }
     }
 }
