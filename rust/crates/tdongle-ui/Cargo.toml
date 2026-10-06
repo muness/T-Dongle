@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 tdongle-traffic = { path = "../tdongle-traffic" }
+tdongle-lcd = { path = "../tdongle-lcd" }
 
 [dev-dependencies]
 proptest = { version = "1", default-features = false, features = ["std"] }

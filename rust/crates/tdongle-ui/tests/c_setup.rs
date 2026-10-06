@@ -183,7 +183,15 @@ fn what_each_origin_may_ask_for() {
 
 #[test]
 fn actions_parse_and_tokens() {
-    for (n, a) in [("mode", Action::Mode), ("wifi", Action::Wifi), ("wifi_remove", Action::WifiRemove), ("add", Action::Add), ("remove", Action::Remove), ("enable", Action::Enable), ("setup_done", Action::SetupDone)] {
+    for (n, a) in [
+        ("mode", Action::Mode),
+        ("wifi", Action::Wifi),
+        ("wifi_remove", Action::WifiRemove),
+        ("add", Action::Add),
+        ("remove", Action::Remove),
+        ("enable", Action::Enable),
+        ("setup_done", Action::SetupDone),
+    ] {
         assert_eq!(action_parse(Some(n)), a);
     }
     for n in [Some(""), Some("WIFI"), Some("wifi "), None] {
@@ -200,6 +208,12 @@ fn actions_parse_and_tokens() {
         assert!(!token_equal(core::str::from_utf8(&other).ok(), Some(ts)));
         other[i] ^= 1;
     }
-    assert!(!token_equal(Some(""), Some(ts)) && !token_equal(None, Some(ts)) && !token_equal(Some(ts), Some("")) && !token_equal(Some(ts), None) && !token_equal(Some(""), Some("")));
+    assert!(
+        !token_equal(Some(""), Some(ts))
+            && !token_equal(None, Some(ts))
+            && !token_equal(Some(ts), Some(""))
+            && !token_equal(Some(ts), None)
+            && !token_equal(Some(""), Some(""))
+    );
     assert!(!token_equal(Some("0001"), Some(ts)) && !token_equal(Some("00010a0f10a5ff800102030405060708x"), Some(ts)));
 }

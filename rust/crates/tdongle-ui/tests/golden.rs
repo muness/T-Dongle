@@ -208,12 +208,13 @@ impl Run {
                 Content::Status(s) => {
                     let mut l = String::new();
                     let b = |x: bool| x as u8;
+                    let t = |x: &[u8]| String::from_utf8_lossy(tdongle_lcd::fmt::cstr(x)).into_owned();
                     write!(
                         l,
                         "bridge={} wifi={} saved_wifi={} recovery={} starting={} installing={} usb={} usb_configured={} usb_suspended={} saved={} enabled={} ready={} login={} failed={} \
                          page={} rssi_valid={} rssi={} ssid=[{}] setup={} ap_ssid=[{}] setup_seconds_left={} down_kbps={} up_kbps={} down_bytes={} up_bytes={} down_frames={} up_frames={} bars=",
                         b(s.bridge), b(s.wifi), b(s.saved_wifi), b(s.recovery), b(s.starting), b(s.installing), b(s.usb), b(s.usb_configured), b(s.usb_suspended), s.saved,
-                        s.enabled, s.ready, s.login, s.failed, s.page, b(s.rssi_valid), s.rssi, s.ssid, b(s.setup), s.ap_ssid, s.setup_seconds_left, s.down_kbps, s.up_kbps,
+                        s.enabled, s.ready, s.login, s.failed, s.page, b(s.rssi_valid), s.rssi, t(&s.ssid), b(s.setup), t(&s.ap_ssid), s.setup_seconds_left, s.down_kbps, s.up_kbps,
                         s.down_bytes, s.up_bytes, s.down_frames, s.up_frames
                     )
                     .unwrap();
@@ -225,7 +226,7 @@ impl Run {
                         " uptime_s={} wifi_up_s={} connects={} last_reason={} usb_resets={} heap_free={} heap_min={} heap_largest={} reset_reason={} boots={} watchdogs={} panics={} \
                          health_view={} active_slot={} active_name=[{}]",
                         s.uptime_s, s.wifi_up_s, s.connects, s.last_reason, s.usb_resets, s.heap_free, s.heap_min, s.heap_largest, s.reset_reason, s.boots, s.watchdogs,
-                        s.panics, s.health_view, s.active_slot, s.active_name
+                        s.panics, s.health_view, s.active_slot, t(&s.active_name)
                     )
                     .unwrap();
                     if l == self.last_status {
@@ -402,7 +403,8 @@ fn dir() -> PathBuf {
 
 #[test]
 fn scenarios_match_the_c_traces() {
-    let mut names: Vec<_> = fs::read_dir(dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "scn")).collect();
+    let mut names: Vec<_> =
+        fs::read_dir(dir()).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "scn")).collect();
     names.sort();
     assert!(names.len() >= 12, "scenarios missing: {names:?}");
     for scn in names {

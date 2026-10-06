@@ -121,7 +121,11 @@ fn health_tallies() {
 
 #[test]
 fn recovery_policy() {
-    assert!(health::should_recover(true, true, false, false) && health::should_recover(true, false, true, false) && health::should_recover(true, false, false, true));
+    assert!(
+        health::should_recover(true, true, false, false)
+            && health::should_recover(true, false, true, false)
+            && health::should_recover(true, false, false, true)
+    );
     assert!(!health::should_recover(false, true, true, true) && !health::should_recover(true, false, false, false));
     let mut e = [0i32; health::stage::COUNT];
     assert!(!health::needs_attention(false, &e));
@@ -149,8 +153,26 @@ fn settings_parse() {
     assert_eq!(Settings::parse("  5   0   10  "), Some(Settings { brightness: 5, rotation: 0, dim_seconds: 10 }));
     assert_eq!(Settings::parse("075 1 0100"), Some(Settings { brightness: 75, rotation: 1, dim_seconds: 100 }));
     for bad in [
-        "", "60", "60 0", "60 0 60 1", "60 0 60 x", "4 0 60", "101 0 60", "60 2 60", "60 0 9", "60 0 3601", "-5 0 60", "+5 0 60", "60,0,60", "60 0 60abc",
-        "x 0 60", "60 0 99999999", "999999 0 60", "6O 0 60", "60\t0 60", "60 0 60\n",
+        "",
+        "60",
+        "60 0",
+        "60 0 60 1",
+        "60 0 60 x",
+        "4 0 60",
+        "101 0 60",
+        "60 2 60",
+        "60 0 9",
+        "60 0 3601",
+        "-5 0 60",
+        "+5 0 60",
+        "60,0,60",
+        "60 0 60abc",
+        "x 0 60",
+        "60 0 99999999",
+        "999999 0 60",
+        "6O 0 60",
+        "60\t0 60",
+        "60 0 60\n",
     ] {
         assert_eq!(Settings::parse(bad), None, "{bad:?}");
     }

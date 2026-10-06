@@ -72,13 +72,7 @@ fn one_of(v: Option<&str>, a: &str, b: &str) -> bool {
 
 /// Classify a request from the facts the handler reads. `local_ipv4` is the address the client connected TO; a client of a subnet must have reached the
 /// dongle's own address on that subnet, and Host / Origin must be canonical (the captive-portal DNS hijack makes phones send arbitrary Host names).
-pub fn classify(
-    peer_ipv4: Option<u32>,
-    local_ipv4: Option<u32>,
-    setup_active: bool,
-    host: Option<&str>,
-    origin: Option<&str>,
-) -> Origin {
+pub fn classify(peer_ipv4: Option<u32>, local_ipv4: Option<u32>, setup_active: bool, host: Option<&str>, origin: Option<&str>) -> Origin {
     let (Some(peer), Some(local)) = (peer_ipv4, local_ipv4) else { return Origin::Denied };
     if peer & 0xffff_ff00 == USB_SUBNET {
         if local != USB_SUBNET + 1 || !one_of(host, "192.168.77.1", "192.168.77.1:80") {

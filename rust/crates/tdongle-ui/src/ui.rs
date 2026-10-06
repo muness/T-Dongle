@@ -11,7 +11,8 @@ use crate::settings::Settings;
 use crate::setup_boot::{Session, SetupRequest};
 use crate::text::Text;
 use core::fmt::{self, Write};
-use tdongle_traffic::{HISTORY, Reading, Sampler};
+use tdongle_lcd::{LcdState, View};
+use tdongle_traffic::{Reading, Sampler};
 
 /// The poll period the control task uses between commands (`UI_POLL_MS`).
 pub const POLL_MS: u32 = 20;
@@ -24,7 +25,7 @@ pub const LED_REFRESH_MS: u32 = led::REFRESH_MS;
 /// The Health page rotates through its three views this often (`UI_HEALTH_ROTATE_MS`).
 pub const HEALTH_ROTATE_MS: u32 = 4000;
 /// Screen pages (`LCD_PAGES`): 0 Connection, 1 Traffic, 2 Health, 3 Setup.
-pub const PAGES: u32 = 4;
+pub const PAGES: u32 = tdongle_lcd::LCD_PAGES;
 /// Health views.
 pub const HEALTH_VIEWS: u32 = 3;
 /// Longest command a gesture queues (the C slot is 20 bytes with the NUL).
@@ -162,99 +163,12 @@ pub struct Inputs<'a> {
 
 impl fmt::Debug for Inputs<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Inputs").field("button_down", &self.button_down).field("setup_active", &self.setup_active).field("snapshot", &self.snapshot).finish_non_exhaustive()
+        f.debug_struct("Inputs")
+            .field("button_down", &self.button_down)
+            .field("setup_active", &self.setup_active)
+            .field("snapshot", &self.snapshot)
+            .finish_non_exhaustive()
     }
-}
-
-/// The LCD state of `ui_compose` (the `lcd_state` fields), filled from the sources the C fills them from.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct LcdFields {
-    /// Bridge mode (not tailnet).
-    pub bridge: bool,
-    /// Wi-Fi joined.
-    pub wifi: bool,
-    /// Wi-Fi network saved.
-    pub saved_wifi: bool,
-    /// Recovery screen.
-    pub recovery: bool,
-    /// Starting overlay (never set by the poll).
-    pub starting: bool,
-    /// Installing overlay.
-    pub installing: bool,
-    /// USB ready.
-    pub usb: bool,
-    /// USB configured.
-    pub usb_configured: bool,
-    /// USB suspended.
-    pub usb_suspended: bool,
-    /// Tailnet memberships.
-    pub saved: u32,
-    /// Enabled.
-    pub enabled: u32,
-    /// Ready.
-    pub ready: u32,
-    /// Login pending.
-    pub login: u32,
-    /// Failed.
-    pub failed: u32,
-    /// Screen page 0..=3.
-    pub page: u32,
-    /// RSSI is valid.
-    pub rssi_valid: bool,
-    /// dBm.
-    pub rssi: i32,
-    /// Joined SSID (32 bytes).
-    pub ssid: Text<32>,
-    /// A setup boot.
-    pub setup: bool,
-    /// Setup access point name (15 bytes).
-    pub ap_ssid: Text<15>,
-    /// Setup seconds left.
-    pub setup_seconds_left: u32,
-    /// Down kbit/s.
-    pub down_kbps: u32,
-    /// Up kbit/s.
-    pub up_kbps: u32,
-    /// Bytes to the host.
-    pub down_bytes: u64,
-    /// Bytes from the host.
-    pub up_bytes: u64,
-    /// Frames to the host.
-    pub down_frames: u64,
-    /// Frames from the host.
-    pub up_frames: u64,
-    /// Traffic bars, oldest first, 0..=20.
-    pub bars: [u8; HISTORY],
-    /// Uptime seconds.
-    pub uptime_s: u32,
-    /// Seconds since the Wi-Fi join.
-    pub wifi_up_s: u32,
-    /// Wi-Fi connects.
-    pub connects: u32,
-    /// Last disconnect reason.
-    pub last_reason: u32,
-    /// USB resets.
-    pub usb_resets: u32,
-    /// Free heap.
-    pub heap_free: u32,
-    /// Minimum free heap.
-    pub heap_min: u32,
-    /// Largest block (0 unless the Health view that shows it is on the glass).
-    pub heap_largest: u32,
-    /// Reset reason.
-    pub reset_reason: u32,
-    /// Boots.
-    pub boots: u32,
-    /// Watchdog resets.
-    pub watchdogs: u32,
-    /// Panics.
-    pub panics: u32,
-    /// Health view 0..=2.
-    pub health_view: u32,
-    /// Active saved network, 1-based.
-    pub active_slot: u32,
-    /// Its name (24 bytes).
-    pub active_name: Text<24>,
 }
 
 /// What goes on the glass.
@@ -268,7 +182,7 @@ pub enum Content {
         attention: bool,
     },
     /// The status screens: compose with the LCD crate (`lcd_compose`).
-    Status(LcdFields),
+    Status(LcdState),
 }
 
 /// One redraw: backlight and rotation (the panel layer sends them to the hardware only when they change), then the view.
@@ -450,33 +364,30 @@ impl Ui {
     /// `ui_compose`: the state the screen and the light are drawn from. `None` when the state lock was busy.
     fn compose(&mut self, now: u32, now_ms: u64, input: &Inputs<'_>) -> Option<Content> {
         let s = input.snapshot.as_ref()?;
-        let mut st = LcdFields {
-            bridge: s.bridge,
-            wifi: s.wifi,
-            saved_wifi: s.saved_wifi,
-            recovery: s.recovery,
-            starting: false,
-            installing: s.installing,
-            usb: s.usb,
-            usb_configured: s.usb_configured,
-            usb_suspended: s.usb_suspended,
-            saved: s.saved,
-            enabled: s.enabled,
-            ready: s.ready,
-            login: s.login,
-            failed: s.failed,
-            page: self.page,
-            health_view: Self::health_view(now),
-            rssi_valid: s.link_connected && s.link_rssi_valid,
-            rssi: s.link_rssi,
-            setup: input.setup_active,
-            active_slot: s.active_slot,
-            active_name: Text::from_str_truncated(s.active_name),
-            ssid: Text::from_str_truncated(s.ssid),
-            ..LcdFields::default()
-        };
+        let mut st = LcdState::ZERO;
+        st.bridge = s.bridge;
+        st.wifi = s.wifi;
+        st.saved_wifi = s.saved_wifi;
+        st.recovery = s.recovery;
+        st.installing = s.installing;
+        st.usb = s.usb;
+        st.usb_configured = s.usb_configured;
+        st.usb_suspended = s.usb_suspended;
+        st.saved = s.saved;
+        st.enabled = s.enabled;
+        st.ready = s.ready;
+        st.login = s.login;
+        st.failed = s.failed;
+        st.page = self.page;
+        st.health_view = Self::health_view(now);
+        st.rssi_valid = s.link_connected && s.link_rssi_valid;
+        st.rssi = s.link_rssi;
+        st.setup = input.setup_active;
+        st.active_slot = s.active_slot;
+        st.set_active_name(s.active_name.as_bytes());
+        st.set_ssid(s.ssid.as_bytes());
         if input.setup_active {
-            st.ap_ssid = Text::from_str_truncated(s.setup_ap_name);
+            st.set_ap_ssid(s.setup_ap_name.as_bytes());
             st.setup_seconds_left = input.setup_session.seconds_left(now);
         }
         self.traffic.sample(&input.traffic, now);
@@ -525,5 +436,21 @@ impl Ui {
             return Some(Content::Menu { rows, attention: self.menu.confirm });
         }
         Some(Content::Status(st))
+    }
+}
+
+impl Content {
+    /// The view for the panel: the menu rows through `lcd_compose_rows`, the status screens through `lcd_compose` (`version` is `GATEWAY_VERSION`).
+    pub fn to_view(&self, version: &str) -> View {
+        match self {
+            Content::Menu { rows, attention } => {
+                let mut r = [[0u8; tdongle_lcd::ROW_BYTES]; ROWS];
+                for (dst, src) in r.iter_mut().zip(rows.iter()) {
+                    dst[..src.as_bytes().len()].copy_from_slice(src.as_bytes());
+                }
+                tdongle_lcd::compose_rows(&r, *attention)
+            }
+            Content::Status(st) => tdongle_lcd::compose(st, version),
+        }
     }
 }
