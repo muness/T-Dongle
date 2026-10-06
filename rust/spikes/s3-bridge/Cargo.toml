@@ -24,6 +24,10 @@ embassy-futures = "0.1"
 embassy-usb = { version = "0.6", default-features = false }
 embassy-net-driver = "0.2"
 static_cell = "2.1"
+embassy-usb-synopsys-otg = "0.4"
+tdongle-usb-out = { path = "../../crates/tdongle-usb-out" }
+tdongle-wifi-budget = { path = "../../crates/tdongle-wifi-budget" }
+esp-wifi-sys-esp32s3 = "0.3"
 critical-section = "1"
 
 # the real pure logic, shared with the std firmware
@@ -33,11 +37,19 @@ tdongle-spsc = { path = "../../crates/tdongle-spsc" }
 tdongle-serial = { path = "../../crates/tdongle-serial" }
 tdongle-traffic = { path = "../../crates/tdongle-traffic" }
 tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
+tdongle-saved = { path = "../../crates/tdongle-saved" }
 tdongle-nvs-read = { path = "../../crates/tdongle-nvs-read" }
 tdongle-nvs-format = { path = "../../crates/tdongle-nvs-format" }
 tdongle-wifi-policy = { path = "../../crates/tdongle-wifi-policy" }
 esp-storage = { version = "0.10", features = ["esp32s3", "embedded-storage"] }
 embedded-storage = "0.3"
+
+[patch.crates-io]
+embassy-usb-synopsys-otg = { path = "../../vendor/embassy-usb-synopsys-otg" }
+
+[features]
+# Stock one-packet OUT transfers (no multi-packet arming): the A/B baseline.
+stock-out = []
 
 [profile.release]
 opt-level = "s"

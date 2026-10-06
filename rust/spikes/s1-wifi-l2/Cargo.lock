@@ -1634,6 +1634,7 @@ dependencies = [
  "tdongle-boot-guard",
  "tdongle-nvs-format",
  "tdongle-nvs-read",
+ "tdongle-saved",
  "tdongle-wifi-policy",
 ]
 
@@ -1837,6 +1838,15 @@ version = "0.3.0-dev"
 [[package]]
 name = "tdongle-nvs-read"
 version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-saved"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-nvs-format",
+ "tdongle-nvs-read",
+ "tdongle-wifi-policy",
+]
 
 [[package]]
 name = "tdongle-wifi-policy"

@@ -23,6 +23,7 @@ embassy-usb = { version = "0.6", default-features = false }
 static_cell = "2.1"
 critical-section = "1"
 tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
+tdongle-saved = { path = "../../crates/tdongle-saved" }
 tdongle-nvs-read = { path = "../../crates/tdongle-nvs-read" }
 tdongle-nvs-format = { path = "../../crates/tdongle-nvs-format" }
 tdongle-wifi-policy = { path = "../../crates/tdongle-wifi-policy" }

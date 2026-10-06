@@ -14,22 +14,20 @@ mod ops;
 mod guard;
 #[path = "../../common/saved.rs"]
 mod saved;
+mod l2;
 mod acm;
 mod ncm;
 
 use alloc::string::String;
 use core::cell::RefCell;
 use core::fmt::Write as _;
-use core::future::poll_fn;
 use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering};
-use core::task::Poll;
 
 use critical_section::Mutex as CsMutex;
 use embassy_executor::Spawner;
 use tdongle_boot_guard::Stage;
 use embassy_futures::select::{Either, select};
 use embassy_futures::yield_now;
-use embassy_net_driver::Driver as NetDriver;
 use embassy_sync::blocking_mutex::raw::{CriticalSectionRawMutex, NoopRawMutex};
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
@@ -43,9 +41,10 @@ use esp_hal::timer::timg::TimerGroup;
 use esp_hal::usb::otg::Usb;
 use esp_hal::usb::otg::embassy_usb_device::{Config as OtgConfig, Driver as UsbDriver};
 use esp_println::println;
+use esp_radio::wifi::Protocols;
 use esp_radio::wifi::scan::ScanConfig;
 use esp_radio::wifi::{
-    AuthenticationMethodConfig, Bandwidth, Config, ControllerConfig, Interface, PowerSaveMode, WifiController,
+    AuthenticationMethodConfig, Bandwidth, Config, ControllerConfig, PowerSaveMode, WifiController,
     sta::StationConfig,
 };
 use static_cell::StaticCell;
@@ -56,13 +55,15 @@ use tdongle_serial::console::{Event, LineReader};
 use tdongle_serial::memory_log::Record;
 use tdongle_serial::reply;
 use tdongle_serial::status::{DisplayState, Mode, Prefs, Snapshot, Traffic, write_status};
-use tdongle_serial::wifi_link::{Events, Info};
+use tdongle_serial::wifi_link::Events;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 
 const FIRMWARE: &str = "0.3.0-s3-spike";
 const MTU: usize = 1514;
+/// OUT endpoint buffers: EP0 (64) + ACM bulk OUT (64) + the NCM bulk OUT transfer buffer (one whole NTB).
+const EP_OUT_BYTES: usize = 64 + 64 + ncm::NTB_OUT_MAX;
 /// esp-radio queues: the C budget is 6 frames in flight to the radio.
 const WIFI_TX_QUEUE: usize = 6;
 const WIFI_RX_QUEUE: usize = 8;
@@ -117,6 +118,18 @@ static HOLD_US_MAX: AtomicU32 = AtomicU32::new(0);
 // Wi-Fi TX
 static WIFI_TX_REFUSED: AtomicU32 = AtomicU32::new(0);
 static WIFI_TX_ROOM_NO: AtomicU32 = AtomicU32::new(0);
+
+/// USB-side modes (console `usb bridge|sink|source`): measure the host link without the radio. `sink` counts OUT datagrams and drops them; `source` sends 1,442 B broadcast frames on IN.
+const USB_BRIDGE: u8 = 0;
+const USB_SINK: u8 = 1;
+const USB_SOURCE: u8 = 2;
+static USB_MODE: AtomicU8 = AtomicU8::new(USB_BRIDGE);
+static SOURCE_KBPS: AtomicU32 = AtomicU32::new(0);
+const SOURCE_FRAME: usize = 1442;
+static SINK_FRAMES: AtomicU32 = AtomicU32::new(0);
+static SINK_BYTES: AtomicU32 = AtomicU32::new(0);
+static SOURCE_FRAMES: AtomicU32 = AtomicU32::new(0);
+static SOURCE_BYTES: AtomicU32 = AtomicU32::new(0);
 
 static RING_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static WORKER_SIG: Signal<CriticalSectionRawMutex, ()> = Signal::new();
@@ -174,12 +187,8 @@ static RING: CsMutex<RefCell<Ring>> = CsMutex::new(RefCell::new(Ring::new()));
 // The Env of tdongle-bridge
 // ======================================================================================================================
 
-/// The station interface, present once the radio driver is up (the console, the USB side and the bridge exist before that).
-type IfaceCell = RefCell<Option<Interface>>;
-
-struct FwEnv {
-    iface: &'static IfaceCell,
-}
+/// The environment of the bridge: the S3 board.
+pub struct FwEnv;
 
 impl Env for FwEnv {
     fn now_us(&self) -> u32 {
@@ -188,7 +197,7 @@ impl Env for FwEnv {
 
     // Wi-Fi RX callback context (the poll task): copy and return, never wait.
     fn usb_ring_send(&self, frame: &[u8]) -> RingSend {
-        if ALT.load(Ordering::Relaxed) == 0 {
+        if ALT.load(Ordering::Relaxed) == 0 || USB_MODE.load(Ordering::Relaxed) != USB_BRIDGE {
             RING_NOT_READY.fetch_add(1, Ordering::Relaxed);
             return RingSend::NotReady;
         }
@@ -218,6 +227,7 @@ impl Env for FwEnv {
 
     fn wifi_rx_register(&self, on: bool) {
         WIFI_RX_ON.store(on, Ordering::Release);
+        l2::RX_ON.store(on, Ordering::Release);
     }
 
     fn notify_worker(&self) {
@@ -225,22 +235,16 @@ impl Env for FwEnv {
     }
 
     fn wifi_tx(&self, frame: &[u8], _context: &TaskContext) -> Result<(), TxError> {
-        let token = self.iface.borrow_mut().as_mut().and_then(|i| i.transmit());
-        match token {
-            Some(tx) => {
-                tx.consume_token(frame.len(), |b| b.copy_from_slice(frame));
-                Ok(())
-            }
-            None => {
-                WIFI_TX_REFUSED.fetch_add(1, Ordering::Relaxed);
-                Err(TxError::NoMem)
-            }
+        let sent = l2::tx(frame);
+        if sent.is_err() {
+            WIFI_TX_REFUSED.fetch_add(1, Ordering::Relaxed);
         }
+        sent
     }
 
     fn wifi_room(&self) -> bool {
-        // esp-radio owns the in-flight accounting (tx_queue_size); a token exists iff inflight < queue size and the link is up.
-        let room = self.iface.borrow_mut().as_mut().is_some_and(|i| i.transmit().is_some());
+        // the C budget: charges outstanding under the limit (6), healed by tx-done, link flush and the 3 s lease
+        let room = l2::room();
         if !room {
             WIFI_TX_ROOM_NO.fetch_add(1, Ordering::Relaxed);
         }
@@ -399,6 +403,14 @@ fn heap_line(out: &mut String) {
     );
 }
 
+/// The saved networks (set by the init task once read), the slot joined, and the last scan's reading per slot (for `list` and `status`).
+static SAVED: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, RefCell<Option<tdongle_nvs_format::load::Loaded>>> =
+    embassy_sync::blocking_mutex::Mutex::new(RefCell::new(None));
+static SELECTED: AtomicI32 = AtomicI32::new(-1);
+static CONNECTED_NOW: AtomicBool = AtomicBool::new(false);
+static SCAN_SEEN: AtomicU32 = AtomicU32::new(0);
+static SCAN_SIGNAL: [AtomicI32; 8] = [const { AtomicI32::new(-127) }; 8];
+
 /// What the init task could not do, for the console (`init`): the console stays up whatever happens here.
 static INIT_NOTE: CsMutex<RefCell<guard::heapless_str::Text>> = CsMutex::new(RefCell::new(guard::heapless_str::Text::new()));
 
@@ -428,11 +440,9 @@ async fn main(spawner: Spawner) -> ! {
     guard::stage(Stage::Usb);
 
     // ---- the bridge (no radio needed yet: the interface is filled in by `init_task`) ----
-    static IFACE: StaticCell<IfaceCell> = StaticCell::new();
-    let iface: &'static IfaceCell = IFACE.init(RefCell::new(None));
     let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or([0; 6]); // STA MAC = base MAC
     static BRIDGE: StaticCell<Bridge<FwEnv>> = StaticCell::new();
-    let bridge: &'static Bridge<FwEnv> = BRIDGE.init_with(|| Bridge::new(FwEnv { iface }, mac));
+    let bridge: &'static Bridge<FwEnv> = BRIDGE.init_with(|| Bridge::new(FwEnv, mac));
     let (Some(producer), Some(worker)) = (bridge.producer(), bridge.worker()) else {
         // Cannot happen (first and only call); if it ever does, the console still comes up below without the data path.
         loop {
@@ -446,8 +456,14 @@ async fn main(spawner: Spawner) -> ! {
     let hex: &'static str = core::str::from_utf8(hex).unwrap_or("000000000000");
 
     let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
-    static EP_OUT: StaticCell<[u8; 192]> = StaticCell::new();
-    let driver = UsbDriver::new(usb, EP_OUT.init([0; 192]), OtgConfig::default());
+    static EP_OUT: StaticCell<[u8; EP_OUT_BYTES]> = StaticCell::new();
+    let mut otg_config = OtgConfig::default();
+    // PATCH (vendor/embassy-usb-synopsys-otg): the NCM bulk OUT endpoint (0x04) is armed for a whole NTB.
+    #[cfg(not(feature = "stock-out"))]
+    {
+        otg_config.out_transfer_bytes[4] = ncm::NTB_OUT_MAX as u16;
+    }
+    let driver = UsbDriver::new(usb, EP_OUT.init([0; EP_OUT_BYTES]), otg_config);
 
     let mut config = embassy_usb::Config::new(0x303A, 0x4001);
     config.bcd_usb = UsbVersion::Two;
@@ -489,7 +505,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(usb_rx_task(rx, producer).unwrap());
     spawner.spawn(usb_tx_task(tx).unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
-    spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, spawner, iface, bridge, worker, state.boot.safe_mode, mac).unwrap());
+    spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, spawner, bridge, worker, state.boot.safe_mode).unwrap());
     loop {
         Timer::after_secs(3600).await;
     }
@@ -515,11 +531,9 @@ async fn init_task(
     wifi: esp_hal::peripherals::WIFI<'static>,
     flash: esp_hal::peripherals::FLASH<'static>,
     spawner: Spawner,
-    iface: &'static IfaceCell,
     bridge: &'static Bridge<FwEnv>,
     worker: tdongle_bridge::Worker<'static, FwEnv>,
     safe_mode: bool,
-    mac: [u8; 6],
 ) {
     // Let the USB device enumerate before the first long step.
     Timer::after_millis(300).await;
@@ -556,11 +570,8 @@ async fn init_task(
             return;
         }
     };
-    let sta = Interface::station();
-    if sta.mac_address() != mac {
-        init_note("STA MAC differs from base MAC");
-    }
-    *iface.borrow_mut() = Some(sta);
+    // Both directions go through `l2` (the C data path), not esp-radio's token API (which wedged: see l2.rs).
+    l2::start(bridge);
     // Each of these is a tuning, not a requirement: report and carry on.
     if controller.set_power_saving(PowerSaveMode::None).is_err() {
         init_note("set_power_saving failed");
@@ -576,8 +587,8 @@ async fn init_task(
     if controller.set_max_tx_power(80).is_err() {
         init_note("set_max_tx_power failed");
     }
-    spawner.spawn(wifi_rx_task(iface, bridge).unwrap());
-    spawner.spawn(worker_task(iface, worker).unwrap());
+    spawner.spawn(worker_task(worker).unwrap());
+    SAVED.lock(|c| *c.borrow_mut() = Some(loaded));
     link_loop(&mut controller, bridge, loaded).await
 }
 
@@ -594,7 +605,14 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
         guard::stage(Stage::Scan);
         let scan = with_timeout(Duration::from_secs(8), controller.scan_async(&ScanConfig::default().with_show_hidden(true).with_max(40))).await;
         let slot = match scan {
-            Ok(Ok(aps)) => saved::choose(&loaded, aps.iter().map(|a| (a.ssid.as_str(), a.signal_strength))),
+            Ok(Ok(aps)) => {
+                let signal = tdongle_saved::signals(&loaded.saved, aps.iter().map(|a| (a.ssid.as_str().as_bytes(), a.signal_strength)));
+                SCAN_SEEN.store(aps.len() as u32, Ordering::Relaxed);
+                for (i, v) in signal.iter().enumerate() {
+                    SCAN_SIGNAL[i].store(*v as i32, Ordering::Relaxed);
+                }
+                tdongle_saved::choose(&loaded, &signal)
+            }
             Ok(Err(_)) => {
                 init_note("scan failed");
                 None
@@ -609,7 +627,7 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
             next = (next + 1) % count;
             next
         });
-        let Some((ssid, pass)) = saved::credentials(&loaded.saved, slot) else {
+        let Some((ssid, pass)) = tdongle_saved::credentials(&loaded.saved, slot) else {
             Timer::after_secs(2).await;
             continue;
         };
@@ -627,6 +645,9 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
             Timer::after_secs(2).await;
             continue;
         }
+        if controller.set_protocols(Protocols::default()).is_err() {
+            init_note("set_protocols failed"); // default is b/g/n: never LR
+        }
         guard::stage(Stage::Connect);
         match with_timeout(Duration::from_secs(30), controller.connect_async()).await {
             Ok(Ok(info)) => {
@@ -636,6 +657,10 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 if let Ok((ch, _)) = controller.channel() {
                     CHANNEL.store(ch, Ordering::Relaxed);
                 }
+                l2::register(); // the driver is started now: (re-)register the callbacks (the tx-done registration needs a started driver)
+                l2::link_changed(); // the driver cleared its queues when the link came up
+                SELECTED.store(slot as i32, Ordering::Relaxed);
+                CONNECTED_NOW.store(true, Ordering::Relaxed);
                 bridge.link(true, &ctx);
                 loop {
                     match select(controller.wait_for_disconnect_async(), Timer::after_secs(2)).await {
@@ -655,6 +680,8 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                     }
                 }
                 RSSI_VALID.store(false, Ordering::Relaxed);
+                CONNECTED_NOW.store(false, Ordering::Relaxed);
+                l2::link_changed(); // and when it dropped, without completing what was in them
                 bridge.link(false, &ctx);
             }
             Ok(Err(e)) => println!("connect failed: {:?}, retrying", e),
@@ -668,39 +695,20 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
 // Wi-Fi -> host: the RX poll (the C's esp_wifi_internal_reg_rxcb callback). Copies into the ring through `Bridge::wifi_rx`.
 // ======================================================================================================================
 
-#[embassy_executor::task]
-async fn wifi_rx_task(iface: &'static IfaceCell, bridge: &'static Bridge<FwEnv>) -> ! {
-    loop {
-        // `receive` yields a token only when a frame is queued AND esp-radio has TX credit (see FINDINGS: RX/TX coupling).
-        let (rx, _tx) = poll_fn(|cx| match iface.borrow_mut().as_mut().and_then(|i| <Interface as NetDriver>::receive(i, cx)) {
-            Some(t) => Poll::Ready(t),
-            None => Poll::Pending,
-        })
-        .await;
-        rx.consume_token(|frame| {
-            if WIFI_RX_ON.load(Ordering::Acquire) {
-                let _ = bridge.wifi_rx(frame); // counted inside; the buffer goes back to the driver when the closure returns
-            }
-        });
-        yield_now().await;
-    }
-}
-
 // ======================================================================================================================
 // host -> Wi-Fi: the worker (async wrapper around `Worker::drain_one`; waits for TX room on the TX-done waker)
 // ======================================================================================================================
 
 #[embassy_executor::task]
-async fn worker_task(iface: &'static IfaceCell, mut worker: tdongle_bridge::Worker<'static, FwEnv>) -> ! {
+async fn worker_task(mut worker: tdongle_bridge::Worker<'static, FwEnv>) -> ! {
     loop {
         WORKER_SIG.wait().await;
         loop {
-            // Wait (bounded) until esp-radio has TX credit and the link is up, so the sync `drain_one` rarely has to block.
-            // Bounded because a link-down never fires the TX waker: drain_one then drops the frame as stale/link-down at once.
-            let room = poll_fn(|cx| {
-                if iface.borrow_mut().as_mut().is_some_and(|i| <Interface as NetDriver>::transmit(i, cx).is_some()) { Poll::Ready(()) } else { Poll::Pending }
-            });
-            let _ = with_timeout(Duration::from_millis(5), room).await;
+            // Wait (bounded) for room under the TX limit; the tx-done callback wakes this. Bounded because a link-down never completes anything:
+            // drain_one then drops the frame as stale/link-down at once, and the lease heals a lost completion.
+            if !l2::room() {
+                let _ = with_timeout(Duration::from_millis(5), l2::TX_DONE_SIG.wait()).await;
+            }
             if !worker.drain_one() {
                 break;
             }
@@ -735,6 +743,13 @@ async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer
             };
             RX_DATAGRAMS.fetch_add(1, Ordering::Relaxed);
             let len = d.len() as u32;
+            if USB_MODE.load(Ordering::Relaxed) == USB_SINK {
+                // `usb sink`: count the datagram and drop it (measures host -> device alone)
+                SINK_FRAMES.fetch_add(1, Ordering::Relaxed);
+                SINK_BYTES.fetch_add(len, Ordering::Relaxed);
+                rx.advance();
+                continue;
+            }
             let mut held_since: Option<Instant> = None;
             loop {
                 RESUME_SIG.reset();
@@ -774,13 +789,52 @@ async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer
 /// Wi-Fi -> host: the ring drains into one NTB per datagram (no IN aggregation yet).
 #[embassy_executor::task]
 async fn usb_tx_task(mut tx: NcmSender) -> ! {
+    let mut seq = 0u32;
+    let mut next = Instant::now();
     loop {
+        if USB_MODE.load(Ordering::Relaxed) == USB_SOURCE {
+            // `usb source`: broadcast dummy frames on IN (measures device -> host alone)
+            let body = tx.body_mut();
+            body[..SOURCE_FRAME].fill(0);
+            body[0..6].fill(0xff);
+            body[6..12].copy_from_slice(&[0x02, 0x54, 0x44, 0x53, 0x33, 0x01]);
+            body[12..14].copy_from_slice(&0x88b5u16.to_be_bytes());
+            body[14..18].copy_from_slice(&seq.to_be_bytes());
+            match tx.send_prepared(SOURCE_FRAME).await {
+                Ok(()) => {
+                    seq = seq.wrapping_add(1);
+                    SOURCE_FRAMES.fetch_add(1, Ordering::Relaxed);
+                    SOURCE_BYTES.fetch_add(SOURCE_FRAME as u32, Ordering::Relaxed);
+                }
+                Err(_) => Timer::after_millis(10).await,
+            }
+            let kbps = SOURCE_KBPS.load(Ordering::Relaxed);
+            if kbps != 0 {
+                next += Duration::from_micros(SOURCE_FRAME as u64 * 8 * 1000 / u64::from(kbps));
+                let now = Instant::now();
+                if next > now {
+                    Timer::at(next).await;
+                } else if now - next > Duration::from_millis(100) {
+                    next = now;
+                }
+            } else {
+                next = Instant::now();
+            }
+            continue;
+        }
+        next = Instant::now();
         let n = loop {
+            if USB_MODE.load(Ordering::Relaxed) == USB_SOURCE {
+                break 0;
+            }
             if let Some(n) = critical_section::with(|cs| RING.borrow_ref_mut(cs).pop_into(tx.body_mut())) {
                 break n;
             }
-            RING_SIG.wait().await;
+            let _ = with_timeout(Duration::from_millis(50), RING_SIG.wait()).await; // wake regularly to notice a mode change
         };
+        if n == 0 {
+            continue;
+        }
         match tx.send_prepared(n).await {
             Ok(()) => {
                 RING_SENT.fetch_add(1, Ordering::Relaxed);
@@ -809,9 +863,20 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
     let st = bridge.stats();
     let none: [Record; 0] = [];
     let linked = st.linked;
+    // saved list and priorities as loaded (not a constant): `saved=0` until the init task has read them
+    let (saved_count, preferred, priorities) = SAVED.lock(|c| match c.borrow().as_ref() {
+        Some(l) => {
+            let mut p = [0u8; 8];
+            for (d, s) in p.iter_mut().zip(l.meta.slot.iter()) {
+                *d = s.priority;
+            }
+            (l.saved.list().len() as u32, l.meta.preferred.map(|i| i as u32), p)
+        }
+        None => (0, None, [0u8; 8]),
+    });
     let snap = Snapshot {
         mode: Mode::Adapter,
-        wifi_current: 0,
+        wifi_current: if linked { SELECTED.load(Ordering::Relaxed) } else { -1 },
         online: linked,
         firmware: FIRMWARE,
         usb_mounted: CONFIGURED.load(Ordering::Relaxed),
@@ -821,12 +886,12 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         temperature: Default::default(),
         clock: Default::default(),
         clock_valid: false,
-        link: Info {
-            connected: linked,
-            rssi_valid: RSSI_VALID.load(Ordering::Relaxed),
-            rssi: RSSI.load(Ordering::Relaxed) as i8,
-            channel: CHANNEL.load(Ordering::Relaxed),
-            ..Default::default()
+        link: {
+            // the driver's own view (`wifi_link_read`): unknown stays unknown (an all-zero Info prints phy=lr)
+            let mut info = l2::link_read();
+            let selected = SELECTED.load(Ordering::Relaxed);
+            info.selected_slot = if linked && (0..8).contains(&selected) { selected as u8 + 1 } else { 0 };
+            info
         },
         events: Events {
             connects: CONNECTS.load(Ordering::Relaxed),
@@ -834,7 +899,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
             last_reason: LAST_REASON.load(Ordering::Relaxed) as u16,
             ..Default::default()
         },
-        prefs: Prefs { saved: 1, preferred: None, priorities: &[], roaming_assist: false },
+        prefs: Prefs { saved: saved_count, preferred: preferred, priorities: &priorities[..saved_count as usize], roaming_assist: false },
         display: DisplayState::default(),
         setup_ap_name: "",
         setup_seconds_left: 0,
@@ -870,20 +935,44 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         hold_us_max: HOLD_US_MAX.load(Ordering::Relaxed),
         ..Default::default()
     };
-    // esp-radio owns the TX-done accounting: no charged/done/aborted equivalents; `refused_pool` = wifi_tx refusals (no token).
-    let wtx = WifiTxReport { refused_pool: WIFI_TX_REFUSED.load(Ordering::Relaxed), ..Default::default() };
+    let pins = l2::pins_stats();
+    let wtx = WifiTxReport {
+        installed: true,
+        tx_done_cb: l2::tx_done_registered(),
+        charged: pins.tx_charged,
+        done: pins.tx_done,
+        aborted: pins.tx_aborted,
+        flushed: pins.tx_flushed,
+        stale: pins.tx_stale,
+        unmatched: pins.tx_unmatched,
+        inflight: pins.tx_outstanding,
+        high_water: pins.tx_high_water,
+        refused_pool: pins.tx_refused_pool,
+        refused_heap: pins.tx_refused_heap,
+    };
     let _ = write_status_lines(out, &Report { l2: &st, ring: &ring, rx: &rx, wifi_tx: &wtx });
     heap_line(out);
     let _ = write!(
         out,
-        "s3 ring_write_err={} wifi_room_no={} ntb_tx={} usb_resets={} cpu_mhz={} tx_queue={} rx_queue={}\r\n",
+        "s3 ring_write_err={} wifi_room_no={} ntb_tx={} usb_resets={} cpu_mhz={} tx_queue={} rx_queue={} usb={} out={} sink_frames={} sink_bytes={} source_frames={} source_bytes={} rx_cb={} rx_ignored={} tx_drv_err={} tx_last_err={:#x} scan_seen={}\r\n",
         RING_WRITE_ERR.load(Ordering::Relaxed),
         WIFI_TX_ROOM_NO.load(Ordering::Relaxed),
         ncm::TX_NTBS.load(Ordering::Relaxed),
         RESETS.load(Ordering::Relaxed),
         CPU_MHZ,
         WIFI_TX_QUEUE,
-        WIFI_RX_QUEUE
+        WIFI_RX_QUEUE,
+        ["bridge", "sink", "source"][usize::from(USB_MODE.load(Ordering::Relaxed)).min(2)],
+        if cfg!(feature = "stock-out") { "stock" } else { "multi" },
+        SINK_FRAMES.load(Ordering::Relaxed),
+        SINK_BYTES.load(Ordering::Relaxed),
+        SOURCE_FRAMES.load(Ordering::Relaxed),
+        SOURCE_BYTES.load(Ordering::Relaxed),
+        l2::RX_CALLBACKS.load(Ordering::Relaxed),
+        l2::RX_IGNORED.load(Ordering::Relaxed),
+        l2::TX_DRIVER_ERR.load(Ordering::Relaxed),
+        l2::TX_LAST_ERR.load(Ordering::Relaxed),
+        SCAN_SEEN.load(Ordering::Relaxed)
     );
 }
 
@@ -927,6 +1016,26 @@ async fn handle(wr: &'static Mutex<NoopRawMutex, AcmWriter>, bridge: &'static Br
             guard::boot_status(&mut s, FIRMWARE, ESP_APP_DESC.app_elf_sha256(), state, Instant::now().as_millis(), Some(esp_alloc::HEAP.free() as u32));
             s.push_str("\r\n");
         }
+        usb if usb == "usb" || usb.starts_with("usb ") => {
+            let arg = usb.strip_prefix("usb").unwrap_or("").trim();
+            let (mode, kbps) = match arg {
+                "bridge" => (Some(USB_BRIDGE), 0),
+                "sink" => (Some(USB_SINK), 0),
+                "source max" => (Some(USB_SOURCE), 0),
+                a => match a.strip_prefix("source ").and_then(|r| r.trim().parse::<u32>().ok()).filter(|k| *k > 0) {
+                    Some(k) => (Some(USB_SOURCE), k),
+                    None => (None, 0),
+                },
+            };
+            match mode {
+                Some(mode) => {
+                    SOURCE_KBPS.store(kbps, Ordering::Relaxed);
+                    USB_MODE.store(mode, Ordering::Relaxed);
+                    let _ = write!(s, "usb {} {}\r\n", ["bridge", "sink", "source"][usize::from(mode)], if mode == USB_SOURCE { if kbps == 0 { "max" } else { "rate" } } else { "" });
+                }
+                None => s.push_str("usage: usb bridge|sink|source RATE_KBPS|max\r\n"),
+            }
+        }
         "init" => {
             let note = critical_section::with(|cs| *INIT_NOTE.borrow_ref(cs));
             let _ = write!(s, "init stage={} note={}\r\n", guard::current_stage().name(), note.as_str());
@@ -954,11 +1063,23 @@ async fn handle(wr: &'static Mutex<NoopRawMutex, AcmWriter>, bridge: &'static Br
         _ => match Command::parse(line) {
             Command::Status => build_status(bridge, &mut s),
             Command::Help => {
-                let _ = reply::write_help(&mut s, false, "");
-                s.push_str("heap [on|off]\r\n");
+                let _ = reply::write_help_implemented(&mut s, "T-Dongle Wi-Fi bridge (S3 spike)", reply::SPIKE_S3_COMMANDS);
             }
             Command::Capabilities => {
-                let _ = reply::write_capabilities(&mut s, false, "");
+                let _ = reply::write_capabilities_implemented(&mut s, &["boot_diagnostics"]);
+            }
+            Command::List => {
+                SAVED.lock(|c| {
+                    if let Some(l) = c.borrow().as_ref() {
+                        let current = SELECTED.load(Ordering::Relaxed);
+                        for (i, p) in l.saved.list().iter().enumerate() {
+                            let slot = &l.meta.slot[i];
+                            let line = reply::ListLine::new(i as u32, current == i as i32 && CONNECTED_NOW.load(Ordering::Relaxed), slot.name_bytes(), p.ssid_bytes(), slot.priority);
+                            // SSIDs are raw bytes; the console is text: lossy is what a terminal shows anyway
+                            s.push_str(&String::from_utf8_lossy(line.as_bytes()));
+                        }
+                    }
+                });
             }
             _ => {
                 let _ = reply::write_unknown(&mut s, false);

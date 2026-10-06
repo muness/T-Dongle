@@ -38,3 +38,22 @@ That build read the NVS, initialised the radio and scanned **before** the USB de
 setup turned into a reported error, timeouts on scan (8 s) and connect (30 s), esp-println on the UART (not USB-Serial-JTAG), a panic handler that records `file:line message` and resets, safe mode after two boots
 that did not stay up. New console commands: `boot-status` (now with `reset_reason`, `stage`, `previous_stage`, `previous_panic`, `safe_mode`, `unstable_boots`), `init` (stage and the last note), `normal` (leave safe mode).
 The cause of the original stall is not established; candidates are in the ADR. If the rebuild still stalls, `boot-status` after the next boot says in which stage.
+
+## Board result 2 (coordinator): the rebuilt S3 boots, the bridge wedges; and the fixes
+Boots (USB first, `boot-status` stage=running, safe_mode=false), heap 53,180 of 114,684 free, `status` in C format. Defects and what was done:
+
+1. **The bridge wedged within a second** (Wi-Fi to host stopped at 176 frames; host to Wi-Fi `tx_retries` 784, `wifi_room_no` 788; ping 100% loss). Cause, from esp-radio 1.0.0-beta.1's source: both directions are gated on one
+   counter, `WIFI_TX_INFLIGHT`, that only the driver's tx-done callback decrements and that nothing resets: `receive()` yields only while `inflight < tx_queue_size`, and `transmit()` likewise. A frame the driver drops
+   when the link changes (the AP was at -87 dBm) is never completed, and a frame sent while the station is not Connected is counted and then silently dropped by `esp_wifi_send_data`; each costs one credit for good.
+   With a full TX queue one flap uses all six. Reproduced as a model (`tdongle-wifi-budget/tests/coupled_credit.rs`) next to the same events against the C's `WifiPins` (which survives them).
+   **Fix:** `src/l2.rs` takes over both directions as the C does: RX through `esp_wifi_internal_reg_rxcb` (a callback in the Wi-Fi task that copies into `Bridge::wifi_rx` and frees the buffer; no TX credit involved),
+   TX through `esp_wifi_internal_tx` charged to `WifiPins` (limit 6, heap floor, tx-done releases, flush on every link change, 3 s lease). esp-radio's token API is no longer used. `status` shows the budget (`bridge_wifi_tx charged/done/flushed/stale/unmatched`), `rx_cb`, `tx_drv_err`.
+2. **Wrong network, `phy=lr`, `saved=1`.** `phy=lr` and `saved=1` were the spike's own status code: `Info::default()` is the C `{0}` whose PHY 0 prints `lr` (the C reads the driver and uses PHY_UNKNOWN), and `Prefs.saved` was a literal 1. Now `l2::link_read` is the C `wifi_link_read`
+   (AP record, negotiated PHY, bandwidth, power save, tx power) and the prefs come from the loaded list. The radio was never in LR (esp-radio's default protocols are b/g/n; the link loop now sets `Protocols::default()` after each `set_config`, HT20 as before).
+   The list itself was incomplete: C builds it from `tn_settings/wifi_profiles` when present, otherwise from the single `tn_settings/wifi` config (a 184-byte `wifi_config_t`) **plus** the v0.1.x `adapter/config` blob. The spike read only the latter.
+   `tdongle-saved` has the C order and the C ranking (usable at -85 dBm or better first, then preferred, then priority, then signal), tested on NVS images made by IDF's generator for the two board layouts (`board_v01`, `board_v03`) and, if present, a real dump (`tests/fixtures/board_dump.bin`, from `esptool read_flash 0x9000 0x10000`, read-only).
+   `list` prints the C lines (`N[*] name= ssid= priority=`). The scan result per slot is in the `s3` line (`scan_seen`) and the `init` command shows why a join was slow.
+3. **`list` and `help`.** `help` and `capabilities` list exactly what the image implements (`write_help_implemented`; a test keeps every listed command parsing to a real command and the unimplemented C commands out). The std firmware's `help` does the same.
+
+OUT patch: the NCM OUT endpoint is armed for a whole NTB as in S2 (board A/B: OUT 8.41 Mbit/s). `s3-stock-app.bin` is the same image without it (`stock-out`).
+USB-side modes (console `usb bridge|sink|source RATE_KBPS|max`): `sink` counts OUT datagrams and drops them (`sink_frames`, `sink_bytes` in the `s3` line), `source` sends 1,442 B broadcast frames on IN (`source_frames`, `source_bytes`); in either mode the Wi-Fi to host ring is refused so the radio cannot interfere. Use them to separate USB from the radio.

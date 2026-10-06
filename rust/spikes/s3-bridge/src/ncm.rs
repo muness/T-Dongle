@@ -8,8 +8,9 @@
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use embassy_usb::Builder;
-use embassy_usb::driver::{Direction, Driver, Endpoint, EndpointAddress, EndpointError, EndpointIn, EndpointOut};
+use embassy_usb::driver::{Direction, Driver, Endpoint, EndpointAddress, EndpointError, EndpointIn};
 use embassy_usb::types::{InterfaceNumber, StringIndex};
+use tdongle_usb_out::{NtbCollector, Step};
 
 pub const USB_CLASS_CDC: u8 = 0x02;
 const USB_CLASS_CDC_DATA: u8 = 0x0a;
@@ -181,6 +182,20 @@ impl<'d, D: Driver<'d>> Sender<'d, D> {
     }
 }
 
+/// What the class needs from an OUT endpoint that takes whole transfers (`embassy-usb-synopsys-otg` with the multi-packet patch): one completed hardware transfer and
+/// whether it ended on a short packet.
+#[allow(async_fn_in_trait)]
+pub trait ReadTransfer {
+    /// See `embassy_usb_synopsys_otg::Endpoint::read_chunk`.
+    async fn read_chunk(&mut self, buf: &mut [u8]) -> Result<(usize, bool), EndpointError>;
+}
+
+impl<'d> ReadTransfer for embassy_usb_synopsys_otg::Endpoint<'d, embassy_usb_synopsys_otg::Out> {
+    async fn read_chunk(&mut self, buf: &mut [u8]) -> Result<(usize, bool), EndpointError> {
+        embassy_usb_synopsys_otg::Endpoint::read_chunk(self, buf).await
+    }
+}
+
 pub struct Receiver<'d, D: Driver<'d>> {
     comm_if: InterfaceNumber,
     comm_ep: D::EndpointIn,
@@ -193,37 +208,36 @@ pub struct Receiver<'d, D: Driver<'d>> {
 }
 
 impl<'d, D: Driver<'d>> Receiver<'d, D> {
-    /// Read one whole NTB from the OUT endpoint into the reassembly buffer (64 B per `read`, until a short
-    /// packet). Returns once the NTB is complete and validated. Does NOT hand out datagrams.
-    pub async fn read_ntb(&mut self) -> Result<(), EndpointError> {
+    /// Read one whole NTB from the OUT endpoint into the reassembly buffer, one hardware transfer (up to the whole NTB buffer, many packets) per `read_chunk`,
+    /// until a chunk ends on a short packet or ZLP (`NtbCollector`, host-tested). Returns once the NTB is complete and validated. Does NOT hand out datagrams.
+    pub async fn read_ntb(&mut self) -> Result<(), EndpointError>
+    where
+        D::EndpointOut: ReadTransfer,
+    {
         let mps = self.read_ep.info().max_packet_size as usize;
+        let mut collector = NtbCollector::new(mps, NTB_OUT_MAX);
         loop {
             self.ndp = 0;
-            let mut pos = 0;
-            let mut overflow = false;
-            loop {
-                let n = if pos + mps <= NTB_OUT_MAX {
-                    let n = self.read_ep.read(&mut self.ntb[pos..pos + mps]).await?;
-                    pos += n;
-                    n
-                } else {
-                    // NTB larger than we advertised: drain the rest of the transfer, drop it.
-                    let mut scratch = [0u8; 64];
-                    overflow = true;
-                    self.read_ep.read(&mut scratch[..mps]).await?
-                };
-                if n < mps {
-                    break;
+            let len = loop {
+                let room = collector.room();
+                match self.read_ep.read_chunk(&mut self.ntb[room]).await {
+                    Ok((n, short)) => {
+                        if let Step::Complete(len) = collector.chunk(n, short) {
+                            break len;
+                        }
+                    }
+                    Err(EndpointError::BufferOverflow) => {
+                        // NTB larger than we advertised: the endpoint dropped it.
+                        let _ = collector.overflow();
+                        RX_BAD_NTB.fetch_add(1, Ordering::Relaxed);
+                    }
+                    Err(e) => return Err(e),
                 }
-            }
-            if overflow {
-                RX_BAD_NTB.fetch_add(1, Ordering::Relaxed);
-                continue;
-            }
-            self.ntb_len = pos;
+            };
+            self.ntb_len = len;
             RX_NTBS.fetch_add(1, Ordering::Relaxed);
-            RX_NTB_BYTES.fetch_add(pos as u32, Ordering::Relaxed);
-            RX_NTB_MAX.fetch_max(pos as u32, Ordering::Relaxed);
+            RX_NTB_BYTES.fetch_add(len as u32, Ordering::Relaxed);
+            RX_NTB_MAX.fetch_max(len as u32, Ordering::Relaxed);
             if self.begin_ntb() {
                 return Ok(());
             }

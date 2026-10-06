@@ -117,7 +117,17 @@ fn run(ntbs: Vec<Vec<u8>>, schedule: Vec<u8>, hold_every: u8) -> Vec<Vec<u8>> {
 fn ntb_strategy() -> impl Strategy<Value = Vec<u8>> {
     prop_oneof![
         // sizes that straddle the interesting boundaries
-        Just(0usize), Just(1), Just(63), Just(64), Just(65), Just(1542), Just(3135), Just(3136), Just(3199), Just(3200), 1usize..=3200
+        Just(0usize),
+        Just(1),
+        Just(63),
+        Just(64),
+        Just(65),
+        Just(1542),
+        Just(3135),
+        Just(3136),
+        Just(3199),
+        Just(3200),
+        1usize..=3200
     ]
     .prop_flat_map(|n| proptest::collection::vec(any::<u8>(), n))
 }

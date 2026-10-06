@@ -175,8 +175,8 @@ const NOT_YET: &str = "ERR Not available in the Rust port yet (phase 2: setup, d
 fn dispatch(line: &str) {
     let mut out = Out;
     match Command::parse(line) {
-        Command::Help => infallible(reply::write_help(&mut out, false, "")),
-        Command::Capabilities => infallible(reply::write_capabilities(&mut out, false, "")),
+        Command::Help => infallible(reply::write_help_implemented(&mut out, "T-Dongle Wi-Fi bridge", reply::PHASE1_FIRMWARE_COMMANDS)),
+        Command::Capabilities => infallible(reply::write_capabilities_implemented(&mut out, &["boot_diagnostics", "power_report"])),
         Command::Pm => crate::report::pm(&mut out),
         Command::BootStatus => crate::report::boot_status(&mut out),
         Command::Status => crate::report::status(&mut out),

@@ -89,6 +89,45 @@ pub fn write_help<W: fmt::Write>(w: &mut W, tailnet: bool, memory_commands: &str
     }
 }
 
+/// The commands the phase 1 firmware implements, in the form `help` prints them. Every one parses (`Command::parse`) to something other than `Unknown`; a test keeps
+/// that true. The C `help` lists commands phase 1 answers with "not available yet", which a client reads as a promise.
+pub const PHASE1_FIRMWARE_COMMANDS: &[&str] =
+    &["status", "list", "use N", "display", "mode wifi_bridge", "capabilities", "pm", "boot-status", "reboot", "bootloader", "help"];
+
+/// The commands of the S3 spike (`status` and `list` are the C replies; the rest are spike tools).
+pub const SPIKE_S3_COMMANDS: &[&str] =
+    &["status", "list", "capabilities", "boot-status", "bootloader", "init", "normal", "heap [on|off]", "usb bridge|sink|source RATE_KBPS|max", "help"];
+
+/// `help` listing exactly `commands` (and nothing the image does not implement), in the C layout: the product line, then `Commands: a, b, c`.
+///
+/// # Errors
+/// Whatever the sink returns.
+pub fn write_help_implemented<W: fmt::Write>(w: &mut W, product: &str, commands: &[&str]) -> fmt::Result {
+    write!(w, "{product} protocol=1\r\nCommands: ")?;
+    for (i, c) in commands.iter().enumerate() {
+        if i != 0 {
+            w.write_str(", ")?;
+        }
+        w.write_str(c)?;
+    }
+    w.write_str("\r\n")
+}
+
+/// `capabilities` listing exactly `features`.
+///
+/// # Errors
+/// Whatever the sink returns.
+pub fn write_capabilities_implemented<W: fmt::Write>(w: &mut W, features: &[&str]) -> fmt::Result {
+    w.write_str("capabilities schema=1 features=")?;
+    for (i, f) in features.iter().enumerate() {
+        if i != 0 {
+            w.write_str(",")?;
+        }
+        w.write_str(f)?;
+    }
+    w.write_str("\r\n")
+}
+
 /// `capabilities`, with `MEMORY_FEATURE` as a parameter (pass `""` for the release image or [`MEMORY_FEATURE_DIAGNOSTICS`]).
 ///
 /// # Errors

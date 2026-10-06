@@ -408,7 +408,7 @@ async fn main(spawner: Spawner) -> ! {
         let slot = match scan.map_err(|_| ()).and_then(|r| r.map_err(|_| ())) {
             Ok(aps) => {
                 println!("scan(show_hidden): {} APs", aps.len());
-                saved::choose(&loaded, aps.iter().map(|a| (a.ssid.as_str(), a.signal_strength)))
+                tdongle_saved::choose(&loaded, &tdongle_saved::signals(&loaded.saved, aps.iter().map(|a| (a.ssid.as_str().as_bytes(), a.signal_strength))))
             }
             Err(()) => {
                 println!("scan failed or timed out");
@@ -419,7 +419,7 @@ async fn main(spawner: Spawner) -> ! {
             next = (next + 1) % loaded.saved.list().len();
             next
         });
-        let Some((ssid, pass)) = saved::credentials(&loaded.saved, slot) else {
+        let Some((ssid, pass)) = tdongle_saved::credentials(&loaded.saved, slot) else {
             Timer::after_secs(2).await;
             continue;
         };

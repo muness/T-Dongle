@@ -558,14 +558,13 @@ dependencies = [
 [[package]]
 name = "embassy-usb-synopsys-otg"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6efd0c0e0b21bcf91b475b8fa47347c1df32c9a99728ae1e1b0e6625862dfd1a"
 dependencies = [
  "critical-section",
  "embassy-sync 0.8.0",
  "embassy-time",
  "embassy-usb-driver",
  "portable-atomic",
+ "tdongle-usb-out",
 ]
 
 [[package]]
@@ -1621,6 +1620,7 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embassy-time",
  "embassy-usb",
+ "embassy-usb-synopsys-otg",
  "embedded-storage",
  "esp-alloc",
  "esp-backtrace",
@@ -1630,15 +1630,19 @@ dependencies = [
  "esp-radio",
  "esp-rtos",
  "esp-storage",
+ "esp-wifi-sys-esp32s3",
  "static_cell",
  "tdongle-aqm",
  "tdongle-boot-guard",
  "tdongle-bridge",
  "tdongle-nvs-format",
  "tdongle-nvs-read",
+ "tdongle-saved",
  "tdongle-serial",
  "tdongle-spsc",
  "tdongle-traffic",
+ "tdongle-usb-out",
+ "tdongle-wifi-budget",
  "tdongle-wifi-policy",
 ]
 
@@ -1856,6 +1860,15 @@ name = "tdongle-nvs-read"
 version = "0.3.0-dev"
 
 [[package]]
+name = "tdongle-saved"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-nvs-format",
+ "tdongle-nvs-read",
+ "tdongle-wifi-policy",
+]
+
+[[package]]
 name = "tdongle-serial"
 version = "0.3.0-dev"
 dependencies = [
@@ -1873,6 +1886,14 @@ dependencies = [
 
 [[package]]
 name = "tdongle-traffic"
+version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-usb-out"
+version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-wifi-budget"
 version = "0.3.0-dev"
 
 [[package]]
