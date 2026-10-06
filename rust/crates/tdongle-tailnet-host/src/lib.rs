@@ -1,5 +1,14 @@
-//! Host adapters for the control driver: tokio TCP, a wall clock, OS entropy, a recording map sink, and a wrapper for the Go interop server in
-//! `rust/tools/tailnet-interop`.
+//! Host adapters and the end-to-end harness of the tailnet gateway.
+//!
+//! * for the control driver (`tdongle-tailnet-ctl`): tokio TCP, a wall clock, OS entropy, a recording map sink;
+//! * [`server`]: a wrapper for the Go interop server in `rust/tools/tailnet-interop` (a real Tailscale control server, DERP server and tsnet peers);
+//! * for the runtime (`tdongle-tailnet-runtime`): [`tokio_net::TokioNet`] (its `Net`, with switches to block UDP, bounce the Wi-Fi link and cut TCP),
+//!   [`mem`] (platform, NVS and a model heap), [`usbhost`] (a fake USB host: smoltcp with a DHCP client, DNS, TCP and UDP), [`fakewifi`] (the NAT and a
+//!   reflecting Internet), and [`harness::Gateway`], which runs the real runtime on a thread of its own and drives it through `TailnetApi`.
+//!
+//! The tests are in `tests/`: `e2e.rs` (the scenarios), `embassy_net.rs` (the device's `Net` over a real embassy-net stack), `memory.rs` (the RAM table),
+//! `interop_ts2021.rs` (the control protocol alone). `cargo test -p tdongle-tailnet-host -- --test-threads=1`; the soak runs `TAILNET_SOAK_SECS` seconds
+//! (default 600). They skip, printing why, when the Go server binary cannot be built.
 
 use embedded_io_adapters::tokio_1::FromTokio;
 use std::io::Read as _;
@@ -11,7 +20,12 @@ use tdongle_tailnet_map::{MapEvent, MapSink, SinkError};
 use tdongle_tailnet_types::{Entropy, Key32, Millis};
 use tokio::net::TcpStream;
 
+pub mod fakewifi;
+pub mod harness;
+pub mod mem;
 pub mod server;
+pub mod tokio_net;
+pub mod usbhost;
 
 /// Opens plain TCP connections to one address.
 #[derive(Clone, Debug)]

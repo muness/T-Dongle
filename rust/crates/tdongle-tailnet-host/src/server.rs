@@ -40,17 +40,23 @@ pub struct GoServer {
     pub control_addr: String,
     /// DERP TLS port.
     pub derp_port: u16,
+    /// The STUN responder's UDP port (the DERP node advertises it).
+    pub stun_port: u16,
 }
 
 impl GoServer {
     /// Spawn the binary and read its hello line.
     pub fn spawn(bin: &std::path::Path) -> Result<Self, String> {
-        let mut child = Command::new(bin)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("spawn {}: {e}", bin.display()))?;
+        Self::spawn_with(bin, &[])
+    }
+
+    /// Spawn with extra environment (`INTEROP_CONTROL_PORT`, `INTEROP_DERP_PORT`: fixed ports, so a restarted server is found at the same address).
+    pub fn spawn_with(bin: &std::path::Path, env: &[(&str, String)]) -> Result<Self, String> {
+        let mut cmd = Command::new(bin);
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        let mut child = cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| format!("spawn {}: {e}", bin.display()))?;
         let stdin = child.stdin.take().unwrap();
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
         let mut hello = String::new();
@@ -59,7 +65,8 @@ impl GoServer {
         let control = v["control"].as_str().ok_or("no control url")?;
         let control_addr = control.trim_start_matches("http://").trim_end_matches('/').to_string();
         let derp_port = v["derp_port"].as_u64().ok_or("no derp_port")? as u16;
-        Ok(Self { child, stdin, stdout, control_addr, derp_port })
+        let stun_port = v["stun_port"].as_u64().unwrap_or(0) as u16;
+        Ok(Self { child, stdin, stdout, control_addr, derp_port, stun_port })
     }
 
     /// Send one command line and return the reply line.
@@ -68,6 +75,46 @@ impl GoServer {
         let mut out = String::new();
         self.stdout.read_line(&mut out).expect("server stdout");
         out.trim().to_string()
+    }
+
+    /// Start a tsnet peer named `name`; returns its tailnet IPv4 and node key (`nodekey:...`).
+    pub fn peer(&mut self, name: &str) -> Result<([u8; 4], String), String> {
+        let r = self.cmd(&format!("peer {name}"));
+        let mut it = r.split_whitespace();
+        if it.next() != Some("PEER") {
+            return Err(r);
+        }
+        let ip: std::net::Ipv4Addr = it.next().ok_or("no ip")?.parse().map_err(|e| format!("{e}"))?;
+        Ok((ip.octets(), it.next().ok_or("no key")?.to_string()))
+    }
+
+    /// Close a peer (the control server then tells the others).
+    pub fn peer_close(&mut self, name: &str) -> bool {
+        self.cmd(&format!("peerclose {name}")) == "OK"
+    }
+
+    /// Queue a raw `tailcfg.MapResponse` (JSON) on a node's streaming map.
+    pub fn rawmap(&mut self, nodekey: &str, json: &str) -> bool {
+        self.cmd(&format!("rawmap {nodekey} {json}")) == "OK"
+    }
+
+    /// `(name, node id, node key)` of every node the control server knows.
+    pub fn ids(&mut self) -> Vec<(String, u64, String)> {
+        self.cmd("ids")
+            .split_whitespace()
+            .skip(1)
+            .filter_map(|t| {
+                let (name, rest) = t.split_once('=')?;
+                let (id, key) = rest.split_once(':')?;
+                Some((name.to_string(), id.parse().ok()?, key.to_string()))
+            })
+            .collect()
+    }
+
+    /// The endpoints the control server has for a node.
+    pub fn endpoints(&mut self, nodekey: &str) -> Vec<String> {
+        let r = self.cmd(&format!("eps {nodekey}"));
+        r.strip_prefix("EPS ").map(|e| e.split(',').filter(|x| !x.is_empty()).map(String::from).collect()).unwrap_or_default()
     }
 
     /// Node public keys the control server knows (`nodekey:...`).

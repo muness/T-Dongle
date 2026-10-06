@@ -16,11 +16,13 @@
 //! before the first map was applied.
 //!
 //! # Memory
-//! Everything big lives in one [`Workspace`] the caller allocates (a `static`, `StaticCell` or `Box`): the record reader (4 KiB), the sealed-record
-//! buffer (4 KiB), a request/response JSON buffer, the TCP input buffer and the map projector. **It is shared across memberships**: the negotiation
-//! token serialises its users (ADR 0013), so two sessions never run `run_session` on the same workspace at the same time, and nothing in it survives
-//! from one session to the next except the statistics. The future of `run_session` itself holds the Noise session, the HTTP/2 session and a few
-//! counters (see [`sizes`]).
+//! Everything big lives in one [`Workspace`] the caller allocates (a `Box`, or a `static` built in place: `Workspace::new` is not `const` because the map
+//! projector's constructor is not): the record reader (4 KiB), the sealed-record buffer (4 KiB), a request/response JSON buffer, the TCP input buffer and
+//! the map projector. **A session borrows its workspace for its whole life**, and a session is a long poll that stays open after the first map: the
+//! negotiation token serialises the *negotiations* (the gate is released after the first map is applied), not the sessions. So two memberships that are both
+//! streaming need two workspaces; one workspace can serve successive sessions of one membership, and nothing in it survives from one session to the next
+//! except the statistics. (Sharing one workspace across streaming sessions would need the driver to lease it per map message; see
+//! `tdongle-tailnet-runtime`'s crate docs.) The future of `run_session` itself holds the Noise session, the HTTP/2 session and a few counters (see [`sizes`]).
 //!
 //! # Cancellation
 //! Dropping the future abandons the connection (the stream is dropped with it) but does not call the gate: the owner of the future releases its token.

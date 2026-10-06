@@ -190,6 +190,13 @@ impl<'a, IO: Read + Write, M: RawMutex> LeasedTlsDerp<'a, IO, M> {
         self.signature_verifies
     }
 
+    /// Wait until the header of the next TLS record has arrived: no lease is taken and no buffer is touched, so this is the call a task makes while it
+    /// waits for the server (and can `select` against other work: it is **cancel-safe**, the header is kept). Follow it with [`LeasedTlsDerp::read_with`],
+    /// which then takes the lease at once. Errors as `read_with`'s `ReadError::Tls`.
+    pub async fn wait_record(&mut self) -> Result<(), TlsError> {
+        self.conn.wait_record().await
+    }
+
     /// Receive one TLS record's plaintext and pass it to `f` (in one or more slices, in order). Returns the plaintext length (0 for a
     /// post-handshake message such as a session ticket: call again). Cancel-safe only while waiting for the header.
     ///

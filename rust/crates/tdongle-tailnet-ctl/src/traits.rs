@@ -48,6 +48,14 @@ pub trait EndpointSource {
     /// If the endpoint set changed since the last call, write it to `out` and return its length; otherwise `None`. The driver sends a lite update
     /// (`Stream=false`, `OmitPeers=true`) only if the resulting request differs from the last one it sent.
     fn poll_endpoints(&mut self, out: &mut [Endpoint]) -> Option<usize>;
+
+    /// The DERP region the node is homed on now (`NetInfo.PreferredDERP`), if it changed from what the session was configured with. The driver puts it
+    /// into the `Hostinfo` of its next endpoint update, so a home region found after the session started (the engine's netcheck) reaches the control plane
+    /// without a new session. Called together with [`EndpointSource::poll_endpoints`]; the update is sent when [`EndpointSource::poll_endpoints`] returns
+    /// something (an implementation that wants a home-region-only update returns its current endpoints again). Default: never changes.
+    fn preferred_derp(&mut self) -> Option<u16> {
+        None
+    }
 }
 
 /// An [`EndpointSource`] with no endpoints.

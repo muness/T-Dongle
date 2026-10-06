@@ -71,8 +71,8 @@ pub struct SessionConfig<'a> {
     pub timeouts: Timeouts,
 }
 
-/// All the big buffers of a control session, in one value the caller allocates once and shares across memberships (the negotiation token serialises
-/// them). `new` is `const`, so a `static` is possible.
+/// All the big buffers of a control session, in one value the caller allocates. A session borrows it for its whole life (see the crate docs, "Memory"), so
+/// every membership that is streaming at the same time needs its own. `new` is not `const` (the map projector's constructor is not).
 #[derive(Debug)]
 pub struct Workspace {
     rx: [u8; RX_BYTES],
@@ -384,6 +384,7 @@ async fn serve<S: Read + Write, K: Clock, Sk: MapSink, G: Gate, P: EndpointSourc
     endpoints: &mut P,
 ) -> SessionEnd {
     let t = cfg.timeouts;
+    let mut hostinfo = cfg.hostinfo;
     let Bufs { rx, reader, json, early_json, projector, stats, pos, len, out_base } = b;
     // 4. HTTP/2 preface, then everything else is driven by what arrives.
     if let Err(e) = wire.flush(h2).await {
@@ -466,16 +467,13 @@ async fn serve<S: Read + Write, K: Clock, Sk: MapSink, G: Gate, P: EndpointSourc
                 h2.queue_ping(now.to_be_bytes());
                 stats.pings_sent += 1;
             }
+            if let Some(p) = endpoints.preferred_derp() {
+                hostinfo.preferred_derp = u32::from(p);
+            }
             if let Some(k) = endpoints.poll_endpoints(&mut ep_buf) {
                 let k = k.min(MAX_ENDPOINTS);
                 if k > 0 {
-                    let req = MapRequest {
-                        node_key: &node_pub,
-                        disco_key: cfg.disco_pub,
-                        hostinfo: cfg.hostinfo,
-                        kind: MapKind::EndpointUpdate,
-                        endpoints: &ep_buf[..k],
-                    };
+                    let req = MapRequest { node_key: &node_pub, disco_key: cfg.disco_pub, hostinfo, kind: MapKind::EndpointUpdate, endpoints: &ep_buf[..k] };
                     let jl = match req.write_json(&mut json[..]) {
                         Ok(n) => n,
                         Err(_) => return SessionEnd::RequestTooLarge,

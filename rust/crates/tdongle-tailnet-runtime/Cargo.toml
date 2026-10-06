@@ -1,0 +1,53 @@
+[package]
+name = "tdongle-tailnet-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The async (embassy) runtime of the tailnet gateway: one set of tasks shared by every membership (control, DERP, UDP, USB, supervisor) around the sans-IO engine, a Net abstraction (embassy-net / tokio), and the TailnetApi the firmware image calls."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# `Net` for `embassy_net::Stack` with caller-supplied static socket buffers.
+embassy-net = ["dep:embassy-net"]
+# `WifiRaw` for `tdongle-tailnet-wifimux` (`RawPort` + `SharedNapt` + `InfoHandle`): the adapter the firmware passes to `run`.
+wifimux = ["dep:tdongle-tailnet-wifimux"]
+# A concrete instantiation of every task with stub platform, storage and USB, so the sizes of the futures can be read with `-Zprint-type-sizes` on the device
+# target (see `probe`). Needs `embassy-net`.
+size-probe = ["embassy-net"]
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+tdongle-tailnet-control = { path = "../tdongle-tailnet-control" }
+tdongle-tailnet-map = { path = "../tdongle-tailnet-map" }
+tdongle-tailnet-ctl = { path = "../tdongle-tailnet-ctl" }
+tdongle-tailnet-derp = { path = "../tdongle-tailnet-derp" }
+tdongle-tailnet-disco = { path = "../tdongle-tailnet-disco" }
+tdongle-tailnet-dns = { path = "../tdongle-tailnet-dns" }
+tdongle-tailnet-tls = { path = "../tdongle-tailnet-tls", default-features = false, features = ["lease", "p384"] }
+tdongle-tailnet-engine = { path = "../tdongle-tailnet-engine", features = ["status"] }
+tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }
+tdongle-tailnet-members = { path = "../tdongle-tailnet-members" }
+tdongle-tailnet-status = { path = "../tdongle-tailnet-status" }
+tdongle-tailnet-usbnet = { path = "../tdongle-tailnet-usbnet" }
+tdongle-tailnet-router = { path = "../tdongle-tailnet-router" }
+tdongle-tailnet-fw = { path = "../tdongle-tailnet-fw" }
+zeroize = { version = "1", default-features = false }
+tdongle-tailnet-wifimux = { path = "../tdongle-tailnet-wifimux", optional = true }
+embassy-sync = "0.8"
+embassy-time = "0.5"
+embassy-futures = "0.1"
+embedded-io-async = "0.7"
+embassy-net = { version = "0.9", default-features = false, features = ["proto-ipv4", "medium-ethernet", "tcp", "udp", "dns", "dhcpv4"], optional = true }
+
+[dev-dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+embassy-time = { version = "0.5", features = ["std", "generic-queue-64"] }
+critical-section = { version = "1.2", features = ["std"] }
+futures = { version = "0.3", default-features = false, features = ["std", "executor", "async-await"] }
+serde_json = "1"
