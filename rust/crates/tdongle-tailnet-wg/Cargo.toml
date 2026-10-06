@@ -1,0 +1,22 @@
+[package]
+name = "tdongle-tailnet-wg"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "WireGuard (Noise_IKpsk2_25519_ChaChaPoly_BLAKE2s) for the tailnet gateway: sans-IO, allocation free, hot/cold peer split, lock-free packet path, RFC 6479 replay window."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+subtle = { version = "2.6", default-features = false }
+zeroize = { version = "1", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
+hex-literal = "1"

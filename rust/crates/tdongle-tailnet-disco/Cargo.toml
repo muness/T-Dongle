@@ -1,0 +1,26 @@
+[package]
+name = "tdongle-tailnet-disco"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "DISCO (Tailscale path discovery: ping, pong, call-me-maybe, per-peer path state) and STUN (binding request/response, netcheck-lite scheduler) for the tailnet gateway: sans-IO, allocation free, in-place on caller buffers."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# The shared entry points of the libfuzzer targets and the in-crate mini-fuzz (needs the test generator from the types crate).
+fuzzing = ["tdongle-tailnet-types/test-util"]
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+
+[dev-dependencies]
+tdongle-tailnet-disco = { path = ".", features = ["fuzzing"] }
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
+hex-literal = "1"
