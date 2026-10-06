@@ -35,7 +35,7 @@ impl<'d> Driver<'d> {
             regs: unsafe { Otg::from_ptr(info.register_ptr.cast_mut()) },
             state,
             // ADAPTATION: new field in the PR's driver; the old driver gave every endpoint a TX FIFO slot (endpoint_count).
-            tx_fifo_count: state.endpoint_count() as u8,
+            tx_fifo_count: 5, // ESP32-S2/S3 FS core: EP0 + DIEPTXF1..4 (as in esp-rs/esp-hal#6465)
             fifo_depth_words: info.fifo_depth_words as u16,
             extra_rx_fifo_words: info.rx_fifo_extra_words,
             phy_type: info.phy_type,
