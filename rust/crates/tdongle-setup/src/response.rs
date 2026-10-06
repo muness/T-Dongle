@@ -22,6 +22,7 @@ pub struct Response<'a> {
 #[derive(Clone, Copy, Debug)]
 enum Body<'a> {
     Sized(&'a [u8]),
+    Sized2(&'a [u8], &'a [u8]),
     Chunked([&'a [u8]; 3]),
 }
 
@@ -107,6 +108,12 @@ impl<'a> Response<'a> {
         Self { status: "200 OK", content_type: "text/html", headers: [("", ""); 4], header_count: 0, body: Body::Chunked(parts), close: false, silent: false }
     }
 
+    /// A `200 OK` response whose sized body is two slices (the USB page and the NUL of its text embed).
+    #[must_use]
+    pub const fn ok2(a: &'a [u8], b: &'a [u8]) -> Self {
+        Self { status: "200 OK", content_type: "text/html", headers: [("", ""); 4], header_count: 0, body: Body::Sized2(a, b), close: false, silent: false }
+    }
+
     /// `httpd_resp_set_status`.
     #[must_use]
     pub const fn status(mut self, status: &'static str) -> Self {
@@ -151,6 +158,11 @@ impl<'a> Response<'a> {
                     return false;
                 }
             }
+            Body::Sized2(a, b) => {
+                if !ok(sink, b"\r\nContent-Length: ") || !ok(sink, dec(a.len() + b.len(), &mut num)) || !ok(sink, b"\r\n") {
+                    return false;
+                }
+            }
             Body::Chunked(_) => {
                 if !ok(sink, b"\r\nTransfer-Encoding: chunked\r\n") {
                     return false;
@@ -167,6 +179,7 @@ impl<'a> Response<'a> {
         }
         match self.body {
             Body::Sized(b) => b.is_empty() || ok(sink, b),
+            Body::Sized2(a, b) => ok(sink, a) && ok(sink, b),
             Body::Chunked(parts) => {
                 for p in parts {
                     if !ok(sink, hex(p.len(), &mut num)) || !ok(sink, b"\r\n") || !ok(sink, p) || !ok(sink, b"\r\n") {

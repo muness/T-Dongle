@@ -211,7 +211,7 @@ impl Portal {
                     .header("X-Frame-Options", "DENY")
                     .header("Content-Security-Policy", page::AP_CSP)
             }
-            Origin::Usb => Response::ok(page::SETUP_HTML).header("Content-Security-Policy", page::USB_CSP),
+            Origin::Usb => Response::ok2(page::SETUP_HTML, page::SETUP_HTML_WIRE_NUL).header("Content-Security-Policy", page::USB_CSP),
             Origin::Denied => match conn.peer {
                 Some(p) if access::in_setup_subnet(p) => Self::redirect(conn, ErrCode::NotFound),
                 _ => Response::error(ErrCode::Forbidden, Some("Open this page through USB Ethernet at 192.168.77.1"), false),

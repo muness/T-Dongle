@@ -111,7 +111,7 @@ pub fn exchange(p: &Portal, conn: &Conn, host: &mut FakeHost, raw: &[u8]) -> (Ve
     let req = reader.request().unwrap();
     let body = BodyIn { bytes: reader.body(), incomplete: reader.body_incomplete() };
     let resp = p.serve(conn, &req, body, host, &mut out);
-    let mut buf = vec![0u8; 20000];
+    let mut buf = vec![0u8; 60000];
     let n = resp.write_into(&mut buf).unwrap();
     buf.truncate(n);
     (buf, resp.close || reader.must_close())
