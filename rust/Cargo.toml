@@ -1,12 +1,12 @@
 # Rust (esp-rs) port of the T-Dongle firmware. ADR: docs/adr/0001-rust-port.md.
 #
 # crates/*   pure logic, #![no_std], host-tested (`cargo +stable test`); no ESP-IDF types, no hardware.
-# firmware/  the ESP32-S3 binary (std, esp-idf-svc over ESP-IDF v5.5.5): thin glue around the pure crates. It is a workspace member but not a
-#            default member: build it from its own directory (`cd firmware && cargo build --release`), which selects the xtensa target.
+# firmware/  the ESP32-S3 binary (no_std, esp-hal/esp-radio/embassy): its own cargo project (own [workspace], xtensa target), thin glue around the pure crates;
+#            build it with rust/tools/build.sh.
 [workspace]
 resolver = "3"
-members = ["crates/*", "firmware"]
-default-members = ["crates/*"]
+members = ["crates/*"]
+exclude = ["firmware", "spikes"]
 
 [workspace.package]
 version = "0.3.0-dev"

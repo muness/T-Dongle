@@ -28,10 +28,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: {workspaces: rust}
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --exclude tdongle-fw --all-targets -- -D warnings
-      - run: cargo test --workspace --exclude tdongle-fw
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
       - name: Boot order of the no_std images (rule 13)
-        run: python3 tools/check_boot_order.py spikes/s1-wifi-l2/src/main.rs spikes/s3-bridge/src/main.rs
+        run: python3 tools/check_boot_order.py firmware/src/main.rs spikes/s1-wifi-l2/src/main.rs
       - name: Rescue arm first (every image)
         run: python3 tools/check_rescue_first.py
       - name: Golden files are reproducible from the C sources
@@ -56,8 +56,8 @@ jobs:
       - run: cargo install --locked cargo-fuzz
       - run: cd rust && cargo +nightly fuzz build
   firmware:
-    # The esp32s3 image: Xtensa Rust toolchain (espup, cached), the pinned ESP-IDF v5.5.5 (tools/bootstrap.sh, cached), then rust/tools/build.sh,
-    # which builds, makes the images and checks them (DIO 40 MHz header, partition table, IRAM rule). Never flashes.
+    # The esp32s3 no_std image: Xtensa Rust toolchain (espup, cached), then rust/tools/build.sh,
+    # which builds, makes the images and checks them (ELF hash in the app descriptor, rescue-first, boot order). Never flashes.
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -82,15 +82,10 @@ jobs:
           command -v espflash || cargo install --locked espflash@4.6.0
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/tdongle
-          key: idf-${{ hashFiles('tools/bootstrap.sh', 'dependencies.lock') }}
-      - run: tools/bootstrap.sh
-      - uses: actions/cache@v4
-        with:
           path: |
             ~/.cargo/registry
-            rust/target
-          key: rust-fw-${{ hashFiles('rust/Cargo.lock', 'rust/firmware/sdkconfig.defaults') }}
+            rust/target-xtensa
+          key: rust-fw-${{ hashFiles('rust/firmware/Cargo.lock') }}
           restore-keys: rust-fw-
       - run: rust/tools/build.sh
       - name: Size against the C image (1,333,360 B)

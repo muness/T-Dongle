@@ -1,16 +1,15 @@
 [build]
-target = "xtensa-esp32s3-espidf"
+target = "xtensa-esp32s3-none-elf"
 
-[target.xtensa-esp32s3-espidf]
-linker = "ldproxy"
-rustflags = ["--cfg", "espidf_time64"]
+[target.xtensa-esp32s3-none-elf]
+rustflags = [
+  "-C", "link-arg=-Wl,-Tlinkall.x",
+  "-C", "link-arg=-nostartfiles",
+]
 
 [unstable]
-build-std = ["std", "panic_abort"]
+build-std = ["core", "alloc"]
 
 [env]
-MCU = "esp32s3"
-# The workspace is virtual: esp-idf-sys reads its [package.metadata] from this crate.
-ESP_IDF_SYS_ROOT_CRATE = "tdongle-fw"
-# Build against the pinned ESP-IDF checkout (IDF_PATH, tools from `export.sh`), the same v5.5.5 the C firmware builds with.
-ESP_IDF_TOOLS_INSTALL_DIR = "fromenv"
+# Default 1492 would make WifiTxToken::consume_token panic for 1493..=1514 byte Ethernet frames from the USB host.
+ESP_RADIO_CONFIG_WIFI_MTU = "1514"

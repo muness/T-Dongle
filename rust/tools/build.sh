@@ -1,22 +1,34 @@
 #!/usr/bin/env bash
-# Build the Rust firmware, make the flashable images and check them.
-#   rust/tools/build.sh            -> rust/dist/tdongle-rust-VERSION/{app.bin,merged.bin,bootloader.bin,partition-table.bin,SHA256SUMS}
-# Needs: the pinned ESP-IDF (tools/bootstrap.sh), the Xtensa Rust toolchain (rust-toolchain.toml), ldproxy, espflash. Never flashes.
+# Build the no_std Rust firmware and make the flashable images. Never flashes.
+#   rust/tools/build.sh   -> rust/dist/tdongle-rust-VERSION/{app.bin,app-diagnostics.bin,merged.bin,bootloader.bin,partition-table.bin,SHA256SUMS}
+# app.bin goes at 0x20000 (keeps NVS). merged.bin is the full 16 MB layout (wipes NVS): only when a bootloader is available (RESCUE_BOOTLOADER or dist file).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-# shellcheck source=env.sh
-. tools/env.sh
-(cd firmware && cargo build --release)
-elf=target/xtensa-esp32s3-espidf/release/tdongle-fw
-idf_out=$(ls -dt target/xtensa-esp32s3-espidf/release/build/esp-idf-sys-*/out | head -1)
-version=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="tdongle-fw"))')
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$PWD/target-xtensa}
+if [ -z "${LIBCLANG_PATH:-}" ]; then LIBCLANG_PATH=$(ls -d ~/.rustup/toolchains/esp/xtensa-esp32-elf-clang/*/esp-clang/lib); export LIBCLANG_PATH; fi
+if ! command -v xtensa-esp-elf-gcc >/dev/null; then PATH=$(ls -d ~/.rustup/toolchains/esp/xtensa-esp-elf/*/xtensa-esp-elf/bin):$PATH; export PATH; fi
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' firmware/Cargo.toml | head -1)
 dist=dist/tdongle-rust-$version
 rm -rf "$dist"; mkdir -p "$dist"
-# The same flash parameters as the C image: DIO, 40 MHz (QIO at 80 MHz boot-loops this board), 16 MB; the C firmware's partition table.
-flags=(--chip esp32s3 --flash-mode dio --flash-freq 40mhz --flash-size 16mb --bootloader "$idf_out/build/bootloader/bootloader.bin" --partition-table firmware/partitions.csv)
-espflash save-image "${flags[@]}" "$elf" "$dist/app.bin"
-espflash save-image "${flags[@]}" --merge "$elf" "$dist/merged.bin"
-cp "$idf_out/build/bootloader/bootloader.bin" "$dist/bootloader.bin"
-python3 tools/check_image.py "$dist" "$elf" "$idf_out"
-(cd "$dist" && shasum -a 256 ./*.bin > SHA256SUMS)
-ls -l "$dist"
+elf=$CARGO_TARGET_DIR/xtensa-esp32s3-none-elf/release/tdongle-fw
+flags=(--chip esp32s3 --flash-mode dio --flash-freq 40mhz --flash-size 16mb)
+bl=${RESCUE_BOOTLOADER:-spikes/dist/bootloader-rescue.bin}
+build() { # features outname
+  (cd firmware && cargo build --release ${1:+--features $1})
+  espflash save-image "${flags[@]}" "$elf" "$dist/$2"
+  local want got
+  want=$(shasum -a 256 "$elf" | cut -d' ' -f1)
+  got=$(python3 -c "d=open('$dist/$2','rb').read();print(d[176:208].hex())")
+  [ "$want" = "$got" ] || { echo "ELF SHA MISMATCH $want vs $got"; exit 1; }
+  echo "$2 elf sha256 $want"
+}
+build diagnostics app-diagnostics.bin
+build "" app.bin
+cp "$elf" "$dist/tdongle-fw.elf"
+if [ -f "$bl" ]; then
+  espflash save-image "${flags[@]}" --merge --bootloader "$bl" --partition-table firmware/partitions.csv "$elf" "$dist/merged.bin"
+  cp "$bl" "$dist/bootloader.bin"
+fi
+python3 tools/check_boot_order.py firmware/src/main.rs
+python3 tools/check_rescue_first.py
+(cd "$dist" && shasum -a 256 ./*.bin > SHA256SUMS && cat SHA256SUMS)
