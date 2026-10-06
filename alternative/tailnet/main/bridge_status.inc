@@ -161,16 +161,15 @@ static void bridge_status_lines(void) {
  *     sojourn_ms age at which a queued frame is dropped (TDONGLE_L2_SOJOURN_MS_MIN..MAX)
  *     codel      0/1: CoDel at the host -> Wi-Fi ingress: ECT frames are marked CE, others dropped (tdongle_aqm.h; counters codel_*, ce_marked)
  *     target_us  CoDel's target for the standing-queue signal (TDONGLE_L2_CODEL_TARGET_US_MIN..MAX)
- *     interval_ms CoDel's interval (TDONGLE_L2_CODEL_INTERVAL_MS_MIN..MAX)
- *     idle_us    a gap this long between the host's datagrams (none held) ends its busy period: the CoDel signal is the age of that period */
-typedef struct { unsigned q, resume, inflight, ring, sojourn_ms, codel, target_us, interval_ms, idle_us; } bridge_tune_t;
+ *     interval_ms CoDel's interval (TDONGLE_L2_CODEL_INTERVAL_MS_MIN..MAX): also the horizon of the hold-evidenced busy period that feeds it */
+typedef struct { unsigned q, resume, inflight, ring, sojourn_ms, codel, target_us, interval_ms; } bridge_tune_t;
 static void bridge_tune_get(bridge_tune_t *t) {
     tdongle_l2_tuning_t l;
     tdongle_l2_get_tuning(&l);
     unsigned inflight = wifi_pins_tx_limit_now();
     *t = (bridge_tune_t){.q = l.queue_limit, .resume = l.resume_depth, .inflight = inflight ? inflight : (unsigned)GATEWAY_WIFI_TX_POOL,
                          .ring = tinyusb_net_tx_ring_max_chunks(), .sojourn_ms = l.sojourn_ms, .codel = l.codel, .target_us = l.codel_target_us,
-                         .interval_ms = l.codel_interval_ms, .idle_us = l.host_idle_us};
+                         .interval_ms = l.codel_interval_ms};
 }
 static const char *bridge_tune_check(const bridge_tune_t *t) {
     if (t->q < 1 || t->q > TDONGLE_L2_HOST_SLOTS) return "q out of range";
@@ -181,7 +180,6 @@ static const char *bridge_tune_check(const bridge_tune_t *t) {
     if (t->codel > 1) return "codel must be 0 or 1";
     if (t->target_us < TDONGLE_L2_CODEL_TARGET_US_MIN || t->target_us > TDONGLE_L2_CODEL_TARGET_US_MAX) return "target_us out of range";
     if (t->interval_ms < TDONGLE_L2_CODEL_INTERVAL_MS_MIN || t->interval_ms > TDONGLE_L2_CODEL_INTERVAL_MS_MAX) return "interval_ms out of range";
-    if (t->idle_us < TDONGLE_L2_HOST_IDLE_US_MIN || t->idle_us > TDONGLE_L2_HOST_IDLE_US_MAX) return "idle_us out of range";
     return NULL;
 }
 /* Parse "key=value ..." over the current values. NULL: ok; else the error text. */
@@ -198,7 +196,7 @@ static const char *bridge_tune_parse(const char *args, bridge_tune_t *t) {
         if (*end || v > 10000000ul) return "value is not a number";
         unsigned *field = !strcmp(tok, "q") ? &t->q : !strcmp(tok, "resume") ? &t->resume : !strcmp(tok, "inflight") ? &t->inflight :
                           !strcmp(tok, "ring") ? &t->ring : !strcmp(tok, "sojourn_ms") ? &t->sojourn_ms : !strcmp(tok, "codel") ? &t->codel :
-                          !strcmp(tok, "target_us") ? &t->target_us : !strcmp(tok, "interval_ms") ? &t->interval_ms : !strcmp(tok, "idle_us") ? &t->idle_us : NULL;
+                          !strcmp(tok, "target_us") ? &t->target_us : !strcmp(tok, "interval_ms") ? &t->interval_ms : NULL;
         if (!field) return "unknown key";
         *field = (unsigned)v;
     }
@@ -209,7 +207,7 @@ static const char *bridge_tune_apply(const bridge_tune_t *t) {
     const char *error = bridge_tune_check(t);
     if (error) return error;
     const tdongle_l2_tuning_t l = {.queue_limit = t->q, .resume_depth = t->resume, .sojourn_ms = t->sojourn_ms, .codel = t->codel != 0,
-                                   .codel_target_us = t->target_us, .codel_interval_ms = t->interval_ms, .host_idle_us = t->idle_us};
+                                   .codel_target_us = t->target_us, .codel_interval_ms = t->interval_ms};
     if (tdongle_l2_set_tuning(&l) != ESP_OK) return "the bridge is not running";
     wifi_pins_set_tx_limit(t->inflight);
     if (tinyusb_net_tx_ring_set_max_chunks(t->ring) != ESP_OK) return "the ring is not running";
@@ -231,13 +229,13 @@ static void bridge_tune_command(const char *args) {
         bridge_tune_get(&t);
     }
     char line[240];
-    snprintf(line, sizeof(line), "bridgetune q=%u resume=%u inflight=%u ring=%u sojourn_ms=%u codel=%u target_us=%u interval_ms=%u idle_us=%u\r\n", t.q, t.resume, t.inflight, t.ring,
-             t.sojourn_ms, t.codel, t.target_us, t.interval_ms, t.idle_us);
+    snprintf(line, sizeof(line), "bridgetune q=%u resume=%u inflight=%u ring=%u sojourn_ms=%u codel=%u target_us=%u interval_ms=%u\r\n", t.q, t.resume, t.inflight, t.ring,
+             t.sojourn_ms, t.codel, t.target_us, t.interval_ms);
     mgmt_write(line);
-    snprintf(line, sizeof(line), "bridgetune_bounds q=1..%u resume=0..q-1 inflight=%u..%u ring=0..%u sojourn_ms=%u..%u codel=0..1 target_us=%u..%u interval_ms=%u..%u idle_us=%u..%u\r\n",
+    snprintf(line, sizeof(line), "bridgetune_bounds q=1..%u resume=0..q-1 inflight=%u..%u ring=0..%u sojourn_ms=%u..%u codel=0..1 target_us=%u..%u interval_ms=%u..%u\r\n",
              (unsigned)TDONGLE_L2_HOST_SLOTS, (unsigned)GATEWAY_WIFI_TX_BAND_MAX, (unsigned)GATEWAY_WIFI_TX_POOL, (unsigned)TINYUSB_NET_TX_MAX_CHUNKS,
              (unsigned)TDONGLE_L2_SOJOURN_MS_MIN, (unsigned)TDONGLE_L2_SOJOURN_MS_MAX, (unsigned)TDONGLE_L2_CODEL_TARGET_US_MIN, (unsigned)TDONGLE_L2_CODEL_TARGET_US_MAX,
-             (unsigned)TDONGLE_L2_CODEL_INTERVAL_MS_MIN, (unsigned)TDONGLE_L2_CODEL_INTERVAL_MS_MAX, (unsigned)TDONGLE_L2_HOST_IDLE_US_MIN, (unsigned)TDONGLE_L2_HOST_IDLE_US_MAX);
+             (unsigned)TDONGLE_L2_CODEL_INTERVAL_MS_MIN, (unsigned)TDONGLE_L2_CODEL_INTERVAL_MS_MAX);
     mgmt_write(line);
 }
 #endif

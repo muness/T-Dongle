@@ -59,7 +59,7 @@ static esp_err_t wifi_pins_tx(void *buffer, uint16_t len) {
     return esp_wifi_internal_tx(WIFI_IF_STA, buffer, len);
 }
 /* Bridge: the worker waits for a free charge instead of being refused (and counting a refusal) every retry period. */
-static bool wifi_pins_tx_room(void) { return gw_wtx_room(&wifi_pins); }
+static bool wifi_pins_tx_room(void) { return gw_wtx_room(&wifi_pins, wifi_pins_now_ms()); }
 __attribute__((unused)) static unsigned wifi_pins_tx_limit_now(void) { return atomic_load_explicit(&wifi_pins.tx_limit, memory_order_relaxed); }
 /* Bridge: the most frames the radio is given at once (0: the driver's pool). See GATEWAY_BRIDGE_WIFI_TX_INFLIGHT in gateway_main.c. */
 static void wifi_pins_set_tx_limit(unsigned limit) { atomic_store_explicit(&wifi_pins.tx_limit, limit, memory_order_relaxed); }

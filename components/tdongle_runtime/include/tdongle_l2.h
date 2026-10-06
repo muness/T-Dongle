@@ -41,9 +41,6 @@
 #define TDONGLE_L2_CODEL_INTERVAL_MS_MIN 20u
 #define TDONGLE_L2_CODEL_INTERVAL_MS_MAX 1000u
 #define TDONGLE_L2_CODEL_DEFAULT true
-#define TDONGLE_L2_HOST_IDLE_US 6000u           /* default: 1.5 x the spacing of 3,200 B NTBs at 6.7 Mbit/s (3.8 ms): a host faster than ~4.3 Mbit/s into a pipe of 6.7 never leaves a gap this long */
-#define TDONGLE_L2_HOST_IDLE_US_MIN 500u
-#define TDONGLE_L2_HOST_IDLE_US_MAX 50000u
 #define TDONGLE_L2_SOJOURN_MS_MAX 190u          /* below TDONGLE_PM_ACTIVITY_HOLD_US (asserted in l2.c) */
 /* A refusal for buffers (the budget's, or the driver's pool) clears as frames leave the antenna, about every 0.3 to 1 ms at the Wi-Fi rate, so the
  * worker retries on a 500 us timer (esp_timer), not on the RTOS tick: at CONFIG_FREERTOS_HZ=100 a tick sleep is 10 ms, long enough for the whole
@@ -77,7 +74,6 @@ typedef struct {
     bool codel;
     uint32_t codel_target_us;    /* TDONGLE_L2_CODEL_TARGET_US_MIN..MAX */
     uint32_t codel_interval_ms;  /* TDONGLE_L2_CODEL_INTERVAL_MS_MIN..MAX */
-    uint32_t host_idle_us;       /* TDONGLE_L2_HOST_IDLE_US_MIN..MAX: a gap this long between the host's datagrams (with no hold pending) means it had nothing queued */
 } tdongle_l2_tuning_t;
 esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *tuning);
 void tdongle_l2_get_tuning(tdongle_l2_tuning_t *out);

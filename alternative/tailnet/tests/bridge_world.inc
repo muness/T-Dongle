@@ -220,6 +220,7 @@ static void pump_ring(void) { tx_worker_step(); run_deferred(); tx_worker_step()
 static void usb_bus(void) { __wrap_netd_xfer_cb(0, 0x81, 0, 64); }                    /* the host took an NTB: the IN completion drains again */
 static void pump_l2(void) { drain(); }                                               /* the host -> Wi-Fi worker */
 static void advance_ms(unsigned ms) { atomic_fetch_add(&mock_us, ms * 1000u); atomic_fetch_add(&mock_tick, ms / TEST_TICK_MS); pm_timer_poll(); }
+static void advance_us_world(unsigned us) { atomic_fetch_add(&mock_us, us); }
 static tinyusb_net_tx_stats_t ring_stats(void) { tinyusb_net_tx_stats_t s; tinyusb_net_tx_ring_stats(&s); return s; }
 static tdongle_l2_stats_t l2_stats(void) { tdongle_l2_stats_t s; tdongle_l2_stats(&s); return s; }
 static size_t heap_free_now(void) { return heap_caps_get_free_size(MALLOC_CAP_INTERNAL); }

@@ -144,11 +144,6 @@ static inline bool gw_wp_rx_in_band(unsigned word) { return gw_wp_rx(word) < GAT
 static inline bool gw_wp_tx_in_band(unsigned word) { return gw_wp_tx(word) < GATEWAY_WIFI_TX_BAND_MAX && gw_wp_rx(word) + gw_wp_tx(word) < GATEWAY_WIFI_BAND_TOTAL; }
 /* Readers without the lock (status, diagnostics, the tests). */
 static inline unsigned gw_wtx_outstanding(const gateway_wifi_pins *b) { return gw_wp_tx(atomic_load_explicit(&b->pins, memory_order_relaxed)); }
-/* Room for one more charge under the limit now (a relaxed read, for a caller that would rather wait than be refused and count a refusal). */
-static inline bool gw_wtx_room(const gateway_wifi_pins *b) {
-    const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);
-    return gw_wtx_outstanding(b) < (limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL);
-}
 static inline unsigned gw_wrx_inflight(const gateway_wifi_pins *b) { return gw_wp_rx(atomic_load_explicit(&b->pins, memory_order_relaxed)); }
 
 typedef enum { GW_WTX_BAND, GW_WTX_ELASTIC, GW_WTX_POOL, GW_WTX_HEAP } gw_wtx_verdict;
@@ -172,19 +167,39 @@ static inline IRAM_ATTR void gw_wtx_pop_head(gateway_wifi_pins *b) {
     b->tx_count--;
 }
 
-/* TX, before esp_wifi_internal_tx. `free_internal` is the free internal heap measured by the caller (injected for the tests), `now_ms`
- * a millisecond clock (wraps are fine). On GW_WTX_BAND or GW_WTX_ELASTIC the frame is charged and the caller MUST release it exactly
- * once: gw_wtx_abort if esp_wifi_internal_tx fails, otherwise the driver's tx-done, a flush or the lease does. */
-static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, size_t free_internal, uint32_t now_ms) {
-    gw_wtx_verdict v;
-    unsigned stale = 0, count;
-    GW_WP_ENTER(b);
-    /* Charges are in order, so only the head can be the oldest: expire from there. */
+/* Expire charges older than the lease. Caller holds the lock; returns how many (the caller releases them from `pins` and counts them). Charges are in
+ * order, so only the head can be the oldest. */
+static inline unsigned gw_wtx_expire_locked(gateway_wifi_pins *b, uint32_t now_ms) {
+    unsigned stale = 0;
     while (b->tx_count && (int32_t)(now_ms - b->tx_stamp[b->tx_head]) > (int32_t)GW_WTX_LEASE_MS) {
         gw_wtx_pop_head(b);
         stale++;
     }
     if (stale) atomic_fetch_sub_explicit(&b->pins, stale * GW_WP_TX_ONE, memory_order_acq_rel);
+    return stale;
+}
+/* Room for one more charge under the limit now, for a caller that would rather wait than be refused (the bridge's worker). It must heal a leaked charge
+ * exactly as admission does: a caller that never reaches gw_wtx_admit while the allowance LOOKS full would otherwise keep a full allowance of leaked
+ * charges for ever (the lease is only ever applied under the lock). So when the allowance looks full, expire under the same lock and look again. */
+static inline bool gw_wtx_room(gateway_wifi_pins *b, uint32_t now_ms) {
+    const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);
+    const unsigned cap = limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL;
+    if (gw_wtx_outstanding(b) < cap) return true;
+    GW_WP_ENTER(b);
+    const unsigned stale = gw_wtx_expire_locked(b, now_ms);
+    GW_WP_EXIT(b);
+    if (stale) atomic_fetch_add_explicit(&b->tx_stale, stale, memory_order_relaxed);
+    return gw_wtx_outstanding(b) < cap;
+}
+
+/* TX, before esp_wifi_internal_tx. `free_internal` is the free internal heap measured by the caller (injected for the tests), `now_ms`
+ * a millisecond clock (wraps are fine). On GW_WTX_BAND or GW_WTX_ELASTIC the frame is charged and the caller MUST release it exactly
+ * once: gw_wtx_abort if esp_wifi_internal_tx fails, otherwise the driver's tx-done, a flush or the lease does. */
+static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, size_t free_internal, uint32_t now_ms) {
+    gw_wtx_verdict v;
+    unsigned count;
+    GW_WP_ENTER(b);
+    const unsigned stale = gw_wtx_expire_locked(b, now_ms);
     unsigned word = atomic_load_explicit(&b->pins, memory_order_relaxed);
     for (;;) {                                             /* RX changes the word without our lock: decide on a snapshot, commit with a CAS */
         const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);

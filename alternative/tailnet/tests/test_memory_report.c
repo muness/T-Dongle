@@ -142,7 +142,7 @@ void tdongle_l2_stats(tdongle_l2_stats_t *s) {
 }
 /* the run-time knobs (bridgetune): the setters the command calls */
 #define GATEWAY_BRIDGE_TUNE 1
-static tdongle_l2_tuning_t tuning = {.queue_limit = 3, .resume_depth = 1, .sojourn_ms = 100, .codel = false, .codel_target_us = 5000, .codel_interval_ms = 100, .host_idle_us = 6000};
+static tdongle_l2_tuning_t tuning = {.queue_limit = 3, .resume_depth = 1, .sojourn_ms = 100, .codel = false, .codel_target_us = 5000, .codel_interval_ms = 100, };
 esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *t) { tuning = *t; return ESP_OK; }
 void tdongle_l2_get_tuning(tdongle_l2_tuning_t *t) { *t = tuning; }
 static unsigned ring_chunks = 10;

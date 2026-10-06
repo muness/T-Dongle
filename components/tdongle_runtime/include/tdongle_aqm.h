@@ -112,6 +112,37 @@ typedef enum {
     TDONGLE_ECN_CE               /* already CE: a router cannot mark it again, and a signal for it is satisfied */
 } tdongle_ecn_class_t;
 
+/* IPv6: walk the extension headers (hop-by-hop 0, routing 43, fragment 44, authentication 51, destination options 60) to the transport header. Bounded (at most
+ * 6 headers) and bounds-checked against `len` at every step. Returns false for a chain that is malformed, truncated or too long (the caller treats the frame as
+ * not IP: never touched). On success *proto is the final next-header value and *off the offset of that header in the frame, or *proto is 0xff when the transport
+ * header is not present or not readable (a non-first fragment, ESP, no next header): such a frame is still IP and may be signalled by its ECN field. */
+static inline bool tdongle_ip6_l4(const uint8_t *f, uint16_t len, unsigned *proto, unsigned *off) {
+    unsigned next = f[20], o = 14u + 40u;
+    for (unsigned depth = 0; depth <= 6u; depth++) {
+        if (next == 0 || next == 43 || next == 60 || next == 44 || next == 51) {
+            if (depth == 6u || o + 8u > len) return false;                            /* a seventh extension header, or one that does not fit */                                         /* the extension header does not fit */
+            unsigned hl;
+            if (next == 44) {
+                hl = 8u;
+                if ((((unsigned)f[o + 2] << 5) | (f[o + 3] >> 3)) != 0) { *proto = 0xff; *off = o; return true; }   /* non-first fragment: no transport header here */
+            } else if (next == 51) {
+                hl = ((unsigned)f[o + 1] + 2u) * 4u;
+            } else {
+                hl = ((unsigned)f[o + 1] + 1u) * 8u;
+            }
+            next = f[o];
+            o += hl;
+            if (o > len) return false;
+            continue;
+        }
+        if (next == 50 || next == 59) { *proto = 0xff; *off = o; return true; }     /* ESP: opaque; no next header */
+        *proto = next;
+        *off = o;
+        return true;
+    }
+    return false;
+}
+
 /* Classify an Ethernet frame. Reads only what it needs, trusts no length. */
 static inline tdongle_ecn_class_t tdongle_ecn_classify(const uint8_t *f, uint16_t len) {
     if (len < 14u) return TDONGLE_ECN_NOT_IP;
@@ -130,11 +161,12 @@ static inline tdongle_ecn_class_t tdongle_ecn_classify(const uint8_t *f, uint16_
         }
         ecn = f[15] & 3u;
     } else if (type == 0x86dd && len >= 14u + 40u && (f[14] >> 4) == 6) {
-        const unsigned next = f[20];
-        if (next == 58) return TDONGLE_ECN_EXEMPT;                                     /* ICMPv6: neighbour discovery, router advertisements */
-        if (next == 6 && len >= 14u + 40u + 14u && (f[14 + 40 + 13] & 0x07)) return TDONGLE_ECN_EXEMPT;
-        if (next == 17 && len >= 14u + 40u + 4u) {
-            const unsigned dst = ((unsigned)f[14 + 40 + 2] << 8) | f[14 + 40 + 3];
+        unsigned next, o;
+        if (!tdongle_ip6_l4(f, len, &next, &o)) return TDONGLE_ECN_NOT_IP;
+        if (next == 58) return TDONGLE_ECN_EXEMPT;                                     /* ICMPv6: neighbour discovery, MLD, router advertisements (also behind extension headers) */
+        if (next == 6 && o + 14u <= len && (f[o + 13] & 0x07)) return TDONGLE_ECN_EXEMPT;
+        if (next == 17 && o + 4u <= len) {
+            const unsigned dst = ((unsigned)f[o + 2] << 8) | f[o + 3];
             if (dst == 546 || dst == 547) return TDONGLE_ECN_EXEMPT;                   /* DHCPv6 */
         }
         ecn = (f[15] >> 4) & 3u;
@@ -175,8 +207,10 @@ static inline tdongle_tcp_ecn_syn_t tdongle_tcp_ecn_syn(const uint8_t *f, uint16
         const unsigned ihl = (unsigned)(f[14] & 0x0f) * 4u;
         if (ihl < 20u || f[23] != 6 || 14u + ihl + 14u > len || (((f[20] & 0x1f) << 8) | f[21])) return TDONGLE_TCP_OTHER;
         flags = f[14 + ihl + 13];
-    } else if (type == 0x86dd && len >= 14u + 40u + 14u && (f[14] >> 4) == 6 && f[20] == 6) {
-        flags = f[14 + 40 + 13];
+    } else if (type == 0x86dd && len >= 14u + 40u && (f[14] >> 4) == 6) {
+        unsigned next, o;
+        if (!tdongle_ip6_l4(f, len, &next, &o) || next != 6 || o + 14u > len) return TDONGLE_TCP_OTHER;
+        flags = f[o + 13];
     } else {
         return TDONGLE_TCP_OTHER;
     }

@@ -75,8 +75,8 @@ assert bridge["timing_pm_note_us_max"] == 400 and bridge["timing_wait_us_max"] =
 assert bridge["rx_class_datagrams"] == 55 and bridge["rx_class_ntbs"] == 30 and bridge["to_wifi_ce_marked"] == 5 and bridge["to_wifi_codel_drop"] == 4 and bridge["timing_signal_us_max"] == 12000 and bridge["timing_room_wait_us_max"] == 1500
 # bridgetune: show, set (applied to the real setters in the other tests), reject, and not confused with other commands.
 tune = [x for x in sections["bridgetune_show"] if isinstance(x, str)]
-assert "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=0 target_us=5000 interval_ms=100 idle_us=6000" in tune and any(x.startswith("bridgetune_bounds q=1..8") for x in tune) and "#handled 1" in tune
-assert "bridgetune q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 codel=1 target_us=4000 interval_ms=100 idle_us=6000" in sections["bridgetune_set"]
+assert "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=0 target_us=5000 interval_ms=100" in tune and any(x.startswith("bridgetune_bounds q=1..8") for x in tune) and "#handled 1" in tune
+assert "bridgetune q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 codel=1 target_us=4000 interval_ms=100" in sections["bridgetune_set"]
 assert any("ERR bridgetune: q out of range" in x for x in sections["bridgetune_bad"]) and any("q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 codel=1" in x for x in sections["bridgetune_bad"])
 assert any("ERR bridgetune: unknown key" in x for x in sections["bridgetune_bad2"]) and "#handled 0" in sections["bridgetune_other"]
 assert bridge["ecn_capable"] == 22 and bridge["ecn_syn_setup"] == 2 and bridge["ecn_synack_accept"] == 1 and bridge["ecn_not_ect"] == 11

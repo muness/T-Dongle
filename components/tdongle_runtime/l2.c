@@ -48,10 +48,7 @@ static struct {
     atomic_uint t_codel_target_us, t_codel_interval_ms, t_codel_gen;     /* gen moves when the AQM parameters change: the worker restarts its controller */
     unsigned codel_gen_seen;                               /* worker only */
     tdongle_codel_t codel;                                 /* worker only (stats read count racily) */
-    atomic_uint busy_start_us;                             /* start of the host's current busy period (see accept_busy) */
-    atomic_uint last_accept_us;                            /* callback only */
-    atomic_bool hold_pending;                              /* the datagram being offered was held before (callback only) */
-    atomic_uint t_host_idle_us;
+    atomic_uint hold_period_start_us, last_hold_us;        /* the hold-evidenced busy period (see note_hold); last_hold 0: no period */
     atomic_uint h2w_ecn_not_ect, h2w_ecn_capable, h2w_ecn_ce, h2w_ecn_exempt, h2w_ecn_not_ip, h2w_syn_ecn_setup, w2h_synack_ecn;
     atomic_uint h2w_codel_signals, h2w_ce_marked, h2w_codel_drop, h2w_signal_us_sum, h2w_signal_us_max;
     TaskHandle_t worker;
@@ -128,7 +125,8 @@ static esp_err_t receive(void *buffer, uint16_t len, void *driver_buffer) {
 }
 
 /* ---- host -> Wi-Fi ---- */
-static void accept_busy(uint32_t now, const uint8_t *frame, uint16_t len);
+static void note_hold(uint32_t now);
+static void count_ecn(const uint8_t *frame, uint16_t len);
 esp_err_t tdongle_l2_host(void *buffer, uint16_t len) {
     const uint8_t *frame = buffer;
     if (!l2.slots) return ESP_ERR_INVALID_STATE;
@@ -159,7 +157,7 @@ esp_err_t tdongle_l2_host(void *buffer, uint16_t len) {
         tail = atomic_load_explicit(&l2.tail, memory_order_seq_cst);
         if (head - tail >= limit || !atomic_exchange_explicit(&l2.held, false, memory_order_seq_cst)) {
             BUMP(h2w_held);      /* (the second case: the worker already took the flag and owes a resume that re-offers this datagram) */
-            atomic_store_explicit(&l2.hold_pending, true, memory_order_relaxed);
+            note_hold(now_us());
             return TUSB_NET_RX_HOLD;
         }
     }
@@ -168,7 +166,7 @@ esp_err_t tdongle_l2_host(void *buffer, uint16_t len) {
     slot->len = len;
     slot->epoch = (uint16_t)atomic_load_explicit(&l2.epoch, memory_order_acquire);
     slot->enq_us = now_us();
-    accept_busy(slot->enq_us, frame, len);
+    count_ecn(frame, len);
     memcpy(slot->bytes, buffer, len);
     atomic_store_explicit(&l2.head, head + 1u, memory_order_release);
     BUMP(h2w_frames);
@@ -178,19 +176,30 @@ esp_err_t tdongle_l2_host(void *buffer, uint16_t len) {
     return ESP_OK;
 }
 
-/* The host's busy period, the standing-queue clock CoDel is given. What matters is whether the HOST has a backlog, which the dongle can only infer from how
- * the host's datagrams arrive: a host with nothing queued leaves gaps (a window-limited or ACK-clocked sender sends in bursts and waits), a host with a
- * backlog does not (it re-arms the pipe and the next NTB is already there), and a host that is being held has a backlog by definition (it is waiting for us).
- * So the period restarts when a datagram is accepted that was not held and followed the previous accepted datagram by more than the idle gap, and
- * otherwise continues: the age is how long the host has been continuously pushing. (The first version of this clock restarted whenever the l2 queue
- * emptied; the board showed that to happen constantly, 7% of frames held, because the wire and the radio are about as fast as the sender: the queue
- * was empty most of the time while the host's own queue stood.) */
-static void accept_busy(uint32_t now, const uint8_t *frame, uint16_t len) {
-    const bool was_held = atomic_exchange_explicit(&l2.hold_pending, false, memory_order_relaxed);
-    const uint32_t gap = now - atomic_load_explicit(&l2.last_accept_us, memory_order_relaxed);
-    if (!was_held && gap > atomic_load_explicit(&l2.t_host_idle_us, memory_order_relaxed))
-        atomic_store_explicit(&l2.busy_start_us, now, memory_order_relaxed);
-    atomic_store_explicit(&l2.last_accept_us, now, memory_order_relaxed);
+/* The standing-queue clock CoDel is given: the age of the HOLD-EVIDENCED busy period. The only direct evidence the dongle has that the host has a backlog is
+ * that it had to say "not now" (the host is waiting for us: TUSB_NET_RX_HOLD). A period starts at the first hold, continues while holds recur within one CoDel
+ * interval, and ends after an interval with no hold; the signal is its age, and zero outside it. Two earlier signals were wrong in opposite ways. The age of
+ * our own queue's busy period reset constantly (the queue is empty while the host's stands: 7% of frames held on the board) and CoDel almost never acted;
+ * the age of the host's inter-datagram "no gap" period (a gap longer than 6 ms ends it) treated ANY sender faster than 4.3 Mbit/s as a standing queue, even
+ * with nothing queued, and dropped non-responsive UDP at an accelerating rate (44% loss on a 4 Mbit/s UDP flow). A sender below the pipe's rate is never
+ * held, so it is never signalled; a sender that saturates the pipe is held again and again, so it is. When the holds stop for an interval the signal is
+ * zero, CoDel leaves its dropping state, and its count decays by the RFC's rule. */
+static void note_hold(uint32_t now) {
+    const uint32_t last = atomic_load_explicit(&l2.last_hold_us, memory_order_relaxed);
+    const uint32_t interval = atomic_load_explicit(&l2.t_codel_interval_ms, memory_order_relaxed) * 1000u;
+    if (last == 0 || (int32_t)(now - last) > (int32_t)interval)
+        atomic_store_explicit(&l2.hold_period_start_us, now, memory_order_relaxed);        /* a new period: no hold within the last interval */
+    atomic_store_explicit(&l2.last_hold_us, now ? now : 1u, memory_order_relaxed);
+}
+/* The age of the period at `now`, zero when there is none (no hold within the last interval). Worker. */
+static uint32_t hold_period_age(uint32_t now) {
+    const uint32_t last = atomic_load_explicit(&l2.last_hold_us, memory_order_relaxed);
+    const uint32_t interval = atomic_load_explicit(&l2.t_codel_interval_ms, memory_order_relaxed) * 1000u;
+    if (last == 0 || (int32_t)(now - last) > (int32_t)interval) return 0;
+    return now - atomic_load_explicit(&l2.hold_period_start_us, memory_order_relaxed);
+}
+/* What the ingress counts about ECN and its negotiation, always (whether or not CoDel is on). */
+static void count_ecn(const uint8_t *frame, uint16_t len) {
     switch (tdongle_ecn_classify(frame, len)) {
     case TDONGLE_ECN_NOT_ECT: BUMP(h2w_ecn_not_ect); break;
     case TDONGLE_ECN_CAPABLE: BUMP(h2w_ecn_capable); break;
@@ -211,7 +220,7 @@ static void retry_wait(void) {
 /* One queued frame, in the worker. The only place the Wi-Fi driver is called from the host side. */
 static void room_done(uint32_t since) { const uint32_t dt = now_us() - since; ADD(h2w_room_wait_us_sum, dt); note_max(&l2.h2w_room_wait_us_max, dt); }
 /* CoDel at the hand-to-radio. The signal is what the dongle can see of a standing queue: the larger of this frame's own time in the dongle (the
- * standard sojourn) and how long the pipe has been continuously full (the age of the host's current busy period: how long it has been pushing without a gap, see accept_busy). The first alone cannot see the host's queue: with
+ * standard sojourn) and how long the pipe has been continuously full (the age of the hold-evidenced busy period, see note_hold). The first alone cannot see the host's queue: with
  * backpressure it stays at a few milliseconds while the host's FIFO sits behind our NAKs (board: 2-3 ms in the dongle, 55-83 ms ping). The second
  * grows for exactly as long as the host has a backlog to push into a full pipe, and falls back to zero the moment the host finds room without
  * waiting, which is what CoDel's "minimum over an interval" needs. Returns true when the frame was dropped. */
@@ -223,7 +232,7 @@ static bool codel_signals(host_slot_t *slot, uint32_t now, uint32_t own_sojourn)
         tdongle_codel_retune(&l2.codel, atomic_load(&l2.t_codel_target_us), atomic_load(&l2.t_codel_interval_ms) * 1000u);
         l2.codel_gen_seen = gen;
     }
-    const uint32_t full = now - atomic_load_explicit(&l2.busy_start_us, memory_order_relaxed);
+    const uint32_t full = hold_period_age(now);
     const uint32_t signal = full > own_sojourn ? full : own_sojourn;
     ADD(h2w_signal_us_sum, signal);
     note_max(&l2.h2w_signal_us_max, signal);
@@ -341,8 +350,6 @@ esp_err_t tdongle_l2_start(const uint8_t mac[6], const tdongle_l2_config_t *conf
     atomic_store(&l2.t_codel, TDONGLE_L2_CODEL_DEFAULT);
     atomic_store(&l2.t_codel_target_us, TDONGLE_CODEL_TARGET_US_DEFAULT);
     atomic_store(&l2.t_codel_interval_ms, TDONGLE_CODEL_INTERVAL_MS_DEFAULT);
-    atomic_store(&l2.t_host_idle_us, TDONGLE_L2_HOST_IDLE_US);
-    atomic_store(&l2.busy_start_us, now_us());
     tdongle_codel_init(&l2.codel, TDONGLE_CODEL_TARGET_US_DEFAULT, TDONGLE_CODEL_INTERVAL_MS_DEFAULT * 1000u);
     l2.slots = calloc(TDONGLE_L2_HOST_SLOTS, sizeof(host_slot_t));
     if (!l2.slots) {
@@ -378,7 +385,7 @@ void tdongle_l2_link(bool connected) {
         tinyusb_net_tx_ring_flush();                     /* frames received before the link dropped must not reach the host after it */
     }
     /* A datagram held at the queue limit belongs to the old association's backlog: the queue is stale now, so let the USB layer re-offer it. */
-    atomic_store_explicit(&l2.busy_start_us, now_us(), memory_order_relaxed);   /* a new association: the old backlog means nothing */
+    atomic_store_explicit(&l2.last_hold_us, 0, memory_order_relaxed);          /* a new association: the old backlog means nothing */
     if (atomic_exchange_explicit(&l2.held, false, memory_order_seq_cst)) resume();
     tud_network_link_state(0, connected);
 }
@@ -388,8 +395,7 @@ esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *t) {
     if (!t || t->queue_limit < 1 || t->queue_limit > TDONGLE_L2_HOST_SLOTS || t->resume_depth >= t->queue_limit ||
         t->sojourn_ms < TDONGLE_L2_SOJOURN_MS_MIN || t->sojourn_ms > TDONGLE_L2_SOJOURN_MS_MAX ||
         t->codel_target_us < TDONGLE_L2_CODEL_TARGET_US_MIN || t->codel_target_us > TDONGLE_L2_CODEL_TARGET_US_MAX ||
-        t->codel_interval_ms < TDONGLE_L2_CODEL_INTERVAL_MS_MIN || t->codel_interval_ms > TDONGLE_L2_CODEL_INTERVAL_MS_MAX ||
-        t->host_idle_us < TDONGLE_L2_HOST_IDLE_US_MIN || t->host_idle_us > TDONGLE_L2_HOST_IDLE_US_MAX)
+        t->codel_interval_ms < TDONGLE_L2_CODEL_INTERVAL_MS_MIN || t->codel_interval_ms > TDONGLE_L2_CODEL_INTERVAL_MS_MAX)
         return ESP_ERR_INVALID_ARG;
     atomic_store(&l2.t_queue_limit, t->queue_limit);
     atomic_store(&l2.t_resume, t->resume_depth);
@@ -399,7 +405,6 @@ esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *t) {
     atomic_store(&l2.t_codel_target_us, t->codel_target_us);
     atomic_store(&l2.t_codel_interval_ms, t->codel_interval_ms);
     atomic_store(&l2.t_codel, t->codel);
-    atomic_store(&l2.t_host_idle_us, t->host_idle_us);
     if (changed) atomic_fetch_add_explicit(&l2.t_codel_gen, 1u, memory_order_release);      /* a controller built under other numbers (or while off) means nothing */
     /* A lower limit may leave the queue above it: it simply drains; a held datagram is released by the next drain as before. */
     return ESP_OK;
@@ -407,7 +412,7 @@ esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *t) {
 void tdongle_l2_get_tuning(tdongle_l2_tuning_t *out) {
     *out = (tdongle_l2_tuning_t){.queue_limit = atomic_load(&l2.t_queue_limit), .resume_depth = atomic_load(&l2.t_resume),
                                  .sojourn_ms = atomic_load(&l2.t_sojourn_ms), .codel = atomic_load(&l2.t_codel),
-                                 .codel_target_us = atomic_load(&l2.t_codel_target_us), .codel_interval_ms = atomic_load(&l2.t_codel_interval_ms), .host_idle_us = atomic_load(&l2.t_host_idle_us)};
+                                 .codel_target_us = atomic_load(&l2.t_codel_target_us), .codel_interval_ms = atomic_load(&l2.t_codel_interval_ms)};
 }
 
 void tdongle_l2_stats(tdongle_l2_stats_t *out) {

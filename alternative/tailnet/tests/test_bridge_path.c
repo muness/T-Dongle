@@ -539,23 +539,23 @@ static void test_bridge_tune(void) {
     restart_sequences();
     wifi_connect();
     tune("");
-    assert(strstr(serial_out, "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=1 target_us=5000 interval_ms=100 idle_us=6000") &&
-           strstr(serial_out, "bridgetune_bounds q=1..8 resume=0..q-1 inflight=4..16 ring=0..12 sojourn_ms=5..190 codel=0..1 target_us=500..50000 interval_ms=20..1000 idle_us=500..50000"));
-    tune("q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50 idle_us=4000");
-    assert(strstr(serial_out, "bridgetune q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50 idle_us=4000") && !strstr(serial_out, "ERR"));
+    assert(strstr(serial_out, "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=1 target_us=5000 interval_ms=100") &&
+           strstr(serial_out, "bridgetune_bounds q=1..8 resume=0..q-1 inflight=4..16 ring=0..12 sojourn_ms=5..190 codel=0..1 target_us=500..50000 interval_ms=20..1000"));
+    tune("q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50");
+    assert(strstr(serial_out, "bridgetune q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50") && !strstr(serial_out, "ERR"));
     tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
     assert(t.queue_limit == 5 && t.resume_depth == 2 && t.sojourn_ms == 60 && t.codel && t.codel_target_us == 3000 && t.codel_interval_ms == 50 &&
            wifi_pins_tx_limit_now() == 8 && tinyusb_net_tx_ring_max_chunks() == 3);
     assert(ring_stats().max_bytes == (BRIDGE_RING_BASE + 3 * TINYUSB_NET_TX_CHUNK_SLABS) * TINYUSB_NET_TX_SLAB_BYTES);
     /* Partial commands change only what they name. */
     tune("inflight=5");
-    assert(strstr(serial_out, "q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50 idle_us=4000"));
+    assert(strstr(serial_out, "q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50"));
     /* Every rejection leaves everything as it was, even when only one field is bad. */
     const char *bad[] = {"q=0", "q=9", "resume=5", "inflight=3", "inflight=17", "ring=13", "sojourn_ms=4", "sojourn_ms=191", "codel=2", "target_us=499", "target_us=50001",
-                         "interval_ms=19", "interval_ms=1001", "idle_us=499", "idle_us=50001", "q=2 sojourn_ms=1", "q=2 codel=1 interval_ms=5", "bogus=1", "prio=1", "q", "q=", "q=x", "=3", "q=3 q"};
+                         "interval_ms=19", "interval_ms=1001", "q=2 sojourn_ms=1", "q=2 codel=1 interval_ms=5", "bogus=1", "prio=1", "q", "q=", "q=x", "=3", "q=3 q"};
     for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         tune(bad[i]);
-        assert(strstr(serial_out, "ERR bridgetune:") && strstr(serial_out, "bridgetune q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50 idle_us=4000"));
+        assert(strstr(serial_out, "ERR bridgetune:") && strstr(serial_out, "bridgetune q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50"));
         tdongle_l2_get_tuning(&t);
         assert(t.queue_limit == 5 && t.sojourn_ms == 60 && t.codel_target_us == 3000 && wifi_pins_tx_limit_now() == 5 && tinyusb_net_tx_ring_max_chunks() == 3);
     }
@@ -623,7 +623,7 @@ static void test_codel(void) {
     assert(atomic_load(&air_delivered) > 100);
 }
 
-/* The production defaults (CoDel on, 5 ms / 100 ms / 6 ms idle) under light, ordinary traffic: nothing is signalled, every frame is bit-exact. */
+/* The production defaults (CoDel on, 5 ms / 100 ms) under light, ordinary traffic: nothing is signalled, every frame is bit-exact. */
 static void test_default_tuning_light_load(void) {
     world_keep_defaults = true;
     world_reset(HEAP_BRIDGE, true);
@@ -631,7 +631,7 @@ static void test_default_tuning_light_load(void) {
     restart_sequences();
     wifi_connect();
     tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
-    assert(t.codel && t.codel_target_us == 5000 && t.codel_interval_ms == 100 && t.host_idle_us == 6000);
+    assert(t.codel && t.codel_target_us == 5000 && t.codel_interval_ms == 100);
     for (int i = 0; i < 300; i++) {
         send_to_host(100 + (i * 37) % 1400, KIND_UNICAST);
         send_to_wifi(100 + (i * 53) % 1400, KIND_UNICAST);
@@ -643,6 +643,47 @@ static void test_default_tuning_light_load(void) {
     const tdongle_l2_stats_t s = l2_stats();
     assert(s.h2w_codel_signals == 0 && s.h2w_ce_marked == 0 && s.h2w_codel_drop == 0 && s.h2w_sent == 300 && atomic_load(&air_ce_seen) == 0);
     assert(s.w2h_forwarded == 300 && atomic_load(&usb_delivered) == 300);
+}
+
+/* Six charges leak (the driver drops its queue without a tx-done and no link event follows). The worker only asks room(), so the lease has to be applied
+ * there: it waits out the sojourn limit for the first frame, then recovers once the 3 s lease has passed, and nothing stays wedged. */
+static void test_leaked_charges_recover(void) {
+    world_reset(HEAP_BRIDGE, true);
+    restart_sequences();
+    wifi_connect();
+    for (unsigned i = 0; i < BRIDGE_WIFI_INFLIGHT; i++) { send_to_wifi(500, KIND_UNICAST); pump_l2(); }
+    assert(gw_wtx_outstanding(&wifi_pins) == BRIDGE_WIFI_INFLIGHT && l2_stats().h2w_sent == BRIDGE_WIFI_INFLIGHT);
+    drv_clear();                                                       /* the leak: charges stay, frames are gone, no tx-done, no link event */
+    send_to_wifi(500, KIND_UNICAST); pump_l2();
+    assert(l2_stats().h2w_tx_failed == 1 && l2_stats().h2w_sent == BRIDGE_WIFI_INFLIGHT);       /* wedged for now: the first frame waited its sojourn and failed */
+    advance_ms(3100);                                                  /* past the lease */
+    assert(send_to_wifi(500, KIND_UNICAST) == ESP_OK);
+    pump_l2(); drv_complete(1);
+    assert(l2_stats().h2w_sent == BRIDGE_WIFI_INFLIGHT + 1 && atomic_load(&wifi_pins.tx_stale) == BRIDGE_WIFI_INFLIGHT && atomic_load(&air_delivered) >= 1);
+    settle();
+    check_world();
+}
+
+/* The failure the release A/B found (44% loss on 4 Mbit/s UDP up): a steady, non-responsive flow BELOW the pipe's rate, with the production tuning, through the
+ * modelled class driver and the real worker. No hold ever happens, so nothing is ever signalled: zero marks, zero drops, every frame delivered intact. */
+static void test_steady_udp_is_not_a_standing_queue(void) {
+    world_keep_defaults = true;
+    world_reset(HEAP_BRIDGE, true);
+    world_keep_defaults = false;
+    restart_sequences();
+    wifi_connect();
+    unsigned offered = 0;
+    for (int i = 0; i < 2000; i++) {                                            /* 1,400 B every 2.5 ms = 4.5 Mbit/s for 5 s of mock time */
+        build_frame(frame_buf, 1400, true, KIND_UNICAST, hseq);
+        if (host_usb_send(frame_buf, 1400)) { hseq++; offered++; }
+        pump_l2(); run_deferred(); drv_complete(2);
+        advance_ms(2); advance_us_world(500);
+    }
+    settle();
+    check_world();
+    const tdongle_l2_stats_t s = l2_stats();
+    assert(offered == 2000 && s.h2w_held == 0 && s.h2w_codel_signals == 0 && s.h2w_codel_drop == 0 && s.h2w_ce_marked == 0 && s.h2w_sent == 2000 &&
+           atomic_load(&air_delivered) == 2000);
 }
 
 /* A long random run: every operation, in any order, with the checks after each one. */
@@ -685,7 +726,7 @@ static void soak(unsigned seed, long total, bool dfs, unsigned steps, unsigned t
         else if (rnd(3) == 0) {                         /* any tuning, within bounds, mid-flight */
             bridge_tune_t t = {.q = 1 + rnd(TDONGLE_L2_HOST_SLOTS), .inflight = GATEWAY_WIFI_TX_BAND_MAX + rnd(GATEWAY_WIFI_TX_POOL - GATEWAY_WIFI_TX_BAND_MAX + 1),
                                .ring = rnd(TINYUSB_NET_TX_MAX_CHUNKS + 1), .sojourn_ms = TDONGLE_L2_SOJOURN_MS_MIN + rnd(TDONGLE_L2_SOJOURN_MS_MAX - TDONGLE_L2_SOJOURN_MS_MIN + 1),
-                               .idle_us = TDONGLE_L2_HOST_IDLE_US_MIN + rnd(10000), .codel = rnd(2), .target_us = TDONGLE_L2_CODEL_TARGET_US_MIN + rnd(5000), .interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MIN + rnd(200)};
+                               .codel = rnd(2), .target_us = TDONGLE_L2_CODEL_TARGET_US_MIN + rnd(5000), .interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MIN + rnd(200)};
             t.resume = rnd(t.q);
             assert(bridge_tune_apply(&t) == NULL);
         }           /* a USB reset: the class driver forgets what it held */
@@ -727,6 +768,8 @@ int main(void) {
     test_bridge_tune();
     test_codel();
     test_default_tuning_light_load();
+    test_leaked_charges_recover();
+    test_steady_udp_is_not_a_standing_queue();
     for (unsigned seed = 1; seed <= 6; seed++) soak(seed, HEAP_BRIDGE, true, 60000, 0);
     for (unsigned seed = 11; seed <= 16; seed++) soak(seed, ML_HB_FLOOR + 8 * TINYUSB_NET_TX_SLAB_BYTES + 6000, true, 60000, 1);
     for (unsigned seed = 21; seed <= 22; seed++) soak(seed, HEAP_BRIDGE, false, 60000, 0);

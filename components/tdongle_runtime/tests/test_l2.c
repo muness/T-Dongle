@@ -99,7 +99,10 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t us) { (void)h; ass
 esp_err_t esp_timer_delete(esp_timer_handle_t h) { (void)h; return 0; }
 unsigned uxTaskGetStackHighWaterMark(TaskHandle_t h) { (void)h; return 1234; }
 void tdongle_pm_note_activity(void) { note_activity_calls++; }
+static unsigned char ce_seen[2000];
+static uint16_t ce_len;
 static esp_err_t wifi_tx(void *b, uint16_t n) {
+    if (n > 34 && (((unsigned char *)b)[15] & 3) == 3) { memcpy(ce_seen, b, n); ce_len = n; }
     assert(!in_callback);                /* the Wi-Fi driver is called by the worker only */
     esp_err_t r = tx_calls < tx_script_n ? tx_script[tx_calls] : tx_default;
     tx_calls++;
@@ -544,11 +547,12 @@ static void codel_on(unsigned target_us, unsigned interval_ms) {
     t.codel = true; t.codel_target_us = target_us; t.codel_interval_ms = interval_ms;
     assert(tdongle_l2_set_tuning(&t) == ESP_OK);
 }
-/* Hold the pipe full (every offer is held or finds the queue above the resume depth) while time passes, one frame per `step_us`. */
-static void saturate(unsigned frames, unsigned step_us, const uint8_t *f, uint16_t len, bool tcp_ecn_check) {
-    (void)tcp_ecn_check;
-    for (unsigned i = 0; i < frames; i++) {
-        host_in(f, len);
+/* Saturate the pipe with real holds: each iteration the host offers one more frame than the queue takes (the last offer is answered TUSB_NET_RX_HOLD), time
+ * passes, and the worker drains (and resumes). `iterations` of `step_us` each. */
+static void saturate(unsigned iterations, unsigned step_us, const uint8_t *f, uint16_t len, bool unused) {
+    (void)unused;
+    for (unsigned i = 0; i < iterations; i++) {
+        for (unsigned k = 0; k <= TDONGLE_L2_HOST_QUEUE_LIMIT; k++) host_in(f, len);
         advance_us(step_us);
         pump();
     }
@@ -557,7 +561,7 @@ static void test_codel(void) {
     uint8_t f[200], g[200];
     /* Off: nothing is touched, however long the pipe is full. */
     start(); tdongle_l2_link(true);
-    { tdongle_l2_tuning_t d; tdongle_l2_get_tuning(&d); assert(d.codel && d.codel_target_us == 5000 && d.codel_interval_ms == 100 && d.host_idle_us == 6000); d.codel = false; assert(tdongle_l2_set_tuning(&d) == ESP_OK); }   /* the defaults are RFC 8289's, on */
+    { tdongle_l2_tuning_t d; tdongle_l2_get_tuning(&d); assert(d.codel && d.codel_target_us == 5000 && d.codel_interval_ms == 100); d.codel = false; assert(tdongle_l2_set_tuning(&d) == ESP_OK); }   /* the defaults are RFC 8289's, on */
     uint16_t n = ipv4_frame(f, 2, 17, 100, false);
     saturate(200, 2000, f, n, false);
     assert(stats().h2w_codel_signals == 0 && stats().h2w_ce_marked == 0 && stats().h2w_codel_drop == 0 && !memcmp(tx_seen, f, n));
@@ -570,11 +574,10 @@ static void test_codel(void) {
     tdongle_l2_stats_t s = stats();
     assert(s.h2w_ce_marked > 3 && s.h2w_codel_drop == 0 && s.h2w_codel_signals == s.h2w_ce_marked);
     assert(s.h2w_sent == s.h2w_queued && s.h2w_codel_count > 0);       /* a marked frame is a sent frame */
-    memcpy(g, tx_seen, n);
-    assert((g[15] & 3) == 3 || (g[15] & 3) == 2);
-    for (unsigned i = 0; i < 400; i++) { saturate(1, 2000, f, n, false); if ((tx_seen[15] & 3) == 3) break; }
-    assert((tx_seen[15] & 3) == 3 && ipv4_checksum_ok(tx_seen));
-    assert(!memcmp(tx_seen, f, 15) && !memcmp(tx_seen + 16, f + 16, 8) && !memcmp(tx_seen + 26, f + 26, n - 26));   /* only TOS and the header checksum changed */
+    ce_len = 0;
+    for (unsigned i = 0; i < 400 && !ce_len; i++) saturate(1, 2000, f, n, false);
+    assert(ce_len == n && (ce_seen[15] & 3) == 3 && ipv4_checksum_ok(ce_seen));
+    assert(!memcmp(ce_seen, f, 15) && !memcmp(ce_seen + 16, f + 16, 8) && !memcmp(ce_seen + 26, f + 26, n - 26));   /* only TOS and the header checksum changed */
     check_identities();
     /* Not-ECT frames are dropped at the same rate, counted separately and in the identity. */
     start(); tdongle_l2_link(true);
@@ -593,57 +596,66 @@ static void test_codel(void) {
     n = ipv4_frame(f, 0, 17, 20, false); f[14 + 20 + 2] = 0; f[14 + 20 + 3] = 67; saturate(20, 2000, f, n, false);  /* DHCP */
     assert(stats().h2w_codel_drop == dropped && stats().h2w_codel_signals == signals);
     check_identities();
-    /* The pipe finds slack: the signal falls to zero and CoDel leaves its dropping state; the next full spell starts a new interval. */
+    /* The holds stop: after an interval without one the signal is zero, CoDel leaves its dropping state, and nothing more is signalled. */
     n = ipv4_frame(f, 0, 17, 100, false);
-    atomic_store(&l2.held, false);
-    advance_us(10000);                                                            /* a gap longer than the host-idle threshold: the host had nothing queued */
-     host_in(f, n); pump();                                      /* a new busy period starts with this frame */
-    unsigned before = stats().h2w_codel_drop;
-    saturate(20, 2000, f, n, false);                                             /* 40 ms full: under the interval again */
-    assert(stats().h2w_codel_drop == before);
+    advance_us(150000);
+    const unsigned before = stats().h2w_codel_drop + stats().h2w_ce_marked;
+    for (unsigned i = 0; i < 400; i++) { host_in(f, n); pump(); advance_us(2500); }       /* 4 Mbit/s of 100 B... a steady unheld flow */
+    assert(stats().h2w_codel_drop + stats().h2w_ce_marked == before && stats().h2w_codel_count == 0);
     /* Retuning restarts the controller. */
     codel_on(1000, 50);
     saturate(10, 2000, f, n, false);
     check_identities();
 }
 
-/* The host's busy period: gaps between its datagrams (unheld) end it, a hold continues it, the threshold is tunable. */
-static unsigned signals_with_spacing(unsigned spacing_us, bool held_each, unsigned frames) {
-    uint8_t f[200];
-    const uint16_t n = ipv4_frame(f, 0, 17, 100, false);
-    start(); tdongle_l2_link(true);
-    codel_on(1000, 20);
-    for (unsigned i = 0; i < frames; i++) {
-        if (held_each) atomic_store(&l2.hold_pending, true);
-        host_in(f, n);
-        pump();
-        advance_us(spacing_us);
+/* The hold-evidenced busy period (ADR 0023 amendment 7). A sender below the pipe's rate is never held and is never signalled, whatever its rate; a sender
+ * that saturates the pipe is held again and again and is signalled once the holds have lasted target + interval; holds that stop for an interval end it. */
+static void steady_flow(unsigned frames, unsigned spacing_us, uint8_t *f, uint16_t n) { for (unsigned i = 0; i < frames; i++) { host_in(f, n); pump(); advance_us(spacing_us); } }
+static void test_hold_evidenced_period(void) {
+    uint8_t f[1600], g[1600];
+    /* 1. The case the board found: a steady non-responsive UDP flow at about 5 Mbit/s (1,400 B every 2.2 ms), below the pipe, no holds: ZERO signals in 4 s. */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    uint16_t n = ipv4_frame(f, 0, 17, 1300, false);                    /* not-ECT UDP: the worst case, a drop if it is ever signalled */
+    steady_flow(1800, 2200, f, n);
+    tdongle_l2_stats_t s = stats();
+    assert(s.h2w_held == 0 && s.h2w_codel_signals == 0 && s.h2w_codel_drop == 0 && s.h2w_ce_marked == 0 && s.h2w_sent == 1800 && s.h2w_signal_us_max < 5000);
+    /* ... and the same at 2.5 ms spacing with 6 ms gaps mixed in (the old gap-based signal restarted on those; this one never started). */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    for (unsigned i = 0; i < 1000; i++) { host_in(f, n); pump(); advance_us(i % 7 == 0 ? 6500 : 2200); }
+    assert(stats().h2w_held == 0 && stats().h2w_codel_signals == 0);
+    /* 2. A saturating flow with holds recurring every 2 ms: no signal for target + interval, then they start and speed up. */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    n = ipv4_frame(f, 0, 17, 100, false);
+    unsigned first_us = 0, t0 = (unsigned)now_us_v;
+    for (unsigned i = 0; i < 400 && !first_us; i++) { saturate(1, 2000, f, n, false); if (stats().h2w_codel_signals) first_us = (unsigned)now_us_v - t0; }
+    assert(stats().h2w_held > 20 && first_us >= 100000 && first_us <= 112000);       /* the first hold started the period; one interval of excess later, the first signal */
+    saturate(300, 2000, f, n, false);
+    assert(stats().h2w_codel_signals >= 6 && stats().h2w_codel_count >= 2);
+    /* 3. The holds stop for an interval: the signal is zero, CoDel leaves its dropping state (count 0), and a steady unheld flow is never signalled again. */
+    advance_us(120000);
+    const unsigned acts = stats().h2w_codel_signals;
+    steady_flow(600, 2200, f, n);
+    assert(stats().h2w_codel_signals == acts && stats().h2w_codel_count == 0);
+    /* 4. Isolated holds (one burst every 150 ms, an interval and a half apart) never form a period: no signal in 6 s. */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    for (unsigned round = 0; round < 40; round++) {
+        saturate(1, 2000, f, n, false);                                               /* one hold */
+        steady_flow(70, 2200, f, n);                                                  /* then 150 ms of unheld traffic */
     }
-    return stats().h2w_codel_signals;
-}
-static void test_busy_period(void) {
-    assert(signals_with_spacing(7000, false, 400) == 0);            /* gaps over the 6 ms idle threshold: the host keeps going idle, no standing queue */
-    assert(signals_with_spacing(5000, false, 400) > 3);             /* no gap over it: back-to-back, a standing backlog */
-    assert(signals_with_spacing(6000, false, 400) > 3);             /* exactly the threshold is not a gap */
-    assert(signals_with_spacing(7000, true, 400) > 3);              /* the same sparse arrivals, each one a held datagram coming back: the host was waiting for us */
-    tdongle_l2_tuning_t t;
-    start(); tdongle_l2_get_tuning(&t);
-    t.host_idle_us = 2000; t.codel = true; t.codel_target_us = 1000; t.codel_interval_ms = 20;
-    assert(tdongle_l2_set_tuning(&t) == ESP_OK);
-    uint8_t f[200]; const uint16_t n = ipv4_frame(f, 0, 17, 100, false);
-    tdongle_l2_link(true);
-    for (unsigned i = 0; i < 400; i++) { host_in(f, n); pump(); advance_us(5000); }
-    assert(stats().h2w_codel_signals == 0);                         /* 5 ms spacing is a gap when the threshold is 2 ms */
-    t.host_idle_us = TDONGLE_L2_HOST_IDLE_US_MIN - 1; assert(tdongle_l2_set_tuning(&t) == ESP_ERR_INVALID_ARG);
-    t.host_idle_us = TDONGLE_L2_HOST_IDLE_US_MAX + 1; assert(tdongle_l2_set_tuning(&t) == ESP_ERR_INVALID_ARG);
-    /* A busy stretch ends the moment the host leaves a gap: the signal falls and the controller stops acting. */
-    start(); tdongle_l2_link(true); codel_on(1000, 20);
-    for (unsigned i = 0; i < 100; i++) { host_in(f, n); pump(); advance_us(3000); }
-    const unsigned busy = stats().h2w_codel_signals;
-    assert(busy > 3);
-    advance_us(20000);
-    for (unsigned i = 0; i < 200; i++) { host_in(f, n); pump(); advance_us(9000); }
-    assert(stats().h2w_codel_signals == busy);
+    assert(stats().h2w_held >= 40 && stats().h2w_codel_signals == 0);
+    /* 5. Holds that DO recur within the interval (every 90 ms) are a standing backlog, however light the rest of the traffic is. */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    for (unsigned round = 0; round < 40; round++) { saturate(1, 2000, f, n, false); steady_flow(40, 2200, f, n); }
+    assert(stats().h2w_codel_signals > 0);
+    /* 6. The interval is CoDel's: a tuned interval moves the horizon. */
+    start(); tdongle_l2_link(true); codel_on(5000, 400);
+    t0 = (unsigned)now_us_v; first_us = 0;
+    for (unsigned i = 0; i < 400 && !first_us; i++) { saturate(1, 2000, f, n, false); if (stats().h2w_codel_signals) first_us = (unsigned)now_us_v - t0; }
+    assert(first_us >= 400000 && first_us <= 412000);
+    /* A link change forgets the period. */
+    tdongle_l2_link(false); tdongle_l2_link(true);
+    assert(hold_period_age((uint32_t)now_us_v) == 0);
+    (void)g;
     check_identities();
 }
 
@@ -720,7 +732,7 @@ int main(void) {
     test_rx_race();
     test_tuning();
     test_codel();
-    test_busy_period();
+    test_hold_evidenced_period();
     test_ecn_counters();
     test_room_wait_stats();
     test_tick_scale();

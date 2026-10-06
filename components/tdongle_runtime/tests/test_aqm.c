@@ -228,6 +228,79 @@ static void test_exempt_and_foreign(void) {
     len = build4(f, 1, 6, 5, 1000, 0); assert(tdongle_ecn_classify(f, len) == TDONGLE_ECN_CAPABLE);
 }
 
+
+/* IPv6 extension headers, built by hand: a chain of (type, length-in-units) headers between the fixed header and the transport header. */
+typedef struct { uint8_t type; uint8_t units; } ext_t;           /* units: the Hdr Ext Len field (8-byte units beyond the first) for 0/43/60, 4-byte units + 2 for 51; fragment is 8 B */
+static uint16_t build6_chain(uint8_t *f, unsigned tclass, const ext_t *chain, unsigned n, unsigned proto, unsigned tcp_flags, unsigned udp_dst, unsigned frag_off) {
+    memset(f, 0, 1600);
+    for (int i = 0; i < 12; i++) f[i] = (uint8_t)rnd(256);
+    f[12] = 0x86; f[13] = 0xdd; f[14] = (uint8_t)(0x60 | (tclass >> 4)); f[15] = (uint8_t)((tclass & 15) << 4); f[21] = 64;
+    unsigned o = 54, next = n ? chain[0].type : proto;
+    f[20] = (uint8_t)next;
+    for (unsigned i = 0; i < n; i++) {
+        const unsigned t = chain[i].type, after = i + 1 < n ? chain[i + 1].type : proto;
+        unsigned hl = t == 44 ? 8 : t == 51 ? ((unsigned)chain[i].units + 2) * 4 : ((unsigned)chain[i].units + 1) * 8;
+        f[o] = (uint8_t)after;
+        if (t == 51) f[o + 1] = chain[i].units; else if (t != 44) f[o + 1] = chain[i].units;
+        if (t == 44) { f[o + 2] = (uint8_t)(frag_off >> 5); f[o + 3] = (uint8_t)((frag_off & 31) << 3); }
+        o += hl;
+    }
+    if (proto == 6) { f[o + 12] = 0x50; f[o + 13] = (uint8_t)tcp_flags; }
+    if (proto == 17) { f[o + 2] = (uint8_t)(udp_dst >> 8); f[o + 3] = (uint8_t)udp_dst; }
+    const unsigned total = o + 60;
+    f[18] = (uint8_t)((total - 54) >> 8); f[19] = (uint8_t)(total - 54);
+    for (unsigned i = o + (proto == 6 ? 20 : 8); i < total; i++) f[i] = (uint8_t)rnd(256);
+    return (uint16_t)total;
+}
+static void test_ipv6_extension_headers(void) {
+    uint8_t f[1600], g[1600];
+    const ext_t hbh = {0, 0}, hbh2 = {0, 2}, dst = {60, 1}, rt = {43, 1}, frag = {44, 0}, ah = {51, 1};
+    /* MLD (ICMPv6) behind hop-by-hop: exempt, the case the review found being dropped. */
+    uint16_t n = build6_chain(f, 2, &hbh, 1, 58, 0, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT);
+    n = build6_chain(f, 0, &hbh, 1, 58, 0, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT);                  /* not-ECT too: never dropped */
+    /* A SYN behind a destination-options header: exempt; data behind it: eligible and markable; the ECN field is where it always is. */
+    n = build6_chain(f, 2, &dst, 1, 6, 0x02, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT);
+    n = build6_chain(f, 2, &dst, 1, 6, 0x10, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE);
+    memcpy(g, f, n); tdongle_ecn_mark_ce(f);
+    for (unsigned i = 0; i < n; i++) if (i != 15) assert(f[i] == g[i]);
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CE);
+    n = build6_chain(f, 0, &dst, 1, 6, 0x10, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_NOT_ECT);
+    /* Chains: several headers, of every kind, in any order. */
+    { const ext_t c[] = {hbh2, rt, dst, ah};
+      n = build6_chain(f, 2, c, 4, 58, 0, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT);
+      n = build6_chain(f, 2, c, 4, 6, 0x04, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT);                /* RST */
+      n = build6_chain(f, 1, c, 4, 6, 0x18, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE);
+      n = build6_chain(f, 2, c, 4, 17, 0, 547, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT);                /* DHCPv6 */
+      n = build6_chain(f, 2, c, 4, 17, 0, 5001, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); }
+    /* A first fragment still carries the transport header; a later one does not (its bytes are payload: eligible, never exempt, whatever they look like). */
+    n = build6_chain(f, 2, &frag, 1, 6, 0x02, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT);
+    n = build6_chain(f, 2, &frag, 1, 6, 0x02, 0, 185); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE);
+    n = build6_chain(f, 2, &frag, 1, 58, 0, 0, 185); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE);
+    /* ESP and "no next header": opaque, eligible by their ECN field. */
+    { const ext_t esp = {50, 0}; n = build6_chain(f, 2, &hbh, 1, 50, 0, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); (void)esp;
+      n = build6_chain(f, 2, &hbh, 1, 59, 0, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); }
+    /* Bounds: too many headers, a header that runs past the frame, a length field that points beyond it: not IP, never touched, nothing read past the end (ASan). */
+    { ext_t c[7]; for (int i = 0; i < 7; i++) c[i] = hbh;
+      n = build6_chain(f, 2, c, 6, 58, 0, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT);                  /* six is the limit */
+      n = build6_chain(f, 2, c, 7, 58, 0, 0, 0); assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_NOT_IP); }
+    n = build6_chain(f, 2, &hbh, 1, 6, 0x10, 0, 0);
+    for (unsigned cut = 0; cut < n; cut++) { const tdongle_ecn_class_t c = tdongle_ecn_classify(f, (uint16_t)cut); (void)c; }     /* every truncation: no read past `cut` */
+    f[54 + 1] = 200; assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_NOT_IP);                                                 /* hop-by-hop length beyond the frame */
+    /* The SYN/SYN-ACK negotiation helper walks the same chain. */
+    n = build6_chain(f, 0, &hbh, 1, 6, 0xc2, 0, 0); assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYN_ECN_SETUP);
+    n = build6_chain(f, 0, &dst, 1, 6, 0x52, 0, 0); assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYNACK_ECN_ACCEPT);
+    n = build6_chain(f, 0, &frag, 1, 6, 0xc2, 0, 185); assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_OTHER);
+    /* Random chains: classification never reads out of bounds and never calls a not-IP frame IP (fuzz under ASan). */
+    for (int iter = 0; iter < 200000; iter++) {
+        ext_t c[8]; const unsigned k = rnd(8); static const uint8_t kinds[] = {0, 43, 44, 51, 60};
+        for (unsigned i = 0; i < k; i++) c[i] = (ext_t){kinds[rnd(5)], (uint8_t)rnd(4)};
+        const unsigned proto = rnd(5) == 0 ? 58 : rnd(2) ? 6 : 17;
+        n = build6_chain(f, rnd(256), c, k, proto, rnd(256), rnd(2) ? 546 : rnd(65536), rnd(3) == 0 ? rnd(8000) : 0);
+        const uint16_t cut = (uint16_t)(rnd(4) == 0 ? rnd(n + 1) : n);
+        (void)tdongle_ecn_classify(f, cut); (void)tdongle_tcp_ecn_syn(f, cut);
+    }
+}
+
 int main(void) {
     test_math();
     test_schedule(0);
@@ -236,6 +309,7 @@ int main(void) {
     test_ecn_ipv4();
     test_ecn_ipv6();
     test_exempt_and_foreign();
-    puts("AQM: integer sqrt and control law, CoDel schedule against the analytic RFC 8289 reference (also across the clock wrap), invariants, ECN marking with recomputed checksums for IPv4 (options, fragments) and IPv6, exemptions and malformed frames");
+    test_ipv6_extension_headers();
+    puts("AQM: integer sqrt and control law, CoDel schedule against the analytic RFC 8289 reference (also across the clock wrap), invariants, ECN marking with recomputed checksums for IPv4 (options, fragments) and IPv6, exemptions and malformed frames, IPv6 extension-header chains built by hand and fuzzed");
     return 0;
 }

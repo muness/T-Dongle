@@ -249,6 +249,25 @@ int main(void) {
     wifi_pins_set_tx_limit(0);
     wifi_pins_link_changed();
     assert(wifi_pins_tx_outstanding() == 0);
+    /* Leaked charges: the allowance fills, no tx-done ever comes. The bridge's worker asks room() and never reaches admit while it looks full, so room()
+     * itself must apply the 3 s lease, or six leaked charges would wedge host -> Wi-Fi for ever. */
+    wifi_pins_set_tx_limit(6);
+    g_free_heap = 1u << 20;
+    const unsigned stale_before = atomic_load(&wifi_pins.tx_stale);
+    for (int i = 0; i < 6; i++) assert(wifi_pins_tx((void *)"x", 1514) == ESP_OK);
+    assert(!wifi_pins_tx_room() && wifi_pins_tx_outstanding() == 6);
+    g_ticks += GW_WTX_LEASE_MS - 100;                            /* not yet: the lease is 3 s */
+    assert(!wifi_pins_tx_room() && wifi_pins_tx_outstanding() == 6 && atomic_load(&wifi_pins.tx_stale) == stale_before);
+    g_ticks += 200;                                              /* now: all six are past it */
+    assert(wifi_pins_tx_room() && wifi_pins_tx_outstanding() == 0 && atomic_load(&wifi_pins.tx_stale) == stale_before + 6);
+    assert(wifi_pins_tx((void *)"x", 1514) == ESP_OK && wifi_pins_tx_outstanding() == 1);      /* and admission works again */
+    /* Partial expiry: only the old ones go. */
+    for (int i = 0; i < 3; i++) { g_ticks += 1000; assert(wifi_pins_tx((void *)"x", 1514) == ESP_OK); }
+    wifi_pins_set_tx_limit(4);                                   /* the allowance looks full (4 outstanding): that is when room() heals */
+    g_ticks += 2100;                                             /* the oldest is now 5.1 s old, the next 4.1, the next 3.1: past the lease; the last is 2.1 */
+    assert(wifi_pins_tx_room() && wifi_pins_tx_outstanding() == 1);
+    wifi_pins_set_tx_limit(0);
+    wifi_pins_link_changed();
     assert(wifi_pins_tx_outstanding() == 0 && atomic_load(&wifi_pins.tx_flushed) >= GATEWAY_WIFI_TX_BAND_MAX);
     assert(atomic_load(&wifi_pins.tx_charged) == atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_aborted) +
                                                   atomic_load(&wifi_pins.tx_flushed) + atomic_load(&wifi_pins.tx_stale) + wifi_pins_tx_outstanding());
