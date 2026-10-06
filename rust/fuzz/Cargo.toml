@@ -17,6 +17,7 @@ tdongle-lcd = { path = "../crates/tdongle-lcd" }
 tdongle-serial = { path = "../crates/tdongle-serial" }
 tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
 tdongle-usb-descriptors = { path = "../crates/tdongle-usb-descriptors" }
+tdongle-setup = { path = "../crates/tdongle-setup" }
 
 [[bin]]
 name = "ecn_classify"
@@ -45,5 +46,23 @@ doc = false
 [[bin]]
 name = "lcd_compose"
 path = "fuzz_targets/lcd_compose.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "setup_dns"
+path = "fuzz_targets/setup_dns.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "setup_http"
+path = "fuzz_targets/setup_http.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "setup_router"
+path = "fuzz_targets/setup_router.rs"
 test = false
 doc = false
