@@ -98,9 +98,7 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t us) { (void)h; ass
 esp_err_t esp_timer_delete(esp_timer_handle_t h) { (void)h; return 0; }
 unsigned uxTaskGetStackHighWaterMark(TaskHandle_t h) { (void)h; return 1234; }
 void tdongle_pm_note_activity(void) { note_activity_calls++; }
-static bool last_sparse;
-static esp_err_t wifi_tx(void *b, uint16_t n, bool sparse) {
-    last_sparse = sparse;
+static esp_err_t wifi_tx(void *b, uint16_t n) {
     assert(!in_callback);                /* the Wi-Fi driver is called by the worker only */
     esp_err_t r = tx_calls < tx_script_n ? tx_script[tx_calls] : tx_default;
     tx_calls++;
@@ -137,7 +135,7 @@ static esp_err_t host_in(const uint8_t *f, uint16_t len) {   /* TinyUSB task */
 static unsigned pump(void) { return drain(); }              /* one wake-up of the worker */
 static unsigned resumes;
 static bool room = true;
-static bool wifi_room(bool sparse) { (void)sparse; assert(!in_callback); return room; }
+static bool wifi_room(void) { assert(!in_callback); return room; }
 static void rx_resume(void) { assert(!in_callback); resumes++; }
 static tdongle_l2_config_t config(void) {
     return (tdongle_l2_config_t){.wifi_tx = wifi_tx, .wifi_room = wifi_room, .rx_resume = rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
@@ -157,7 +155,7 @@ static void check_identities(void) {
     tdongle_l2_stats_t s = stats();
     assert(s.w2h_frames == s.w2h_forwarded + s.w2h_invalid + s.w2h_own_mac + s.w2h_link_down + s.w2h_usb_not_ready + s.w2h_ring_full);
     assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down);
-    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
+    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_codel_drop + s.h2w_queue_depth);
 }
 
 static void test_start(void) {
@@ -472,84 +470,22 @@ static void test_rx_race(void) {
 
 static void open_room_after_three(void) { if (++hook_calls == 3) room = true; }
 
-/* Packets for the classifier: Ethernet + IPv4/IPv6 + TCP/UDP/ICMP headers, built by hand. */
-static unsigned build_ip(uint8_t *f, unsigned ethertype, unsigned proto, unsigned payload, bool v6, unsigned tcp_doff) {
-    memset(f, 0, 400);
-    memcpy(f, peer, 6); memcpy(f + 6, mac, 6);
-    f[12] = (uint8_t)(ethertype >> 8); f[13] = (uint8_t)ethertype;
-    if (!v6) {
-        f[14] = 0x45; unsigned total = 20 + payload; f[16] = (uint8_t)(total >> 8); f[17] = (uint8_t)total; f[23] = (uint8_t)proto;
-        if (proto == 6) f[14 + 20 + 12] = (uint8_t)(tcp_doff / 4 << 4);
-        return 14 + total;
-    }
-    f[14] = 0x60; f[18] = (uint8_t)(payload >> 8); f[19] = (uint8_t)payload; f[20] = (uint8_t)proto;
-    if (proto == 6) f[14 + 40 + 12] = (uint8_t)(tcp_doff / 4 << 4);
-    return 14 + 40 + payload;
-}
-static void test_classifier(void) {
-    uint8_t f[400];
-    unsigned n = build_ip(f, 0x0800, 6, 20, false, 20); assert(is_sparse(f, n));            /* pure ACK */
-    n = build_ip(f, 0x0800, 6, 32, false, 32); assert(is_sparse(f, n));                     /* ACK with options */
-    n = build_ip(f, 0x0800, 6, 20 + 100, false, 20); assert(!is_sparse(f, n));              /* TCP data, however small: never reordered ahead of its flow */
-    n = build_ip(f, 0x0800, 1, 64, false, 0); assert(is_sparse(f, n));                      /* ICMP echo */
-    n = build_ip(f, 0x0800, 17, 60, false, 0); assert(is_sparse(f, n));                     /* DNS-sized UDP */
-    n = build_ip(f, 0x0800, 17, 400 - 34, false, 0); assert(!is_sparse(f, 400));            /* bigger than the sparse limit */
-    n = build_ip(f, 0x86dd, 58, 32, true, 0); assert(is_sparse(f, n));                      /* ICMPv6 */
-    n = build_ip(f, 0x86dd, 6, 20, true, 20); assert(is_sparse(f, n));                      /* IPv6 pure ACK */
-    n = build_ip(f, 0x86dd, 6, 20 + 50, true, 20); assert(!is_sparse(f, n));
-    n = build_ip(f, 0x0806, 0, 28, false, 0); assert(is_sparse(f, 42));                     /* ARP */
-    n = build_ip(f, 0x0800, 47, 20, false, 0); assert(!is_sparse(f, n));                    /* GRE: unknown is bulk */
-    f[14] = 0x41; assert(!is_sparse(f, 60));                                                /* a bad header length is bulk, not a crash */
-    assert(!is_sparse(f, 13));
-}
-
-/* Priority: off by default; on, sparse frames take the priority queue and are served first; data stays in order in the bulk queue. */
-static void test_priority(void) {
-    uint8_t f[400];
-    start(); tdongle_l2_link(true);
-    tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
-    unsigned n = build_ip(f, 0x0800, 1, 64, false, 0);
-    assert(host_in(f, n) == ESP_OK && stats().h2w_sparse == 0 && l2.sp_head == 0);          /* off: an ordinary frame */
-    pump();
-    t.prio = true; assert(tdongle_l2_set_tuning(&t) == ESP_OK);
-    uint8_t d[200]; frame(d, 200, peer, mac, 1);
-    for (unsigned i = 0; i < 3; i++) { d[20] = (uint8_t)i; assert(host_in(d, 200) == ESP_OK); }      /* three bulk frames (not sparse: unknown ethertype) */
-    n = build_ip(f, 0x0800, 1, 64, false, 0); f[40] = 0xAA;
-    assert(host_in(f, n) == ESP_OK && stats().h2w_sparse == 1 && stats().h2w_queue_depth == 4);
-    n = build_ip(f, 0x0800, 6, 20, false, 20); f[40] = 0xBB;
-    assert(host_in(f, n) == ESP_OK && stats().h2w_sparse == 2);
-    n = build_ip(f, 0x0800, 1, 64, false, 0); f[40] = 0xCC;
-    assert(host_in(f, n) == TUSB_NET_RX_HOLD && stats().h2w_sparse == 2);   /* the priority queue was full (2): this one is bulk, and the bulk queue is at its limit: held */
-    check_identities();
-    /* Served: sparse first (in arrival order), then the bulk frames in order. */
-    uint8_t order_seen[8]; unsigned k = 0;
-    tx_script_n = 0;
-    while (stats().h2w_queue_depth) {
-        const unsigned sp_before = l2.sp_tail;
-        if (l2.sp_tail != l2.sp_head) { deliver_frame(&l2.sp_slots[l2.sp_tail & SPARSE_MASK], true); atomic_store(&l2.sp_tail, sp_before + 1); assert(last_sparse); }
-        else { unsigned tail = atomic_load(&l2.tail); deliver(&l2.slots[tail & SLOT_MASK]); atomic_store(&l2.tail, tail + 1); assert(!last_sparse); }
-        order_seen[k++] = tx_seen[tx_seen_len > 40 ? 40 : 20];
-    }
-    assert(k == 5 && order_seen[0] == 0xAA && order_seen[1] == 0xBB);
-    check_identities();
-    /* Through the real worker pass the same way: sparse before bulk. */
-    for (unsigned i = 0; i < 2; i++) { d[20] = (uint8_t)i; assert(host_in(d, 200) == ESP_OK); }
-    n = build_ip(f, 0x0800, 1, 64, false, 0); f[40] = 0xDD; assert(host_in(f, n) == ESP_OK);
-    assert(pump() == 3 && last_sparse == false && tx_seen[20] == 1);   /* the last frame sent was bulk frame 1; the sparse one went first */
-    check_identities();
-}
-
 /* Tuning: bounds are checked as a whole, a rejected set changes nothing, a set takes effect at once. */
 static void test_tuning(void) {
     start();
     tdongle_l2_tuning_t t, back; tdongle_l2_get_tuning(&t);
-    assert(t.queue_limit == TDONGLE_L2_HOST_QUEUE_LIMIT && t.resume_depth == TDONGLE_L2_HOST_RESUME_DEPTH && t.sojourn_ms == TDONGLE_L2_SOJOURN_MS && !t.prio);
+    assert(t.queue_limit == TDONGLE_L2_HOST_QUEUE_LIMIT && t.resume_depth == TDONGLE_L2_HOST_RESUME_DEPTH && t.sojourn_ms == TDONGLE_L2_SOJOURN_MS && !t.codel &&
+           t.codel_target_us == TDONGLE_CODEL_TARGET_US_DEFAULT && t.codel_interval_ms == TDONGLE_CODEL_INTERVAL_MS_DEFAULT);
     tdongle_l2_tuning_t bad = t;
     bad.queue_limit = 0; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
     bad = t; bad.queue_limit = TDONGLE_L2_HOST_SLOTS + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
     bad = t; bad.resume_depth = t.queue_limit; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
     bad = t; bad.sojourn_ms = TDONGLE_L2_SOJOURN_MS_MIN - 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
     bad = t; bad.sojourn_ms = TDONGLE_L2_SOJOURN_MS_MAX + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.codel_target_us = TDONGLE_L2_CODEL_TARGET_US_MIN - 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.codel_target_us = TDONGLE_L2_CODEL_TARGET_US_MAX + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.codel_interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MIN - 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.codel_interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MAX + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
     bad = t; bad.queue_limit = 5; bad.sojourn_ms = 0; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);   /* one bad field: nothing applied */
     tdongle_l2_get_tuning(&back); assert(!memcmp(&back, &t, sizeof(t)));
     t.queue_limit = 5; t.resume_depth = 2; t.sojourn_ms = 40;
@@ -580,6 +516,94 @@ static void test_room_wait_stats(void) {
     check_identities();
 }
 
+
+/* ---- CoDel at the hand-to-radio ---- */
+static uint16_t ipv4_frame(uint8_t *f, unsigned ecn, unsigned proto, unsigned payload, bool syn) {
+    memset(f, 0, 200);
+    memcpy(f, peer, 6); memcpy(f + 6, mac, 6);
+    f[12] = 0x08; f[13] = 0x00; f[14] = 0x45; f[15] = (uint8_t)ecn;
+    const unsigned total = 20 + payload; f[16] = (uint8_t)(total >> 8); f[17] = (uint8_t)total; f[22] = 64; f[23] = (uint8_t)proto;
+    f[26] = 10; f[29] = 1; f[30] = 10; f[33] = 2;
+    if (proto == 6) { f[14 + 20 + 12] = 0x50; f[14 + 20 + 13] = syn ? 0x02 : 0x10; }
+    uint32_t sum = 0;
+    for (unsigned i = 14; i < 34; i += 2) sum += (f[i] << 8) | f[i + 1];
+    while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+    f[24] = (uint8_t)(~sum >> 8); f[25] = (uint8_t)~sum;
+    return (uint16_t)(14 + total);
+}
+static bool ipv4_checksum_ok(const uint8_t *f) {
+    uint32_t sum = 0;
+    for (unsigned i = 14; i < 34; i += 2) sum += (f[i] << 8) | f[i + 1];
+    while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+    return (uint16_t)sum == 0xffff;
+}
+static void codel_on(unsigned target_us, unsigned interval_ms) {
+    tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
+    t.codel = true; t.codel_target_us = target_us; t.codel_interval_ms = interval_ms;
+    assert(tdongle_l2_set_tuning(&t) == ESP_OK);
+}
+/* Hold the pipe full (every offer is held or finds the queue above the resume depth) while time passes, one frame per `step_us`. */
+static void saturate(unsigned frames, unsigned step_us, const uint8_t *f, uint16_t len, bool tcp_ecn_check) {
+    (void)tcp_ecn_check;
+    for (unsigned i = 0; i < frames; i++) {
+        atomic_store(&l2.held, true);                 /* the host is waiting for room: the pipe is full */
+        host_in(f, len);
+        advance_us(step_us);
+        pump();
+    }
+}
+static void test_codel(void) {
+    uint8_t f[200], g[200];
+    /* Off: nothing is touched, however long the pipe is full. */
+    start(); tdongle_l2_link(true);
+    uint16_t n = ipv4_frame(f, 2, 17, 100, false);
+    saturate(200, 2000, f, n, false);
+    assert(stats().h2w_codel_signals == 0 && stats().h2w_ce_marked == 0 && stats().h2w_codel_drop == 0 && !memcmp(tx_seen, f, n));
+    /* On, ECT(0): marked CE once the pipe has been full for a whole interval, never dropped; checksum valid; payload and addresses untouched. */
+    start(); tdongle_l2_link(true);
+    codel_on(5000, 100);
+    saturate(30, 2000, f, n, false);                 /* 60 ms: below the interval */
+    assert(stats().h2w_codel_signals == 0);
+    saturate(150, 2000, f, n, false);                /* 300 ms more */
+    tdongle_l2_stats_t s = stats();
+    assert(s.h2w_ce_marked > 3 && s.h2w_codel_drop == 0 && s.h2w_codel_signals == s.h2w_ce_marked);
+    assert(s.h2w_sent == s.h2w_queued && s.h2w_codel_count > 0);       /* a marked frame is a sent frame */
+    memcpy(g, tx_seen, n);
+    assert((g[15] & 3) == 3 || (g[15] & 3) == 2);
+    for (unsigned i = 0; i < 400; i++) { saturate(1, 2000, f, n, false); if ((tx_seen[15] & 3) == 3) break; }
+    assert((tx_seen[15] & 3) == 3 && ipv4_checksum_ok(tx_seen));
+    assert(!memcmp(tx_seen, f, 15) && !memcmp(tx_seen + 16, f + 16, 8) && !memcmp(tx_seen + 26, f + 26, n - 26));   /* only TOS and the header checksum changed */
+    check_identities();
+    /* Not-ECT frames are dropped at the same rate, counted separately and in the identity. */
+    start(); tdongle_l2_link(true);
+    codel_on(5000, 100);
+    n = ipv4_frame(f, 0, 17, 100, false);
+    saturate(300, 2000, f, n, false);
+    s = stats();
+    assert(s.h2w_codel_drop > 3 && s.h2w_ce_marked == 0 && s.h2w_codel_signals == s.h2w_codel_drop);
+    assert(s.h2w_sent + s.h2w_codel_drop == s.h2w_queued - s.h2w_queue_depth);
+    check_identities();
+    /* Frames CoDel must never touch: ARP, SYN, DHCP: never marked, never dropped, whatever the signal. */
+    unsigned dropped = stats().h2w_codel_drop, signals = stats().h2w_codel_signals;
+    memset(g, 0, 60); memcpy(g, peer, 6); memcpy(g + 6, mac, 6); g[12] = 0x08; g[13] = 0x06;                       /* ARP */
+    saturate(20, 2000, g, 60, false);
+    n = ipv4_frame(f, 0, 6, 20, true);  saturate(20, 2000, f, n, false);                                          /* TCP SYN */
+    n = ipv4_frame(f, 0, 17, 20, false); f[14 + 20 + 2] = 0; f[14 + 20 + 3] = 67; saturate(20, 2000, f, n, false);  /* DHCP */
+    assert(stats().h2w_codel_drop == dropped && stats().h2w_codel_signals == signals);
+    check_identities();
+    /* The pipe finds slack: the signal falls to zero and CoDel leaves its dropping state; the next full spell starts a new interval. */
+    n = ipv4_frame(f, 0, 17, 100, false);
+    atomic_store(&l2.held, false); atomic_store(&l2.busy_continues, false);      /* nobody was waiting: the pipe went idle */
+    advance_us(5000); host_in(f, n); pump();                                      /* a new busy period starts with this frame */
+    unsigned before = stats().h2w_codel_drop;
+    saturate(20, 2000, f, n, false);                                             /* 40 ms full: under the interval again */
+    assert(stats().h2w_codel_drop == before);
+    /* Retuning restarts the controller. */
+    codel_on(1000, 50);
+    saturate(10, 2000, f, n, false);
+    check_identities();
+}
+
 static void test_tick_scale(void) {
     printf("  retry period %u us, sojourn limit %u ms, queue limit %u of %u slots (tick %d ms: unused by the worker)\n", TDONGLE_L2_RETRY_US, TDONGLE_L2_SOJOURN_MS,
            TDONGLE_L2_HOST_QUEUE_LIMIT, TDONGLE_L2_HOST_SLOTS, TEST_TICK_MS);
@@ -598,9 +622,8 @@ int main(void) {
     test_sojourn();
     test_depth_never_wraps();
     test_rx_race();
-    test_classifier();
-    test_priority();
     test_tuning();
+    test_codel();
     test_room_wait_stats();
     test_tick_scale();
     free(l2.slots);

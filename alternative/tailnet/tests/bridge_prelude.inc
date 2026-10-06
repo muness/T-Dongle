@@ -4,6 +4,7 @@
  * This is the part that comes BEFORE those sources: the Wi-Fi driver, the esp_netif/lwIP names wifi_pins.inc mentions, the CPU-frequency locks. */
 #include "tdongle_l2.h"
 #include "tdongle_pm.h"
+#include "tdongle_aqm.h"
 #include "wifi_pin_budget.h"
 atomic_uint ml_hb_refused[ML_HB_SITE_COUNT];
 #define WIFI_IF_STA 0

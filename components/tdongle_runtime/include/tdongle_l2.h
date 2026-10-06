@@ -36,12 +36,11 @@
 #define TDONGLE_L2_SLOT_BYTES 1524u
 #define TDONGLE_L2_SOJOURN_MS 100u              /* default sojourn limit */
 #define TDONGLE_L2_SOJOURN_MS_MIN 5u
+#define TDONGLE_L2_CODEL_TARGET_US_MIN 500u
+#define TDONGLE_L2_CODEL_TARGET_US_MAX 50000u
+#define TDONGLE_L2_CODEL_INTERVAL_MS_MIN 20u
+#define TDONGLE_L2_CODEL_INTERVAL_MS_MAX 1000u
 #define TDONGLE_L2_SOJOURN_MS_MAX 190u          /* below TDONGLE_PM_ACTIVITY_HOLD_US (asserted in l2.c) */
-/* Sparse-flow priority (fq_codel's idea, by size and kind): a frame that is a pure TCP ACK or other zero-payload TCP segment, ICMP, a UDP datagram, or
- * ARP, and no longer than TDONGLE_L2_SPARSE_MAX_LEN, goes to a second small queue the worker serves first, and may use the radio's reserve. Data
- * segments are never "sparse" whatever their size, so a flow's own data cannot be reordered by it. Off by default (tuning). */
-#define TDONGLE_L2_SPARSE_MAX_LEN 200u
-#define TDONGLE_L2_SPARSE_SLOTS 2u
 /* A refusal for buffers (the budget's, or the driver's pool) clears as frames leave the antenna, about every 0.3 to 1 ms at the Wi-Fi rate, so the
  * worker retries on a 500 us timer (esp_timer), not on the RTOS tick: at CONFIG_FREERTOS_HZ=100 a tick sleep is 10 ms, long enough for the whole
  * 16-buffer pool to drain and the radio to idle (measured: 590 retries, 101 frames lost, upload below what the link carries). */
@@ -51,11 +50,11 @@
 typedef struct {
     /* Required. Sends one frame on the STA interface through the Wi-Fi TX budget (wifi_pins.inc): ESP_OK when the driver took it,
      * ESP_ERR_NO_MEM when it was refused for buffers (retried every TDONGLE_L2_RETRY_US until the frame's sojourn limit), anything else is final. Worker task only. */
-    esp_err_t (*wifi_tx)(void *frame, uint16_t len, bool sparse);
+    esp_err_t (*wifi_tx)(void *frame, uint16_t len);
     /* Optional. True when the radio can take another frame now (wifi_pins_tx_room). While it is false the worker waits instead of calling wifi_tx and
      * being refused: the bridge keeps few frames in the driver (GATEWAY_BRIDGE_WIFI_TX_INFLIGHT), and a full allowance is the normal state of a link
      * that is the bottleneck, not an error. */
-    bool (*wifi_room)(bool sparse);
+    bool (*wifi_room)(void);
     /* Required with a host that can be held: ask the USB layer to offer the held datagram again (tinyusb_net_rx_resume). Called by the worker. */
     void (*rx_resume)(void);
     unsigned task_priority;      /* the host -> Wi-Fi worker: GATEWAY_TASK_BRIDGE_PRIO */
@@ -69,7 +68,10 @@ typedef struct {
     uint32_t queue_limit;        /* 1..TDONGLE_L2_HOST_SLOTS: frames that may stand in the bulk queue before the host is held */
     uint32_t resume_depth;       /* 0..queue_limit-1: drain to this depth before the held datagram is offered again */
     uint32_t sojourn_ms;         /* TDONGLE_L2_SOJOURN_MS_MIN..MAX: age at which a frame is dropped */
-    bool prio;                   /* sparse-flow priority (the radio reserve is the gateway's: bridgetune prio= sets both) */
+    /* CoDel/ECN on the ingress (tdongle_aqm.h, ADR 0023 amendment 4): off by default until the board says otherwise. */
+    bool codel;
+    uint32_t codel_target_us;    /* TDONGLE_L2_CODEL_TARGET_US_MIN..MAX */
+    uint32_t codel_interval_ms;  /* TDONGLE_L2_CODEL_INTERVAL_MS_MIN..MAX */
 } tdongle_l2_tuning_t;
 esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *tuning);
 void tdongle_l2_get_tuning(tdongle_l2_tuning_t *out);
@@ -93,9 +95,14 @@ typedef struct {
     uint32_t h2w_link_down;      /* Wi-Fi not connected when the frame arrived */
     uint32_t h2w_held;           /* offers refused with TUSB_NET_RX_HOLD at the queue limit: USB backpressure, nothing dropped */
     uint32_t h2w_resumes;        /* times the worker asked for held datagrams again */
-    uint32_t h2w_sparse;         /* frames taken by the priority queue (a subset of h2w_queued) */
+    /* CoDel (only when enabled). h2w_queued = sent + stale + sojourn_drop + link_down_queued + tx_failed + codel_drop + depth; a marked frame is sent. */
+    uint32_t h2w_codel_signals;  /* eligible frames CoDel signalled (marked, already CE, or dropped) */
+    uint32_t h2w_ce_marked;      /* ECT frames that left with CE set */
+    uint32_t h2w_codel_drop;     /* non-ECT frames dropped by CoDel */
+    uint32_t h2w_signal_us_sum, h2w_signal_us_max;   /* the signal CoDel sees per eligible frame: max(its own time in the dongle, time the pipe has been continuously full) */
+    uint32_t h2w_codel_count;    /* CoDel's signal count in the current dropping state (0 outside it) */
     uint32_t h2w_room_waits, h2w_room_wait_us_sum, h2w_room_wait_us_max;   /* frames that had to wait for the radio's allowance, and for how long: the radio's dwell */
-    /* The worker. h2w_queued = sent + stale + sojourn_drop + link_down_queued + tx_failed + queue depth, always (at rest). */
+    /* The worker. h2w_queued = sent + stale + sojourn_drop + link_down_queued + tx_failed + codel_drop + queue depth, always (at rest). */
     uint32_t h2w_sent;           /* the Wi-Fi driver took the frame */
     uint32_t h2w_stale;          /* queued before the link changed: dropped without sending */
     uint32_t h2w_sojourn_drop;   /* older than TDONGLE_L2_SOJOURN_MS when the worker reached it: dropped without sending */

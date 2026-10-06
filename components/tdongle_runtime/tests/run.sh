@@ -11,6 +11,9 @@ for tick in 1 10; do
  cc -std=c11 -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -g -DTEST_TICK_MS=$tick -I stubs -I ../include test_l2.c -o "/tmp/tdongle-test-l2-$tick"
  "/tmp/tdongle-test-l2-$tick"
 done
+# CoDel and ECN marking (portable C): the schedule against the analytic RFC 8289 reference, checksums recomputed from the bytes.
+cc -std=c11 -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=all -g -I ../include test_aqm.c -lm -o /tmp/tdongle-test-aqm
+/tmp/tdongle-test-aqm
 # PM burst counter: portable C, run under ASan/UBSan and TSan (its nesting depth is shared between tasks).
 for san in address,undefined thread; do
  cc -std=c11 -Wall -Wextra -fsanitize=$san -fno-sanitize-recover=all -g -pthread -I ../include test_pm_burst.c -o "/tmp/tdongle-test-pm_burst-${san%%,*}"

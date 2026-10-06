@@ -17,7 +17,7 @@ static void *wifi_task(void *arg) {
     uint32_t seq = 1;
     for (unsigned i = 0; i < ITERATIONS; i++) {
         const uint32_t x = next_rand(&r);
-        const uint16_t len = (x & 3) == 0 ? (uint16_t)(24 + (x >> 8) % 80) : (uint16_t)(24 + (x >> 8) % 1491);
+        const uint16_t len = (x & 3) == 0 ? (uint16_t)(80 + (x >> 8) % 80) : (uint16_t)(80 + (x >> 8) % 1435);
         build_frame(f, len, false, (x >> 4) % 4 == 0 ? KIND_BCAST : KIND_UNICAST, seq++);
         wifi_rx(f, len);
         atomic_fetch_add(&wifi_sent, 1);
@@ -31,7 +31,7 @@ static void *usb_task(void *arg) {                         /* TinyUSB: receive c
     uint32_t seq = 1;
     for (unsigned i = 0; i < ITERATIONS; i++) {
         const uint32_t x = next_rand(&r);
-        const uint16_t len = (x & 3) == 0 ? (uint16_t)(24 + (x >> 8) % 80) : (uint16_t)(24 + (x >> 8) % 1491);
+        const uint16_t len = (x & 3) == 0 ? (uint16_t)(80 + (x >> 8) % 80) : (uint16_t)(80 + (x >> 8) % 1435);
         build_frame(f, len, true, KIND_UNICAST, seq++);
         host_tx(f, len);
         atomic_fetch_add(&usb_sent, 1);

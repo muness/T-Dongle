@@ -5,30 +5,68 @@ static const uint8_t sta_mac[6] = {2, 1, 2, 3, 4, 5}, peer_mac[6] = {0x00, 0x1a,
 static const uint8_t dst_peer[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55}, dst_bcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
                      dst_mcast[6] = {0x33, 0x33, 0x00, 0x00, 0x00, 0x16};
 enum { KIND_UNICAST, KIND_BCAST, KIND_MCAST };
-/* Wi-Fi to host frames come from `peer_mac` to the STA MAC, host to Wi-Fi frames from the STA MAC. Ethertype follows the sequence: ARP, IPv4, IPv6. */
+/* Wi-Fi to host frames come from `peer_mac` to the STA MAC, host to Wi-Fi frames from the STA MAC. The Ethertype follows the sequence: ARP, IPv4, IPv6;
+ * the IP frames carry a REAL header (valid IPv4 checksum, TCP ACK so nothing is exempt) whose ECN field cycles not-ECT / ECT(1) / ECT(0) / CE, so CoDel has
+ * something to mark, drop or leave alone, and the observers can tell a marked frame from a damaged one. The sequence number, the length and the pattern live
+ * at offset 60 on, clear of every header. Minimum length 80. */
+#define FRAME_MIN 80u
+#define FRAME_SEQ 60u
+static uint16_t csum_ip(const uint8_t *p, unsigned n) { uint32_t sum = 0; for (unsigned i = 0; i + 1 < n; i += 2) sum += (uint32_t)(p[i] << 8) | p[i + 1]; while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16); return (uint16_t)~sum; }
+static unsigned frame_ecn(uint32_t seq) { return (seq / 3) % 4; }       /* 0 not-ECT, 1 ECT(1), 2 ECT(0), 3 CE */
 static uint16_t build_frame(uint8_t *f, uint16_t len, bool from_host, int kind, uint32_t seq) {
-    assert(len >= 24 && len <= TDONGLE_L2_FRAME_MAX);
+    assert(len >= FRAME_MIN && len <= TDONGLE_L2_FRAME_MAX);
     memcpy(f, kind == KIND_UNICAST ? (from_host ? dst_peer : sta_mac) : kind == KIND_BCAST ? dst_bcast : dst_mcast, 6);
     memcpy(f + 6, from_host ? sta_mac : peer_mac, 6);
-    static const uint8_t ethertype[3][2] = {{0x08, 0x06}, {0x08, 0x00}, {0x86, 0xdd}};
-    memcpy(f + 12, ethertype[seq % 3], 2);
-    memcpy(f + 14, &seq, 4);
-    f[18] = (uint8_t)(len >> 8); f[19] = (uint8_t)len;
-    for (uint16_t i = 20; i < len; i++) f[i] = (uint8_t)(seq * 7 + len + i);
+    memset(f + 12, 0, len - 12);
+    for (unsigned i = 14; i < 60; i++) f[i] = (uint8_t)(seq * 13 + i);                       /* ARP and anything else: a pattern, never touched */
+    if (seq % 3 == 1) {                                                                       /* IPv4 + TCP ACK */
+        f[12] = 0x08; f[13] = 0x00;
+        memset(f + 14, 0, 40);
+        f[14] = 0x45; f[15] = (uint8_t)((seq % 64) << 2 | frame_ecn(seq)); f[16] = (uint8_t)((len - 14) >> 8); f[17] = (uint8_t)(len - 14);
+        f[18] = (uint8_t)(seq >> 8); f[19] = (uint8_t)seq; f[22] = 64; f[23] = 6;
+        f[26] = 10; f[29] = 1; f[30] = 10; f[33] = 2;
+        f[34 + 12] = 0x50; f[34 + 13] = 0x10; f[34] = 0x13; f[35] = 0x88; f[36] = 0x1f; f[37] = 0x90;
+        const uint16_t hc = csum_ip(f + 14, 20); f[24] = (uint8_t)(hc >> 8); f[25] = (uint8_t)hc;
+    } else if (seq % 3 == 2) {                                                                // IPv6 + TCP ACK
+        f[12] = 0x86; f[13] = 0xdd;
+        memset(f + 14, 0, 40 + 20);
+        f[14] = (uint8_t)(0x60 | ((seq % 64) << 2 | frame_ecn(seq)) >> 4); f[15] = (uint8_t)((((seq % 64) << 2 | frame_ecn(seq)) & 15) << 4);
+        f[18] = (uint8_t)((len - 54) >> 8); f[19] = (uint8_t)(len - 54); f[20] = 6; f[21] = 64;
+        f[22 + 15] = 1; f[38 + 15] = 2;
+        f[54 + 12] = 0x50; f[54 + 13] = 0x10;
+    } else {
+        f[12] = 0x08; f[13] = 0x06;
+    }
+    memcpy(f + FRAME_SEQ, &seq, 4);
+    f[FRAME_SEQ + 4] = (uint8_t)(len >> 8); f[FRAME_SEQ + 5] = (uint8_t)len;
+    for (uint16_t i = FRAME_SEQ + 6; i < len; i++) f[i] = (uint8_t)(seq * 7 + len + i);
     return len;
 }
-static uint32_t check_frame(const uint8_t *f, uint16_t len, bool from_host) {
-    assert(len >= 24 && !memcmp(f + 6, from_host ? sta_mac : peer_mac, 6));
+/* Returns the sequence number and whether CoDel marked the frame. `may_mark`: the host -> Wi-Fi direction, where CE is the only change allowed. */
+static uint32_t check_frame_ex(const uint8_t *f, uint16_t len, bool from_host, bool may_mark, bool *marked) {
+    assert(len >= FRAME_MIN && !memcmp(f + 6, from_host ? sta_mac : peer_mac, 6));
     uint32_t seq;
-    memcpy(&seq, f + 14, 4);
-    assert(f[18] == (uint8_t)(len >> 8) && f[19] == (uint8_t)len);
-    for (uint16_t i = 20; i < len; i++) assert(f[i] == (uint8_t)(seq * 7 + len + i));
+    memcpy(&seq, f + FRAME_SEQ, 4);
+    assert(f[FRAME_SEQ + 4] == (uint8_t)(len >> 8) && f[FRAME_SEQ + 5] == (uint8_t)len);
+    uint8_t want[TDONGLE_L2_FRAME_MAX];
+    build_frame(want, len, from_host, !memcmp(f, dst_bcast, 6) ? KIND_BCAST : !memcmp(f, dst_mcast, 6) ? KIND_MCAST : KIND_UNICAST, seq);
+    bool m = false;
+    if (may_mark && seq % 3 == 1 && (frame_ecn(seq) == 1 || frame_ecn(seq) == 2) && (f[15] & 3) == 3) {
+        want[15] |= 3; m = true;
+        want[24] = want[25] = 0;
+        const uint16_t hc = csum_ip(want + 14, 20); want[24] = (uint8_t)(hc >> 8); want[25] = (uint8_t)hc;       /* what a correct incremental update yields */
+        assert(csum_ip(f + 14, 20) == 0);
+    }
+    if (may_mark && seq % 3 == 2 && (frame_ecn(seq) == 1 || frame_ecn(seq) == 2) && (f[15] & 0x30) == 0x30) { want[15] |= 0x30; m = true; }
+    assert(!memcmp(f, want, len));
+    if (marked) *marked = m;
     return seq;
 }
+static uint32_t check_frame(const uint8_t *f, uint16_t len, bool from_host) { return check_frame_ex(f, len, from_host, false, NULL); }
 
 /* ---- observers ---- */
 static uint32_t usb_last_seq, air_last_seq;
-static bool air_may_reorder;                  /* sparse-flow priority is allowed to put an ACK or a ping ahead of bulk: the air order is then not the host's */
+static _Atomic unsigned air_ce_seen;          /* frames that reached the air marked CE (and were verified as a correct marking) */
 static bool usb_have, air_have;
 static _Atomic unsigned usb_delivered, air_delivered;
 static void usb_observe(const uint8_t *f, uint16_t len) {              /* inside tud_network_xmit: the frame enters an NTB */
@@ -39,9 +77,11 @@ static void usb_observe(const uint8_t *f, uint16_t len) {              /* inside
     atomic_fetch_add(&usb_delivered, 1);
 }
 static void air_observe(const uint8_t *f, uint16_t len) {              /* the pp task: a frame leaves the antenna */
-    const uint32_t seq = check_frame(f, len, true);
-    assert(air_may_reorder || !air_have || seq > air_last_seq);
-    if (!air_have || seq > air_last_seq) air_last_seq = seq;
+    bool marked;
+    const uint32_t seq = check_frame_ex(f, len, true, true, &marked);
+    if (marked) atomic_fetch_add(&air_ce_seen, 1);
+    assert(!air_have || seq > air_last_seq);
+    air_last_seq = seq;
     air_have = true;
     atomic_fetch_add(&air_delivered, 1);
 }
@@ -50,7 +90,7 @@ static void air_observe(const uint8_t *f, uint16_t len) {              /* the pp
 #define HEAP_BRIDGE 140000L         /* about what the bridge image has free: no tailnet runtime, no membership */
 static bool wifi_up;
 #define BRIDGE_RING_BASE 8u            /* gateway_main.c: GATEWAY_BRIDGE_TX_BASE_FRAMES */
-#define BRIDGE_RING_CHUNKS 6u          /* GATEWAY_BRIDGE_TX_MAX_CHUNKS */
+#define BRIDGE_RING_CHUNKS 10u          /* GATEWAY_BRIDGE_TX_MAX_CHUNKS */
 #define BRIDGE_WIFI_INFLIGHT 6u        /* GATEWAY_BRIDGE_WIFI_TX_INFLIGHT */
 #define BRIDGE_RING_FRAMES (BRIDGE_RING_BASE + BRIDGE_RING_CHUNKS * TINYUSB_NET_TX_CHUNK_SLABS)
 static size_t heap_must_stay_above = ML_HB_RESERVE;   /* the lowest free heap any operation may leave (a case with a deliberately tiny heap lowers it) */
@@ -118,7 +158,7 @@ static void world_reset(long total, bool dfs) {
     drv_pool = GATEWAY_WIFI_TX_POOL; drv_force_error = 0; drv_cb_result = 0; drv_done_cb = NULL; atomic_store(&drv_rxcb, NULL);
     drv_accepted = drv_aired = drv_cleared = drv_refused_pool = drv_calls = 0;
     atomic_store(&rx_frees, 0);
-    usb_have = air_have = false; air_may_reorder = false; atomic_store(&usb_delivered, 0); atomic_store(&air_delivered, 0);
+    usb_have = air_have = false; atomic_store(&air_ce_seen, 0); atomic_store(&usb_delivered, 0); atomic_store(&air_delivered, 0);
     atomic_store(&host_carrier, 0); atomic_store(&host_carrier_changes, 0);
     xmit_hook = usb_observe;
     recv_renew_hook = class_pump; cls_n = cls_naks = cls_taken = 0; cls_active = cls_again = false; recv_renew_calls = 0;
@@ -144,7 +184,7 @@ static void world_reset(long total, bool dfs) {
     assert(tinyusb_net_tx_ring_start(&tx) == ESP_OK);
     free(l2.slots);
     memset(&l2, 0, sizeof(l2));
-    const tdongle_l2_config_t bridge = {.wifi_tx = wifi_pins_bridge_tx, .wifi_room = wifi_pins_tx_room, .rx_resume = tinyusb_net_rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
+    const tdongle_l2_config_t bridge = {.wifi_tx = wifi_pins_tx, .wifi_room = wifi_pins_tx_room, .rx_resume = tinyusb_net_rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
     assert(tdongle_l2_start(sta_mac, &bridge) == ESP_OK);
     wifi_up = false;
 }
@@ -195,8 +235,8 @@ static void check_world(void) {
     const tdongle_l2_stats_t s = l2_stats();
     assert(s.w2h_frames == s.w2h_forwarded + s.w2h_invalid + s.w2h_own_mac + s.w2h_link_down + s.w2h_usb_not_ready + s.w2h_ring_full);
     assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down);   /* a held offer is not a frame */
-    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
-    assert(s.h2w_queue_depth <= TDONGLE_L2_HOST_SLOTS + TDONGLE_L2_SPARSE_SLOTS && s.h2w_queue_high_water <= TDONGLE_L2_HOST_SLOTS && cls_n <= CLASS_CAP_FRAMES);
+    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_codel_drop + s.h2w_queue_depth);
+    assert(s.h2w_queue_depth <= TDONGLE_L2_HOST_SLOTS && s.h2w_queue_high_water <= TDONGLE_L2_HOST_SLOTS && cls_n <= CLASS_CAP_FRAMES);
     /* The ring: every frame the bridge handed it is queued, delivered to an NTB or flushed, and the USB side saw exactly the delivered ones. */
     const tinyusb_net_tx_stats_t r = ring_stats();
     assert(s.w2h_forwarded == r.enqueued_frames);
@@ -225,7 +265,7 @@ static void check_final(void) {
     const tdongle_l2_stats_t s = l2_stats();
     const tinyusb_net_tx_stats_t t = ring_stats();
     assert(t.enqueued_frames == t.sent_frames + t.flushed_link_down && t.sent_frames == atomic_load(&usb_delivered) && s.w2h_forwarded == t.enqueued_frames);
-    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed && s.h2w_sent == drv_accepted);
+    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_codel_drop && s.h2w_sent == drv_accepted);
     assert(drv_accepted == drv_aired + drv_cleared && atomic_load(&air_delivered) == drv_aired && gw_wtx_outstanding(&wifi_pins) == 0);
     assert(atomic_load(&wifi_pins.tx_charged) == atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_aborted) + atomic_load(&wifi_pins.tx_flushed) + atomic_load(&wifi_pins.tx_stale));
     assert(atomic_load(&rx_frees) == s.w2h_frames);                 /* the driver's RX buffer: freed exactly once per frame it handed over */

@@ -71,14 +71,15 @@ _Static_assert(CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM >= GATEWAY_WIFI_TX_BAND_MAX
                "the Wi-Fi TX pool must hold the TX band and fit the pin budget's FIFO (wifi_pin_budget.h)");
 _Static_assert(GATEWAY_WIFI_TX_POOL == CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM, "the pin budget must follow the configured TX pool");
 /* The transparent bridge's ring (ADR 0023): Wi-Fi to host. Same mechanism, same floors, no gate (there is no negotiation). Sized from evidence:
- * 32 frames (55 ms of USB time, 48,768 B) cost heap and, with a 16-slot host queue, ping; 12 frames made UDP download lose 5% at 4 Mbit/s (1% before)
- * and 37% at 8 (ring_full 2,355). Nothing can backpressure Wi-Fi, so on this direction the ring is the burst absorber, and its delay only exists while a
- * download is running (it is not in the ping's way during upload). 8 permanent + 6 elastic chunks = 20 frames = 30 KB = 35 ms of USB time: absorbs two
- * A-MPDU bursts, bounded in time by the assert below. Retune from `bridge_usb_ring dropped_full` and `high_water_slabs`. */
+ * 32 frames cost heap and, with the then 16-slot host queue, ping; 12 lost 5% / 37% of UDP download at 4 / 8 Mbit/s; the board's ring sweep at 8 Mbit/s
+ * (ring = 2 / 6 / 10 chunks) lost 12% / 9% / 7% with the heap minimum still 102 KB. Nothing can backpressure Wi-Fi, so on this direction the ring is the
+ * burst absorber, and its delay exists only while a download runs (the host-side latency under upload does not pass through it). 8 permanent frames +
+ * 10 elastic chunks of 2 = 28 frames = 42.7 KB = 49 ms of USB time at the bus limit: two A-MPDU bursts and then some, elastic (grown only above the
+ * heap floor and returned 10 s after the burst), bounded in time by the assert below, and below the ring's 32-slab limit. */
 #define GATEWAY_BRIDGE_TX_BASE_FRAMES 8u
-#define GATEWAY_BRIDGE_TX_MAX_CHUNKS 6u
+#define GATEWAY_BRIDGE_TX_MAX_CHUNKS 10u
 #define GATEWAY_BRIDGE_TX_MAX_FRAMES (GATEWAY_BRIDGE_TX_BASE_FRAMES + GATEWAY_BRIDGE_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_SLABS)
-#define GATEWAY_BRIDGE_RING_MAX_DRAIN_MS 36u   /* the longest a full ring may take to drain at the USB bus limit */
+#define GATEWAY_BRIDGE_RING_MAX_DRAIN_MS 50u   /* the longest a full ring may take to drain at the USB bus limit */
 /* Host to Wi-Fi: the radio is given this many frames at a time, not the driver's 16. The TX block-ack window is 6 (CONFIG_ESP_WIFI_TX_BA_WIN), so
  * 6 in flight is one full aggregate; every frame beyond is queueing delay in front of every other packet (16 frames at 6.5 Mbit/s are 30 ms). With
  * USB backpressure (tdongle_l2.h) this and the host queue (3) are the whole standing queue in the dongle. */
@@ -95,7 +96,7 @@ _Static_assert(TDONGLE_L2_HOST_QUEUE_LIMIT * TDONGLE_L2_SLOT_BYTES / 875 <= 6,
                "the host -> Wi-Fi standing queue must drain, at the USB OUT limit, in a few milliseconds: it is behind the host's own backpressure");
 /* Boot-heap neutrality against the original bridge: its permanent buffering was 32 pool frames of 1,524 B, its worker's stack and TCB. */
 _Static_assert(GATEWAY_BRIDGE_TX_BASE_FRAMES * TINYUSB_NET_TX_SLAB_BYTES + 1536 + 340 +
-               (TDONGLE_L2_HOST_SLOTS + TDONGLE_L2_SPARSE_SLOTS) * TDONGLE_L2_SLOT_BYTES + GATEWAY_BRIDGE_TASK_STACK + 340 <=
+               TDONGLE_L2_HOST_SLOTS * TDONGLE_L2_SLOT_BYTES + GATEWAY_BRIDGE_TASK_STACK + 340 <=
                32 * 1524 + 3072 + 340,   /* the original l2.c: 32 pool frames, the 3,072 B stack of its worker, its TCB */
                "the bridge's permanent buffering (ring base, ring worker, host queue, forwarder) grew past what the original bridge held");
 /* Bridge task scheme (gateway.h): the same core and the same constants as the tailnet mode, with the l2 forwarder where usb_routes is. */
@@ -1498,7 +1499,7 @@ static esp_err_t start_wifi(void) {
     if(!gateway_tailnet_mode()){
         uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);
         wifi_pins_set_tx_limit(GATEWAY_BRIDGE_WIFI_TX_INFLIGHT);   /* the radio's allowance in bridge mode (ADR 0023 amendment 2) */
-        const tdongle_l2_config_t bridge={.wifi_tx=wifi_pins_bridge_tx,.wifi_room=wifi_pins_tx_room,.rx_resume=tinyusb_net_rx_resume,.task_priority=GATEWAY_TASK_BRIDGE_PRIO,.task_core=GATEWAY_TASK_BRIDGE_CORE,.task_stack=GATEWAY_BRIDGE_TASK_STACK};
+        const tdongle_l2_config_t bridge={.wifi_tx=wifi_pins_tx,.wifi_room=wifi_pins_tx_room,.rx_resume=tinyusb_net_rx_resume,.task_priority=GATEWAY_TASK_BRIDGE_PRIO,.task_core=GATEWAY_TASK_BRIDGE_CORE,.task_stack=GATEWAY_BRIDGE_TASK_STACK};
         START_TRY(tdongle_l2_start(mac,&bridge));
     }
     wifi_init_config_t w=WIFI_INIT_CONFIG_DEFAULT();

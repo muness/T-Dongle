@@ -48,7 +48,7 @@ static void test_bytes_both_directions(void) {
     restart_sequences();
     wifi_connect();
     atomic_store(&air_must_be_max, false);          /* host broadcasts do not raise the clock (see test_dfs) */
-    static const uint16_t sizes[] = {24, 60, 99, 342, 590, 1000, 1400, 1500, 1514};
+    static const uint16_t sizes[] = {80, 99, 342, 590, 1000, 1400, 1500, 1514};
     unsigned w = 0, h = 0;
     for (unsigned i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++)
         for (int kind = KIND_UNICAST; kind <= KIND_MCAST; kind++) {
@@ -502,7 +502,7 @@ static void test_status_lines(void) {
     assert(seen_value("to_wifi", "frames") == seen_value("to_wifi", "queued") + seen_value("to_wifi", "invalid") + seen_value("to_wifi", "foreign_mac") +
                seen_value("to_wifi", "link_down"));
     assert(seen_value("to_wifi", "queued") == seen_value("to_wifi", "sent") + seen_value("to_wifi", "stale") + seen_value("to_wifi", "sojourn_drop") + seen_value("to_wifi", "link_down_queued") +
-               seen_value("to_wifi", "tx_failed") + seen_value("to_wifi", "queue_depth"));
+               seen_value("to_wifi", "tx_failed") + seen_value("to_wifi", "codel_drop") + seen_value("to_wifi", "queue_depth"));
     assert(seen_value("wifi_tx", "charged") == seen_value("wifi_tx", "done") + seen_value("wifi_tx", "aborted") + seen_value("wifi_tx", "flushed") +
                seen_value("wifi_tx", "stale") + seen_value("wifi_tx", "inflight"));
     assert(seen_value("usb_ring", "enqueued") == seen_value("to_host", "forwarded") && seen_value("to_host", "ring_full") > 0 && seen_value("to_wifi", "tx_failed") == 1);
@@ -526,7 +526,7 @@ static void test_status_lines(void) {
     assert(lines == 7 && fields == seen_n);
     assert(strstr(serial_out, "bridge_to_host frames=") && strstr(serial_out, " ring_full=") && strstr(serial_out, " last_tx_error=") && strstr(serial_out, "bridge_wifi_tx installed=1"));
     /* The diagnostics report, built the way memory_diagnostics.inc builds it, is the same set. */
-    assert(seen_n == 3 + 8 + 17 + 9 + 12 + 13 + 12);
+    assert(seen_n == 3 + 8 + 20 + 9 + 12 + 15 + 12);
 }
 
 
@@ -536,29 +536,29 @@ static void test_bridge_tune(void) {
     world_reset(HEAP_BRIDGE, true);
     restart_sequences();
     wifi_connect();
-    air_may_reorder = true;                          /* prio=1 below: sparse frames may overtake bulk */
     tune("");
-    assert(strstr(serial_out, "bridgetune q=3 resume=1 inflight=6 ring=6 sojourn_ms=100 prio=0") && strstr(serial_out, "bridgetune_bounds q=1..8 resume=0..q-1 inflight=4..16 ring=0..12 sojourn_ms=5..190"));
-    tune("q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 prio=1");
-    assert(strstr(serial_out, "bridgetune q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 prio=1") && !strstr(serial_out, "ERR"));
+    assert(strstr(serial_out, "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=0 target_us=5000 interval_ms=100") &&
+           strstr(serial_out, "bridgetune_bounds q=1..8 resume=0..q-1 inflight=4..16 ring=0..12 sojourn_ms=5..190 codel=0..1 target_us=500..50000 interval_ms=20..1000"));
+    tune("q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50");
+    assert(strstr(serial_out, "bridgetune q=5 resume=2 inflight=8 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50") && !strstr(serial_out, "ERR"));
     tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
-    assert(t.queue_limit == 5 && t.resume_depth == 2 && t.sojourn_ms == 60 && t.prio && wifi_pins_tx_limit_now() == 8 && tinyusb_net_tx_ring_max_chunks() == 3);
+    assert(t.queue_limit == 5 && t.resume_depth == 2 && t.sojourn_ms == 60 && t.codel && t.codel_target_us == 3000 && t.codel_interval_ms == 50 &&
+           wifi_pins_tx_limit_now() == 8 && tinyusb_net_tx_ring_max_chunks() == 3);
     assert(ring_stats().max_bytes == (BRIDGE_RING_BASE + 3 * TINYUSB_NET_TX_CHUNK_SLABS) * TINYUSB_NET_TX_SLAB_BYTES);
-    assert(atomic_load(&wifi_pins.tx_sparse_extra) == GATEWAY_BRIDGE_SPARSE_RESERVE);
     /* Partial commands change only what they name. */
     tune("inflight=5");
-    assert(strstr(serial_out, "q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 prio=1"));
+    assert(strstr(serial_out, "q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50"));
     /* Every rejection leaves everything as it was, even when only one field is bad. */
-    const char *bad[] = {"q=0", "q=9", "resume=5", "inflight=3", "inflight=17", "ring=13", "sojourn_ms=4", "sojourn_ms=191", "prio=2", "q=2 sojourn_ms=1",
-                         "bogus=1", "q", "q=", "q=x", "=3", "q=3 q"};
+    const char *bad[] = {"q=0", "q=9", "resume=5", "inflight=3", "inflight=17", "ring=13", "sojourn_ms=4", "sojourn_ms=191", "codel=2", "target_us=499", "target_us=50001",
+                         "interval_ms=19", "interval_ms=1001", "q=2 sojourn_ms=1", "q=2 codel=1 interval_ms=5", "bogus=1", "prio=1", "q", "q=", "q=x", "=3", "q=3 q"};
     for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
         tune(bad[i]);
-        assert(strstr(serial_out, "ERR bridgetune:") && strstr(serial_out, "bridgetune q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 prio=1"));
+        assert(strstr(serial_out, "ERR bridgetune:") && strstr(serial_out, "bridgetune q=5 resume=2 inflight=5 ring=3 sojourn_ms=60 codel=1 target_us=3000 interval_ms=50"));
         tdongle_l2_get_tuning(&t);
-        assert(t.queue_limit == 5 && t.sojourn_ms == 60 && wifi_pins_tx_limit_now() == 5 && tinyusb_net_tx_ring_max_chunks() == 3);
+        assert(t.queue_limit == 5 && t.sojourn_ms == 60 && t.codel_target_us == 3000 && wifi_pins_tx_limit_now() == 5 && tinyusb_net_tx_ring_max_chunks() == 3);
     }
     /* The knobs bite: the queue limit holds the host at 2, the radio allowance is 4 (the minimum), the ring cap is 0 (8 frames). */
-    tune("q=2 resume=0 inflight=4 ring=0 sojourn_ms=100 prio=0");
+    tune("q=2 resume=0 inflight=4 ring=0 sojourn_ms=100 codel=0 target_us=5000 interval_ms=100");
     assert(!strstr(serial_out, "ERR"));
     for (int i = 0; i < 3; i++) { build_frame(frame_buf, 1000, true, KIND_UNICAST, hseq); const esp_err_t r = host_tx(frame_buf, 1000); if (r == ESP_OK) hseq++; else assert(r == TUSB_NET_RX_HOLD); }
     assert(l2_stats().h2w_queue_depth == 2 && l2_stats().h2w_held == 1);
@@ -570,20 +570,55 @@ static void test_bridge_tune(void) {
     ntb_credit = -1;
     settle();
     check_world();
-    /* The priority reserve in the real budget: with the radio full, a sparse frame still goes (reserve 2), bulk waits. */
-    tune("q=3 resume=1 inflight=4 ring=6 prio=1");
-    for (int i = 0; i < 4; i++) { send_to_wifi(1000, KIND_UNICAST); pump_l2(); }
-    assert(drv_depth() == 4 && gw_wtx_outstanding(&wifi_pins) == 4);
-    assert(!wifi_pins_tx_room(false) && wifi_pins_tx_room(true));
-    uint8_t ping[100];
-    build_frame(ping, 100, true, KIND_UNICAST, hseq);                       /* build_frame's ethertype cycles ARP / IPv4 / IPv6 by sequence: use ARP */
-    ping[12] = 0x08; ping[13] = 0x06;
-    assert(host_tx(ping, 100) == ESP_OK && l2_stats().h2w_sparse == 1);
-    pump_l2();                                                              /* served at once through the reserve: the radio now holds 5 */
-    assert(drv_depth() == 5 && l2_stats().h2w_sent >= 1);
-    hseq++;
+}
+
+/* CoDel end to end (ADR 0023 amendment 4): with the host saturating the pipe through the class driver, CoDel marks ECT frames (the observer proves each mark
+ * is a correct one: CE set, IPv4 checksum valid, nothing else changed), drops only not-ECT IP frames, never touches ARP, CE frames pass; counters identities
+ * hold; and with it off nothing of the sort happens. */
+static unsigned radio_waits;
+static void radio_wait_hook(void) { if (++radio_waits % 4 == 0) drv_complete(1); }      /* the radio completes one frame per 2 ms (four 500 us waits): ~4 Mbit/s of 1,000 B frames */
+static void saturate_with_codel(bool on, unsigned frames) {
+    world_reset(HEAP_BRIDGE, true);
+    restart_sequences();
+    wifi_connect();
+    tune(on ? "codel=1 target_us=1000 interval_ms=20" : "codel=0");
+    assert(!strstr(serial_out, "ERR"));
+    wait_hook = radio_wait_hook;
+    radio_waits = 0;
+    for (unsigned i = 0; i < frames; i++) {
+        for (int k = 0; k < 4; k++) {                                       /* the host offers four frames for every one the radio can take: the pipe stays full */
+            build_frame(frame_buf, 1000, true, KIND_UNICAST, hseq);
+            if (host_usb_send(frame_buf, 1000)) hseq++;
+        }
+        pump_l2(); run_deferred();
+        check_world();
+    }
+    wait_hook = NULL;
     settle();
     check_world();
+}
+static void test_codel(void) {
+    saturate_with_codel(false, 400);
+    tdongle_l2_stats_t s = l2_stats();
+    assert(s.h2w_codel_signals == 0 && s.h2w_ce_marked == 0 && s.h2w_codel_drop == 0 && atomic_load(&air_ce_seen) == 0 && s.h2w_held > 100);
+    const unsigned sent_off = s.h2w_sent;
+    saturate_with_codel(true, 400);
+    s = l2_stats();
+    assert(s.h2w_held > 100);                                         /* the pipe was saturated: that is what CoDel measures */
+    assert(s.h2w_codel_signals > 10 && s.h2w_ce_marked > 3 && s.h2w_codel_drop > 3);
+    assert(s.h2w_codel_signals >= s.h2w_ce_marked + s.h2w_codel_drop);          /* (a signal on an already-CE frame is satisfied by it) */
+    assert(atomic_load(&air_ce_seen) == s.h2w_ce_marked);                       /* every mark reached the air, and the observer proved each one a correct marking */
+    assert(s.h2w_sent > sent_off / 2);                                /* congestion control, not a shutdown */
+    assert(s.h2w_signal_us_max >= 1000);
+    check_world();
+    /* The pipe finds slack (a trickle with room): the controller goes quiet and nothing more is signalled. */
+    const unsigned before = l2_stats().h2w_codel_signals;
+    for (int i = 0; i < 100; i++) { advance_ms(30); build_frame(frame_buf, 200, true, KIND_UNICAST, hseq); if (host_usb_send(frame_buf, 200)) hseq++; pump_l2(); run_deferred(); drv_complete(4); }
+    settle();
+    assert(l2_stats().h2w_codel_signals == before);
+    check_world();
+    /* Never the frames it must not touch: ARP-typed frames (every third sequence number) always arrive intact (the observer verified each byte). */
+    assert(atomic_load(&air_delivered) > 100);
 }
 
 /* A long random run: every operation, in any order, with the checks after each one. */
@@ -597,7 +632,7 @@ static void soak(unsigned seed, long total, bool dfs, unsigned steps, unsigned t
     bool unplugged = false;
     for (unsigned step = 0; step < steps; step++) {
         const unsigned r = rnd(100);
-        const uint16_t len = rnd(4) == 0 ? (uint16_t)(24 + rnd(80)) : rnd(3) == 0 ? (uint16_t)(1400 + rnd(115)) : (uint16_t)(24 + rnd(1491));
+        const uint16_t len = rnd(4) == 0 ? (uint16_t)(80 + rnd(80)) : rnd(3) == 0 ? (uint16_t)(1400 + rnd(115)) : (uint16_t)(80 + rnd(1435));
         bool ring_step = false;
         if (r < 28) {
             const unsigned k = rnd(100);
@@ -625,10 +660,10 @@ static void soak(unsigned seed, long total, bool dfs, unsigned steps, unsigned t
         else if (rnd(4) == 0) class_reset();
         else if (rnd(3) == 0) {                         /* any tuning, within bounds, mid-flight */
             bridge_tune_t t = {.q = 1 + rnd(TDONGLE_L2_HOST_SLOTS), .inflight = GATEWAY_WIFI_TX_BAND_MAX + rnd(GATEWAY_WIFI_TX_POOL - GATEWAY_WIFI_TX_BAND_MAX + 1),
-                               .ring = rnd(TINYUSB_NET_TX_MAX_CHUNKS + 1), .sojourn_ms = TDONGLE_L2_SOJOURN_MS_MIN + rnd(TDONGLE_L2_SOJOURN_MS_MAX - TDONGLE_L2_SOJOURN_MS_MIN + 1), .prio = rnd(2)};
+                               .ring = rnd(TINYUSB_NET_TX_MAX_CHUNKS + 1), .sojourn_ms = TDONGLE_L2_SOJOURN_MS_MIN + rnd(TDONGLE_L2_SOJOURN_MS_MAX - TDONGLE_L2_SOJOURN_MS_MIN + 1),
+                               .codel = rnd(2), .target_us = TDONGLE_L2_CODEL_TARGET_US_MIN + rnd(5000), .interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MIN + rnd(200)};
             t.resume = rnd(t.q);
             assert(bridge_tune_apply(&t) == NULL);
-            if (t.prio) air_may_reorder = true;
         }           /* a USB reset: the class driver forgets what it held */
         else allow_tx = !allow_tx || rnd(2);
         if (drv_force_error) errors++;
@@ -666,6 +701,7 @@ int main(void) {
     test_dfs();
     test_status_lines();
     test_bridge_tune();
+    test_codel();
     for (unsigned seed = 1; seed <= 6; seed++) soak(seed, HEAP_BRIDGE, true, 60000, 0);
     for (unsigned seed = 11; seed <= 16; seed++) soak(seed, ML_HB_FLOOR + 8 * TINYUSB_NET_TX_SLAB_BYTES + 6000, true, 60000, 1);
     for (unsigned seed = 21; seed <= 22; seed++) soak(seed, HEAP_BRIDGE, false, 60000, 0);

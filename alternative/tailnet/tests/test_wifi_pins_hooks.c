@@ -238,20 +238,14 @@ int main(void) {
     wifi_pins_link_changed();                                  /* the driver cleared its queues: the charges go, no netif needed */
     /* The bridge's allowance (ADR 0023 amendment 2): fewer frames in flight than the pool, waited for through wifi_pins_tx_room(), refused as pool-full if asked anyway. */
     g_free_heap = 1u << 20;
-    assert(wifi_pins_tx_room(false) && wifi_pins_tx_limit_now() == 0);       /* limit 0: the driver's pool */
+    assert(wifi_pins_tx_room() && wifi_pins_tx_limit_now() == 0);       /* limit 0: the driver's pool */
     wifi_pins_set_tx_limit(2);
-    assert(wifi_pins_tx((void *)"x", 1514) == ESP_OK && wifi_pins_tx_room(false) && wifi_pins_tx((void *)"x", 1514) == ESP_OK);
-    assert(!wifi_pins_tx_room(false) && !wifi_pins_tx_room(true));      /* no reserve configured: a sparse frame waits like any other */
-    wifi_pins_set_sparse_extra(1);                                      /* the priority reserve: one more charge for a sparse frame, never for bulk */
-    assert(!wifi_pins_tx_room(false) && wifi_pins_tx_room(true) && wifi_pins_bridge_tx((void *)"x", 66, true) == ESP_OK);
-    assert(!wifi_pins_tx_room(true) && wifi_pins_bridge_tx((void *)"x", 66, true) == ESP_ERR_NO_MEM);
-    g_done_cb(WIFI_IF_STA, NULL, NULL, true);
-    wifi_pins_set_sparse_extra(0);
+    assert(wifi_pins_tx((void *)"x", 1514) == ESP_OK && wifi_pins_tx_room() && wifi_pins_tx((void *)"x", 1514) == ESP_OK);
+    assert(!wifi_pins_tx_room());
     g_tx_calls = 0;
-    assert(wifi_pins_tx((void *)"x", 1514) == ESP_ERR_NO_MEM && g_tx_calls == 0 && atomic_load(&wifi_pins.tx_refused_pool) == 2);
+    assert(wifi_pins_tx((void *)"x", 1514) == ESP_ERR_NO_MEM && g_tx_calls == 0 && atomic_load(&wifi_pins.tx_refused_pool) == 1);
     g_done_cb(WIFI_IF_STA, NULL, NULL, true);
-    g_done_cb(WIFI_IF_STA, NULL, NULL, true);
-    assert(wifi_pins_tx_room(false) && wifi_pins_tx((void *)"x", 1514) == ESP_OK);
+    assert(wifi_pins_tx_room() && wifi_pins_tx((void *)"x", 1514) == ESP_OK);
     wifi_pins_set_tx_limit(0);
     wifi_pins_link_changed();
     assert(wifi_pins_tx_outstanding() == 0);

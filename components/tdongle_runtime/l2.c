@@ -5,6 +5,7 @@
  * usbd_defer_func() waits forever when its event queue is full), so each only copies and returns. The state they share with the worker is
  * a pair of free-running counters over a fixed slot array (single producer, single consumer, no lock) and atomics. */
 #include "tdongle_l2.h"
+#include "tdongle_aqm.h"
 #include "tdongle_pm.h"
 #include "esp_private/wifi.h"
 #include "esp_timer.h"
@@ -26,7 +27,6 @@ typedef struct {
 _Static_assert(sizeof(host_slot_t) <= TDONGLE_L2_SLOT_BYTES, "TDONGLE_L2_SLOT_BYTES is the size the heap budget is written with");
 _Static_assert((TDONGLE_L2_HOST_SLOTS & (TDONGLE_L2_HOST_SLOTS - 1u)) == 0, "the slot counters run free: the slot count must divide 2^32");
 _Static_assert(TDONGLE_L2_SOJOURN_MS >= TDONGLE_L2_SOJOURN_MS_MIN && TDONGLE_L2_SOJOURN_MS <= TDONGLE_L2_SOJOURN_MS_MAX, "the default sojourn limit is inside its bounds");
-_Static_assert((TDONGLE_L2_SPARSE_SLOTS & (TDONGLE_L2_SPARSE_SLOTS - 1u)) == 0, "the sparse queue counters run free too");
 _Static_assert(TDONGLE_L2_HOST_RESUME_DEPTH < TDONGLE_L2_HOST_QUEUE_LIMIT, "resume below the limit, or the pipe is released at the moment it is refused again");
 _Static_assert(TDONGLE_L2_HOST_QUEUE_LIMIT >= 2 && TDONGLE_L2_HOST_QUEUE_LIMIT <= TDONGLE_L2_HOST_SLOTS, "the standing-queue limit lives inside the slot array");
 _Static_assert((uint64_t)TDONGLE_L2_SOJOURN_MS_MAX * 1000u < TDONGLE_PM_ACTIVITY_HOLD_US,
@@ -34,20 +34,23 @@ _Static_assert((uint64_t)TDONGLE_L2_SOJOURN_MS_MAX * 1000u < TDONGLE_PM_ACTIVITY
 _Static_assert(TDONGLE_L2_RETRY_US >= 100u && (uint64_t)TDONGLE_L2_RETRY_US * 4u <= (uint64_t)TDONGLE_L2_SOJOURN_MS_MIN * 1000u, "a retry period is a fraction of the sojourn limit");
 
 #define SLOT_MASK (TDONGLE_L2_HOST_SLOTS - 1u)
-#define SPARSE_MASK (TDONGLE_L2_SPARSE_SLOTS - 1u)
 #define BUMP(field) atomic_fetch_add_explicit(&l2.field, 1u, memory_order_relaxed)
 #define ADD(field, v) atomic_fetch_add_explicit(&l2.field, (unsigned)(v), memory_order_relaxed)
 
 static struct {
-    esp_err_t (*wifi_tx)(void *frame, uint16_t len, bool sparse);
-    bool (*wifi_room)(bool sparse);
+    esp_err_t (*wifi_tx)(void *frame, uint16_t len);
+    bool (*wifi_room)(void);
     void (*rx_resume)(void);
     atomic_bool held;            /* the callback refused a datagram at the queue limit and the worker owes the USB layer a resume */
-    host_slot_t *slots;          /* bulk queue */
-    host_slot_t *sp_slots;       /* sparse (priority) queue */
-    atomic_uint sp_head, sp_tail;
+    host_slot_t *slots;
     atomic_uint t_queue_limit, t_resume, t_sojourn_ms;     /* tuning */
-    atomic_bool t_prio;
+    atomic_bool t_codel;
+    atomic_uint t_codel_target_us, t_codel_interval_ms, t_codel_gen;     /* gen moves when the AQM parameters change: the worker restarts its controller */
+    unsigned codel_gen_seen;                               /* worker only */
+    tdongle_codel_t codel;                                 /* worker only (stats read count racily) */
+    atomic_uint busy_start_us;                             /* start of the current busy period: the queue was last idle (empty, nobody waiting for room) then */
+    atomic_bool busy_continues;                            /* the worker released a held datagram: the queue's next arrival at depth 0 continues the busy period */
+    atomic_uint h2w_codel_signals, h2w_ce_marked, h2w_codel_drop, h2w_signal_us_sum, h2w_signal_us_max;
     TaskHandle_t worker;
     esp_timer_handle_t retry_timer;
     uint8_t identity[6];
@@ -59,7 +62,7 @@ static struct {
     atomic_uint h2w_frames, h2w_queued, h2w_invalid, h2w_foreign_mac, h2w_link_down, h2w_held, h2w_resumes;
     atomic_uint h2w_sent, h2w_stale, h2w_sojourn_drop, h2w_link_down_queued, h2w_tx_failed, h2w_tx_retries, h2w_queue_high_water;
     atomic_int h2w_last_tx_error;
-    atomic_uint h2w_sparse, h2w_room_waits, h2w_room_wait_us_sum, h2w_room_wait_us_max;
+    atomic_uint h2w_room_waits, h2w_room_wait_us_sum, h2w_room_wait_us_max;
     atomic_uint pm_notes, pm_note_us_sum, pm_note_us_max, h2w_wait_us_sum, h2w_wait_us_max, h2w_tx_us_sum, h2w_tx_us_max;
 } l2;
 
@@ -73,28 +76,6 @@ static uint32_t now_us(void) { return (uint32_t)esp_timer_get_time(); }
 /* A link-layer multicast or broadcast frame (the I/G bit) is the neighbours' chatter: it is forwarded like any other but must not pin the
  * clock at its maximum for a hold period (tdongle_pm.h; the same rule gateway_host_input applies). */
 static bool unicast(const uint8_t *frame) { return (frame[0] & 1u) == 0; }
-/* Sparse: ACK-like and control frames (see TDONGLE_L2_SPARSE_MAX_LEN). Parses only what it needs and trusts nothing: anything it cannot place is bulk. */
-static bool is_sparse(const uint8_t *f, uint16_t len) {
-    if (len > TDONGLE_L2_SPARSE_MAX_LEN || len < 14) return false;
-    const unsigned type = ((unsigned)f[12] << 8) | f[13];
-    if (type == 0x0806) return true;                                       /* ARP */
-    if (type == 0x0800 && len >= 14u + 20u) {                              /* IPv4 */
-        const unsigned ihl = (unsigned)(f[14] & 0x0f) * 4u, total = ((unsigned)f[16] << 8) | f[17], proto = f[23];
-        if (ihl < 20u || 14u + ihl > len) return false;
-        if (proto == 1 || proto == 17) return true;                        /* ICMP; UDP of at most this size */
-        if (proto == 6 && len >= 14u + ihl + 20u) {
-            const unsigned doff = (unsigned)(f[14 + ihl + 12] >> 4) * 4u;
-            return total == ihl + doff;                                    /* no payload: ACK, SYN, FIN */
-        }
-        return false;
-    }
-    if (type == 0x86dd && len >= 14u + 40u) {                              /* IPv6 without extension headers */
-        const unsigned next = f[20], payload = ((unsigned)f[18] << 8) | f[19];
-        if (next == 58 || next == 17) return true;
-        if (next == 6 && len >= 14u + 40u + 20u) return payload == (unsigned)(f[14 + 40 + 12] >> 4) * 4u;
-    }
-    return false;
-}
 /* tdongle_pm_note_activity() with its cost recorded: the first note after an idle period raises the CPU clock inside the caller, and how long
  * that takes is what the idle-latency question of the first board run is about (ADR 0023, "idle ping"). */
 static void note_activity(void) {
@@ -162,25 +143,6 @@ esp_err_t tdongle_l2_host(void *buffer, uint16_t len) {
         BUMP(h2w_link_down);
         return ESP_ERR_INVALID_STATE;
     }
-    const bool sparse = atomic_load_explicit(&l2.t_prio, memory_order_relaxed) && is_sparse(frame, len);
-    if (sparse) {
-        /* The priority queue is tiny and never holds the host: if it is full the frame joins the bulk queue like any other. */
-        const unsigned stail = atomic_load_explicit(&l2.sp_tail, memory_order_acquire), shead = atomic_load_explicit(&l2.sp_head, memory_order_relaxed);
-        if (shead - stail < TDONGLE_L2_SPARSE_SLOTS) {
-            note_activity();
-            host_slot_t *slot = &l2.sp_slots[shead & SPARSE_MASK];
-            slot->len = len;
-            slot->epoch = (uint16_t)atomic_load_explicit(&l2.epoch, memory_order_acquire);
-            slot->enq_us = now_us();
-            memcpy(slot->bytes, buffer, len);
-            atomic_store_explicit(&l2.sp_head, shead + 1u, memory_order_release);
-            BUMP(h2w_frames);
-            BUMP(h2w_queued);
-            BUMP(h2w_sparse);
-            xTaskNotifyGive(l2.worker);
-            return ESP_OK;
-        }
-    }
     /* tail first, then head: head only grows, so head - tail can never be negative whatever the worker does between the two loads. */
     unsigned tail = atomic_load_explicit(&l2.tail, memory_order_acquire);
     const unsigned head = atomic_load_explicit(&l2.head, memory_order_relaxed);
@@ -200,6 +162,10 @@ esp_err_t tdongle_l2_host(void *buffer, uint16_t len) {
     slot->len = len;
     slot->epoch = (uint16_t)atomic_load_explicit(&l2.epoch, memory_order_acquire);
     slot->enq_us = now_us();
+    /* A busy period starts when a frame arrives at an empty queue that nobody was waiting to fill. After a resume the arrival at an empty queue is the
+     * held datagram coming back: the host had a backlog, the period goes on. */
+    if (head == tail && !atomic_exchange_explicit(&l2.busy_continues, false, memory_order_relaxed))
+        atomic_store_explicit(&l2.busy_start_us, slot->enq_us, memory_order_relaxed);
     memcpy(slot->bytes, buffer, len);
     atomic_store_explicit(&l2.head, head + 1u, memory_order_release);
     BUMP(h2w_frames);
@@ -218,7 +184,36 @@ static void retry_wait(void) {
 
 /* One queued frame, in the worker. The only place the Wi-Fi driver is called from the host side. */
 static void room_done(uint32_t since) { const uint32_t dt = now_us() - since; ADD(h2w_room_wait_us_sum, dt); note_max(&l2.h2w_room_wait_us_max, dt); }
-static void deliver_frame(const host_slot_t *slot, bool sparse) {
+/* CoDel at the hand-to-radio. The signal is what the dongle can see of a standing queue: the larger of this frame's own time in the dongle (the
+ * standard sojourn) and how long the pipe has been continuously full (the age of the current busy period: since the queue was last idle with nobody waiting for room). The first alone cannot see the host's queue: with
+ * backpressure it stays at a few milliseconds while the host's FIFO sits behind our NAKs (board: 2-3 ms in the dongle, 55-83 ms ping). The second
+ * grows for exactly as long as the host has a backlog to push into a full pipe, and falls back to zero the moment the host finds room without
+ * waiting, which is what CoDel's "minimum over an interval" needs. Returns true when the frame was dropped. */
+static bool codel_signals(host_slot_t *slot, uint32_t now, uint32_t own_sojourn) {
+    const tdongle_ecn_class_t cls = tdongle_ecn_classify(slot->bytes, slot->len);
+    if (cls == TDONGLE_ECN_NOT_IP || cls == TDONGLE_ECN_EXEMPT) return false;      /* ARP, DHCP, ND, SYN/FIN/RST: never signalled, not measured */
+    const unsigned gen = atomic_load_explicit(&l2.t_codel_gen, memory_order_acquire);
+    if (gen != l2.codel_gen_seen) {
+        tdongle_codel_retune(&l2.codel, atomic_load(&l2.t_codel_target_us), atomic_load(&l2.t_codel_interval_ms) * 1000u);
+        l2.codel_gen_seen = gen;
+    }
+    const uint32_t full = now - atomic_load_explicit(&l2.busy_start_us, memory_order_relaxed);
+    const uint32_t signal = full > own_sojourn ? full : own_sojourn;
+    ADD(h2w_signal_us_sum, signal);
+    note_max(&l2.h2w_signal_us_max, signal);
+    if (!tdongle_codel_should_signal(&l2.codel, signal, now)) return false;
+    BUMP(h2w_codel_signals);
+    if (cls == TDONGLE_ECN_CAPABLE) {
+        tdongle_ecn_mark_ce(slot->bytes);
+        BUMP(h2w_ce_marked);
+        return false;
+    }
+    if (cls == TDONGLE_ECN_CE) return false;                                       /* already marked upstream: the signal is satisfied */
+    BUMP(h2w_codel_drop);
+    return true;
+}
+
+static void deliver(host_slot_t *slot) {
     if (!atomic_load_explicit(&l2.linked, memory_order_acquire)) {
         BUMP(h2w_link_down_queued);
         return;
@@ -236,9 +231,10 @@ static void deliver_frame(const host_slot_t *slot, bool sparse) {
     }
     ADD(h2w_wait_us_sum, waited);
     note_max(&l2.h2w_wait_us_max, waited);
+    if (atomic_load_explicit(&l2.t_codel, memory_order_relaxed) && codel_signals(slot, first, waited)) return;      /* dropped by CoDel */
     uint32_t room_since = 0;
     for (;;) {
-        if (l2.wifi_room && !l2.wifi_room(sparse)) {
+        if (l2.wifi_room && !l2.wifi_room()) {
             /* The radio has its allowance in flight: that is the bottleneck working, not a failure. Wait for a frame to leave the antenna. The sojourn
              * limit still bounds the wait (a link that never completes anything). */
             if (!room_since) { room_since = now_us(); BUMP(h2w_room_waits); }
@@ -254,7 +250,7 @@ static void deliver_frame(const host_slot_t *slot, bool sparse) {
         if (room_since) { room_done(room_since); room_since = 0; }
         /* The slot is read in place: only this task frees it (by advancing tail), and the driver copies the frame inside the call. */
         const uint32_t t0 = now_us();
-        const esp_err_t result = l2.wifi_tx((void *)slot->bytes, slot->len, sparse);
+        const esp_err_t result = l2.wifi_tx((void *)slot->bytes, slot->len);
         const uint32_t t1 = now_us();
         if (result == ESP_OK) {
             BUMP(h2w_sent);
@@ -279,20 +275,10 @@ static void resume(void) {
     if (l2.rx_resume) l2.rx_resume();
 }
 
-static void deliver(const host_slot_t *slot) { deliver_frame(slot, false); }
-
 /* Everything queued so far; returns how many frames were handled. */
 static unsigned drain(void) {
     unsigned handled = 0;
     for (;;) {
-        /* Sparse frames first: they are ACKs and pings, and a frame waiting behind bulk is the delay they exist to avoid. */
-        const unsigned stail = atomic_load_explicit(&l2.sp_tail, memory_order_relaxed);
-        if (stail != atomic_load_explicit(&l2.sp_head, memory_order_acquire)) {
-            deliver_frame(&l2.sp_slots[stail & SPARSE_MASK], true);
-            atomic_store_explicit(&l2.sp_tail, stail + 1u, memory_order_release);
-            handled++;
-            continue;
-        }
         const unsigned tail = atomic_load_explicit(&l2.tail, memory_order_relaxed);
         if (tail == atomic_load_explicit(&l2.head, memory_order_acquire)) return handled;
         deliver(&l2.slots[tail & SLOT_MASK]);
@@ -300,9 +286,11 @@ static unsigned drain(void) {
         handled++;
         /* The queue has room again: if the callback refused a datagram, ask the USB layer to offer it. Below the resume depth, not the limit, so the pipe
          * is refilled while the worker still has frames to send. */
-        if (atomic_load_explicit(&l2.head, memory_order_acquire) - (tail + 1u) <= atomic_load_explicit(&l2.t_resume, memory_order_relaxed) &&
-            atomic_exchange_explicit(&l2.held, false, memory_order_seq_cst))
+        const unsigned depth_after = atomic_load_explicit(&l2.head, memory_order_acquire) - (tail + 1u);
+        if (depth_after <= atomic_load_explicit(&l2.t_resume, memory_order_relaxed) && atomic_exchange_explicit(&l2.held, false, memory_order_seq_cst)) {
+            atomic_store_explicit(&l2.busy_continues, true, memory_order_relaxed);   /* the host has a datagram waiting for room: the pipe is not idle */
             resume();
+        }
     }
 }
 
@@ -325,26 +313,24 @@ esp_err_t tdongle_l2_start(const uint8_t mac[6], const tdongle_l2_config_t *conf
     atomic_store(&l2.t_queue_limit, TDONGLE_L2_HOST_QUEUE_LIMIT);
     atomic_store(&l2.t_resume, TDONGLE_L2_HOST_RESUME_DEPTH);
     atomic_store(&l2.t_sojourn_ms, TDONGLE_L2_SOJOURN_MS);
+    atomic_store(&l2.t_codel_target_us, TDONGLE_CODEL_TARGET_US_DEFAULT);
+    atomic_store(&l2.t_codel_interval_ms, TDONGLE_CODEL_INTERVAL_MS_DEFAULT);
+    atomic_store(&l2.busy_start_us, now_us());
+    tdongle_codel_init(&l2.codel, TDONGLE_CODEL_TARGET_US_DEFAULT, TDONGLE_CODEL_INTERVAL_MS_DEFAULT * 1000u);
     l2.slots = calloc(TDONGLE_L2_HOST_SLOTS, sizeof(host_slot_t));
-    l2.sp_slots = calloc(TDONGLE_L2_SPARSE_SLOTS, sizeof(host_slot_t));
-    if (!l2.slots || !l2.sp_slots) {
-        free(l2.slots);
-        free(l2.sp_slots);
-        l2.slots = l2.sp_slots = NULL;
+    if (!l2.slots) {
         return ESP_ERR_NO_MEM;
     }
     const esp_timer_create_args_t timer = {.callback = retry_fire, .name = "l2_retry"};
     if (esp_timer_create(&timer, &l2.retry_timer) != ESP_OK) {
         free(l2.slots);
-        free(l2.sp_slots);
-        l2.slots = l2.sp_slots = NULL;
+        l2.slots = NULL;
         return ESP_ERR_NO_MEM;
     }
     if (xTaskCreatePinnedToCore(forward, "l2_wifi", config->task_stack, NULL, config->task_priority, &l2.worker, config->task_core) != pdPASS) {
         esp_timer_delete(l2.retry_timer);
         free(l2.slots);
-        free(l2.sp_slots);
-        l2.slots = l2.sp_slots = NULL;
+        l2.slots = NULL;
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
@@ -365,6 +351,7 @@ void tdongle_l2_link(bool connected) {
         tinyusb_net_tx_ring_flush();                     /* frames received before the link dropped must not reach the host after it */
     }
     /* A datagram held at the queue limit belongs to the old association's backlog: the queue is stale now, so let the USB layer re-offer it. */
+    atomic_store_explicit(&l2.busy_continues, false, memory_order_relaxed);
     if (atomic_exchange_explicit(&l2.held, false, memory_order_seq_cst)) resume();
     tud_network_link_state(0, connected);
 }
@@ -372,37 +359,46 @@ void tdongle_l2_link(bool connected) {
 esp_err_t tdongle_l2_set_tuning(const tdongle_l2_tuning_t *t) {
     if (!l2.slots) return ESP_ERR_INVALID_STATE;
     if (!t || t->queue_limit < 1 || t->queue_limit > TDONGLE_L2_HOST_SLOTS || t->resume_depth >= t->queue_limit ||
-        t->sojourn_ms < TDONGLE_L2_SOJOURN_MS_MIN || t->sojourn_ms > TDONGLE_L2_SOJOURN_MS_MAX)
+        t->sojourn_ms < TDONGLE_L2_SOJOURN_MS_MIN || t->sojourn_ms > TDONGLE_L2_SOJOURN_MS_MAX ||
+        t->codel_target_us < TDONGLE_L2_CODEL_TARGET_US_MIN || t->codel_target_us > TDONGLE_L2_CODEL_TARGET_US_MAX ||
+        t->codel_interval_ms < TDONGLE_L2_CODEL_INTERVAL_MS_MIN || t->codel_interval_ms > TDONGLE_L2_CODEL_INTERVAL_MS_MAX)
         return ESP_ERR_INVALID_ARG;
     atomic_store(&l2.t_queue_limit, t->queue_limit);
     atomic_store(&l2.t_resume, t->resume_depth);
     atomic_store(&l2.t_sojourn_ms, t->sojourn_ms);
-    atomic_store(&l2.t_prio, t->prio);
+    const bool changed = atomic_load(&l2.t_codel_target_us) != t->codel_target_us || atomic_load(&l2.t_codel_interval_ms) != t->codel_interval_ms ||
+                         atomic_load(&l2.t_codel) != t->codel;
+    atomic_store(&l2.t_codel_target_us, t->codel_target_us);
+    atomic_store(&l2.t_codel_interval_ms, t->codel_interval_ms);
+    atomic_store(&l2.t_codel, t->codel);
+    if (changed) atomic_fetch_add_explicit(&l2.t_codel_gen, 1u, memory_order_release);      /* a controller built under other numbers (or while off) means nothing */
     /* A lower limit may leave the queue above it: it simply drains; a held datagram is released by the next drain as before. */
     return ESP_OK;
 }
 void tdongle_l2_get_tuning(tdongle_l2_tuning_t *out) {
     *out = (tdongle_l2_tuning_t){.queue_limit = atomic_load(&l2.t_queue_limit), .resume_depth = atomic_load(&l2.t_resume),
-                                 .sojourn_ms = atomic_load(&l2.t_sojourn_ms), .prio = atomic_load(&l2.t_prio)};
+                                 .sojourn_ms = atomic_load(&l2.t_sojourn_ms), .codel = atomic_load(&l2.t_codel),
+                                 .codel_target_us = atomic_load(&l2.t_codel_target_us), .codel_interval_ms = atomic_load(&l2.t_codel_interval_ms)};
 }
 
 void tdongle_l2_stats(tdongle_l2_stats_t *out) {
 #define LOAD(field) atomic_load_explicit(&l2.field, memory_order_relaxed)
     /* tail BEFORE head: head only grows, so the difference cannot go negative (and wrap to 4 billion) however the worker interleaves. */
     const unsigned tail = atomic_load_explicit(&l2.tail, memory_order_acquire), head = atomic_load_explicit(&l2.head, memory_order_acquire);
-    const unsigned stail = atomic_load_explicit(&l2.sp_tail, memory_order_acquire), shead = atomic_load_explicit(&l2.sp_head, memory_order_acquire);
     *out = (tdongle_l2_stats_t){
         .linked = atomic_load_explicit(&l2.linked, memory_order_acquire), .link_changes = LOAD(link_changes),
         .w2h_frames = LOAD(w2h_frames), .w2h_forwarded = LOAD(w2h_forwarded), .w2h_invalid = LOAD(w2h_invalid),
         .w2h_own_mac = LOAD(w2h_own_mac), .w2h_link_down = LOAD(w2h_link_down), .w2h_usb_not_ready = LOAD(w2h_usb_not_ready),
         .w2h_ring_full = LOAD(w2h_ring_full), .w2h_raced = LOAD(w2h_raced),
         .h2w_frames = LOAD(h2w_frames), .h2w_queued = LOAD(h2w_queued), .h2w_invalid = LOAD(h2w_invalid),
-        .h2w_foreign_mac = LOAD(h2w_foreign_mac), .h2w_link_down = LOAD(h2w_link_down), .h2w_held = LOAD(h2w_held), .h2w_resumes = LOAD(h2w_resumes), .h2w_sparse = LOAD(h2w_sparse), .h2w_room_waits = LOAD(h2w_room_waits),
+        .h2w_foreign_mac = LOAD(h2w_foreign_mac), .h2w_link_down = LOAD(h2w_link_down), .h2w_held = LOAD(h2w_held), .h2w_resumes = LOAD(h2w_resumes), .h2w_codel_signals = LOAD(h2w_codel_signals), .h2w_ce_marked = LOAD(h2w_ce_marked),
+        .h2w_codel_drop = LOAD(h2w_codel_drop), .h2w_signal_us_sum = LOAD(h2w_signal_us_sum), .h2w_signal_us_max = LOAD(h2w_signal_us_max),
+        .h2w_codel_count = l2.codel.dropping ? l2.codel.count : 0, .h2w_room_waits = LOAD(h2w_room_waits),
         .h2w_room_wait_us_sum = LOAD(h2w_room_wait_us_sum), .h2w_room_wait_us_max = LOAD(h2w_room_wait_us_max),
         .h2w_sent = LOAD(h2w_sent), .h2w_stale = LOAD(h2w_stale), .h2w_sojourn_drop = LOAD(h2w_sojourn_drop),
         .h2w_link_down_queued = LOAD(h2w_link_down_queued),
         .h2w_tx_failed = LOAD(h2w_tx_failed), .h2w_tx_retries = LOAD(h2w_tx_retries), .h2w_last_tx_error = LOAD(h2w_last_tx_error),
-        .h2w_queue_depth = (head - tail) + (shead - stail), .h2w_queue_high_water = LOAD(h2w_queue_high_water),
+        .h2w_queue_depth = head - tail, .h2w_queue_high_water = LOAD(h2w_queue_high_water),
         .worker_stack_free = l2.worker ? (uint32_t)uxTaskGetStackHighWaterMark(l2.worker) : 0,
         .pm_notes = LOAD(pm_notes), .pm_note_us_sum = LOAD(pm_note_us_sum), .pm_note_us_max = LOAD(pm_note_us_max),
         .h2w_wait_us_sum = LOAD(h2w_wait_us_sum), .h2w_wait_us_max = LOAD(h2w_wait_us_max),

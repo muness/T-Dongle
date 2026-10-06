@@ -72,12 +72,12 @@ assert bridge["to_host_frames"] == bridge["to_host_forwarded"] + bridge["to_host
 assert bridge["to_wifi_frames"] == bridge["to_wifi_queued"] + bridge["to_wifi_invalid"] + bridge["to_wifi_foreign_mac"] + bridge["to_wifi_link_down"]
 assert bridge["to_wifi_queued"] == bridge["to_wifi_sent"] + bridge["to_wifi_stale"] + bridge["to_wifi_sojourn_drop"] + bridge["to_wifi_link_down_queued"] + bridge["to_wifi_tx_failed"] + bridge["to_wifi_queue_depth"]
 assert bridge["timing_pm_note_us_max"] == 400 and bridge["timing_wait_us_max"] == 800 and bridge["to_host_raced"] == 1 and bridge["timing_cold_starts"] == 21
-assert bridge["rx_class_datagrams"] == 55 and bridge["rx_class_ntbs"] == 30 and bridge["to_wifi_sparse"] == 5 and bridge["timing_room_wait_us_max"] == 1500
+assert bridge["rx_class_datagrams"] == 55 and bridge["rx_class_ntbs"] == 30 and bridge["to_wifi_ce_marked"] == 5 and bridge["to_wifi_codel_drop"] == 4 and bridge["timing_signal_us_max"] == 12000 and bridge["timing_room_wait_us_max"] == 1500
 # bridgetune: show, set (applied to the real setters in the other tests), reject, and not confused with other commands.
 tune = [x for x in sections["bridgetune_show"] if isinstance(x, str)]
-assert "bridgetune q=3 resume=1 inflight=6 ring=6 sojourn_ms=100 prio=0" in tune and any(x.startswith("bridgetune_bounds q=1..8") for x in tune) and "#handled 1" in tune
-assert "bridgetune q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 prio=1" in sections["bridgetune_set"]
-assert any("ERR bridgetune: q out of range" in x for x in sections["bridgetune_bad"]) and any("q=2 resume=1 inflight=8 ring=4" in x for x in sections["bridgetune_bad"])
+assert "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=0 target_us=5000 interval_ms=100" in tune and any(x.startswith("bridgetune_bounds q=1..8") for x in tune) and "#handled 1" in tune
+assert "bridgetune q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 codel=1 target_us=4000 interval_ms=100" in sections["bridgetune_set"]
+assert any("ERR bridgetune: q out of range" in x for x in sections["bridgetune_bad"]) and any("q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 codel=1" in x for x in sections["bridgetune_bad"])
 assert any("ERR bridgetune: unknown key" in x for x in sections["bridgetune_bad2"]) and "#handled 0" in sections["bridgetune_other"]
 assert bridge["to_wifi_last_tx_error"] == -1 and bridge["usb_ring_ring_bytes"] == 9144 and bridge["usb_ring_dropped_full"] == 7 and bridge["usb_ring_enqueued"] == 90
 assert bridge["wifi_tx_installed"] == 1 and bridge["wifi_tx_tx_done_cb"] == 1 and bridge["wifi_tx_charged"] == 10 and bridge["wifi_tx_refused_pool"] == 5
