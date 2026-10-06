@@ -3,21 +3,51 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ../../components/tdongle_runtime/tests/run.sh
 mkdir -p build-host
+# Host builds see no ESP-IDF configuration (tests/sdkconfig.h) and the real allocator-tag header.
+TD_INC="-I tests -I components/microlink/include -I ../../components/tdongle_runtime/include"
 python - <<'PYWIFI'
 from pathlib import Path
 s=Path('main/wifi_profiles.inc').read_text();a=s.index('/* Scanning and reconnecting');Path('build-host/wifi_store.inc').write_text(s[:a]);Path('build-host/wifi_worker.inc').write_text(s[a:])
 PYWIFI
 for name in coord_read wifi_policy wifi_profiles; do
- cc -std=gnu11 -I build-host -fsanitize=address,undefined -g tests/test_${name}.c -o build-host/test_${name}
+ cc $TD_INC -std=gnu11 -I build-host -fsanitize=address,undefined -g tests/test_${name}.c -o build-host/test_${name}
  build-host/test_${name}
 done
+# Wi-Fi link status text and lwIP counter lines (the driver reads and serial dispatch run in tools/test-memory-report.py).
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g tests/test_wifi_link.c -o build-host/test_wifi_link
+build-host/test_wifi_link
 # The USB wrapper is shared with the original bridge; test its real code too.
 (cd ../.. && TEST_CFLAGS="-fsanitize=address,undefined -g" python3 tools/test_net.py)
-cc -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g tests/test_usb_identity.c -o build-host/test_usb_identity
+build-host/test_usb_identity
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I main tests/test_usb_rx_budget.c -o build-host/test_usb_rx_budget
+build-host/test_usb_rx_budget
+python3 tools/test-tcp-window.py
+python3 tools/test-heap-budget.py
+# main/wifi_pins.inc against stand-ins for the IDF and lwIP calls: install order, RX hook lifetime, exactly-once release.
+cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra -Werror -I tests/host_pins -I components/microlink/include -I main tests/test_wifi_pins_hooks.c -o build-host/test_wifi_pins_hooks
+build-host/test_wifi_pins_hooks
+python3 tools/usb_drain_model.py --check
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I tests tests/test_router.c -o build-host/test_router
 build-host/test_router
+# Router hot path (docs/research/forwarding-latency.md): RAM-resident O(1) tables, RCU membership pinning, incremental checksums.
+RT_CC="$TD_INC -std=c11 -D_GNU_SOURCE -Wall -Wextra -g -pthread -I tests -I main -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter"
+cc $RT_CC -fsanitize=address,undefined tests/test_route_table.c -o build-host/test_route_table
+build-host/test_route_table
+cc $RT_CC -fsanitize=thread -DRT_TSAN tests/test_route_table.c -o build-host/test_route_table_tsan
+build-host/test_route_table_tsan
+cc $RT_CC -fsanitize=address,undefined tests/test_router_hotpath.c -o build-host/test_router_hotpath
+build-host/test_router_hotpath
+cc $RT_CC -fsanitize=thread -DHOT_TSAN tests/test_router_hotpath.c -o build-host/test_router_hotpath_tsan
+build-host/test_router_hotpath_tsan
+# Differential: the frozen pre-optimisation router against the new one, same random packets and control events.
+cc $RT_CC -fsanitize=address,undefined -DIMPL_OLD -c tests/router_impl.c -o build-host/router_old.o
+cc $RT_CC -fsanitize=address,undefined -DIMPL_NEW -c tests/router_impl.c -o build-host/router_new.o
+cc $RT_CC -fsanitize=address,undefined tests/test_router_differential.c build-host/router_old.o build-host/router_new.o -o build-host/test_router_differential
+for seed in $(seq 1 24); do build-host/test_router_differential "$seed" | tail -1; done
 : "${IDF_PATH:?Source ESP-IDF for the same cJSON used by the firmware}"
-cc -std=c11 -fsanitize=address,undefined -g -pthread -I "$IDF_PATH/components/json/cJSON" tests/test_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_stream
-cc -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_projection.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_projection
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I "$IDF_PATH/components/json/cJSON" tests/test_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_stream
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_projection.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_projection
 build-host/test_projection
 build-host/test_stream
 
@@ -28,7 +58,7 @@ a=source.index('static void generate_keypair(')
 b=source.index('/* ============================================================================\n * cJSON',a)
 Path('build-host/identity_core.inc').write_text(source[a:b])
 PYCODE
-cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_identity.c -o build-host/test_identity
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_identity.c -o build-host/test_identity
 build-host/test_identity
 
 python - <<'PYCODE'
@@ -39,8 +69,21 @@ b=source.index('/* =============================================================
 Path('build-host/noise_aead.inc').write_text(source[a:b])
 PYCODE
 mbed="$IDF_PATH/components/mbedtls/mbedtls"
-cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$mbed/include" -I "$mbed/library" tests/test_noise_inplace.c "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_noise_inplace
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$mbed/include" -I "$mbed/library" tests/test_noise_inplace.c "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_noise_inplace
 build-host/test_noise_inplace
+
+# WireGuard data-path ChaCha20-Poly1305 (wireguard_lwip): RFC 8439 vectors, then thousands of random
+# lengths/alignments/tag failures against the original implementation and mbedTLS, sanitised, at two
+# optimisation levels (the aligned fast paths are only exercised for real by -fsanitize=alignment).
+wg=components/microlink/components/wireguard_lwip/src
+for opt in -O1 -O3; do
+ cc -std=gnu11 $opt -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -Wno-unused-const-variable \
+    -I tests -I "$wg" -I "$wg/crypto" -I "$wg/crypto/refc" -I "$wg/crypto/legacy" -I "$mbed/include" -I "$mbed/library" \
+    tests/test_wg_crypto.c "$wg/crypto/refc/chacha20.c" "$wg/crypto/refc/poly1305-donna.c" "$wg/crypto/refc/chacha20poly1305.c" \
+    "$wg/crypto.c" "$wg/crypto/legacy/wg_crypto_legacy.c" "$wg/crypto/wg_crypto_bench.c" "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" \
+    "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_wg_crypto
+ build-host/test_wg_crypto 8000
+done
 python tools/test-usb-peer.py
 
 python - <<'PYCODE'
@@ -50,40 +93,70 @@ a=source.index('static int do_start_long_poll(')
 b=source.index('/* Send a "lite" endpoint update',a)
 Path('build-host/map_request.inc').write_text(source[a:b])
 PYCODE
-cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_map_request.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_map_request
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_map_request.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_map_request
 build-host/test_map_request
-cc -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_project_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_project_stream
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I "$IDF_PATH/components/json/cJSON" tests/test_project_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_project_stream
 build-host/test_project_stream
-python - <<'PYCODE'
-from pathlib import Path
-s=Path('components/microlink/src/ml_derp.c').read_text();a=s.index('static int derp_read_exact(');b=s.index('/* ============================================================================',a)
-Path('build-host/derp_receive.inc').write_text(s[a:b])
-PYCODE
-cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_derp_receive.c -o build-host/test_derp_receive
-build-host/test_derp_receive
+# Shared runtime (ADR 0013 stage 1). The adversarial slicing check: two memberships share one DERP loop (the real
+# ml_derp_link state machine under the real ml_mux) while one member's server stalls, hangs or goes deaf. Virtual time
+# (exact) first, then real threads, sockets and a real clock under ASan/UBSan and under TSan.
+SHARED="components/microlink/src/ml_derp_link.c components/microlink/src/ml_mux.c components/microlink/src/ml_negotiation.c"
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -Itests $SHARED tests/test_shared_derp.c -o build-host/test_shared_derp
+build-host/test_shared_derp
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -pthread -Itests $SHARED tests/test_shared_derp_realtime.c -o build-host/test_shared_derp_rt
+build-host/test_shared_derp_rt
+cc $TD_INC -std=gnu11 -fsanitize=thread -g -Wall -Wextra -pthread -Itests $SHARED tests/test_shared_derp_realtime.c -o build-host/test_shared_derp_rt_tsan
+build-host/test_shared_derp_rt_tsan
+# The negotiation token, the control task's token rule, admission arithmetic and the pool eviction policy.
+for san in address,undefined thread; do
+ cc $TD_INC -std=gnu11 -fsanitize=$san -fno-sanitize-recover=all -g -Wall -Wextra -pthread components/microlink/src/ml_negotiation.c tests/test_negotiation.c -o build-host/test_negotiation_${san%%,*}
+ build-host/test_negotiation_${san%%,*}
+done
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra -pthread components/microlink/src/ml_negotiation.c tests/test_coord_token.c -o build-host/test_coord_token
+build-host/test_coord_token
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra tests/test_admission.c -o build-host/test_admission
+build-host/test_admission
+cc $TD_INC -std=gnu11 -fsanitize=address,undefined -fno-sanitize-recover=undefined -g -Wall -Wextra tests/test_peer_policy.c -o build-host/test_peer_policy
+build-host/test_peer_policy
+# The shared tasks' lifecycle: memberships join and leave while the tasks run; each is freed (and poisoned) the moment
+# detach returns, so a late touch by any task is a use-after-free (ASan) and an unsynchronised access a race (TSan).
+for san in address,undefined thread; do
+ cc $TD_INC -std=gnu11 -fsanitize=$san -fno-sanitize-recover=all -g -Wall -Wextra -pthread components/microlink/src/ml_rt_core.c components/microlink/src/ml_mux.c tests/test_rt_lifecycle.c -o build-host/test_rt_lifecycle_${san%%,*}
+ build-host/test_rt_lifecycle_${san%%,*}
+done
+# The global WireGuard peer-slot pool (generic core), then the real wireguard.c / wireguardif.c on lwIP fakes: receiver-index
+# uniqueness pool-wide, device-scoped lookups, split-crypto commit guards, per-device handshake cursor.
+wg=components/microlink/components/wireguard_lwip/src
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -I $wg tests/test_wg_peer_pool.c $wg/wireguard_pool.c -o build-host/test_wg_peer_pool
+build-host/test_wg_peer_pool
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_peer_pool_if.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_peer_pool_if
+build-host/test_wg_peer_pool_if
 python - <<'PYCODE'
 from pathlib import Path
 s=Path('main/gateway_main.c').read_text();a=s.index('#include "json_writer.inc"');b=s.index('static esp_err_t command(',a)
-Path('build-host/status_stream.inc').write_text(s[a:b]);Path('build-host/json_writer.inc').write_text(Path('main/json_writer.inc').read_text())
+Path('build-host/status_stream.inc').write_text(s[a:b]);Path('build-host/json_writer.inc').write_text(Path('main/json_writer.inc').read_text());Path('build-host/runtime_status.inc').write_text(Path('main/runtime_status.inc').read_text())
 PYCODE
-cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_status_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_status_stream
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_status_stream.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_status_stream
 build-host/test_status_stream
 python - <<'PYCODE'
 from pathlib import Path
 h=Path('components/microlink/include/microlink_internal.h').read_text();a=h.index('/* Peer update (from coord');b=h.index('/* ============================================================================',a);c=h.index('typedef struct {',h.index('#define ML_MAX_DERP_NODES'));d=h.index('/* ============================================================================',c)
-Path('build-host/semantic_types.inc').write_text(h[a:b]+h[c:d])
+Path('build-host/semantic_types.inc').write_text('#include "ml_derp_cert.h"\n'+h[a:b]+h[c:d])
 s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static void parse_peers_from_map_response(');b=s.index('/* Add Endpoints',a);c=s.index('static void decode_derp_regions(');d=s.index('static bool activate_derp_regions(',c)
 Path('build-host/semantic_consumers.inc').write_text(s[a:b]+s[c:d])
 w=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=w.index('static void process_peer_updates(');b=w.index('/* ============================================================================',a);Path('build-host/batch_consumer.inc').write_text(w[a:b])
 PYCODE
-cc -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_map.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_map
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_map.c components/microlink/src/ml_derp_cert.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_map
 build-host/test_semantic_map
 python - <<'PYCODE'
 from pathlib import Path
 s=Path('components/microlink/src/ml_coord.c').read_text();a=s.index('static int coord_send(');b=s.index('#include "coord_read.inc"',a);c=s.index('static int noise_send_owned(');d=s.index('/* Receive and decrypt',c)
 Path('build-host/control_send.inc').write_text(s[a:b]+s[c:d])
 PYCODE
-cc -std=c11 -fsanitize=address,undefined -g -pthread -I build-host -I "$mbed/include" -I "$mbed/library" tests/test_control_send.c "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_control_send
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I build-host -I "$mbed/include" -I "$mbed/library" tests/test_control_send.c "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_control_send
 build-host/test_control_send
 
 python - <<'PYCODE'
@@ -96,31 +169,179 @@ Path('build-host/receive_core.inc').write_text(s[a:b]+s[c:d]);Path('build-host/c
 Path('build-host/h2_preface.inc').write_text(s[e:f])
 h=Path('components/microlink/src/ml_h2.c').read_text();Path('build-host/h2_core.inc').write_text(h[h.index('static const char *TAG'):])
 PYCODE
-cc -std=c11 -fsanitize=address,undefined -g -pthread -I build-host -I "$IDF_PATH/components/json/cJSON" -I "$mbed/include" -I "$mbed/library" tests/test_h2_handshake.c "$IDF_PATH/components/json/cJSON/cJSON.c" "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_h2_handshake
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -pthread -I build-host -I "$IDF_PATH/components/json/cJSON" -I "$mbed/include" -I "$mbed/library" tests/test_h2_handshake.c "$IDF_PATH/components/json/cJSON/cJSON.c" "$mbed/library/chacha20.c" "$mbed/library/poly1305.c" "$mbed/library/chachapoly.c" "$mbed/library/platform_util.c" "$mbed/library/constant_time.c" -o build-host/test_h2_handshake
 build-host/test_h2_handshake
 python tools/test-sockets.py
 python tools/test-control-interop.py
 python tools/test-journal.py
 
-cc -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_peer_directory.c -o build-host/test_peer_directory
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_peer_directory.c -o build-host/test_peer_directory
 build-host/test_peer_directory
-cc -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_directory.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_directory
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include -I "$IDF_PATH/components/json/cJSON" tests/test_semantic_directory.c components/microlink/src/ml_derp_cert.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_semantic_directory
 build-host/test_semantic_directory
 
 python - <<'PYJIT'
 from pathlib import Path
-s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate(');b=s.index('/* The queue owns copies',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('static int directory_activate_idle(');b=s.index('/* ----------------------------------------------------------------------------\n * Egress',a);Path('build-host/jit_activation.inc').write_text(s[a:b])
+a=s.index('static bool wg_initiation_plausible(');b=s.index('#endif',a);Path('build-host/wg_initiation.inc').write_text(s[a:b])
 PYJIT
-cc -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_jit_directory.c -o build-host/test_jit_directory
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_jit_directory.c -o build-host/test_jit_directory
 build-host/test_jit_directory
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I components/microlink/include tests/test_inbound_trial.c -o build-host/test_inbound_trial
+cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_wg_initiation.c -o build-host/test_wg_initiation
+build-host/test_wg_initiation
+build-host/test_inbound_trial
 
 python - <<'PYQUEUE'
 from pathlib import Path
-s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('esp_err_t ml_gateway_queue_packet(');b=s.index('#endif',a);Path('build-host/jit_queue.inc').write_text(s[a:b])
+s=Path('components/microlink/src/ml_wg_mgr.c').read_text();a=s.index('typedef struct { uint32_t vpn_ip, enq_us; uint16_t len; }');b=s.index('#endif',a);Path('build-host/jit_queue.inc').write_text(s[a:b])
 PYQUEUE
-cc -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_jit_queue.c -o build-host/test_jit_queue
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host tests/test_jit_queue.c -o build-host/test_jit_queue
+# Egress in the real wireguardif.c (lwIP fakes): the in-place sealed datagram equals the copying path's, byte for byte, with
+# the same counters, timestamps, rekey flags and results; and the idle-slice predicate.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_egress.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_egress
+build-host/test_wg_egress race
+# The same egress sequence with the seal outside a mutex standing for the core lock, against a thread rolling keypairs: TSan.
+cc -std=gnu11 -O1 -g -fsanitize=thread -fno-sanitize-recover=all -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_egress.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_egress_tsan
+build-host/test_wg_egress_tsan race
+build-host/test_wg_egress
+# Inbound loss (docs/adr/0019-inbound-loss.md). The replay window (32 -> 512 bits, RFC 6479 ring) against an exact reference model,
+# at the shipped size and at the neighbours (the code is size-generic; a wrong ring/window relation fails on some size).
+for bits in 512 64 128 2048 8192; do
+ cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -DWIREGUARD_REPLAY_RING_BITS=$bits -I $wg tests/test_wg_replay.c -o build-host/test_wg_replay_$bits
+ build-host/test_wg_replay_$bits 3000 | tail -$([[ $bits == 512 ]] && echo 12 || echo 1)
+done
+# Every inbound drop point of the real wireguardif.c counts exactly once; replay protection precedes endpoint/timer/keypair updates;
+# reordered arrival is accepted up to the window.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_counters.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_counters
+build-host/test_wg_rx_counters
+# net_io's drain loop (the cause of the silent UDP loss) and the counters' thread safety.
+cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -I components/microlink/include tests/test_net_io_drain.c -o build-host/test_net_io_drain
+build-host/test_net_io_drain
+cc -std=gnu11 -O1 -g -fsanitize=thread -pthread -I components/microlink/include -I $wg tests/test_rx_stats_threads.c -o build-host/test_rx_stats_threads
+build-host/test_rx_stats_threads
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -pthread -I components/microlink/include -I $wg tests/test_rx_stats_threads.c -o build-host/test_rx_stats_threads_asan
+build-host/test_rx_stats_threads_asan
+# Tunnel -> USB reject reasons, and the allocation-failure ownership rule.
+cc $RT_CC -fsanitize=address,undefined -fno-sanitize-recover=undefined tests/test_router_rx_reasons.c -o build-host/test_router_rx_reasons
+build-host/test_router_rx_reasons
+# Inbound pipeline (docs/adr/0020-inbound-pipeline.md).
+# Cryptokey routing for IPv4 AND IPv6 (WireGuard whitepaper 5.4.6) on the real wireguardif.c against the dual-stack lwIP fake: the
+# source must be in the peer's AllowedIPs of its own family, the IPv6 length is the Payload Length, unsupported IPv6 is counted.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -DWG_HOST_IPV6 -I tests/host/wg_lwip -I tests/host_esp -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_ipv6_rx.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_ipv6_rx
+build-host/test_wg_ipv6_rx
+# The run: begin / in-place decrypt / complete / deliver for up to ML_WG_RX_BATCH datagrams per core-lock cycle, identical in every
+# observable to the one-datagram path (random traffic, both side by side), with the lock discipline asserted.
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_batch.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_batch
+build-host/test_wg_rx_batch
+# ... and the decrypt with the lock released against a thread that rolls and destroys the keypairs meanwhile, under TSan.
+cc -std=gnu11 -O1 -g -fsanitize=thread -w -DWIREGUARD_CRYPTO_REFC=1 -pthread -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_rx_batch.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_rx_batch_tsan
+build-host/test_wg_rx_batch_tsan race
+# Router batch hand-off: identical to its packets one by one, the USB netif only under the core lock and the lock taken once per chunk,
+# ownership on every path.
+cc $RT_CC -fsanitize=address,undefined -fno-sanitize-recover=undefined tests/test_router_batch.c -o build-host/test_router_batch
+build-host/test_router_batch
+# wg_mgr's inbound drain: the real staging / flush / drain code of ml_wg_mgr.c (two ranges, extracted) on the real wireguardif.c.
+python - <<'PYCODE'
+from pathlib import Path
+w=Path('components/microlink/src/ml_wg_mgr.c').read_text()
+a=w.index('/* ----------------------------------------------------------------------------\n * Inbound runs (ADR 0020)')
+b=w.index('/* ============================================================================\n * SendCallMeMaybe',a)
+c=w.index("/* Drain one membership's wg_rx_queue in runs")
+d=w.index('static void member_service(',c)
+Path('build-host/wg_mgr_rx.inc').write_text(w[a:b]+w[c:d])
+PYCODE
+cc -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -w -DWIREGUARD_CRYPTO_REFC=1 -I tests/host/wg_lwip -I tests/host_esp -I components/microlink/include -I ../../components/tdongle_runtime/include -I build-host -I $wg -I $wg/crypto -I $wg/crypto/refc \
+   tests/test_wg_mgr_rx.c tests/host/wg_lwip/wg_host_lwip.c $wg/wireguard.c $wg/wireguardif.c $wg/wireguard_pool.c \
+   $wg/crypto.c $wg/crypto/refc/blake2s.c $wg/crypto/refc/chacha20.c $wg/crypto/refc/chacha20poly1305.c \
+   $wg/crypto/refc/poly1305-donna.c $wg/crypto/refc/x25519.c -o build-host/test_wg_mgr_rx
+build-host/test_wg_mgr_rx
+# The byte and heap bound on datagrams waiting for wg_mgr: exact model, then four producers and a consumer under TSan.
+cc -std=c11 -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -Wall -Wextra -pthread -I components/microlink/include tests/test_wg_rx_budget.c -o build-host/test_wg_rx_budget
+build-host/test_wg_rx_budget
+cc -std=c11 -O1 -g -fsanitize=thread -Wall -Wextra -pthread -I components/microlink/include tests/test_wg_rx_budget.c -o build-host/test_wg_rx_budget_tsan
+build-host/test_wg_rx_budget_tsan
+cc $TD_INC -std=c11 -Wall -Wextra -fsanitize=address,undefined -g tests/test_wg_idle.c -o build-host/test_wg_idle
+build-host/test_wg_idle
 build-host/test_jit_queue
 
 python tools/test-resilience.py
 
 python tools/test-lcd.py
+python3 tools/test-measurement-scripts.py
+python3 tools/test-memory-report.py
+
+# self_dns_name publication (seqlock) under a concurrent writer: address/undefined and thread sanitizers.
+cc -std=c11 -Wall -Wextra -fsanitize=address,undefined -g -pthread tests/test_published_name.c -o build-host/test_published_name
+build-host/test_published_name
+cc -std=c11 -Wall -Wextra -fsanitize=thread -g -pthread tests/test_published_name.c -o build-host/test_published_name_tsan
+build-host/test_published_name_tsan
+
+# DERP TLS server authentication: real mbedTLS handshakes (TLS 1.2, peer certificate not kept, as on the
+# device) through ml_derp_tls.c and the ESP-IDF esp_crt_bundle.c trust store, both compiled unchanged.
+derp_tls_lib=build-host/mbedtls-derp
+if [ ! -f "$derp_tls_lib/libmbedtls_derp.a" ] || [ tests/derp_tls_host_config.h -nt "$derp_tls_lib/libmbedtls_derp.a" ]; then
+  rm -rf "$derp_tls_lib"; mkdir -p "$derp_tls_lib"
+  ls "$mbed"/library/*.c | xargs -P 8 -I{} sh -c 'cc -O1 -w -DMBEDTLS_CONFIG_FILE="\"derp_tls_host_config.h\"" -I tests -I "$1/include" -I "$1/library" -c "$2" -o "$3/$(basename "$2" .c).o"' _ "$mbed" {} "$derp_tls_lib"
+  ar rcs "$derp_tls_lib/libmbedtls_derp.a" "$derp_tls_lib"/*.o
+fi
+python tests/derp_pki.py build-host/derp-pki "$IDF_PATH/components/mbedtls/esp_crt_bundle/gen_crt_bundle.py"
+# The trust-anchor match (ml_derp_tls.c) runs against a two-certificate bundle, whose second entry is not 2-byte
+# aligned: ESP-IDF's own reader (esp_crt_bundle.c) loads u16 fields through a cast, fine on xtensa and x86, so that
+# one file is built without the alignment check. The code under test (ml_derp_tls.c) keeps the full sanitizers.
+DERP_TLS_FLAGS="-std=gnu11 -DCONFIG_MBEDTLS_CERTIFICATE_BUNDLE_MAX_CERTS=200 -g -DMBEDTLS_CONFIG_FILE=\"derp_tls_host_config.h\" -I tests/host_esp -I tests \
+  -I components/microlink/include -I $mbed/include -I $mbed/library -I $IDF_PATH/components/mbedtls/esp_crt_bundle/include"
+cc $DERP_TLS_FLAGS -fsanitize=address,undefined -fno-sanitize=alignment -c "$IDF_PATH/components/mbedtls/esp_crt_bundle/esp_crt_bundle.c" -o build-host/esp_crt_bundle.o
+cc $DERP_TLS_FLAGS -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -fno-sanitize-recover=undefined \
+  tests/test_derp_tls.c components/microlink/src/ml_derp_tls.c components/microlink/src/ml_derp_cert.c build-host/esp_crt_bundle.o \
+  "$derp_tls_lib/libmbedtls_derp.a" -o build-host/test_derp_tls
+build-host/test_derp_tls build-host/derp-pki
+
+# Shared entropy: ONE seeded CTR-DRBG for every membership (real mbedTLS), thread-safe, resident only while used.
+for san in address,undefined thread; do
+ cc -std=gnu11 -fsanitize=$san -g -Wall -Wextra -pthread -DMBEDTLS_CONFIG_FILE='"derp_tls_host_config.h"' -I tests -I components/microlink/include -I "$mbed/include" -I "$mbed/library" \
+  tests/test_rng.c components/microlink/src/ml_rng.c "$derp_tls_lib/libmbedtls_derp.a" -o build-host/test_rng_${san%%,*}
+ build-host/test_rng_${san%%,*}
+done
+
+# Control-plane Noise key: who vouches for it (real parse/fetch core of ml_coord.c, mock transport).
+python - <<'PYKEY'
+from pathlib import Path
+s=Path('components/microlink/src/ml_coord.c').read_text()
+a=s.index('/* Parse "[http[s]://]host[:port]" into bare host');b=s.index('/* --- end of the key-fetch core')
+Path('build-host/key_fetch.inc').write_text(s[a:b])
+h=Path('components/microlink/include/microlink_internal.h').read_text()
+a=h.index('#define ML_CTRL_KEY_NONE');b=h.index('#define CTRL_KEY_PLAINTEXT');b=h.index('\n',b)
+Path('build-host/ctrl_key_defs.inc').write_text(h[a:b]+'\n')
+PYKEY
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I build-host -I "$IDF_PATH/components/json/cJSON" tests/test_control_key.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_control_key
+build-host/test_control_key
+
+# SNTP supervision and DERP pacing: a missing clock is retried, visible, and gates nothing else.
+cc $TD_INC -std=c11 -fsanitize=address,undefined -g -I . tests/test_clock_sync.c -o build-host/test_clock_sync
+build-host/test_clock_sync
+
+# cJSON depth: the same limit the firmware build sets (CMakeLists.txt). No sanitizer here:
+# it inflates frames and this test measures the parser's stack.
+CJSON_LIMIT=$(sed -n 's/^set(TDONGLE_CJSON_NESTING_LIMIT \([0-9][0-9]*\)).*/\1/p' ../../CMakeLists.txt)
+[[ -n "$CJSON_LIMIT" ]] || { echo 'TDONGLE_CJSON_NESTING_LIMIT not found in CMakeLists.txt' >&2; exit 1; }
+cc $TD_INC -std=c11 -O1 -g -DCJSON_NESTING_LIMIT="$CJSON_LIMIT" -I "$IDF_PATH/components/json/cJSON" tests/test_json_depth.c "$IDF_PATH/components/json/cJSON/cJSON.c" -o build-host/test_json_depth
+build-host/test_json_depth

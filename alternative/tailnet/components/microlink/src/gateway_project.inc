@@ -99,7 +99,7 @@ static gp_scope gp_field(gp_reader *p, gp_scope parent, size_t a, size_t z) {
             return GP_ANY;
     } else if (parent == GP_DNODE) {
         if (K("HostName") || K("IPv4") || K("IPv6") || K("STUNPort") ||
-            K("DERPPort") || K("STUNOnly"))
+            K("DERPPort") || K("STUNOnly") || K("CertName"))
             return GP_ANY;
     }
     return GP_DROP;

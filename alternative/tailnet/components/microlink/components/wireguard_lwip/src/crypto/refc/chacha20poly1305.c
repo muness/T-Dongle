@@ -35,6 +35,7 @@
 #include "chacha20poly1305.h"
 #include "chacha20.h"
 #include "poly1305-donna.h"
+#include "wg_crypto_internal.h"
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -46,8 +47,8 @@
 static const uint8_t zero[CHACHA20_BLOCK_SIZE] = { 0 };
 
 // 2.6.  Generating the Poly1305 Key Using ChaCha20
-static void generate_poly1305_key(struct poly1305_context *poly1305_state, struct chacha20_ctx *chacha20_state, const uint8_t *key, uint64_t nonce) {
-    uint8_t block[POLY1305_KEY_SIZE] = {0};
+WG_CRYPTO_HOT static void generate_poly1305_key(struct poly1305_context *poly1305_state, struct chacha20_ctx *chacha20_state, const uint8_t *key, uint64_t nonce) {
+    uint8_t block[POLY1305_KEY_SIZE] __attribute__((aligned(4))) = {0};
 
     // The method is to call the block function with the following parameters:
     // - The 256-bit session integrity key is used as the ChaCha20 key.
@@ -60,11 +61,11 @@ static void generate_poly1305_key(struct poly1305_context *poly1305_state, struc
 
     poly1305_init(poly1305_state, block);
 
-    crypto_zero(&block, sizeof(block));
+    wg_zero_words(block, POLY1305_KEY_SIZE / 4);
 }
 
 // 2.8.  AEAD Construction (Encryption)
-void chacha20poly1305_encrypt(uint8_t *dst, const uint8_t *src, size_t src_len, const uint8_t *ad, size_t ad_len, uint64_t nonce, const uint8_t *key) {
+WG_CRYPTO_HOT void chacha20poly1305_encrypt(uint8_t *dst, const uint8_t *src, size_t src_len, const uint8_t *ad, size_t ad_len, uint64_t nonce, const uint8_t *key) {
     struct poly1305_context poly1305_state;
     struct chacha20_ctx chacha20_state;
     uint8_t block[8];
@@ -80,12 +81,12 @@ void chacha20poly1305_encrypt(uint8_t *dst, const uint8_t *src, size_t src_len, 
     // - The AAD
     poly1305_update(&poly1305_state, ad, ad_len);
     // - padding1 -- the padding is up to 15 zero bytes, and it brings the total length so far to an integral multiple of 16
-    padded_len = (ad_len + 15) & 0xFFFFFFF0; // Round up to next 16 bytes
+    padded_len = (ad_len + 15) & ~(size_t)15; // Round up to next 16 bytes
     poly1305_update(&poly1305_state, zero, padded_len - ad_len);
     // - The ciphertext
     poly1305_update(&poly1305_state, dst, src_len);
     // - padding2 -- the padding is up to 15 zero bytes, and it brings the total length so far to an integral multiple of 16.
-    padded_len = (src_len + 15) & 0xFFFFFFF0; // Round up to next 16 bytes
+    padded_len = (src_len + 15) & ~(size_t)15; // Round up to next 16 bytes
     poly1305_update(&poly1305_state, zero, padded_len - src_len);
     // - The length of the additional data in octets (as a 64-bit little-endian integer)
     U64TO8_LITTLE(block, (uint64_t)ad_len);
@@ -99,19 +100,18 @@ void chacha20poly1305_encrypt(uint8_t *dst, const uint8_t *src, size_t src_len, 
     // - A 128-bit tag, which is the output of the Poly1305 function. (append to dst)
     poly1305_finish(&poly1305_state, dst + src_len);
 
-    // Make sure we leave nothing sensitive on the stack
-    crypto_zero(&chacha20_state, sizeof(chacha20_state));
-    crypto_zero(&block, sizeof(block));
+    // Make sure we leave nothing sensitive on the stack (the length block is public)
+    wg_zero_words(&chacha20_state, sizeof(chacha20_state) / 4);
 }
 
 // 2.8.  AEAD Construction (Decryption)
-bool chacha20poly1305_decrypt(uint8_t *dst, const uint8_t *src, size_t src_len, const uint8_t *ad, size_t ad_len, uint64_t nonce, const uint8_t *key) {
+WG_CRYPTO_HOT bool chacha20poly1305_decrypt(uint8_t *dst, const uint8_t *src, size_t src_len, const uint8_t *ad, size_t ad_len, uint64_t nonce, const uint8_t *key) {
     struct poly1305_context poly1305_state;
     struct chacha20_ctx chacha20_state;
     uint8_t block[8];
     uint8_t mac[POLY1305_MAC_SIZE];
     size_t padded_len;
-    int dst_len;
+    size_t dst_len;
     bool result = false;
 
     // Decryption is similar [to encryption] with the following differences:
@@ -131,12 +131,12 @@ bool chacha20poly1305_decrypt(uint8_t *dst, const uint8_t *src, size_t src_len, 
         // - The AAD
         poly1305_update(&poly1305_state, ad, ad_len);
         // - padding1 -- the padding is up to 15 zero bytes, and it brings the total length so far to an integral multiple of 16
-        padded_len = (ad_len + 15) & 0xFFFFFFF0; // Round up to next 16 bytes
+        padded_len = (ad_len + 15) & ~(size_t)15; // Round up to next 16 bytes
         poly1305_update(&poly1305_state, zero, padded_len - ad_len);
         // - The ciphertext (note the Poly1305 function is still run on the AAD and the ciphertext, not the plaintext)
         poly1305_update(&poly1305_state, src, dst_len);
         // - padding2 -- the padding is up to 15 zero bytes, and it brings the total length so far to an integral multiple of 16.
-        padded_len = (dst_len + 15) & 0xFFFFFFF0; // Round up to next 16 bytes
+        padded_len = (dst_len + 15) & ~(size_t)15; // Round up to next 16 bytes
         poly1305_update(&poly1305_state, zero, padded_len - dst_len);
         // - The length of the additional data in octets (as a 64-bit little-endian integer)
         U64TO8_LITTLE(block, (uint64_t)ad_len);
@@ -157,6 +157,7 @@ bool chacha20poly1305_decrypt(uint8_t *dst, const uint8_t *src, size_t src_len, 
             chacha20(&chacha20_state, dst, src, dst_len);
             result = true;
         }
+        wg_zero_words(&chacha20_state, sizeof(chacha20_state) / 4);
     }
     return result;
 }

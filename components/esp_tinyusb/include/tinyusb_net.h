@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include "esp_err.h"
 #include "sdkconfig.h"
@@ -95,6 +97,145 @@ esp_err_t tinyusb_net_send_sync(void *buffer, uint16_t len, void *buff_free_arg,
  *          ESP_ERR_INVALID_STATE if tusb not initialized
  */
 esp_err_t tinyusb_net_send_async(void *buffer, uint16_t len, void *buff_free_arg);
+
+/** One ring slab holds one maximum frame record: [len:2][gen:2][payload padded to 4] = 4 + 1520. */
+#define TINYUSB_NET_TX_SLAB_BYTES   1524u
+/** Elastic memory is allocated in chunks of this many slabs (one heap block of TINYUSB_NET_TX_CHUNK_BYTES). */
+#define TINYUSB_NET_TX_CHUNK_SLABS  2u
+#define TINYUSB_NET_TX_CHUNK_BYTES  (TINYUSB_NET_TX_CHUNK_SLABS * TINYUSB_NET_TX_SLAB_BYTES)
+#define TINYUSB_NET_TX_MAX_BASE_SLABS 8u
+#define TINYUSB_NET_TX_MAX_CHUNKS   12u
+
+/**
+ * @brief Transmit-ring counters (monotonic except the sizes and `chunks`/`pm_held`)
+ */
+typedef struct {
+    uint32_t ring_bytes;         /*!< capacity now: permanent slabs plus live elastic chunks */
+    uint32_t base_bytes;         /*!< permanent capacity (always allocated) */
+    uint32_t max_bytes;          /*!< capacity with every elastic chunk present: the cap */
+    uint32_t elastic_held_bytes; /*!< heap held by elastic chunks, including chunks still draining before they are freed */
+    uint32_t chunks;             /*!< live elastic chunks (not counting ones being retired) */
+    uint32_t high_water_bytes;   /*!< most record bytes ever queued at once */
+    uint32_t high_water_slabs;   /*!< most slabs ever in the queue at once */
+    uint32_t enqueued_frames;    /*!< frames accepted into the ring */
+    uint32_t enqueued_bytes;
+    uint32_t sent_frames;        /*!< frames handed to an NTB (each exactly once) */
+    uint32_t sent_bytes;
+    uint32_t dropped_full;       /*!< no free slab and no room in the open one: backpressure, frame dropped */
+    uint32_t dropped_link_down;  /*!< refused because USB was not ready */
+    uint32_t dropped_invalid;    /*!< length outside 14..1518 */
+    uint32_t flushed_link_down;  /*!< queued frames discarded when USB went away */
+    uint32_t ntb_blocked;        /*!< times a drain stopped with every NTB in flight */
+    uint32_t xfer_events;        /*!< IN transfer completions that drained the ring (no polling) */
+    uint32_t worker_stack_free;  /*!< worker stack high-water mark, bytes never used */
+    uint32_t grow_events;        /*!< elastic chunks added */
+    uint32_t shrink_events;      /*!< elastic chunks freed after sitting idle */
+    uint32_t reclaim_events;     /*!< times chunks were retired because admission/negotiation needed the heap */
+    uint32_t reclaimed_chunks;   /*!< chunks freed by those reclaims */
+    uint32_t grow_denied_gate;   /*!< growth refused: admission or a negotiation is in progress */
+    uint32_t grow_denied_heap;   /*!< growth refused: free heap would fall below the floor */
+    uint32_t grow_denied_largest;/*!< growth refused: largest free block below the floor, before or after the allocation */
+    uint32_t grow_denied_nomem;  /*!< growth refused: the allocator returned NULL */
+    uint32_t grow_raced;         /*!< a chunk was allocated and discarded because a reclaim started meanwhile */
+    uint32_t pm_acquired;        /*!< CPU-frequency lock acquisitions (0 unless CONFIG_PM_ENABLE) */
+    uint32_t pm_released;
+    uint32_t pm_held;            /*!< 1 while the lock is held */
+    /* Drain-rate evidence (ADR 0022). An IN transfer is one NTB (or a zero-length packet closing one whose size was a
+     * multiple of the 64 byte packet). ntb_bytes / ntb_xfers is the mean NTB; with the mean frame size it gives datagrams
+     * per NTB. The gap histogram is the time between consecutive IN completions seen by the TinyUSB task while frames
+     * were queued: each gap is one NTB's bus time plus the task's wake latency, so a mean far above the bus time of the
+     * mean NTB (about 0.85 ms per kilobyte at full speed) says the task is being starved, not the bus. */
+    uint32_t ntb_xfers;          /*!< IN completions that carried data (one NTB each) */
+    uint32_t ntb_zlp;            /*!< zero-length IN completions (ZLP after an NTB that was a multiple of 64 B) */
+    uint32_t ntb_bytes;          /*!< bytes carried by those NTBs, summed */
+    uint32_t ntb_max_bytes;      /*!< largest NTB completed */
+    uint32_t drains_sent[5];     /*!< drain passes that handed 1, 2, 3, 4, 5 or more frames to the NTBs */
+    uint32_t gap_count;          /*!< completions with a backlog, measured since the previous completion */
+    uint32_t gap_us_sum;
+    uint32_t gap_us_max;
+    uint32_t gap_hist[5];        /*!< < 1 ms, < 2 ms, < 4 ms, < 8 ms, >= 8 ms */
+    uint32_t cold_starts;        /*!< empty to non-empty transitions that were later handed to an NTB */
+    uint32_t cold_us_sum;        /*!< commit of the first frame to its hand-over: worker wake + deferral + TinyUSB task */
+    uint32_t cold_us_max;
+    uint32_t worker_demotions;   /*!< times the worker ran heap work at work_priority */
+} tinyusb_net_tx_stats_t;
+
+/**
+ * @brief Transmit ring and elastic-buffer configuration
+ *
+ * Capacity is `base_frames` full frames that are always present plus up to `max_chunks` elastic chunks of
+ * TINYUSB_NET_TX_CHUNK_SLABS frames each, allocated on demand by the worker task (never by the producer) and
+ * released when idle or when admission needs the heap.
+ */
+typedef struct {
+    unsigned base_frames;        /*!< permanent slabs, 2..TINYUSB_NET_TX_MAX_BASE_SLABS */
+    unsigned max_chunks;         /*!< elastic chunks, 0..TINYUSB_NET_TX_MAX_CHUNKS (0: fixed ring) */
+    unsigned priority;           /*!< worker task priority: the relay (notify, defer) runs here */
+    unsigned work_priority;      /*!< priority for a growth pass (heap walks); 0: the same as `priority`. Retire and idle shrink stay at `priority`.
+                                      The relay must outrank the producers on its core so the first frame is not held behind
+                                      a decrypt run, but a heap walk must not delay the TinyUSB task it is serving. */
+    int core;                    /*!< worker core (tskNO_AFFINITY for none) */
+    size_t floor_free;           /*!< free internal heap that must remain after a growth */
+    size_t floor_largest;        /*!< largest free internal block that must exist before AND after a growth */
+    uint32_t idle_ms;            /*!< a chunk unused this long is freed, one chunk per 500 ms pass, highest first (0: 2000) */
+    bool (*gate)(void *ctx);     /*!< true while growth is forbidden and idle chunks must go (negotiation); may be NULL */
+    void *gate_ctx;
+    /** CPU-frequency hold while frames are queued (the gateway binds them to a tdongle_pm_burst_t). Both NULL: no
+     *  hold. Called from the worker task only, strictly alternating begin/end (begin on empty to non-empty, end on
+     *  non-empty to empty, link loss or teardown), with no lock of the ring held. */
+    void (*pm_begin)(void *ctx);
+    void (*pm_end)(void *ctx);
+    void *pm_ctx;
+} tinyusb_net_tx_config_t;
+
+/**
+ * @brief Allocate the permanent ring and start its worker task (once, after tinyusb_net_init)
+ *
+ * The ring is an alternative to tinyusb_net_send_sync() for callers that hold a lock and must
+ * never wait. It costs base_frames * 1524 bytes of heap plus the worker (1,536 B stack and a 340 B TCB);
+ * send_sync users pay nothing. The transmit-complete event that keeps it draining is a
+ * linker wrap of netd_xfer_cb (CMakeLists.txt).
+ *
+ * @return ESP_OK, ESP_ERR_NO_MEM, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_STATE (started with another config)
+ */
+esp_err_t tinyusb_net_tx_ring_start(const tinyusb_net_tx_config_t *cfg);
+
+/**
+ * @brief Queue a frame for transmission without blocking
+ *
+ * The frame is copied: the caller keeps ownership of `buffer` in every case and the
+ * free_tx_buffer callback is NOT used. Calls must be serialized by the caller (single
+ * producer). Never waits for a task, never allocates: it takes a critical section of a few
+ * instructions twice (reserve and commit a slab range) and copies outside it.
+ *
+ * @return ESP_OK            queued; it will be handed to USB exactly once or flushed on link loss
+ *         ESP_ERR_NO_MEM    ring full (dropped, counted)
+ *         ESP_ERR_INVALID_STATE  ring not started or USB not ready (dropped, counted)
+ *         ESP_ERR_INVALID_ARG    frame length outside 14..1518
+ */
+esp_err_t tinyusb_net_tx_ring_send(const void *buffer, uint16_t len);
+
+/**
+ * @brief Give back the elastic memory now (membership admission)
+ *
+ * Retires every elastic chunk: idle ones are freed at once, chunks that still hold queued frames stop receiving
+ * new frames and are freed when the last frame in them has been handed to USB (frames in flight are never
+ * dropped or freed under the consumer). Waits up to `wait_ms` for those chunks to drain. Call it AFTER the
+ * negotiation token is held (the gate then keeps the worker from growing again) and BEFORE measuring free heap.
+ * Not for use from the lwIP lock holder or the TinyUSB task: it may sleep.
+ *
+ * @return bytes of elastic memory still held when it returns (0 when the whole elastic part is back in the heap)
+ */
+size_t tinyusb_net_tx_elastic_reclaim(uint32_t wait_ms);
+
+/** @brief Wake the worker so it re-evaluates the gate (retire idle chunks). Never blocks; any task context. */
+void tinyusb_net_tx_elastic_kick(void);
+
+/** @brief The USB link went away (detach): frames queued so far are stale and are flushed. Any task context. */
+void tinyusb_net_tx_ring_link_down(void);
+
+/** @brief Snapshot the transmit-ring counters */
+void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out);
 
 #endif // (CONFIG_TINYUSB_NET_MODE_NONE != 1)
 

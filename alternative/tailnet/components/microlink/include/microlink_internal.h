@@ -2,21 +2,34 @@
  * @file microlink_internal.h
  * @brief MicroLink v2 Internal Types and Task Communication
  *
- * Architecture: 5 FreeRTOS tasks communicating via queues and event groups.
- * No shared mutable state between tasks - each owns its data exclusively.
+ * Architecture (ADR 0013 stage 1): three SHARED tasks serve every membership, and the
+ * control plane keeps one task per membership.
  *
- * Tasks:
- *   net_io   (Core 0, pri 6)  - Unified select() on all sockets
- *   derp_tx  (Core 0, pri 7)  - Sole DERP TLS writer
- *   coord    (Core 1, pri 5)  - Control plane (Noise, HTTP/2, registration)
- *   wg_mgr   (Core 1, pri 7)  - WireGuard + DISCO + peer management
- *   app      (unpinned, pri 3) - User application (external, not ours)
+ * Shared (one instance, started with the first membership, stopped with the last):
+ *   net_io   (Core 0, pri 7)  - one select() over every membership's UDP sockets
+ *   derp     (Core 0, pri 5)  - every membership's DERP link (non-blocking TLS state machine)
+ *   wg_mgr   (Core 1, pri 7)  - WireGuard + DISCO + peer management for every membership
+ * Per membership:
+ *   coord    (Core 1, pri 5)  - control plane (Noise, HTTP/2, registration, map)
+ *
+ * A membership's state is owned by exactly one task at a time per concern (its sockets by
+ * net_io, its DERP link and TLS context by the derp task, its peers and WireGuard device by
+ * wg_mgr, its control connection by its coord task). Shared tasks reach a membership only
+ * through ml_mux_t (ml_mux.h), whose lock is the lifetime rule: after ml_mux_detach() returns,
+ * no shared task touches the membership again. See ml_runtime.h.
  */
 
 #pragma once
 
 #include "microlink.h"
 #include "ml_config_httpd.h"
+#include "ml_published_name.h"
+#include "ml_derp_cert.h"
+#include "ml_derp_tls.h"
+#include "ml_derp_link.h"
+#include "ml_mux.h"
+#include "ml_negotiation.h"
+#include "ml_rng.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,6 +40,8 @@
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "esp_heap_caps.h"
+#include "tdongle_memory.h"
+#include "ml_gateway_limits.h"
 /* Forward-declare esp_tls_t so we can hold a pointer without pulling in
  * the full esp_tls.h header (esp-tls REQUIRES added in CMakeLists). */
 struct esp_tls;
@@ -47,47 +62,125 @@ extern "C" {
  * ========================================================================== */
 
 /* Task configuration.
- * Stack sizes right-sized 2026-05-26 from measured high-water marks to free
- * internal DRAM (FreeRTOS stacks are internal-only). Observed peak usage:
- * net_io ~3.0K, derp_tx ~3.7K, coord ~8.3K (TLS + a 4K on-stack recv_buf),
- * wg_mgr ~4.3K. Trimmed only the clearly-oversized ones, keeping a generous
- * margin over the observed peak (TLS handshakes can spike). coord/wg_mgr
- * left as-is — they run closer to their ceiling. */
-#define ML_TASK_NET_IO_STACK    (6 * 1024)   /* was 8K; ~3K peak observed */
+ *
+ * Stack sizes (FreeRTOS stacks are internal DRAM). Rule: size >= 2 x the highest stack use measured on
+ * hardware, rounded up to 512 B, and never less than peak + 2 KiB. With shared tasks the rule is applied
+ * to the worst path of ONE membership's service slice plus the worst CROSS-MEMBER path, because a shared
+ * task visits memberships one after another and never nests them: the deepest stack is the deepest single
+ * slice, whichever membership it serves.
+ *
+ * Evidence: firmware 0.2.22 on the T-Dongle-S3, 2026-10-05 (docs/diagnostics/baseline-0.2.22-2026-10-05.md),
+ * uxTaskGetStackHighWaterMark after a join that included the DERP TLS handshake and 4x4-stream bidirectional
+ * iperf over the direct path. Peak use: net_io 3,376, derp_tx 3,716, coord 4,152, wg_mgr 3,644.
+ * The stack overflow canary stays on (CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY).
+ *
+ * Paths that capture did not run, bounded from the linked binary's frame sizes (tools/stack-frames.py prints
+ * the frame of each function in the linked binary; they were added up along the real call chains):
+ *   derp     DERP certificate verification runs in the handshake step (esp_crt_verify_callback + RSA/ECDSA
+ *            verify): about +1.5 KB over the VERIFY_NONE handshake that was measured, so about 5.2 KB peak.
+ *            The non-blocking link adds ml_derp_link_service (frames: ClientInfo scratch 192 B, receive
+ *            scratch 64 B) on top of the same TLS chain: about +0.4 KB, so about 5.6 KB.
+ *            The cross-member path is the DNS callback registration under the core lock and the negotiation
+ *            token poll, both shallower than the handshake chain.
+ *   coord    map re-fetch and reconnect repeat the measured map path (the deepest one: DERP-map activation runs the
+ *            netcheck on this task). The paths added since that capture, from GCC's frame sizes along the real call
+ *            chains (docs/research/evidence/coord_stack_paths.py, docs/adr/0021): the JSON of the /key response
+ *            (plain HTTP for an http:// login server: unauthenticated) and of the RegisterResponse is parsed by cJSON,
+ *            which recurses on this stack; ml_coord.c bounds their nesting to 4 and 16 levels (the build's limit
+ *            is 32) before parsing, so the worst of them is 5.7 KB with everything the frame sums cannot see added;
+ *            the https key fetch and control connection run esp_tls's handshake on this task as well (5.4 KB,
+ *            direct calls only). The measured 4,152 B bounds the rule from below (2 x = 8,304 B), the analysed
+ *            5,736 B from above (+ 2 KiB = 7,784 B): 8,704 B is the smallest 512 B multiple that holds both, for
+ *            plain and TLS control alike. The research's 6,144 B (docs/research/membership-bytes.md R3) is below
+ *            twice the measured use and is NOT taken; lowering it needs a new board measurement (see ADR 0016).
+ *   wg_mgr   inbound activation of an unknown peer adds derp_sender_admit 336 and directory_activate_idle 336
+ *            on the paths JIT activation already walked. Stage 1 adds the CROSS-MEMBER path: when the peer pool
+ *            is full a membership evicts the least recently used idle peer of ANOTHER membership
+ *            (peer_pool_evict -> remove_peer -> wireguardif_remove_peer), about +0.9 KB, and runs the WireGuard
+ *            interface init (wg_init_interface_impl, ~1.0 KB of frames) from the same task. Both replace, not
+ *            nest, the 3,644 B path measured: about 5.6 KB.
+ *   net_io   only socket receive and queue hand-off; the shared loop adds an fd_set for every membership's
+ *            three sockets (about 128 B) and the same 1,564 B receive buffer.
+ * Every size below leaves at least 2 KiB over the highest estimate and is at least twice the measured use.
+ * They must be re-verified on the board: `stack_free_bytes` in /status reports the shared tasks' headroom. */
+#define ML_TASK_NET_IO_STACK    (7168)       /* 3,376 B measured, ~3.6 KB est. -> 7,168 */
 #define ML_TASK_NET_IO_PRIO     7
 #define ML_TASK_NET_IO_CORE     0
 
-#define ML_TASK_DERP_TX_STACK   (10 * 1024)  /* was 14K; ~3.7K peak observed */
+#define ML_TASK_DERP_TX_STACK   (7680)       /* 3,716 B measured, ~5.6 KB est. with verification -> 7,680 */
 #define ML_TASK_DERP_TX_PRIO    5
 #define ML_TASK_DERP_TX_CORE    0
 
-#define ML_TASK_COORD_STACK     (12 * 1024)
+#define ML_COORD_STACK_MEASURED  4152        /* uxTaskGetStackHighWaterMark, board, firmware 0.2.22, all phases */
+#define ML_COORD_STACK_ANALYSED  5736        /* worst path added since, evidence/coord_stack_paths.py */
+#define ML_TASK_COORD_STACK     (8704)       /* per membership; stage 2 may share it. Smallest 512 B multiple that holds both bounds: */
+_Static_assert(ML_TASK_COORD_STACK >= 2 * ML_COORD_STACK_MEASURED, "coord stack: at least twice the measured use");
+_Static_assert(ML_TASK_COORD_STACK >= ML_COORD_STACK_ANALYSED + 2048, "coord stack: at least 2 KiB over the analysed worst path");
+_Static_assert(ML_TASK_COORD_STACK % 512 == 0 && ML_TASK_COORD_STACK - 512 < 2 * ML_COORD_STACK_MEASURED,
+               "coord stack: not larger than the rule needs (re-measure before changing the bounds)");
 #define ML_TASK_COORD_PRIO      5
 #define ML_TASK_COORD_CORE      1
 
-#define ML_TASK_WG_MGR_STACK    (8 * 1024)
+#define ML_TASK_WG_MGR_STACK    (8192)       /* 3,644 B measured, ~5.6 KB est. with eviction -> 8,192 */
 #define ML_TASK_WG_MGR_PRIO     7
 #define ML_TASK_WG_MGR_CORE     1
+
+/* The three tasks every membership shares: their stacks are paid once, by the first membership. */
+#define ML_RT_SHARED_STACK_BYTES (ML_TASK_NET_IO_STACK + ML_TASK_DERP_TX_STACK + ML_TASK_WG_MGR_STACK)
 
 /* Queue depths */
 /* TX 16->64 (2026-05-27): absorb speedtest bursts so packets queue instead of
  * being dropped at enqueue; relay buffers are SPIRAM-backed (ml_psram_malloc),
  * the queue control struct itself is ~64×48B internal (negligible). */
+#ifdef CONFIG_TDONGLE_QUEUE_DEPTH_SWEEP
+#define ML_QUEUE_SWEEP CONFIG_TDONGLE_QUEUE_DEPTH_SWEEP
+#else
+#define ML_QUEUE_SWEEP 0
+#endif
+#if ML_QUEUE_SWEEP
+#define ML_DERP_TX_QUEUE_DEPTH  ML_QUEUE_SWEEP
+#define ML_DISCO_RX_QUEUE_DEPTH ML_QUEUE_SWEEP
+#else
 #define ML_DERP_TX_QUEUE_DEPTH  8
 #define ML_DISCO_RX_QUEUE_DEPTH 8
-/* WG RX 8->32 (2026-05-27): download-direction frames arrive in bursts via DERP;
- * depth 8 overflowed and silently dropped → TCP loss → exit-node throughput
- * collapse. ml_rx_packet_t is small (ptr+len+meta); 32 is ~1KB internal. */
-#define ML_WG_RX_QUEUE_DEPTH    8
+#endif
+/* WG RX queue slots. The slots are only the COUNT bound (an ml_rx_packet_t is 48 B); what a queued datagram costs is the heap block
+ * it points to, and that is bounded in bytes across all memberships by ml_wg_rx_budget.h (ML_WG_RX_QUEUE_BYTES), which holds 9
+ * full-size datagrams or, with these slots, 12 small ones (ACKs). 8 -> 12 (ADR 0020): a burst that net_io moves out of the socket
+ * mailbox in one pass (up to 10, at most 16) must fit at once, and the old 8 slots lost 5 % of a 3 Mbit/s UDP stream. +192 B of
+ * queue storage per membership, charged by admission through member_queue_bytes. */
+#if ML_QUEUE_SWEEP
+#define ML_WG_RX_QUEUE_DEPTH    ML_QUEUE_SWEEP
+#define ML_STUN_RX_QUEUE_DEPTH  (ML_QUEUE_SWEEP < 4 ? ML_QUEUE_SWEEP : 4)
+#else
+#define ML_WG_RX_QUEUE_DEPTH    12
 #define ML_STUN_RX_QUEUE_DEPTH  4
+#endif
 #define ML_COORD_CMD_QUEUE_DEPTH 4
 #define ML_PEER_UPDATE_QUEUE_DEPTH 16
+
+/* Outbound packets one membership may hold while the peer they are for is activated and its handshake runs
+ * (ml_gateway_queue_packet). A per-membership budget, no longer a constant 4: at ~1,400 B each, 8 is 11,200 B at the
+ * worst, only while a handshake is in flight, tagged to the `wg` owner (the packet pool of PR-B will own this memory).
+ * Enqueueing wakes the wg_mgr task (ml_rt_wake), so the budget is what absorbs a burst, not a polling period. */
+#define ML_JIT_PENDING 8
+#define ML_JIT_PACKET_MAX 1400
 
 /* Protocol limits */
 #define ML_MAX_PEERS            CONFIG_ML_MAX_PEERS
 #define ML_MAX_ENDPOINTS        8
 #define ML_MAX_PACKET_SIZE      1500
-#define ML_DERP_MAX_FRAME       (ML_MAX_PACKET_SIZE + 64)
+/* Largest payload accepted in one DERP frame after the 32-byte source key of a
+ * RecvPacket (and the cap for every other post-handshake frame). The DERP frame
+ * header (type byte + 4 length bytes, derp.go frameHeaderLen) is not part of the
+ * length field, and a RecvPacket's 32-byte source key is subtracted before this
+ * cap applies. The largest WireGuard data message is a tunnel packet of up to
+ * ML_MAX_PACKET_SIZE bytes padded to 16 plus 16 bytes of header and 16 of tag:
+ * 1,500 -> 1,504 + 32 = 1,536 <= 1,564. Our netif MTU is 1,420 (1,456 on the
+ * wire) and Tailscale's default 1,280 (1,312); handshake messages are < 150. */
+_Static_assert(ML_DERP_MAX_FRAME == ML_MAX_PACKET_SIZE + 64, "ml_derp_link.h and the packet size must agree");
+_Static_assert(ML_DERP_MAX_FRAME >= ((ML_MAX_PACKET_SIZE + 15) / 16) * 16 + 32,
+               "a maximum-size WireGuard data message must fit one DERP frame");
 
 /* DERP */
 /* 2026-05-28: tried region 26 (Nuremberg, = tailscale-105's home DERP) to kill
@@ -102,6 +195,17 @@ extern "C" {
 /* Tailscale control plane */
 #define ML_CTRL_HOST            "controlplane.tailscale.com"
 #define ML_CTRL_PORT            443
+
+/* Who vouches for the control server's Noise key (see ml_coord.c). */
+#define ML_CTRL_KEY_NONE            0 /* nothing established yet */
+#define ML_CTRL_KEY_PINNED_BUILTIN  1 /* Tailscale SaaS key compiled into ml_noise.c */
+#define ML_CTRL_KEY_PINNED_CONFIG   2 /* ctrl_noise_key from the configuration */
+#define ML_CTRL_KEY_TLS_VERIFIED    3 /* fetched over https, certificate verified */
+#define ML_CTRL_KEY_PLAINTEXT       4 /* fetched over http: NOT authenticated */
+#define CTRL_KEY_PINNED_BUILTIN ML_CTRL_KEY_PINNED_BUILTIN
+#define CTRL_KEY_PINNED_CONFIG  ML_CTRL_KEY_PINNED_CONFIG
+#define CTRL_KEY_TLS_VERIFIED   ML_CTRL_KEY_TLS_VERIFIED
+#define CTRL_KEY_PLAINTEXT      ML_CTRL_KEY_PLAINTEXT
 #define ML_CTRL_PROTOCOL_VER    131
 
 /* Hostinfo.IPNVersion is supplied per-device via microlink_config_t.ipn_version
@@ -158,14 +262,8 @@ extern "C" {
  * this one guards the map stream specifically (#32). */
 #define ML_CTRL_STREAM_STALE_MS         300000
 
-/* DERP relay liveness (#33). The 3-attempt connect bursts are only re-armed
- * by a coord (re)connect or an incoming DERPMap — neither fires while coord
- * sits in COORD_LONG_POLL, so the writer task must own its own recovery:
- * retry forever on exponential backoff, and treat RX silence on a
- * "connected" socket as a dead link (DERP servers keepalive every ~15-60s). */
-#define ML_DERP_RETRY_MIN_MS            5000
-#define ML_DERP_RETRY_MAX_MS            60000
-#define ML_DERP_STALE_MS                90000
+/* DERP relay liveness (#33): the retry ladder, the receive watchdog and every per-record, per-write and
+ * per-attempt deadline live in ml_derp_link.h (ML_DERP_RETRY_MIN_MS, ML_DERP_RETRY_MAX_MS, ML_DERP_STALE_MS, ...). */
 
 /* Large tailnet buffer sizes (PSRAM-allocated, configurable via menuconfig) */
 #define ML_H2_BUFFER_SIZE       (CONFIG_ML_H2_BUFFER_SIZE_KB * 1024)
@@ -313,6 +411,16 @@ typedef struct {
     bool authoritative;
     ml_peer_update_t updates[];
 } ml_peer_batch_t;
+/* Peer-update queue entries are of two kinds: heap blocks (map batches, endpoint updates: ml_peer_update_t, owner PEER) and
+ * queued host packets, which are lwIP pbufs in the WireGuard transport layout (ml_wg_mgr.c, "Egress"). A pbuf pointer is
+ * 4-aligned, so bit 0 tells the two apart; a packet entry must never be dereferenced as an update or freed with free(). */
+struct pbuf;
+static inline bool ml_pu_is_packet(const void *entry) { return ((uintptr_t)entry & 1u) != 0; }
+static inline void *ml_pu_tag_packet(struct pbuf *packet) { return (void *)((uintptr_t)packet | 1u); }
+static inline struct pbuf *ml_pu_packet(const void *entry) { return (struct pbuf *)((uintptr_t)entry & ~(uintptr_t)1u); }
+static inline tdongle_owner ml_peer_update_owner(const ml_peer_update_t *update) { (void)update; return TDONGLE_OWNER_PEER; }
+/* Free an entry taken from the queue (stop path). */
+void ml_pu_free_entry(void *entry);
 
 /* ============================================================================
  * Peer State (owned exclusively by wg_mgr task)
@@ -326,6 +434,11 @@ typedef struct {
     uint8_t disco_key[32];
     char hostname[64];
     bool active;
+    /* Activated because of an inbound claim nobody has authenticated yet (a
+     * DERP source key). Set only while it holds the membership's single trial
+     * slot; cleared when WireGuard authenticates this peer, or the peer is
+     * removed when the trial expires. See directory_trial_* in ml_wg_mgr.c. */
+    bool unconfirmed;
 
     /* Endpoints */
     struct {
@@ -418,6 +531,7 @@ typedef struct {
     uint16_t stun_port;     /* 0 = default 3478 */
     uint16_t derp_port;     /* 0 = default 443 */
     bool stun_only;         /* true if node only serves STUN, not DERP */
+    ml_derp_cert_t cert;    /* how to authenticate the TLS server: from DERPNode.CertName */
 } ml_derp_node_t;
 
 typedef struct {
@@ -452,15 +566,19 @@ typedef struct {
  * DERP Connection State
  * ========================================================================== */
 
+struct derp_xport;                  /* connect-time scratch (ml_derp.c): heap, only while connecting */
 typedef struct {
     int sockfd;                     /* Raw TCP socket */
-    mbedtls_ssl_context ssl;        /* TLS context (owned exclusively by DERP I/O task) */
+    mbedtls_ssl_context ssl;        /* TLS context (touched only by the derp task, or by teardown under the mux lock) */
     mbedtls_ssl_config ssl_conf;
-    mbedtls_entropy_context entropy;
-    mbedtls_ctr_drbg_context ctr_drbg;
-    bool connected;
-    volatile bool rx_parked;        /* reader sets true when NOT touching the ssl context */
+    bool tls_up;                    /* ssl and ssl_conf are initialised (and an ml_rng reference is held) */
+    struct derp_xport *xport;       /* DNS, TCP and TLS progress of the attempt in flight; NULL otherwise */
+    ml_derp_link_t link;            /* the relay protocol, as a non-blocking state machine */
+    bool connected;                 /* mirrors link.state == READY for the other tasks */
     uint64_t last_recv_ms;          /* For keepalive watchdog */
+    uint64_t connect_started_ms;    /* wall of the attempt that is in flight, for the timing log */
+    uint32_t tls_verify_failures;   /* handshakes refused because the server did not authenticate */
+    uint32_t tls_deferred;          /* connects postponed until the wall clock is set */
 } ml_derp_conn_t;
 
 /* ============================================================================
@@ -478,6 +596,16 @@ typedef struct {
 
 
 #include "ml_directory.h"
+
+/* The wg_mgr loop's per-membership state. It used to be locals of a task function; with one shared wg_mgr
+ * task every membership keeps its own in its context. */
+typedef struct {
+    enum { ML_WG_STAGE_NEW, ML_WG_STAGE_WAIT_REGISTRATION, ML_WG_STAGE_RUNNING } stage;
+    uint64_t last_disco_probe_ms, last_wg_periodic_ms, last_snapshot_ms;
+    bool derp_was_connected;
+    bool stun_cmm_sent;             /* one-shot: send CallMeMaybe after the first STUN result */
+    uint32_t disco_rx_10s, budget_hits_10s;
+} ml_wg_loop_t;
 
 struct microlink_s {
     uint8_t txid_v4[12], txid_v6[12];
@@ -515,7 +643,10 @@ struct microlink_s {
     /* State (atomic reads from any task, writes only from coord) */
     volatile microlink_state_t state;
     volatile uint32_t vpn_ip;
-    char self_dns_name[128];
+    /* MagicDNS name of this node. Written by the control task, read by the
+     * status, LCD and DNS tasks: use ml_published_name_set/get, never the
+     * text directly (it can be mid-rewrite). */
+    ml_published_name_t self_dns_name;
 
     /* True when load_or_generate_keys() found every keypair in NVS at
      * boot (i.e. this device has a persistent node identity). False
@@ -551,18 +682,15 @@ struct microlink_s {
     EventGroupHandle_t events;
 
     /* Task handles */
-    TaskHandle_t net_io_task;
-    TaskHandle_t derp_tx_task;
-    TaskHandle_t derp_rx_task;
-    TaskHandle_t coord_task;
-    TaskHandle_t wg_mgr_task;
-    /* Tasks started by microlink_start() that have not signed off yet
+    TaskHandle_t coord_task;        /* the only per-membership task; net_io, derp and wg_mgr are shared (ml_runtime.h) */
+    /* The coord task, if microlink_start() created it and it has not signed off yet
      * (ml_task_exiting). microlink_stop() waits for this to reach zero
      * instead of sleeping a fixed 3 s and hoping: a coord task still inside
      * poll_map_update() when microlink_destroy() freed the instance was a
      * use-after-free PANIC on the reference router (reconnect burst). */
     volatile int tasks_alive;
-    bool stop_incomplete;           /* a task outlived the stop wait: destroy must not free */
+    bool rt_attached;               /* registered with the shared tasks (ml_rt_attach succeeded) */
+    bool stop_incomplete;           /* a task outlived the stop wait, or a shared task still held this context: destroy must not free */
 
     /* Queues */
     QueueHandle_t derp_tx_queue;        /* -> derp_tx task */
@@ -571,11 +699,22 @@ struct microlink_s {
     QueueHandle_t stun_rx_queue;        /* net_io -> coord */
     QueueHandle_t coord_cmd_queue;      /* any -> coord */
     volatile uint32_t peer_generation; /* even = peer metadata stable, odd = owner applying updates */
-    struct { ml_peer_update_t *packet; uint64_t expires; } jit_pending[4];
+    struct { struct pbuf *packet; uint64_t expires; uint32_t vpn_ip; uint32_t seq; uint16_t len; } jit_pending[ML_JIT_PENDING];   /* prepared egress pbufs, see ml_wg_mgr.c */
     volatile unsigned jit_packet_count;
     uint32_t jit_hits,jit_misses,jit_evictions,jit_rejected,jit_dropped;
     uint32_t directory_applied;
+    /* Budget for work an unauthenticated inbound packet can cause (flash
+     * lookup, X25519, a peer slot). Owned by wg_mgr. */
+    struct {
+        uint8_t pending;              /* peer index + 1 holding the trial slot, 0 = free */
+        uint8_t tokens;               /* lookups the next packets may still cause */
+        uint64_t refill_ms;           /* last token refill */
+        uint64_t deadline_ms;         /* the trial peer must authenticate by then */
+        uint64_t cooldown_until_ms;   /* no new trial before this after a failed one */
+        uint32_t started, confirmed, expired, refused;
+    } inbound_trial;
     ml_directory_t directory;
+    ml_wg_loop_t wgm;               /* shared wg_mgr task's per-membership loop state */
     volatile bool map_batch_pending; /* at most one owned semantic batch per membership */
     QueueHandle_t peer_update_queue;    /* coord -> wg_mgr */
 
@@ -697,7 +836,8 @@ struct microlink_s {
     uint8_t *h2_acc;
     size_t   h2_acc_len;
 
-    uint8_t *lp_acc;         /* PSRAM, ML_JSON_BUFFER_SIZE, lazily allocated */
+    /* Never allocated in gateway mode: nothing assigns it, so only destroy ever frees it (docs/memory-diagnostics.md). */
+    uint8_t *lp_acc;
     size_t   lp_acc_len;
 
     /* Key expiry (parsed from MapResponse self-node) */
@@ -745,6 +885,11 @@ struct microlink_s {
      * server key. */
     uint8_t ctrl_noise_pubkey[32];
     bool ctrl_noise_pubkey_valid;
+    uint8_t ctrl_key_auth;           /* ML_CTRL_KEY_*: who vouches for the key above */
+    uint8_t ctrl_key_failures;       /* consecutive Noise handshake failures with a fetched key */
+    uint32_t ctrl_key_drop_backoff_ms; /* gap enforced between drops of the fetched key */
+    uint64_t ctrl_key_next_drop_ms;  /* no drop before this (uptime ms) */
+    uint32_t ctrl_key_refetches;     /* fetched keys dropped after failures */
 
     /* Subnet routes to advertise on register (Hostinfo.RoutableIPs).
      * Newline-separated CIDR string copied from microlink_config_t.advertise_routes.
@@ -776,13 +921,16 @@ void gateway_diag_record(const microlink_t *ml, uint32_t event,
  * Internal Function Declarations (per-module)
  * ========================================================================== */
 
-/* ml_net_io.c */
-void ml_net_io_task(void *arg);
+/* ml_net_io.c: the shared loop's body. One call = one select() over every attached membership's sockets
+ * (at most 50 ms), then the packets that arrived are classified and queued. `scratch` is the task's
+ * receive buffer (ML_NET_IO_SCRATCH_BYTES). */
+#define ML_NET_IO_SCRATCH_BYTES (ML_MAX_PACKET_SIZE + 64)
+void ml_net_io_pass(ml_mux_t *mux, uint8_t *scratch);
 
-/* ml_derp.c */
-void ml_derp_tx_task(void *arg);
-esp_err_t ml_derp_connect(microlink_t *ml);
-void ml_derp_disconnect(microlink_t *ml);
+/* ml_derp.c: the per-membership hooks of the shared DERP task (see ml_runtime.c). */
+extern const ml_mux_ops_t ml_derp_mux_ops;
+/* Wire a freshly allocated membership to the DERP machinery. Allocation-free. */
+void ml_derp_member_init(microlink_t *ml);
 
 /* Every microlink task calls this as its LAST statement before
  * vTaskDelete(NULL): after it returns the task must not touch ml again,
@@ -799,8 +947,28 @@ void ml_coord_task(void *arg);
  * pinned (exit-node off). Defined in ml_coord.c, also called from ml_derp.c. */
 void ml_bind_sock_to_upstream(microlink_t *ml, int fd);
 
-/* ml_wg_mgr.c */
-void ml_wg_mgr_task(void *arg);
+/* ml_wg_mgr.c: the per-membership hooks of the shared wg_mgr task (see ml_runtime.c). */
+extern const ml_mux_ops_t ml_wg_mux_ops;
+/* Global WireGuard peer-slot pool, for /status (ml_wg_mgr.c). */
+typedef struct {
+    uint32_t capacity, used, peak, refused_full, refused_nomem;
+    uint32_t evictions_own, evictions_other, rejected;
+    uint32_t refused_largest;   /* slots refused because they would have taken the largest free block under the TLS floor */
+    uint32_t refused_heap;      /* slots beyond the guaranteed ones refused for the recovery reserve / negotiation peak (ml_adm_slot_heap_ok) */
+    uint32_t largest_low;       /* smallest largest-free-block seen right after a slot allocation (UINT32_MAX: none yet) */
+    uint32_t slot_bytes, device_bytes;
+} ml_wg_pool_status_t;
+void ml_wg_pool_status(ml_wg_pool_status_t *out);
+size_t ml_wg_slot_bytes(void);       /* sizeof(struct wireguard_peer): the slot the pool hands out */
+size_t ml_wg_device_bytes(void);     /* sizeof(struct wireguard_device): a membership's WireGuard device */
+
+/* The shared wg_mgr task's scratch: one pass visits every membership, and the work windows below the
+ * per-membership drains (#46) are bounded by the pass as a whole, so N memberships share what one used to have. */
+typedef struct { uint64_t pass_start_ms; uint32_t drain_ms; uint64_t next_due_ms; } ml_wg_pass_t;
+typedef struct { uint32_t wait_ms; bool active; } ml_derp_pass_t;   /* shortest wait any link asks for, UINT32_MAX = none */
+void ml_wg_pass_begin(ml_wg_pass_t *pass);
+/* Units of work the last pass did (packets moved, timers run); reset by the call. wg_mgr task only. */
+unsigned ml_wg_pass_work_take(void);
 void ml_wg_mgr_send_cmm(microlink_t *ml, uint32_t peer_vpn_ip);
 esp_err_t ml_wg_mgr_trigger_handshake(microlink_t *ml, uint32_t dest_vpn_ip);
 bool ml_wg_mgr_peer_is_up(microlink_t *ml, uint32_t vpn_ip);
@@ -1020,4 +1188,8 @@ static inline void *ml_psram_calloc(size_t n, size_t size) {
 }
 #endif
 
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+/* Times the WireGuard cipher (ChaCha20-Poly1305) and a plain copy of len-byte packets. */
+bool ml_wg_crypto_bench(size_t len, unsigned rounds, uint32_t *aead_ns, uint32_t *copy_ns);
+#endif
 esp_err_t ml_gateway_queue_packet(microlink_t *ml, uint32_t ip, const uint8_t *data, size_t len);

@@ -1,0 +1,44 @@
+menu "T-Dongle memory diagnostics"
+    config TDONGLE_MEMORY_DIAGNOSTICS
+        bool "Memory diagnostics build (owner-tagged heap, per-phase capture, serial memory/members commands)"
+        default n
+        help
+            Evidence build for the multi-tailnet memory work. Adds an owner-tagged
+            allocation ledger (microlink sites plus mbedTLS), a per-membership heap
+            capture at each join phase, an admission record and the serial
+            "memory" / "members" commands. Costs about 2 KB of static RAM and a
+            few instructions per tagged allocation. Leave off for release images:
+            every hook compiles to the plain allocator call when this is off.
+
+    config TDONGLE_MEMORY_GUARD_FLOOR_BYTES
+        int "Free-heap floor enforced on tagged allocations and task creation (bytes)"
+        depends on TDONGLE_MEMORY_DIAGNOSTICS
+        range 0 65536
+        default 12288
+        help
+            A tagged allocation that would leave less internal heap than this is
+            refused (counted as denied) and a membership task whose stack would
+            do the same is not created. This turns an out-of-memory crash during
+            an over-budget membership into an ordinary start failure. Adjustable
+            at run time with "memory guard <bytes>".
+
+    config TDONGLE_MEMORY_ADMISSION_OVERRIDE
+        bool "Start memberships past member_start_budget() (diagnostics only)"
+        depends on TDONGLE_MEMORY_DIAGNOSTICS
+        default y
+        help
+            Replaces the 107 KB budget and 24,000 B largest-block gate with the
+            guard floor above, so a second membership can be attempted and its
+            cost measured. Failed attempts are retried at most once a minute and
+            every attempt is recorded by the "members" command.
+
+    config TDONGLE_QUEUE_DEPTH_SWEEP
+        int "Relay queue depth override for the throughput sweep (0 keeps 8/8/8/4)"
+        depends on TDONGLE_MEMORY_DIAGNOSTICS
+        range 0 8
+        default 0
+        help
+            Sets the per-membership DERP TX, DISCO RX and WG RX queue depths to this
+            value and the STUN RX depth to the smaller of this value and 4. Build
+            one image per depth (1, 2, 4, 8) for the queue-depth sweep (issue #10).
+endmenu

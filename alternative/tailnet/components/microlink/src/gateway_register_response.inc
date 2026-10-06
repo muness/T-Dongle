@@ -4,7 +4,7 @@ static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
     size_t h2_resp_len = ml->h2_acc_len;
     if (h2_resp_len >= sizeof(gateway_json)) return -1;
     if (h2_resp_len) memcpy(h2_resp, ml->h2_acc, h2_resp_len);
-    free(ml->h2_acc);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc);
     ml->h2_acc = NULL;
     ml->h2_acc_len = 0;
 
@@ -87,7 +87,7 @@ static int gateway_read_registration(microlink_t *ml, ml_noise_state_t *noise) {
     size_t pending = h2_resp_len - end;
     if (pending) {
         if (pending > 4096) { errno = EMSGSIZE; return -1; }
-        ml->h2_acc = malloc(pending);
+        ml->h2_acc = tdongle_heap_tag(TDONGLE_OWNER_CONTROL, malloc(pending));
         if (!ml->h2_acc) { errno = ENOMEM; return -1; }
         memcpy(ml->h2_acc, h2_resp + end, pending); ml->h2_acc_len = pending;
     }

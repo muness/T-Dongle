@@ -11,6 +11,9 @@ if(${IDF_VERSION_MAJOR} LESS 6)
     list(APPEND priv_req "usb")
 endif()
 
+# tinyusb_net.c allocates the transmit ring with heap_caps
+list(APPEND priv_req "heap" "esp_timer")
+
 if(CONFIG_TINYUSB_CDC_ENABLED)
     list(APPEND srcs
         "cdc.c"
@@ -61,3 +64,9 @@ endif()
 # Pass tusb_config.h from this component to TinyUSB
 idf_component_get_property(tusb_lib ${tinyusb_name} COMPONENT_LIB)
 target_include_directories(${tusb_lib} PRIVATE "include")
+
+# The transmit ring drains on every IN transfer completion. TinyUSB has no hook for that, so
+# wrap the NCM class driver's handler (tinyusb_net.c: __wrap_netd_xfer_cb calls the real one first).
+if(CONFIG_TINYUSB_NET_MODE_NCM)
+    target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=netd_xfer_cb")
+endif()

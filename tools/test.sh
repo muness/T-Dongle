@@ -13,6 +13,7 @@ build-host/test_core
 "${compiler[@]}" -std=c11 -I main main/core.c main/view.c tests/preview.c -o build-host/preview
 build-host/preview > build-host/preview.txt
 python3 tools/preview.py
+python3 tools/test_flash_wait.py
 python3 tools/test_net.py
 python3 tools/test_settings.py
 python3 tools/test_profile.py

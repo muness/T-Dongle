@@ -26,6 +26,8 @@
 #endif
 #include <ctype.h>
 #include "microlink_internal.h"
+#include "ml_coord_state.h"
+#include "ml_runtime.h"
 #include "ml_x25519.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -44,9 +46,9 @@
 static const char *TAG = "ml_coord";
 
 static void *coord_alloc(size_t bytes){
- void *p=ml_psram_malloc(bytes);
+ void *p=tdongle_heap_tag(TDONGLE_OWNER_CONTROL, ml_psram_malloc(bytes));
 #ifdef ESP_PLATFORM
- tdongle_memory_note(1,bytes,p==NULL);
+ tdongle_memory_note(TDONGLE_MEMORY_OP_CONTROL_BUFFER,bytes,p==NULL);
 #endif
  return p;
 }
@@ -133,19 +135,7 @@ static cJSON *build_routable_ips_array(const char *routes)
 
 
 
-/* Coordination state machine */
-typedef enum {
-    COORD_IDLE,
-    COORD_STUN_PROBE,
-    COORD_DNS_RESOLVE,
-    COORD_TCP_CONNECT,
-    COORD_NOISE_HANDSHAKE,
-    COORD_H2_PREFACE,
-    COORD_REGISTER,
-    COORD_FETCH_PEERS,
-    COORD_LONG_POLL,
-    COORD_RECONNECTING,
-} coord_state_t;
+/* Coordination state machine: coord_state_t and the token rule are in ml_coord_state.h */
 
 /* ============================================================================
  * Helper: hex encoding for keys
@@ -172,17 +162,39 @@ static int hex_to_bytes(const char *hex, uint8_t *bytes, size_t max_len) {
 }
 
 /* ============================================================================
- * Control-plane URL parsing + Noise server key fetch (Headscale / custom)
+ * Control-plane URL parsing + Noise server key (who vouches for the key)
  *
- * Custom control planes (Headscale / Ionscale / dev coordinators) are set via
- * login_server as "host", "host:port", "http://host[:port]" or
- * "https://host[:port]".  The Tailscale SaaS default needs neither parsing
- * (bare compiled-in host, port 80) nor a key fetch (hardcoded server key).
+ * The ts2021 Noise handshake authenticates the control server by its static
+ * public key, so whoever supplies that key decides who the device talks to. A
+ * wrong key is a full control-plane impersonation (it receives the node key,
+ * auth key and every MapRequest). Tailscale's client gets the key with
+ * GET <control URL>/key over the control URL's own scheme, https by default,
+ * verified against the system roots (control/controlclient loadServerPubKeys).
+ * The sources here, strongest first:
+ *
+ *   CTRL_KEY_PINNED_BUILTIN  Tailscale SaaS (no login_server): the key compiled
+ *                            into ml_noise.c. Noise authenticates the server
+ *                            against it, nothing is fetched. (The same value
+ *                            https://controlplane.tailscale.com/key returns.)
+ *   CTRL_KEY_PINNED_CONFIG   microlink_config_t.ctrl_noise_key: an operator
+ *                            supplied key; any scheme, nothing is fetched.
+ *   CTRL_KEY_TLS_VERIFIED    https:// login_server: fetched over TLS with the
+ *                            certificate chain and host name verified against
+ *                            the ESP-IDF bundle. A failed verification fails
+ *                            the fetch; there is no fallback to plain HTTP.
+ *   CTRL_KEY_PLAINTEXT       http:// login_server: fetched in the clear, as
+ *                            Tailscale does for an explicit http:// URL. Anyone
+ *                            on the path can substitute their own key, so this
+ *                            is only for a trusted LAN or a pinned key, and it
+ *                            is logged and reported (ctrl_key_auth).
+ *
+ * A login_server with no scheme is https://, Tailscale's default; plain HTTP
+ * has to be asked for with http://.
  * ========================================================================== */
 
 /* Parse "[http[s]://]host[:port]" into bare host and decimal port string.
- * Default port is "80" for http:// / bare hosts and "443" for https://.
- * If use_tls_out is non-NULL it is set to true iff the scheme is https://.
+ * No scheme means https (secure by default): port 443 and *use_tls_out true.
+ * "http://" is plain HTTP, port 80. An explicit ":port" overrides the default.
  * Returns 0 on success, -1 on error. */
 static int parse_host_port(const char *in,
                            char *host_out, size_t host_sz,
@@ -190,22 +202,18 @@ static int parse_host_port(const char *in,
                            bool *use_tls_out) {
     if (!in || !host_out || !port_out || host_sz == 0 || port_sz == 0) return -1;
 
-    /* Reset the TLS flag up front so the outcome never depends on the
-     * caller's prior state (a stale true from an earlier https:// parse). */
-    if (use_tls_out) *use_tls_out = false;
-
+    bool tls = true;
+    const char *default_port = "443";
     const char *p = in;
-    const char *default_port = "80";
 
-    /* Strip scheme */
     if (strncasecmp(p, "http://", 7) == 0) {
         p += 7;
+        tls = false;
+        default_port = "80";
     } else if (strncasecmp(p, "https://", 8) == 0) {
-        if (use_tls_out) *use_tls_out = true;
         p += 8;
-        /* Default port for https is 443; explicit ":port" in the URL overrides. */
-        default_port = "443";
     }
+    if (use_tls_out) *use_tls_out = tls;
 
     /* Find ':' for port separator, stop at '/' (path) or end */
     const char *colon = NULL;
@@ -270,6 +278,34 @@ static int hex_to_bytes32(const char *hex, uint8_t out[32]) {
     return 0;
 }
 
+/* Depth of nested JSON containers a control-plane document may have before it is parsed. cJSON recurses once per
+ * level on THIS task's stack (64 B a level on xtensa, CJSON_NESTING_LIMIT 32 in the build), so a hostile body can
+ * otherwise claim 2 KB of the coord stack: /key is fetched over plain HTTP for an http:// login server, so anyone on
+ * the path can write it. The real documents are shallow (/key: 1 level, RegisterResponse: 3), so the bound is well
+ * above them and well below the build's limit; it is what the coord stack budget in microlink_internal.h counts.
+ * The scan treats every '{' and '[' outside a string as a level, which is at least what cJSON will descend into
+ * (a string is skipped exactly as JSON ends it: an unescaped quote), so a document it accepts cannot recurse deeper. */
+#define ML_JSON_DEPTH_KEY       4
+#define ML_JSON_DEPTH_REGISTER  16
+static bool json_nesting_within(const char *text, size_t length, unsigned max_depth) {
+    unsigned depth = 0;
+    bool in_string = false;
+    for (size_t i = 0; i < length; i++) {
+        char c = text[i];
+        if (in_string) {
+            if (c == '\\') i++;                  /* the escaped character cannot end the string */
+            else if (c == '"') in_string = false;
+        } else if (c == '"') {
+            in_string = true;
+        } else if (c == '{' || c == '[') {
+            if (++depth > max_depth) return false;
+        } else if ((c == '}' || c == ']') && depth) {
+            depth--;
+        }
+    }
+    return true;
+}
+
 /* Parse the /key?v=<ML_CTRL_PROTOCOL_VER> HTTP response (already NUL-terminated).
  * Skips HTTP headers, handles chunked transfer encoding, decodes the JSON
  * "publicKey":"mkey:<64 hex>" field, and hex-decodes the 32-byte Noise pubkey
@@ -282,6 +318,12 @@ static int parse_pubkey_response(const char *resp, uint8_t pubkey_out[32]) {
         return -1;
     }
     body += 4;
+    /* Only a 200 carries a key; an error page must not be mined for one. */
+    if (strncmp(resp, "HTTP/1.", 7) != 0 || resp[7] < '0' || resp[7] > '1' || resp[8] != ' ' ||
+        strncmp(resp + 9, "200", 3) != 0) {
+        ESP_LOGE(TAG, "fetch_server_pubkey: server did not answer 200 (%.12s)", resp);
+        return -1;
+    }
 
     /* Handle chunked transfer encoding: skip the first hex length line. */
     if (strstr(resp, "Transfer-Encoding: chunked") ||
@@ -296,6 +338,10 @@ static int parse_pubkey_response(const char *resp, uint8_t pubkey_out[32]) {
     }
 
     /* Parse JSON: {"legacyPublicKey":"mkey:...","publicKey":"mkey:<64 hex>"} */
+    if (!json_nesting_within(body, strlen(body), ML_JSON_DEPTH_KEY)) {
+        ESP_LOGE(TAG, "fetch_server_pubkey: JSON nested deeper than %d levels", ML_JSON_DEPTH_KEY);
+        return -1;
+    }
     cJSON *root = cJSON_Parse(body);
     if (!root) {
         ESP_LOGE(TAG, "fetch_server_pubkey: JSON parse failed; body='%s'", body);
@@ -324,173 +370,208 @@ static int parse_pubkey_response(const char *resp, uint8_t pubkey_out[32]) {
     return 0;
 }
 
-/* Open a short-lived connection to host:port (plain TCP or TLS per
- * ml->use_tls), GET /key?v=<ML_CTRL_PROTOCOL_VER>, parse the JSON body, extract publicKey,
- * hex-decode into ml->ctrl_noise_pubkey.  Returns 0 on success, -1 on any
- * failure.  Closes its own socket / destroys its own transient TLS handle. */
-static int fetch_server_pubkey(microlink_t *ml, const char *host, const char *port) {
-    /* ------------------------------------------------------------------ */
-    /* TLS branch: use esp_tls for a short-lived, transient connection.    */
-    /* The handle is local — never stored in ml.                           */
-    /* ------------------------------------------------------------------ */
-    if (ml->use_tls) {
-        ESP_LOGI(TAG, "Fetching Noise server pubkey from https://%s:%s/key?v=%d", host, port,
-                 ML_CTRL_PROTOCOL_VER);
+/* One short-lived connection for the key request. open() returns NULL when the
+ * connection or, for TLS, the certificate verification fails. */
+typedef struct {
+    void *(*open)(microlink_t *ml, const char *host, const char *port);
+    int (*write)(void *conn, const uint8_t *data, size_t length);   /* bytes written, <0 on error */
+    int (*read)(void *conn, uint8_t *buffer, size_t capacity);      /* bytes read, 0 at end, <0 on error */
+    void (*close)(void *conn);
+} ctrl_key_transport_t;
 
-        const esp_tls_cfg_t cfg = {
-            .crt_bundle_attach = esp_crt_bundle_attach,
-            .timeout_ms        = 10000,
-            .non_block         = false,
-        };
-        esp_tls_t *tls = esp_tls_init();
-        if (!tls) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: esp_tls_init failed");
-            return -1;
-        }
-        int port_i = atoi(port);
-        int rc_tls = esp_tls_conn_new_sync(host, (int)strlen(host), port_i, &cfg, tls);
-        if (rc_tls != 1) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: TLS handshake failed (rc=%d)", rc_tls);
-            esp_tls_conn_destroy(tls);
-            return -1;
-        }
+/* The /key response is ~400 bytes with headers; Tailscale caps it at 64 KiB. */
+#define CTRL_KEY_REQUEST_MAX 256
+#define CTRL_KEY_RESPONSE_MAX 1536
 
-        /* Build the HTTP GET request; use ctrl_host_hdr for the Host header
-         * (matches what the coord connection uses), falling back to host. */
-        const char *host_hdr = (ml->ctrl_host_hdr[0]) ? ml->ctrl_host_hdr : host;
-        char req[256];
-        /* The capability version on /key must be the same one every other
-         * request carries (ML_CTRL_PROTOCOL_VER) -- tailscaled sends its
-         * CurrentCapabilityVersion here too. It was a hardcoded 88 (Tailscale
-         * 1.62) while the MapRequest already said 131; Headscale >= 0.29
-         * drops the minimum supported version above 88 and answers
-         * "unsupported client version" (HTTP 400), so registration died at
-         * the very first step. SaaS accepted both. */
-        int req_len = snprintf(req, sizeof(req),
-            "GET /key?v=%d HTTP/1.1\r\n"
-            "Host: %s\r\n"
-            "User-Agent: microlink\r\n"
-            "Connection: close\r\n"
-            "\r\n",
-            ML_CTRL_PROTOCOL_VER, host_hdr);
-        if (req_len <= 0 || req_len >= (int)sizeof(req)) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: request snprintf overflow");
-            esp_tls_conn_destroy(tls);
-            return -1;
-        }
-
-        if ((ssize_t)esp_tls_conn_write(tls, req, req_len) != (ssize_t)req_len) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: TLS write failed");
-            esp_tls_conn_destroy(tls);
-            return -1;
-        }
-
-        /* Drain the full response (server closes after body). */
-        char resp[2048];
-        int total = 0;
-        while (total < (int)sizeof(resp) - 1) {
-            ssize_t n = esp_tls_conn_read(tls, (unsigned char *)resp + total,
-                                          sizeof(resp) - 1 - total);
-            if (n <= 0) break;
-            total += (int)n;
-        }
-        esp_tls_conn_destroy(tls);
-
-        if (total <= 0) {
-            ESP_LOGE(TAG, "fetch_server_pubkey: empty TLS response");
-            return -1;
-        }
-        resp[total] = '\0';
-
-        if (parse_pubkey_response(resp, ml->ctrl_noise_pubkey) != 0) {
-            return -1;
-        }
-        ml->ctrl_noise_pubkey_valid = true;
-        ESP_LOGI(TAG, "Fetched Noise server pubkey (TLS): %02x%02x%02x%02x...%02x%02x",
-                 ml->ctrl_noise_pubkey[0], ml->ctrl_noise_pubkey[1],
-                 ml->ctrl_noise_pubkey[2], ml->ctrl_noise_pubkey[3],
-                 ml->ctrl_noise_pubkey[30], ml->ctrl_noise_pubkey[31]);
-        return 0;
-    }
-
-    /* ------------------------------------------------------------------ */
-    /* Plain-HTTP branch.                                                  */
-    /* ------------------------------------------------------------------ */
-    int sock = -1;
-    struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
-    struct addrinfo *res = NULL;
-    int rc = -1;
-
-    ESP_LOGI(TAG, "Fetching Noise server pubkey from http://%s:%s/key?v=%d", host, port,
-             ML_CTRL_PROTOCOL_VER);
-
-    if (ml_getaddrinfo(host, port, &hints, &res) != 0 || !res) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: DNS resolve failed for %s", host);
-        goto out;
-    }
-
-    sock = ml_socket(res->ai_family, SOCK_STREAM, IPPROTO_TCP);
-    if (sock < 0) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: socket() failed");
-        goto out;
-    }
-
-    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
-    ml_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    ml_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
-    /* Keep the key fetch off the exit-node tunnel, like the coord socket. */
-    ml_bind_sock_to_upstream(ml, sock);
-
-    if (ml_connect(sock, res->ai_addr, res->ai_addrlen) < 0) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: connect() failed: errno=%d", errno);
-        goto out;
-    }
-
-    char req[256];
-    int req_len = snprintf(req, sizeof(req),
+/* GET /key?v=<ML_CTRL_PROTOCOL_VER> over `transport`, cache the key in ml.
+ * The connection (and, for TLS, its whole session state) is closed before the
+ * response is parsed and before this returns: nothing of it is alive when the
+ * Noise handshake starts. The key is stored only after a complete, well
+ * formed 200 response. Returns 0 on success. */
+static int ctrl_key_fetch(microlink_t *ml, const ctrl_key_transport_t *transport,
+                          const char *host, const char *port) {
+    char request[CTRL_KEY_REQUEST_MAX];
+    /* The capability version on /key must be the same one every other request
+     * carries (ML_CTRL_PROTOCOL_VER): Headscale >= 0.29 refuses a stale one with
+     * HTTP 400, which killed registration at the first step. */
+    int request_length = snprintf(request, sizeof(request),
         "GET /key?v=%d HTTP/1.1\r\n"
         "Host: %s\r\n"
         "User-Agent: microlink\r\n"
         "Connection: close\r\n"
         "\r\n",
-        ML_CTRL_PROTOCOL_VER, (ml->ctrl_host_hdr[0]) ? ml->ctrl_host_hdr : host);
-    if (req_len <= 0 || req_len >= (int)sizeof(req)) goto out;
-
-    if (ml_send(sock, (uint8_t *)req, req_len, 0) != req_len) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: send failed");
+        ML_CTRL_PROTOCOL_VER, ml->ctrl_host_hdr[0] ? ml->ctrl_host_hdr : host);
+    if (request_length <= 0 || request_length >= (int)sizeof(request)) {
+        ESP_LOGE(TAG, "control key: request does not fit");
+        return -1;
+    }
+    char *response = coord_alloc(CTRL_KEY_RESPONSE_MAX + 1);
+    if (!response) {
+        ESP_LOGE(TAG, "control key: out of memory for the response");
+        return -1;
+    }
+    int result = -1;
+    void *connection = transport->open(ml, host, port);
+    if (!connection) {
+        ESP_LOGE(TAG, "control key: cannot %s %s:%s",
+                 ml->use_tls ? "establish a verified TLS connection to" : "connect to", host, port);
         goto out;
     }
-
-    /* Read full response (headers + body).  Response is small (~200 bytes). */
-    char resp[2048];
     int total = 0;
-    while (total < (int)sizeof(resp) - 1) {
-        int n = ml_recv(sock, (uint8_t *)resp + total, sizeof(resp) - 1 - total, 0);
+    if (transport->write(connection, (const uint8_t *)request, (size_t)request_length) != request_length) {
+        ESP_LOGE(TAG, "control key: request not sent");
+        transport->close(connection);
+        goto out;
+    }
+    while (total < CTRL_KEY_RESPONSE_MAX) {
+        int n = transport->read(connection, (uint8_t *)response + total, (size_t)(CTRL_KEY_RESPONSE_MAX - total));
         if (n <= 0) break;
         total += n;
     }
-    if (total <= 0) {
-        ESP_LOGE(TAG, "fetch_server_pubkey: empty HTTP response");
+    transport->close(connection); /* before parsing: no TLS state outlives the request */
+    if (total <= 0 || total >= CTRL_KEY_RESPONSE_MAX) {
+        if (total <= 0)
+            ESP_LOGE(TAG, "control key: empty response");
+        else
+            ESP_LOGE(TAG, "control key: response larger than %d bytes", CTRL_KEY_RESPONSE_MAX);
         goto out;
     }
-    resp[total] = '\0';
-
-    if (parse_pubkey_response(resp, ml->ctrl_noise_pubkey) != 0) {
+    response[total] = '\0';
+    uint8_t key[32];
+    if (parse_pubkey_response(response, key) != 0)
         goto out;
-    }
+    memcpy(ml->ctrl_noise_pubkey, key, sizeof(key));
     ml->ctrl_noise_pubkey_valid = true;
-    ESP_LOGI(TAG, "Fetched Noise server pubkey: %02x%02x%02x%02x...%02x%02x",
-             ml->ctrl_noise_pubkey[0], ml->ctrl_noise_pubkey[1],
-             ml->ctrl_noise_pubkey[2], ml->ctrl_noise_pubkey[3],
-             ml->ctrl_noise_pubkey[30], ml->ctrl_noise_pubkey[31]);
-    rc = 0;
-
+    result = 0;
 out:
-    if (sock >= 0) ml_close_sock(sock);
-    if (res) ml_freeaddrinfo(res);
-    return rc;
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, response);
+    return result;
 }
+
+/* Make ml->ctrl_noise_pubkey usable and record who vouches for it, before any
+ * control connection is opened (so the key fetch's TLS session never coexists
+ * with the control connection's). *key_out is the key for ml_noise_init, or
+ * NULL for the built-in Tailscale key. Returns 0, or -1: do not connect. */
+static int ctrl_key_ensure(microlink_t *ml, const ctrl_key_transport_t *tls_transport,
+                           const ctrl_key_transport_t *plain_transport, const uint8_t **key_out) {
+    *key_out = NULL;
+    if (!ml->ctrl_host[0]) {
+        ml->ctrl_key_auth = CTRL_KEY_PINNED_BUILTIN;
+        return 0;
+    }
+    if (!ml->ctrl_noise_pubkey_valid) {
+        /* A certificate cannot be judged before SNTP has set the clock. Say so and
+         * let the reconnect backoff try again, rather than burn a TLS session on
+         * a handshake that must fail with a misleading "certificate not yet valid".
+         * Nothing else waits: only this https:// server's key (the SaaS key is
+         * built in, an http:// server and a pinned key need no certificate). */
+        if (ml->use_tls && !ml_derp_clock_valid()) {
+            ESP_LOGW(TAG, "Control key for %s waits for the wall clock (SNTP): its certificate cannot be verified yet",
+                     ml->ctrl_host_parsed);
+            snprintf(ml->transport_error, sizeof(ml->transport_error), "Waiting for the clock (SNTP) to verify %.24s",
+                     ml->ctrl_host_parsed);
+            return -1;
+        }
+        const ctrl_key_transport_t *transport = ml->use_tls ? tls_transport : plain_transport;
+        ESP_LOGI(TAG, "Fetching control server Noise key from %s://%s:%s/key",
+                 ml->use_tls ? "https" : "http", ml->ctrl_host_parsed, ml->ctrl_port_str);
+        if (ctrl_key_fetch(ml, transport, ml->ctrl_host_parsed, ml->ctrl_port_str) != 0) {
+            ESP_LOGE(TAG, "Failed to fetch the Noise key from %s", ml->ctrl_host_parsed);
+            return -1;
+        }
+        ml->ctrl_key_auth = ml->use_tls ? CTRL_KEY_TLS_VERIFIED : CTRL_KEY_PLAINTEXT;
+        if (ml->ctrl_key_auth == CTRL_KEY_PLAINTEXT)
+            ESP_LOGW(TAG, "Control server key for %s was fetched over plain HTTP and is NOT authenticated: "
+                          "anyone on the network path can impersonate the control server. Use https:// "
+                          "or set ctrl_noise_key.", ml->ctrl_host_parsed);
+    }
+    *key_out = ml->ctrl_noise_pubkey;
+    return 0;
+}
+/* A fetched key is a cache, not a pin (Tailscale's controlclient re-reads /key
+ * when the handshake fails). After CTRL_KEY_DROP_AFTER consecutive Noise
+ * handshake failures the cached key is dropped so ctrl_key_ensure() fetches it
+ * again before the next attempt, covering a server whose key was rotated. Drops
+ * are spaced by a doubling gap (30 s .. 10 min) so a down or hostile server
+ * cannot make the device hammer /key. A configured pin and the compiled-in
+ * Tailscale key are never dropped: only keys whose source is the fetch. */
+#define CTRL_KEY_DROP_AFTER 2
+#define CTRL_KEY_DROP_MIN_MS 30000u
+#define CTRL_KEY_DROP_MAX_MS 600000u
+static void ctrl_key_note_handshake(microlink_t *ml, bool ok, uint64_t now_ms) {
+    if (ok) {
+        ml->ctrl_key_failures = 0;
+        return;
+    }
+    if (ml->ctrl_key_auth != CTRL_KEY_TLS_VERIFIED && ml->ctrl_key_auth != CTRL_KEY_PLAINTEXT)
+        return;
+    if (++ml->ctrl_key_failures < CTRL_KEY_DROP_AFTER || now_ms < ml->ctrl_key_next_drop_ms)
+        return;
+    ml->ctrl_noise_pubkey_valid = false;
+    ml->ctrl_key_failures = 0;
+    ml->ctrl_key_refetches++;
+    ml->ctrl_key_drop_backoff_ms = ml->ctrl_key_drop_backoff_ms
+        ? (ml->ctrl_key_drop_backoff_ms >= CTRL_KEY_DROP_MAX_MS / 2 ? CTRL_KEY_DROP_MAX_MS
+                                                                    : ml->ctrl_key_drop_backoff_ms * 2)
+        : CTRL_KEY_DROP_MIN_MS;
+    ml->ctrl_key_next_drop_ms = now_ms + ml->ctrl_key_drop_backoff_ms;
+    ESP_LOGW(TAG, "Noise handshake keeps failing: dropping the fetched control key for %s; it is fetched again",
+             ml->ctrl_host_parsed);
+}
+/* --- end of the key-fetch core (the host tests compile everything above) --- */
+
+/* Production transports. TLS: esp_tls with the certificate bundle, hostname
+ * checked, VERIFY_REQUIRED (esp-tls sets both whenever crt_bundle_attach is
+ * given); the handle lives only between open() and close(). */
+static void *key_tls_open(microlink_t *ml, const char *host, const char *port) {
+    (void)ml;
+    const esp_tls_cfg_t cfg = {
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .timeout_ms        = 10000,
+        .non_block         = false,
+    };
+    esp_tls_t *tls = esp_tls_init();
+    if (!tls) return NULL;
+    if (esp_tls_conn_new_sync(host, (int)strlen(host), atoi(port), &cfg, tls) != 1) {
+        esp_tls_conn_destroy(tls);
+        return NULL;
+    }
+    return tls;
+}
+static int key_tls_write(void *conn, const uint8_t *data, size_t length) {
+    return (int)esp_tls_conn_write(conn, data, length);
+}
+static int key_tls_read(void *conn, uint8_t *buffer, size_t capacity) {
+    return (int)esp_tls_conn_read(conn, buffer, capacity);
+}
+static void key_tls_close(void *conn) { esp_tls_conn_destroy(conn); }
+static const ctrl_key_transport_t key_tls_transport = {key_tls_open, key_tls_write, key_tls_read, key_tls_close};
+
+/* Plain HTTP: only reached for an explicit http:// login_server. */
+static void *key_plain_open(microlink_t *ml, const char *host, const char *port) {
+    struct addrinfo hints = { .ai_family = AF_UNSPEC, .ai_socktype = SOCK_STREAM };
+    struct addrinfo *res = NULL;
+    if (ml_getaddrinfo(host, port, &hints, &res) != 0 || !res) return NULL;
+    int sock = ml_socket(res->ai_family, SOCK_STREAM, IPPROTO_TCP);
+    if (sock < 0) { ml_freeaddrinfo(res); return NULL; }
+    struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+    ml_setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    ml_setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    /* Keep the key fetch off the exit-node tunnel, like the coord socket. */
+    ml_bind_sock_to_upstream(ml, sock);
+    int rc = ml_connect(sock, res->ai_addr, res->ai_addrlen);
+    ml_freeaddrinfo(res);
+    if (rc < 0) { ml_close_sock(sock); return NULL; }
+    return (void *)(intptr_t)(sock + 1); /* 0 would read as NULL */
+}
+static int key_plain_write(void *conn, const uint8_t *data, size_t length) {
+    return (int)ml_send((int)(intptr_t)conn - 1, (uint8_t *)data, length, 0);
+}
+static int key_plain_read(void *conn, uint8_t *buffer, size_t capacity) {
+    return (int)ml_recv((int)(intptr_t)conn - 1, buffer, capacity, 0);
+}
+static void key_plain_close(void *conn) { ml_close_sock((int)(intptr_t)conn - 1); }
+static const ctrl_key_transport_t key_plain_transport = {key_plain_open, key_plain_write, key_plain_read, key_plain_close};
 
 /* ============================================================================
  * TLS-aware connection helpers for the coord connection
@@ -582,7 +663,7 @@ static void ml_conn_close(microlink_t *ml) {
      * into the next one prepends stale bytes to its FIRST framed message -
      * which is the initial full netmap, the most valuable message on the
      * stream. It would be lost to the length-prefix guard. */
-    free(ml->h2_acc);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc);
     ml->h2_acc = NULL;
     ml->h2_acc_len = 0;
     ml->lp_acc_len = 0;
@@ -631,13 +712,13 @@ static int noise_send(microlink_t *ml, ml_noise_state_t *noise,
                           NULL, 0,
                           plaintext, pt_len,
                           frame + 3) != ESP_OK) {
-        free(frame);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, frame);
         return -1;
     }
     noise->tx_nonce++;
 
     int ret = coord_send(ml, frame, 3 + ct_len);
-    free(frame);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, frame);
     return ret;
 }
 
@@ -681,12 +762,12 @@ static int noise_recv_buffer(microlink_t *ml, ml_noise_state_t *noise,
         ml->noise_error=3;errno=EMSGSIZE;return -1;
     }
 
-    uint8_t *ciphertext = in_place ? plaintext : ml_psram_malloc(ct_len);
+    uint8_t *ciphertext = in_place ? plaintext : tdongle_heap_tag(TDONGLE_OWNER_CONTROL, ml_psram_malloc(ct_len));
     if (!ciphertext) {ml->noise_error=4;errno=ENOMEM;return -1;}
 
     if (coord_recv_committed(ml, ciphertext, ct_len) < 0) {
         ml->noise_error = 5;
-        if (!in_place) free(ciphertext);
+        if (!in_place) tdongle_heap_free(TDONGLE_OWNER_CONTROL, ciphertext);
         return -1;
     }
 
@@ -696,12 +777,12 @@ static int noise_recv_buffer(microlink_t *ml, ml_noise_state_t *noise,
                           plaintext) != ESP_OK) {
         ESP_LOGE(TAG, "Noise decrypt failed (nonce=%llu)", (unsigned long long)noise->rx_nonce);
         ml->noise_error=6;errno=EBADMSG;
-        if (!in_place) free(ciphertext);
+        if (!in_place) tdongle_heap_free(TDONGLE_OWNER_CONTROL, ciphertext);
         return -1;
     }
     noise->rx_nonce++;
 
-    if (!in_place) free(ciphertext);
+    if (!in_place) tdongle_heap_free(TDONGLE_OWNER_CONTROL, ciphertext);
     return (int)pt_len;
 }
 
@@ -749,6 +830,15 @@ static int do_tcp_connect(microlink_t *ml) {
         snprintf(ml->ctrl_host_hdr, sizeof(ml->ctrl_host_hdr), "%s:%s",
                  ml->ctrl_host_parsed, ml->ctrl_port_str);
     }
+
+    /* Who vouches for the control server's Noise key, settled before any
+     * control connection exists: the key fetch (its own TLS session for an
+     * https:// server) is finished and released before the control TLS
+     * connection below is opened, so the two never coexist in RAM. A custom
+     * server whose key cannot be established is not connected to. */
+    const uint8_t *unused_key;
+    if (ctrl_key_ensure(ml, &key_tls_transport, &key_plain_transport, &unused_key) != 0)
+        return -1;
 
     /* ====== TLS branch ====================================================
      * When the login server URL used https://, skip raw TCP and do a full
@@ -862,20 +952,15 @@ static int do_noise_handshake(microlink_t *ml, ml_noise_state_t *noise) {
     ml->control_stage = 2; ml->h2_debug[0] = 0;
     int64_t t_noise_start = esp_timer_get_time();
 
-    /* For custom control planes (Headscale / Ionscale / dev coordinators),
-     * each instance generates its own Noise keypair, so the hardcoded
-     * Tailscale SaaS server pubkey in ml_noise_init would always fail the
-     * ChaCha20-Poly1305 machine-key decrypt.  Fetch the real server pubkey
-     * from /key?v=<ML_CTRL_PROTOCOL_VER> here, once, and cache it on ml.  (ctrl_host_parsed /
-     * ctrl_port_str were filled by do_tcp_connect just before this state.) */
+    /* The server's Noise key was settled by ctrl_key_ensure() in do_tcp_connect:
+     * NULL selects the built-in Tailscale SaaS key; a custom control plane
+     * (Headscale / Ionscale / dev coordinators generates its own key) uses the
+     * pinned or authenticated-fetched one. Never guess a key for a custom host. */
     const uint8_t *server_pubkey = NULL;
     if (ml->ctrl_host[0]) {
         if (!ml->ctrl_noise_pubkey_valid) {
-            if (fetch_server_pubkey(ml, ml->ctrl_host_parsed, ml->ctrl_port_str) != 0) {
-                ESP_LOGE(TAG, "Failed to fetch server Noise pubkey from %s",
-                         ml->ctrl_host_parsed);
-                return -1;
-            }
+            ESP_LOGE(TAG, "No authenticated Noise key for %s", ml->ctrl_host_parsed);
+            return -1;
         }
         server_pubkey = ml->ctrl_noise_pubkey;
     }
@@ -919,10 +1004,10 @@ static int do_noise_handshake(microlink_t *ml, ml_noise_state_t *noise) {
     ESP_LOGI(TAG, "Sending Noise handshake (msg1=%d bytes, b64=%d chars)", (int)msg1_len, (int)b64_len);
 
     if (coord_send(ml, (uint8_t *)http_req, req_len) < 0) {
-        free(http_req);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, http_req);
         return -1;
     }
-    free(http_req);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, http_req);
 
     if (gateway_read_upgrade(ml) < 0) return -1;
     ml->control_stage = 3;
@@ -1083,7 +1168,7 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
 
     /* Build HTTP/2 HEADERS + DATA frames */
     uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
-    if (!h2_buf) { free(json_str); return -1; }
+    if (!h2_buf) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); return -1; }
 
     int h2_pos = 0;
 
@@ -1092,23 +1177,23 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
                                               "POST", "/machine/register",
                                               CTRL_HOST_HDR(ml), "application/json",
                                               1, false);
-    if (hdr_len < 0) { free(json_str); free(h2_buf); return -1; }
+    if (hdr_len < 0) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += hdr_len;
 
     /* DATA frame (JSON body, END_STREAM) */
     int data_len = ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos,
                                             (uint8_t *)json_str, json_len,
                                             1, true);
-    free(json_str);
-    if (data_len < 0) { free(h2_buf); return -1; }
+    tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
+    if (data_len < 0) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += data_len;
 
     /* Encrypt and send as one Noise frame */
     if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
-        free(h2_buf);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
         return -1;
     }
-    free(h2_buf);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
 
     int64_t t_reg_sent = esp_timer_get_time();
     ESP_LOGI(TAG, "RegisterRequest sent (%d H2 bytes) [TIMING] send: %lld ms",
@@ -1144,6 +1229,11 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     } else if (json_offset < 0) {
         ESP_LOGW(TAG, "No '{' found in RegisterResponse data");
 
+        return -1;
+    }
+
+    if (!json_nesting_within(parse_start, parse_len, ML_JSON_DEPTH_REGISTER)) {
+        ESP_LOGW(TAG, "RegisterResponse JSON nested deeper than %d levels", ML_JSON_DEPTH_REGISTER);
         return -1;
     }
 
@@ -1256,7 +1346,7 @@ static int do_register_locked(microlink_t *ml, ml_noise_state_t *noise) {
     cJSON *node = cJSON_GetObjectItem(resp_json, "Node");
     if (node) {
         cJSON *name=cJSON_GetObjectItem(node,"Name");
-        if(cJSON_IsString(name)&&name->valuestring&&strlen(name->valuestring)<sizeof(ml->self_dns_name))strlcpy(ml->self_dns_name,name->valuestring,sizeof(ml->self_dns_name));
+        if(cJSON_IsString(name)&&name->valuestring)ml_published_name_set(&ml->self_dns_name,name->valuestring);
         cJSON *addresses = cJSON_GetObjectItem(node, "Addresses");
         if (addresses && cJSON_GetArraySize(addresses) > 0) {
             const char *addr = cJSON_GetArrayItem(addresses, 0)->valuestring;
@@ -1499,7 +1589,7 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
         /* Send to wg_mgr task via queue */
         if (!gateway_peer_publish(ml, &update)) {
             ESP_LOGW(TAG, "Peer update queue full, dropping %s", update->hostname);
-            free(update);
+            tdongle_heap_free(TDONGLE_OWNER_PEER, update);
         }
     }
 
@@ -1537,7 +1627,7 @@ static void parse_peers_from_map_response(microlink_t *ml, cJSON *root) {
             ESP_LOGI(TAG, "Peer sweep: %s not in authoritative netmap — removing",
                      ml->peers[i].hostname);
             if (!gateway_peer_publish(ml, &rm)) {
-                free(rm);
+                tdongle_heap_free(TDONGLE_OWNER_PEER, rm);
             } else {
                 swept++;
             }
@@ -1582,7 +1672,7 @@ check_removed:
             }
 
             if (!gateway_peer_publish(ml, &update)) {
-                free(update);
+                tdongle_heap_free(TDONGLE_OWNER_PEER, update);
             }
         }
     }
@@ -1666,7 +1756,7 @@ check_removed:
                      update->has_online ? (update->online ? "true" : "false") : "-");
 
             if (!gateway_peer_publish(ml, &update)) {
-                free(update);
+                tdongle_heap_free(TDONGLE_OWNER_PEER, update);
             }
         }
     }
@@ -1812,6 +1902,18 @@ static void decode_derp_regions(ml_derp_region_t *out, uint8_t *count, uint16_t 
 
                 cJSON *so = cJSON_GetObjectItem(node_obj, "STUNOnly");
                 if (so && cJSON_IsTrue(so)) n->stun_only = true;
+
+                /* CertName selects how the DERP TLS server is authenticated.
+                 * Unusable (malformed, or too long to keep whole) marks the node
+                 * unconnectable instead of silently falling back to HostName. */
+                cJSON *cn = cJSON_GetObjectItem(node_obj, "CertName");
+                const char *cert_name = (cn && cJSON_IsString(cn)) ? cn->valuestring : NULL;
+                bool host_whole = hn && hn->valuestring && strlen(hn->valuestring) < sizeof(n->hostname);
+                if (!host_whole || (cn && !cert_name)) {
+                    n->cert.kind = ML_DERP_CERT_INVALID;
+                } else {
+                    ml_derp_cert_parse(n->hostname, cert_name, &n->cert);
+                }
 
                 r->node_count++;
             }
@@ -1966,7 +2068,7 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
 
     /* Build H2 HEADERS + DATA, stream ID 3 (stream 1 was register) */
     uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
-    if (!h2_buf) { free(json_str); return -1; }
+    if (!h2_buf) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); return -1; }
 
     int h2_pos = 0;
 
@@ -1974,21 +2076,21 @@ static int do_map_exchange(microlink_t *ml, ml_noise_state_t *noise, bool send_r
                                               "POST", "/machine/map",
                                               CTRL_HOST_HDR(ml), "application/json",
                                               3, false);
-    if (hdr_len < 0) { free(json_str); free(h2_buf); return -1; }
+    if (hdr_len < 0) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += hdr_len;
 
     int data_len = ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos,
                                             (uint8_t *)json_str, json_len,
                                             3, true);
-    free(json_str);
-    if (data_len < 0) { free(h2_buf); return -1; }
+    tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
+    if (data_len < 0) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += data_len;
 
     if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
-        free(h2_buf);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
         return -1;
     }
-    free(h2_buf);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
     }  /* if (send_request) */
 
     int result = gateway_read_map(ml, noise, send_request ? 3 : 5, true);
@@ -2041,28 +2143,28 @@ static int do_start_long_poll(microlink_t *ml, ml_noise_state_t *noise, bool omi
 
     /* Build H2 frames on stream ID 5 */
     uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
-    if (!h2_buf) { free(json_str); return -1; }
+    if (!h2_buf) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); return -1; }
 
     int h2_pos = 0;
     int hdr_len = ml_h2_build_headers_frame(h2_buf, json_len + 512,
                                               "POST", "/machine/map",
                                               CTRL_HOST_HDR(ml), "application/json",
                                               5, false);
-    if (hdr_len < 0) { free(json_str); free(h2_buf); return -1; }
+    if (hdr_len < 0) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += hdr_len;
 
     int data_len = ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos,
                                             (uint8_t *)json_str, json_len,
                                             5, true);
-    free(json_str);
-    if (data_len < 0) { free(h2_buf); return -1; }
+    tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
+    if (data_len < 0) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += data_len;
 
     if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
-        free(h2_buf);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
         return -1;
     }
-    free(h2_buf);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
 
     ESP_LOGI(TAG, "Streaming MapRequest sent on stream 5");
     return 0;
@@ -2129,7 +2231,7 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     for (size_t i = 0; i < json_len; i++) { ep_hash ^= (uint8_t)json_str[i]; ep_hash *= 16777619u; }
     if (ep_hash == ml->last_ep_update_hash) {
         ESP_LOGD(TAG, "Endpoint update unchanged (%d endpoints, %d bytes), not re-sent", ep_count, (int)json_len);
-        free(json_str);
+        tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
         return 0;
     }
     ESP_LOGI(TAG, "Endpoint update: %d bytes, %d endpoints (Stream=false, OmitPeers=true)",
@@ -2144,29 +2246,29 @@ static int do_send_endpoint_update(microlink_t *ml, ml_noise_state_t *noise) {
     ml->h2_next_stream_id += 2;
 
     uint8_t *h2_buf = coord_alloc(json_len + 512 + 16);
-    if (!h2_buf) { free(json_str); return -1; }
+    if (!h2_buf) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); return -1; }
 
     int h2_pos = 0;
     int hdr_len = ml_h2_build_headers_frame(h2_buf, json_len + 512,
                                               "POST", "/machine/map",
                                               CTRL_HOST_HDR(ml), "application/json",
                                               sid, false);
-    if (hdr_len < 0) { free(json_str); free(h2_buf); return -1; }
+    if (hdr_len < 0) { tdongle_heap_free(TDONGLE_OWNER_MAP, json_str); tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += hdr_len;
 
     int data_len = ml_h2_build_data_frame(h2_buf + h2_pos, json_len + 512 - h2_pos,
                                             (uint8_t *)json_str, json_len,
                                             sid, true);  /* END_STREAM */
-    free(json_str);
-    if (data_len < 0) { free(h2_buf); return -1; }
+    tdongle_heap_free(TDONGLE_OWNER_MAP, json_str);
+    if (data_len < 0) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf); return -1; }
     h2_pos += data_len;
 
     if (noise_send_owned(ml, noise, h2_buf, h2_pos, json_len + 512 + 16) < 0) {
-        free(h2_buf);
+        tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
         ESP_LOGE(TAG, "Failed to send endpoint update");
         return -1;
     }
-    free(h2_buf);
+    tdongle_heap_free(TDONGLE_OWNER_CONTROL, h2_buf);
 
     ESP_LOGI(TAG, "Endpoint update sent on H2 stream %lu", (unsigned long)sid);
     ml->last_ep_update_hash = ep_hash;
@@ -2207,7 +2309,7 @@ static void apply_long_poll_map(microlink_t *ml, cJSON *update_json) {
     cJSON *node = cJSON_GetObjectItem(update_json, "Node");
     if (node) {
         cJSON *name=cJSON_GetObjectItem(node,"Name");
-        if(cJSON_IsString(name)&&name->valuestring&&strlen(name->valuestring)<sizeof(ml->self_dns_name))strlcpy(ml->self_dns_name,name->valuestring,sizeof(ml->self_dns_name));
+        if(cJSON_IsString(name)&&name->valuestring)ml_published_name_set(&ml->self_dns_name,name->valuestring);
         cJSON *addresses = cJSON_GetObjectItem(node, "Addresses");
         if (addresses && cJSON_GetArraySize(addresses) > 0) {
             const char *addr = cJSON_GetArrayItem(addresses, 0)->valuestring;
@@ -2239,6 +2341,7 @@ static void apply_long_poll_map(microlink_t *ml, cJSON *update_json) {
     if (parse_derp_map_from_response(ml, update_json) && !ml->derp.connected) {
         ESP_LOGI(TAG, "DERPMap arrived via long-poll - signaling DERP connect");
         xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
+        ml_rt_wake(ML_RT_TASK_DERP);
     }
 }
 
@@ -2260,9 +2363,21 @@ void ml_coord_task(void *arg) {
     ml_coord_cmd_t cmd;
     uint64_t last_activity_ms = ml_get_time_ms();
     int reconnect_attempts = 0;
+    uint64_t map_applied_ms = 0;  /* nonzero until the steady-state heap capture is taken */
 
     /* Noise protocol state - owned exclusively by this task */
     ml_noise_state_t noise = {0};
+
+    /* Only one membership negotiates at a time (ml_negotiation.h): the Noise handshake, registration and the
+     * initial map are the control channel's memory peak, and two of them overlapping is what took v120 to a
+     * 6 KB largest block. The token follows the state machine (ml_coord_state.h), so every path out of a
+     * negotiation state releases it at the next loop iteration. */
+    static const char waiting_text[] = "Waiting for another membership to finish joining";
+    ml_neg_t *neg = ml_rt_negotiation();
+    const uintptr_t neg_key = ml_neg_key(ml->config.diagnostic_id, ML_NEG_PHASE_CONTROL);
+    /* True from the first instruction: the gateway's start path hands this task the token (same phase-A key). The first
+     * sync keeps it in a negotiating state and releases it otherwise; where nothing was handed over, releasing is a no-op. */
+    bool neg_holding = true;
 
     /* Wait for WiFi/cellular OR shutdown */
     ESP_LOGI(TAG, "Waiting for WiFi...");
@@ -2302,8 +2417,17 @@ void ml_coord_task(void *arg) {
             }
         }
 
-        /* DERP reconnect is now handled by the DERP I/O task itself.
-         * The I/O task checks ML_EVT_DERP_RECONNECT directly. */
+        /* DERP reconnect is handled by the shared DERP task, which watches ML_EVT_DERP_RECONNECT itself. */
+
+        if (!coord_token_sync(neg, neg_key, state, ml->connected_at_ms ? ML_NEG_PRIO_REJOIN : ML_NEG_PRIO_START,
+                              &neg_holding)) {
+            /* Another membership is negotiating. Waiting costs nothing; the shutdown bit and the command queue are
+             * checked again every 50 ms. */
+            if (!ml->transport_error[0]) strlcpy(ml->transport_error, waiting_text, sizeof(ml->transport_error));
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
+        if (!strcmp(ml->transport_error, waiting_text)) ml->transport_error[0] = 0;
 
         switch (state) {
         case COORD_IDLE:
@@ -2349,6 +2473,7 @@ void ml_coord_task(void *arg) {
             }
             ml->h2_next_stream_id = 7;  /* Reset H2 stream counter for new connection */
             ml->last_ep_update_hash = 0;   /* new map session: send the endpoints once regardless */
+            tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_CONTROL);
             state = COORD_NOISE_HANDSHAKE;
             break;
 
@@ -2357,10 +2482,13 @@ void ml_coord_task(void *arg) {
             if (do_noise_handshake(ml, &noise) < 0) {
                 gateway_diag_record(ml, GATEWAY_DIAG_NOISE_FAILURE, errno);
                 ESP_LOGE(TAG, "Noise handshake failed");
+                ctrl_key_note_handshake(ml, false, ml_get_time_ms());
                 ml_conn_close(ml);
                 state = COORD_RECONNECTING;
                 break;
             }
+            tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_NOISE);
+            ctrl_key_note_handshake(ml, true, 0);
             state = COORD_H2_PREFACE;
             break;
 
@@ -2389,6 +2517,7 @@ void ml_coord_task(void *arg) {
                 state = COORD_RECONNECTING;
                 break;
             }
+            tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_REGISTER);
             state = COORD_FETCH_PEERS;
             break;
 
@@ -2439,15 +2568,30 @@ void ml_coord_task(void *arg) {
                  * 100.64.0.1 forever, and a netif whose address never
                  * matches the real tailnet IP silently drops every inbound
                  * packet (all TCP dead while DISCO keeps answering). */
+                tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_MAP);
+                map_applied_ms = ml_get_time_ms();
                 xEventGroupSetBits(ml->events, ML_EVT_COORD_REGISTERED);
+                ml_rt_wake(ML_RT_TASK_WG_MGR);
+                /* The negotiation is over: the control channel's peak is behind us. Let go now, before the
+                 * wait for DERP below, which is another membership-phase (the DERP link takes the token itself
+                 * for its handshake) and must not wait on a token this task still holds. */
+                coord_token_sync(neg, neg_key, COORD_LONG_POLL, ML_NEG_PRIO_REJOIN, &neg_holding);
 
                 if (!ml->derp.connected) {
                     /* Signal DERP I/O task to connect (connection now owned by I/O task) */
                     xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
-                    /* Wait for DERP to connect (up to 15s) before continuing */
-                    ESP_LOGI(TAG, "Waiting for DERP I/O task to connect...");
-                    xEventGroupWaitBits(ml->events, ML_EVT_DERP_CONNECTED,
-                                        pdFALSE, pdTRUE, pdMS_TO_TICKS(15000));
+                    ml_rt_wake(ML_RT_TASK_DERP);
+                    /* Wait for DERP to connect (up to 15s) before continuing -- unless
+                     * the wall clock is not set: DERP will not even try until SNTP has
+                     * run (certificates cannot be judged), and the control plane must not
+                     * sit out the wait for it. The relay connects when the clock arrives. */
+                    if (ml_derp_clock_valid()) {
+                        ESP_LOGI(TAG, "Waiting for DERP I/O task to connect...");
+                        xEventGroupWaitBits(ml->events, ML_EVT_DERP_CONNECTED,
+                                            pdFALSE, pdTRUE, pdMS_TO_TICKS(15000));
+                    } else {
+                        ESP_LOGW(TAG, "Wall clock not set yet: not waiting for DERP; continuing");
+                    }
                 }
 
                 /* Start streaming long-poll for incremental updates */
@@ -2498,6 +2642,11 @@ void ml_coord_task(void *arg) {
             ml->control_stage = 7;
             {
                 uint64_t now = ml_get_time_ms();
+
+                if (map_applied_ms && now - map_applied_ms >= 60000) {
+                    tdongle_memory_phase(ml->config.diagnostic_id, TDONGLE_PHASE_STEADY);
+                    map_applied_ms = 0;
+                }
 
                 /* Check control plane watchdog (120s) */
                 if (now - last_activity_ms > ml->t_ctrl_watchdog_ms) {
@@ -2602,7 +2751,7 @@ void ml_coord_task(void *arg) {
                          * IGNORED, so we need this separate Stream=false request. */
                         do_send_endpoint_update(ml, &noise);
                     }
-                    free(stun_pkt.data);
+                    tdongle_heap_free(TDONGLE_OWNER_PACKET, stun_pkt.data);
                 }
 
                 /* STUN retry logic: 3 attempts per server, 2s apart, then fallback */
@@ -2658,7 +2807,7 @@ void ml_coord_task(void *arg) {
 
                 if (ml->derp.connected && now - ml->last_derp_keepalive_ms > 60000) {
                     uint8_t preferred = 0x01;
-                    uint8_t *ka_data = malloc(1);
+                    uint8_t *ka_data = tdongle_heap_tag(TDONGLE_OWNER_PACKET, malloc(1));
                     if (ka_data) {
                         *ka_data = preferred;
                         ml_derp_tx_item_t ka_item = {
@@ -2668,7 +2817,7 @@ void ml_coord_task(void *arg) {
                         };
                         memset(ka_item.dest_pubkey, 0, 32);
                         if (xQueueSend(ml->derp_tx_queue, &ka_item, 0) != pdTRUE) {
-                            free(ka_data);
+                            tdongle_heap_free(TDONGLE_OWNER_PACKET, ka_data);
                         }
                     }
                     ml->last_derp_keepalive_ms = now;
@@ -2781,6 +2930,7 @@ void ml_coord_task(void *arg) {
     /* Cleanup */
     ml_conn_close(ml);
     memset(&noise, 0, sizeof(noise));
+    coord_token_sync(neg, neg_key, COORD_IDLE, ML_NEG_PRIO_REJOIN, &neg_holding);   /* never exit holding the token */
 
     ESP_LOGI(TAG, "Coord task exiting");
     ml_task_exiting(ml);

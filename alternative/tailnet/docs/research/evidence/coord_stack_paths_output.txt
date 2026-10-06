@@ -1,0 +1,12 @@
+frames (B): ml_coord_task 896, do_register_locked 448, key_tls_open 144, cJSON parse_value 64 (x33 levels)
+calibration: measured deepest path 4152 B = static frames 2272 (coord task, map exchange, read map, activate regions, netcheck 608, one lwIP call, one log line) + 1880 not visible in .ci (exception frame, newlib printf, internals behind function pointers)
+
+path (static frames + unseen 1880 B)
+register response: JSON bounded to 16 levels (authenticated server)   5736
+/key over plain HTTP: JSON bounded to 4 levels (unauthenticated)   4520
+  (for comparison) register response at the build's limit of 32 levels   6760
+TLS control key fetch / connect (esp_tls handshake, direct calls only)   5384
+   esp_tls_conn_new_sync deepest direct chain: esp_tls_conn_new_sync > esp_tls_low_level_conn > esp_mbedtls_handshake > mbedtls_ssl_handshake > mbedtls_ssl_handshake_step > mbedtls_ssl_handshake_server_step > mbedtls_ssl_parse_certificate > mbedtls_ssl_verify_certificate > mbedtls_x509_crt_verify_restartable ...
+
+worst analysed path                                    5736
+rule: stack >= 2 x measured (4152) = 8304 ; stack >= worst analysed + 2048 = 7784

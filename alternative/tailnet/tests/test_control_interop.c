@@ -1,5 +1,7 @@
 #define coord_alloc ml_psram_malloc
 #include "cJSON.h"
+#include "tdongle_memory.h"
+#include "ml_gateway_limits.h"
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>

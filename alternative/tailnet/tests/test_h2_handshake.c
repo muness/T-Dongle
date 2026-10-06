@@ -1,3 +1,4 @@
+#include "tdongle_memory.h"
 #define coord_alloc ml_psram_malloc
 #include "cJSON.h"
 #include "mbedtls/chachapoly.h"

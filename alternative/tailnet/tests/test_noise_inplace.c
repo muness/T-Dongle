@@ -1,3 +1,4 @@
+#include "tdongle_memory.h"
 #include "mbedtls/chachapoly.h"
 #include <assert.h>
 #include <stdint.h>

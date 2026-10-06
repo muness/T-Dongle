@@ -13,8 +13,8 @@ directory=(r/'components/microlink/src/ml_directory.c').read_text()
 dns=(r/'main/dns.c').read_text()
 (build/'dns.inc').write_text(dns[dns.index('static uint16_t read16'):])
 (build/'usb_health.inc').write_text('\n'.join(line for line in (r/'main/usb_health.c').read_text().splitlines() if not line.startswith('#include')))
-for name in ['usb_health','startup','settings','derp_owner','route_ingress','boot_health','directory_mount','dns']:
-    cmd=['cc','-std=c11','-g','-fsanitize=address,undefined','-I',str(build),'-I',str(cj),str(r/f'tests/test_{name}.c')]
+for name in ['usb_health','startup','settings','route_ingress','boot_health','directory_mount','dns']:
+    cmd=['cc','-std=c11','-g','-fsanitize=address,undefined','-I',str(build),'-I',str(r/'tests'),'-I',str(r/'components/microlink/include'),'-I',str(r/'../../components/tdongle_runtime/include'),'-I',str(cj),str(r/f'tests/test_{name}.c')]
     if name=='settings':cmd.append(str(cj/'cJSON.c'))
     cmd+=['-o',str(build/f'test_{name}')];subprocess.run(cmd,check=True);subprocess.run([str(build/f'test_{name}')],check=True)
 

@@ -5,7 +5,23 @@ static int ml_gateway_queue_packet(microlink_t *ml,uint32_t ip,const uint8_t *da
     ip4_addr_t dest={.addr=ip};struct netif *wg=ml->wg_netif;
     int result=wg->output(wg,p,&dest);pbuf_free(p);return result;
 }
+#include "../main/route_table.c"
 #include "../main/router.c"
+/* Reference: recompute every checksum from scratch (what the router did before
+ * it switched to incremental updates). Tests use it to build valid packets and
+ * to prove the incremental result equals the full recompute. */
+static void checksums(uint8_t *b, size_t n, unsigned h) {
+    wr16(b + 10, 0);
+    wr16(b + 10, finish(sum(b, h, 0)));
+    unsigned offset = b[9] == 6 ? 16 : 6;
+    uint8_t *t = b + h;
+    unsigned length = n - h;
+    wr16(t + offset, 0);
+    uint32_t s = sum(b + 12, 8, 0) + b[9] + length;
+    s = sum(t, length, s);
+    uint16_t c = finish(s);
+    wr16(t + offset, c ? c : 65535);
+}
 static uint8_t sent[1500];
 static size_t sent_size;
 static struct netif *sent_on;

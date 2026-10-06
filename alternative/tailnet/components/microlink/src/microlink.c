@@ -7,6 +7,7 @@
  */
 
 #include "microlink_internal.h"
+#include "ml_wg_rx_budget.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -22,6 +23,7 @@
 #include <time.h>
 #include "lwip/sockets.h"
 #include "wireguard-platform.h"
+#include "ml_runtime.h"
 
 #ifdef CONFIG_ML_ENABLE_CELLULAR
 #include "ml_cellular.h"
@@ -84,7 +86,11 @@ static esp_err_t load_or_generate_keys(microlink_t *ml) {
  * ========================================================================== */
 
 static void *cjson_psram_malloc(size_t size) {
-    return ml_psram_malloc(size);
+    return tdongle_heap_tag(TDONGLE_OWNER_MAP, ml_psram_malloc(size));
+}
+
+static void cjson_free(void *block) {
+    tdongle_heap_free(TDONGLE_OWNER_MAP, block);
 }
 
 /* ============================================================================
@@ -117,6 +123,23 @@ esp_err_t microlink_factory_reset(void) {
  * Public API
  * ========================================================================== */
 
+/* "mkey:<64 hex>" or "<64 hex>" -> 32 bytes. */
+static bool ml_parse_noise_key(const char *text, uint8_t out[32]) {
+    if (strncmp(text, "mkey:", 5) == 0) text += 5;
+    if (strlen(text) != 64) return false;
+    for (int i = 0; i < 32; i++) {
+        int v[2];
+        for (int j = 0; j < 2; j++) {
+            char c = text[2 * i + j];
+            v[j] = (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 :
+                   (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+            if (v[j] < 0) return false;
+        }
+        out[i] = (uint8_t)(v[0] << 4 | v[1]);
+    }
+    return true;
+}
+
 microlink_t *microlink_init(const microlink_config_t *config) {
     if (!config || !config->auth_key) {
         ESP_LOGE(TAG, "Invalid config: auth_key required");
@@ -126,19 +149,19 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     /* Route cJSON to PSRAM */
     cJSON_Hooks hooks = {
         .malloc_fn = cjson_psram_malloc,
-        .free_fn = free
+        .free_fn = cjson_free
     };
     cJSON_InitHooks(&hooks);
 
     /* Allocate context from PSRAM */
-    microlink_t *ml = ml_psram_calloc(1, sizeof(microlink_t));
+    microlink_t *ml = tdongle_heap_tag(TDONGLE_OWNER_CONTEXT, ml_psram_calloc(1, sizeof(microlink_t)));
     if (!ml) {
         ESP_LOGE(TAG, "Failed to allocate context");
         return NULL;
     }
 
     if (!config->identity_namespace || !config->identity_namespace[0] || strlen(config->identity_namespace) > 15) {
-        free(ml); return NULL;
+        tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml); return NULL;
     }
     snprintf(ml->identity_namespace, sizeof(ml->identity_namespace), "%s", config->identity_namespace);
     /* Copy config */
@@ -146,6 +169,19 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     if (ml->config.max_peers == 0) ml->config.max_peers = ML_MAX_PEERS;
     if (ml->config.max_peers > ML_MAX_PEERS) ml->config.max_peers = ML_MAX_PEERS;
     ml->config.enable_derp = true;  /* Always need DERP for relay */
+
+    /* An operator supplied control-server key pins it for any scheme. A key
+     * that does not parse is refused rather than ignored: ignoring it would
+     * quietly turn a pinned deployment into an unauthenticated key fetch. */
+    if (config->ctrl_noise_key && config->ctrl_noise_key[0]) {
+        if (!ml_parse_noise_key(config->ctrl_noise_key, ml->ctrl_noise_pubkey)) {
+            ESP_LOGE(TAG, "ctrl_noise_key must be 64 hex digits, optionally prefixed mkey:");
+            tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml); return NULL;
+        }
+        ml->ctrl_noise_pubkey_valid = true;
+        ml->ctrl_key_auth = ML_CTRL_KEY_PINNED_CONFIG;
+    }
+    ml->config.ctrl_noise_key = NULL; /* the caller's string is not retained */
 
     /* Seed derp_region_default from config so MapRequest.PreferredDERP and
      * the GUI marker have a value before the first MapResponse arrives. */
@@ -163,7 +199,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     ml->disco_sock6 = -1;
     ml->stun_sock = -1;
     ml->stun_sock6 = -1;
-    ml->derp.sockfd = -1;
+    ml_derp_member_init(ml);
 
     /* Resolve timing (0 = use defaults from #defines) */
     ml->t_disco_heartbeat_ms = ml->config.disco_heartbeat_ms ? ml->config.disco_heartbeat_ms : ML_DISCO_HEARTBEAT_MS;
@@ -180,7 +216,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
 
     /* Load or generate persistent keys */
     if (load_or_generate_keys(ml) != ESP_OK) {
-        free(ml);
+        tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml);
         return NULL;
     }
 
@@ -301,7 +337,7 @@ microlink_t *microlink_init(const microlink_config_t *config) {
     ml->events = xEventGroupCreate();
     if (!ml->events) {
         ESP_LOGE(TAG, "Failed to create event group");
-        free(ml);
+        tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml);
         return NULL;
     }
 
@@ -329,6 +365,14 @@ esp_err_t microlink_start(microlink_t *ml) {
     if (ml->state != ML_STATE_IDLE) {
         ESP_LOGW(TAG, "Already started (state=%d)", ml->state);
         return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Diagnostics guard (always true in a release build): decide before any state change, socket or
+     * task exists, so a refusal leaves the instance idle and a later microlink_start can retry. The shared
+     * tasks' stacks are charged to the first membership only. */
+    if (!tdongle_memory_start_allowed(ML_TASK_COORD_STACK + ml_rt_start_bytes())) {
+        ESP_LOGE(TAG, "Not enough heap above the diagnostics guard floor for the membership tasks");
+        return ESP_ERR_NO_MEM;
     }
 
     ml->state = ML_STATE_WIFI_WAIT;
@@ -394,41 +438,22 @@ skip_bsd_socket:
     ;
 #endif
 
-    /* Create tasks */
-    BaseType_t ret;
-
-    ret = xTaskCreatePinnedToCore(ml_net_io_task, "ml_net_io", ML_TASK_NET_IO_STACK,
-                                   ml, ML_TASK_NET_IO_PRIO, &ml->net_io_task, ML_TASK_NET_IO_CORE);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create net_io task");
-        return ESP_FAIL;
+    /* Join the shared net_io / derp / wg_mgr tasks (started by the first membership), then create the one
+     * task a membership keeps for itself: the control plane. */
+    esp_err_t rt_err = ml_rt_attach(ml);
+    if (rt_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to join the shared runtime: %s", esp_err_to_name(rt_err));
+        goto start_failed;
     }
-    __atomic_add_fetch(&ml->tasks_alive, 1, __ATOMIC_SEQ_CST);
 
-    ret = xTaskCreatePinnedToCore(ml_derp_tx_task, "ml_derp_tx", ML_TASK_DERP_TX_STACK,
-                                   ml, ML_TASK_DERP_TX_PRIO, &ml->derp_tx_task, ML_TASK_DERP_TX_CORE);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create derp_tx task");
-        return ESP_FAIL;
-    }
     __atomic_add_fetch(&ml->tasks_alive, 1, __ATOMIC_SEQ_CST);
-
-    /* DERP RX/TX and TLS lifetime share one owner (10 KiB saved per membership). */
-    ret = xTaskCreatePinnedToCore(ml_coord_task, "ml_coord", ML_TASK_COORD_STACK,
-                                   ml, ML_TASK_COORD_PRIO, &ml->coord_task, ML_TASK_COORD_CORE);
-    if (ret != pdPASS) {
+    if (xTaskCreatePinnedToCore(ml_coord_task, "ml_coord", ML_TASK_COORD_STACK,
+                                ml, ML_TASK_COORD_PRIO, &ml->coord_task, ML_TASK_COORD_CORE) != pdPASS) {
+        __atomic_sub_fetch(&ml->tasks_alive, 1, __ATOMIC_SEQ_CST);
         ESP_LOGE(TAG, "Failed to create coord task");
-        return ESP_FAIL;
+        rt_err = ESP_ERR_NO_MEM;
+        goto start_failed;
     }
-    __atomic_add_fetch(&ml->tasks_alive, 1, __ATOMIC_SEQ_CST);
-
-    ret = xTaskCreatePinnedToCore(ml_wg_mgr_task, "ml_wg_mgr", ML_TASK_WG_MGR_STACK,
-                                   ml, ML_TASK_WG_MGR_PRIO, &ml->wg_mgr_task, ML_TASK_WG_MGR_CORE);
-    if (ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create wg_mgr task");
-        return ESP_FAIL;
-    }
-    __atomic_add_fetch(&ml->tasks_alive, 1, __ATOMIC_SEQ_CST);
 
     /* WiFi is expected to be connected before microlink_start() is called.
      * Signal the event so coord/wg_mgr tasks proceed immediately. */
@@ -445,6 +470,13 @@ skip_bsd_socket:
 
     ESP_LOGI(TAG, "All tasks started");
     return ESP_OK;
+
+start_failed:
+    /* Nothing keeps running for a start that did not complete: leave the shared tasks (their detach stops them
+     * if this was the only membership), close what start opened, and report so a later start can retry. */
+    ml->state = ML_STATE_IDLE;
+    if (!ml_rt_detach(ml)) ml->stop_incomplete = true;
+    return ESP_FAIL;
 }
 
 esp_err_t microlink_stop(microlink_t *ml) {
@@ -452,18 +484,16 @@ esp_err_t microlink_stop(microlink_t *ml) {
 
     ESP_LOGI(TAG, "Stopping...");
     xEventGroupSetBits(ml->events, ML_EVT_SHUTDOWN_REQUEST);
+    bool incomplete = false;    /* becomes ml->stop_incomplete once this stop has run to the end */
 
-    /* Unblock any task parked in a blocking socket call so it can observe the
-     * shutdown bit and self-delete BEFORE microlink_destroy() frees ml below.
-     * Without this a derp_tx task mid-TLS-handshake (mbedtls_ssl_read on
-     * derp.sockfd) or the coord task in coord_recv stays blocked past the
-     * wait, and the free() races the still-running task → use-after-free
-     * panic in mbedtls (observed 2026-05-26: ml_derp_tx crash in
-     * ssl_parse_record_header on a WiFi-uplink bounce that re-triggered the
-     * connect/teardown path). shutdown() — not close() — wakes the recv
-     * without invalidating the fd, so each task still closes its own socket
-     * in its normal error path and there is no double-close / fd-reuse race. */
-    if (ml->derp.sockfd >= 0) shutdown(ml->derp.sockfd, SHUT_RDWR);
+    /* Unblock the control task if it is parked in a blocking socket call so it can observe the shutdown bit
+     * and self-delete BEFORE microlink_destroy() frees ml below. Without this a coord task in coord_recv
+     * stays blocked past the wait, and the free() races the still-running task -> use-after-free panic
+     * (observed 2026-05-26 on a WiFi-uplink bounce that re-triggered the connect/teardown path). shutdown() --
+     * not close() -- wakes the recv without invalidating the fd, so the task still closes its own socket in its
+     * normal error path and there is no double-close / fd-reuse race. The shared DERP, WireGuard and net_io
+     * tasks never block on a membership's socket (they are non-blocking by construction), so they need no
+     * such nudge: the detach below is what ends their use of this instance. */
     if (ml->coord_sock >= 0)  shutdown(ml->coord_sock,  SHUT_RDWR);
     /* TLS control-plane connection: coord_sock is -1 and the fd lives inside
      * the esp_tls handle — shut that down too so a blocked esp_tls_conn_read
@@ -483,7 +513,7 @@ esp_err_t microlink_stop(microlink_t *ml) {
         xQueueSend(ml->coord_cmd_queue, &stop_cmd, 0);
     }
 
-    /* Wait for tasks to exit (they check ML_EVT_SHUTDOWN_REQUEST).
+    /* Wait for the control task to exit (it checks ML_EVT_SHUTDOWN_REQUEST).
      * Tasks call vTaskDelete(NULL) to self-delete, so we must NOT call
      * vTaskDelete() on them again — that causes a crash in uxListRemove
      * because the task's list node is already invalid. Wait for them to
@@ -503,18 +533,34 @@ esp_err_t microlink_stop(microlink_t *ml) {
         int left = __atomic_load_n(&ml->tasks_alive, __ATOMIC_SEQ_CST);
         if (left > 0) {
             ESP_LOGE(TAG, "%d task(s) still running %d ms after the stop request -- "
-                          "the instance will be leaked rather than freed under them", left, waited);
-            ml->stop_incomplete = true;
+                          "the instance is kept (not freed) until a later stop finds them gone", left, waited);
+            incomplete = true;
         } else {
             ESP_LOGI(TAG, "All tasks exited (%d ms)", waited);
         }
     }
 
-    ml->net_io_task = NULL;
-    ml->derp_tx_task = NULL;
-    ml->derp_rx_task = NULL;
     ml->coord_task = NULL;
-    ml->wg_mgr_task = NULL;
+
+    /* Leave the shared tasks. Detach waits for the slice they may be running for this membership, tears down
+     * its DERP connection and WireGuard interface under their locks, and returns only when no shared task can
+     * touch ml again. If one cannot let go in time the membership stays attached and must not be freed. */
+    if (!ml_rt_detach(ml)) {
+        ESP_LOGE(TAG, "a shared task still holds this membership -- the instance is kept (not freed) until a later stop lets go");
+        incomplete = true;
+    }
+    /* stop_incomplete is recomputed by every stop, never sticky: a slice that outran the detach timeout ends by itself,
+     * and the gateway manager retries stop_member every ten seconds. If the flag could only be set, that retry would
+     * detach successfully and still never destroy, turning a transient overrun into a permanent leak. */
+    __atomic_store_n(&ml->stop_incomplete, incomplete, __ATOMIC_RELEASE);
+
+    /* A membership that is gone never keeps the negotiation token, whatever path it was on when it was stopped
+     * (the control task and the DERP link release it themselves; this is the backstop for every other way out). */
+    {
+        ml_neg_t *neg = ml_rt_negotiation();
+        ml_neg_release(neg, ml_neg_key(ml->config.diagnostic_id, ML_NEG_PHASE_CONTROL));
+        ml_neg_release(neg, ml_neg_key(ml->config.diagnostic_id, ML_NEG_PHASE_DERP));
+    }
 
     /* Stop HTTP config server */
     if (ml->config_httpd) {
@@ -552,9 +598,10 @@ void microlink_destroy(microlink_t *ml) {
      * ML_JSON_BUFFER_SIZE) were never released here before: every
      * stop/start cycle lost ~650 KB on the reference router. */
     ml_directory_abort(ml);
-    for(unsigned i=0;i<4;i++)free(ml->jit_pending[i].packet);
-    ml_derp_disconnect(ml);
-    if (ml->h2_acc) { free(ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0; }
+    for(unsigned i=0;i<ML_JIT_PENDING;i++)if(ml->jit_pending[i].packet)pbuf_free(ml->jit_pending[i].packet);
+    /* The DERP link was closed and its TLS state released by ml_rt_detach() (under the DERP task's lock); the
+     * packets still queued for it are freed with the queues below. */
+    if (ml->h2_acc) { tdongle_heap_free(TDONGLE_OWNER_CONTROL, ml->h2_acc); ml->h2_acc = NULL; ml->h2_acc_len = 0; }
     if (ml->lp_acc) { free(ml->lp_acc); ml->lp_acc = NULL; ml->lp_acc_len = 0; }
 
     extern void ml_gateway_release_netif(microlink_t *);
@@ -572,17 +619,24 @@ void microlink_destroy(microlink_t *ml) {
     /* Whatever is still queued owns heap memory: packets the disco / wg /
      * stun consumers never got to (data), peer updates the wg_mgr never
      * applied (the update itself). Free them before the queues go. The DERP
-     * TX queue was drained by ml_derp_disconnect() above. */
+     * TX queue is drained here too: it may hold packets queued after the link closed. */
     {
         ml_rx_packet_t pkt;
         QueueHandle_t rxq[] = { ml->disco_rx_queue, ml->wg_rx_queue, ml->stun_rx_queue };
         for (size_t i = 0; i < sizeof(rxq) / sizeof(rxq[0]); i++) {
             if (!rxq[i]) continue;
-            while (xQueueReceive(rxq[i], &pkt, 0) == pdTRUE) free(pkt.data);
+            while (xQueueReceive(rxq[i], &pkt, 0) == pdTRUE) {
+                if (rxq[i] == ml->wg_rx_queue) ml_wgrx_release(pkt.len);   /* ml_wg_rx_budget.h: the bytes no longer wait */
+                tdongle_heap_free(TDONGLE_OWNER_PACKET, pkt.data);
+            }
         }
-        ml_peer_update_t *upd;
+        ml_derp_tx_item_t tx;
+        if (ml->derp_tx_queue) {
+            while (xQueueReceive(ml->derp_tx_queue, &tx, 0) == pdTRUE) tdongle_heap_free(TDONGLE_OWNER_PACKET, tx.data);
+        }
+        void *upd;
         if (ml->peer_update_queue) {
-            while (xQueueReceive(ml->peer_update_queue, &upd, 0) == pdTRUE) free(upd);
+            while (xQueueReceive(ml->peer_update_queue, &upd, 0) == pdTRUE) ml_pu_free_entry(upd);
         }
     }
 
@@ -602,7 +656,7 @@ void microlink_destroy(microlink_t *ml) {
     memset(ml->wg_private_key, 0, 32);
     memset(ml->disco_private_key, 0, 32);
 
-    free(ml);
+    tdongle_heap_free(TDONGLE_OWNER_CONTEXT, ml);
     ESP_LOGI(TAG, "Destroyed");
 }
 
@@ -648,6 +702,7 @@ esp_err_t microlink_rebind(microlink_t *ml) {
      * fresh handshake (it watches ML_EVT_DERP_RECONNECT directly). */
     xEventGroupClearBits(ml->events, ML_EVT_DERP_CONNECTED);
     xEventGroupSetBits(ml->events, ML_EVT_DERP_RECONNECT);
+    ml_rt_wake(ML_RT_TASK_DERP);
 
     return ESP_OK;
 }
@@ -666,10 +721,14 @@ uint64_t microlink_get_ctrl_last_rx_ms(const microlink_t *ml) {
 
 void microlink_get_task_states(const microlink_t *ml, microlink_task_states_t *out) {
     if (!out) return;
-    out->net_io  = (ml && ml->net_io_task)  ? (int)eTaskGetState(ml->net_io_task)  : -1;
-    out->derp_tx = (ml && ml->derp_tx_task) ? (int)eTaskGetState(ml->derp_tx_task) : -1;
-    out->coord   = (ml && ml->coord_task)   ? (int)eTaskGetState(ml->coord_task)   : -1;
-    out->wg_mgr  = (ml && ml->wg_mgr_task)  ? (int)eTaskGetState(ml->wg_mgr_task)  : -1;
+    /* net_io, derp and wg_mgr are shared by every attached membership; coord is this membership's own. */
+    TaskHandle_t net_io = (ml && ml->rt_attached) ? ml_rt_task_handle(ML_RT_TASK_NET_IO) : NULL;
+    TaskHandle_t derp   = (ml && ml->rt_attached) ? ml_rt_task_handle(ML_RT_TASK_DERP) : NULL;
+    TaskHandle_t wg_mgr = (ml && ml->rt_attached) ? ml_rt_task_handle(ML_RT_TASK_WG_MGR) : NULL;
+    out->net_io  = net_io ? (int)eTaskGetState(net_io) : -1;
+    out->derp_tx = derp   ? (int)eTaskGetState(derp)   : -1;
+    out->coord   = (ml && ml->coord_task) ? (int)eTaskGetState(ml->coord_task) : -1;
+    out->wg_mgr  = wg_mgr ? (int)eTaskGetState(wg_mgr) : -1;
 }
 
 esp_err_t microlink_get_peer_info(const microlink_t *ml, int index, microlink_peer_info_t *info) {
@@ -726,6 +785,9 @@ esp_err_t microlink_get_diag(const microlink_t *ml, microlink_diag_t *out) {
     out->rc_coord_transport = ml->rc_coord_transport;
     out->rc_derp_rx_wd      = ml->rc_derp_rx_wd;
     out->rc_derp_retry      = ml->rc_derp_retry;
+    out->derp_tls_verify_failures = ml->derp.tls_verify_failures;
+    out->derp_tls_deferred  = ml->derp.tls_deferred;
+    out->ctrl_key_auth      = ml->ctrl_key_auth;
     /* First 16 hex chars of the WG public key (= 8 bytes). Enough to
      * eyeball-match against `headscale nodes list` output. */
     for (int i = 0; i < 8; i++) {

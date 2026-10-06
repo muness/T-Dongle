@@ -16,6 +16,7 @@
 #include "ml_config_httpd.h"
 #include "microlink.h"
 #include "microlink_internal.h"
+#include "ml_runtime.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_system.h"
@@ -352,7 +353,7 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *json) {
     }
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, str);
-    free(str);
+    cJSON_free(str);  /* allocated through the cJSON hooks, so freed through them */
     return ESP_OK;
 }
 
@@ -738,10 +739,10 @@ static esp_err_t handler_monitor(httpd_req_t *req) {
     if (ml) {
         cJSON *tasks = cJSON_AddObjectToObject(json, "tasks");
         struct { const char *name; TaskHandle_t handle; } tlist[] = {
-            {"net_io",  ml->net_io_task},
-            {"derp_tx", ml->derp_tx_task},
+            {"net_io",  ml_rt_task_handle(ML_RT_TASK_NET_IO)},   /* shared by every membership */
+            {"derp_tx", ml_rt_task_handle(ML_RT_TASK_DERP)},
             {"coord",   ml->coord_task},
-            {"wg_mgr",  ml->wg_mgr_task},
+            {"wg_mgr",  ml_rt_task_handle(ML_RT_TASK_WG_MGR)},
         };
         for (int i = 0; i < 4; i++) {
             if (tlist[i].handle) {

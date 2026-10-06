@@ -186,22 +186,23 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
             }
             __atomic_store_n(&ml->map_batch_pending, true, __ATOMIC_RELEASE);
 #ifdef GATEWAY_FLASH_DIRECTORY
-            batch=ml_psram_calloc(1,sizeof(*batch));
+            batch=tdongle_heap_tag(TDONGLE_OWNER_PEER, ml_psram_calloc(1,sizeof(*batch)));
             if (!batch || (!s->count && !ml_directory_begin(ml)) || !ml_directory_commit(ml,s->authoritative)) {
-                free(batch);s->failure="Peer flash commit failed; previous directory retained";
+                tdongle_heap_free(TDONGLE_OWNER_PEER, batch);s->failure="Peer flash commit failed; previous directory retained";
                 __atomic_store_n(&ml->map_batch_pending,false,__ATOMIC_RELEASE);return false;
             }
             batch->header.action=ML_PEER_BATCH;
             batch->authoritative=true;
 #else
-            batch = ml_psram_calloc(1, sizeof(*batch) +
-                                           count * sizeof(ml_peer_update_t));
+            batch = tdongle_heap_tag(TDONGLE_OWNER_PEER, ml_psram_calloc(1, sizeof(*batch) +
+                                           count * sizeof(ml_peer_update_t)));
             if (!batch) {
                 s->failure = "Not enough memory for a validated map batch";
                 __atomic_store_n(&ml->map_batch_pending, false,
                                  __ATOMIC_RELEASE);
                 return false;
             }
+            ml_rt_wake(ML_RT_TASK_WG_MGR);   /* the peer owner applies it now, not at its next poll */
             batch->header.action = ML_PEER_BATCH;
             batch->count = count;
             batch->authoritative = s->authoritative;
@@ -221,7 +222,7 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
 #endif
             if (xQueueSend(ml->peer_update_queue, &batch, pdMS_TO_TICKS(100)) !=
                 pdTRUE) {
-                free(batch);
+                tdongle_heap_free(TDONGLE_OWNER_PEER, batch);
                 s->failure = "Map update queue is busy; retrying";
                 __atomic_store_n(&ml->map_batch_pending, false,
                                  __ATOMIC_RELEASE);
@@ -232,7 +233,7 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
     if (s->has_ip)
         ml->vpn_ip = s->vpn_ip;
     if (s->has_name)
-        strlcpy(ml->self_dns_name, s->dns, sizeof(ml->self_dns_name));
+        ml_published_name_set(&ml->self_dns_name, s->dns);
     ml->map_generation++;
     if (s->expired) {
         ml->key_expired = true;
@@ -243,8 +244,10 @@ static bool gateway_stage_commit(microlink_t *ml, gs_parser *p) {
     if (s->derp_present) {
         ml->derp_region_count = s->region_count;
         memcpy(ml->derp_regions, s->regions, sizeof(s->regions));
-        if (activate_derp_regions(ml) && !ml->derp.connected)
+        if (activate_derp_regions(ml) && !ml->derp.connected) {
             xEventGroupSetBits(ml->events, ML_EVT_DERP_CONNECT_REQ);
+            ml_rt_wake(ML_RT_TASK_DERP);
+        }
     }
     return true;
 }

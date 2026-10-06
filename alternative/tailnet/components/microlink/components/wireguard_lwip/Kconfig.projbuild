@@ -1,0 +1,20 @@
+menu "WireGuard crypto (wireguard_lwip)"
+
+    config WG_CRYPTO_IRAM
+        bool "Run ChaCha20-Poly1305 from IRAM"
+        default n
+        help
+            Place the per-packet ChaCha20/Poly1305 code (about 5 KB) in IRAM instead of
+            flash. Flash code runs through the instruction cache, which Wi-Fi and the
+            TCP/IP stack share; if they evict the cipher's loops between packets every
+            packet pays cache refills. Costs IRAM, which is scarce on this firmware:
+            enable only if `crypto bench` shows "avg" well above "min".
+
+    config WG_CRYPTO_BENCH_BASELINE
+        bool "Include the original ChaCha20-Poly1305 in `crypto bench` for A/B comparison"
+        default n
+        help
+            Links the pre-optimisation implementation (crypto/legacy) and prints its
+            timings next to the optimised code. Diagnostics only; adds about 4 KB of flash.
+
+endmenu

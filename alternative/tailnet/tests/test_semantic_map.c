@@ -1,4 +1,5 @@
 #include "cJSON.h"
+#include "ml_gateway_limits.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,6 +9,11 @@
 #include <ctype.h>
 #include <limits.h>
 #include <errno.h>
+static void release(void *p);
+#define free release
+#include "tdongle_memory.h" /* its inline free() must hit the leak-counting release() */
+#include "../components/microlink/include/ml_published_name.h"
+static const char *dns_text(const ml_published_name_t *n){static char b[ML_PUBLISHED_NAME_MAX];ml_published_name_get(n,b,sizeof(b),NULL);return b;}
 static size_t test_strlcpy(char *out,const char *src,size_t size) {
     size_t length=strlen(src);
     if(size){size_t n=length<size-1?length:size-1;memcpy(out,src,n);out[n]=0;}
@@ -44,7 +50,8 @@ typedef struct {
     volatile uint32_t peer_generation;
     volatile bool map_batch_pending;
     unsigned vpn_ip, map_generation;
-    char self_dns_name[128], last_error[64];
+    ml_published_name_t self_dns_name;
+    char last_error[64];
     bool key_expired;
     unsigned derp_region_default;
     uint8_t derp_region_count;
@@ -94,6 +101,7 @@ static void *ml_psram_calloc(size_t n, size_t size) {
         live++;
     return p;
 }
+#undef free
 static void release(void *p) {
     if (p) {
         assert(live);
@@ -132,6 +140,9 @@ static uint64_t ticks;
 static uint64_t ml_get_time_ms(void) { return ticks++; }
 static void vTaskDelay(unsigned ms) { ticks += ms; }
 static void xEventGroupSetBits(int events, int bit) {}
+enum { ML_RT_TASK_NET_IO, ML_RT_TASK_DERP, ML_RT_TASK_WG_MGR };
+static unsigned wake_calls;
+static void ml_rt_wake(int task) { (void)task; wake_calls++; }   /* event driven: producers wake the shared tasks */
 static bool activate_derp_regions(microlink_t *ml) {
     return ml->derp_region_count > 0;
 }
@@ -279,9 +290,36 @@ int main(void) {
                     "\"2\":{\"RegionID\":2},\"3\":{\"RegionID\":3},\"5\":{"
                     "\"RegionID\":5},\"4\":{\"RegionID\":4,\"Nodes\":[{"
                     "\"HostName\":\"derp\",\"IPv4\":\"1.2.3.4\"}]}}}}"));
-    assert(m.vpn_ip == 0x64030405 && strstr(m.self_dns_name, ".ts.net") &&
+    assert(m.vpn_ip == 0x64030405 && strstr(dns_text(&m.self_dns_name), ".ts.net") &&
            m.derp_region_count == 4 && m.derp_regions[3].region_id == 4 &&
            !allocations);
+    /* DERPNode.CertName survives projection and is interpreted: default, name, pin, and
+     * the unusable forms that must mark the node unconnectable instead of falling back. */
+    reset();
+    m = (microlink_t){.derp_region_default = 4};
+    assert(feed(&m, "{\"DERPMap\":{\"Regions\":{\"4\":{\"RegionID\":4,\"Nodes\":["
+                    "{\"HostName\":\"derp4a\",\"CertName\":\"front.example\"},"
+                    "{\"HostName\":\"10.0.0.1\",\"CertName\":\"sha256-raw:"
+                    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\"}]}}}}"));
+    assert(m.derp_region_count == 1 && m.derp_regions[0].node_count == 2);
+    assert(m.derp_regions[0].nodes[0].cert.kind == ML_DERP_CERT_NAME &&
+           !strcmp(m.derp_regions[0].nodes[0].cert.v.name, "front.example"));
+    assert(m.derp_regions[0].nodes[1].cert.kind == ML_DERP_CERT_PIN &&
+           m.derp_regions[0].nodes[1].cert.v.sha256[31] == 0xff);
+    reset();
+    m = (microlink_t){.derp_region_default = 4};
+    assert(feed(&m, "{\"DERPMap\":{\"Regions\":{\"4\":{\"RegionID\":4,\"Nodes\":["
+                    "{\"HostName\":\"derp4a\",\"CertName\":\"sha256-raw:abcd\"},"
+                    "{\"HostName\":\"derp4b\",\"CertName\":7,\"InsecureForTests\":true}]}}}}"));
+    assert(m.derp_regions[0].nodes[0].cert.kind == ML_DERP_CERT_INVALID);          /* bad pin */
+    assert(m.derp_regions[0].nodes[1].cert.kind == ML_DERP_CERT_INVALID);          /* not a string */
+    reset();
+    m = (microlink_t){.derp_region_default = 4};
+    assert(feed(&m, "{\"DERPMap\":{\"Regions\":{\"4\":{\"RegionID\":4,\"Nodes\":["
+                    "{\"HostName\":\"derp4a\",\"InsecureForTests\":true},"
+                    "{\"HostName\":\"derp4b\",\"CertName\":\"derp4b\"}]}}}}"));
+    assert(m.derp_regions[0].nodes[0].cert.kind == ML_DERP_CERT_HOSTNAME);         /* InsecureForTests is not honoured */
+    assert(m.derp_regions[0].nodes[1].cert.kind == ML_DERP_CERT_HOSTNAME);
     reset();
     m = (microlink_t){.vpn_ip = 123};
     assert(!feed(&m, "{\"PeersChanged\":[{\"ID\":1}],\"Node\":{\"Addresses\":["
@@ -297,7 +335,7 @@ int main(void) {
     m = (microlink_t){0};
     reject_queue = true;
     assert(!feed(&m, "{\"Node\":{\"Name\":\"unchanged\"},\"Peers\":[]}"));
-    assert(!m.self_dns_name[0] && !m.map_generation && !live);
+    assert(!dns_text(&m.self_dns_name)[0] && !m.map_generation && !live);
     reset();
     m = (microlink_t){0};
     char *large = malloc(400000);
@@ -305,7 +343,7 @@ int main(void) {
     size_t n = strlen(large);
     memset(large + n, 'x', 300000);
     strcpy(large + n + 300000, "\",\"Node\":{\"Name\":\"kept\"}}");
-    assert(feed(&m, large) && !strcmp(m.self_dns_name, "kept") &&
+    assert(feed(&m, large) && !strcmp(dns_text(&m.self_dns_name), "kept") &&
            !allocations); /* standard malloc is not staged allocator */
     reset();
     m = (microlink_t){0};
@@ -372,7 +410,7 @@ int main(void) {
     }
     int noise = 0;
     assert(gateway_read_map(&m, &noise, 3, true) == 0 &&
-           m.map_generation == 1 && !strcmp(m.self_dns_name, "kept") &&
+           m.map_generation == 1 && !strcmp(dns_text(&m.self_dns_name), "kept") &&
            !allocations);
 #undef free
     free(large);
