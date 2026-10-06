@@ -14,6 +14,19 @@
 //!
 //! No allocation, no unsafe code. The working set is a few 32-byte buffers on the stack plus [`Nvs`] itself (360 bytes); the largest stack frames are the blob buffers of [`Store::load_all`] (about 2.5 KiB) and [`Store::save_profiles`] (about 1.8 KiB), so a task that calls the store needs 8 KiB of stack to be comfortable.
 //!
+//! # Using it in the firmware
+//!
+//! ```ignore
+//! // 0x9000 and 0x10000 are the `nvs` row of rust/firmware/partitions.csv (the C firmware's table, unchanged).
+//! let flash = tdongle_nvs_write::NorPartition::new(esp_storage::FlashStorage::new(), 0x9000);
+//! let mut store = tdongle_nvs_write::Store::mount(flash, 0x10000)?;      // repairs what a power cut left, writes nothing otherwise
+//! let settings = store.load_all()?;                                      // networks, metadata, display, mode; writes nothing
+//! store.save_profiles(&list, &meta)?;                                    // wifi_meta, then wifi_profiles
+//! ```
+//!
+//! After an `Err(Error::Flash(_))` call [`Store::remount`] before anything else. A flash erase takes tens of milliseconds and stalls
+//! the cache (and with it every interrupt not in IRAM): do not save while the bridge must not hiccup, as with ESP-IDF's own nvs.
+//!
 //! # Atomicity
 //!
 //! `nvs_commit` of the C is a no-op for the storage engine (every set is on flash when it returns) and so is [`Nvs::commit`]. The unit of

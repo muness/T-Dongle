@@ -40,18 +40,12 @@ fn c_binary() -> Option<std::path::PathBuf> {
     Some(std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("idf_c_check"))
 }
 
-#[test]
-fn esp_idf_cut_while_writing_then_this_crates_mount() {
+fn sweep_c_writer(name: &str, base: Vec<u8>, script: &str, steps: Vec<Step>, pair: Option<(&'static str, &'static str, &'static str)>, stride: u64) {
     let Some(bin) = c_binary() else { return };
-    let mut base_store = board();
-    // the C script creates namespaces itself, but start from a base that has them all so the sweep covers value writes
-    base_store.nvs().set_blob("tailnet", "directory", &pattern(9000, 1)).unwrap();
-    let base = base_store.nvs().flash().data.clone();
-    let dir = export_dir().join("c_writer");
+    let dir = export_dir().join(format!("c_writer_{name}"));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("base.bin"), &base).unwrap();
-    std::fs::write(dir.join("script.txt"), SCRIPT).unwrap();
-    let stride = env_u64("NVS_C_WRITER_STRIDE", 11);
+    std::fs::write(dir.join("script.txt"), script).unwrap();
     let out = std::process::Command::new(bin)
         .arg("--crash-sweep")
         .arg(dir.join("base.bin"))
@@ -71,15 +65,14 @@ fn esp_idf_cut_while_writing_then_this_crates_mount() {
         })
         .collect();
     assert!(cuts.len() > 100, "{text}");
-    let sc =
-        Scenario { name: "c_writer", base: base.clone(), steps: steps(), pair: Some(("tn_settings", "wifi_meta", "wifi_profiles")), rerun: true, churn: 0 };
+    let sc = Scenario { name: "c_writer", base: base.clone(), steps, pair, rerun: true, churn: 0 };
     let run = prepare(&sc);
     let mut f = std::io::BufReader::new(std::fs::File::open(dir.join("images.bin")).unwrap());
     let mut died_count = 0;
     for (n, k, died) in &cuts {
         let mut img = vec![0u8; SIZE as usize];
         f.read_exact(&mut img).unwrap();
-        let what = format!("ESP-IDF writer cut at {n}, in step {k}");
+        let what = format!("{name}: ESP-IDF writer cut at {n}, in step {k}");
         let k = if *died { *k } else { sc.steps.len() - 1 };
         let repaired = run.check_image(&img, k, &what);
         // the partition keeps working: the whole sequence again reaches the final state
@@ -90,6 +83,28 @@ fn esp_idf_cut_while_writing_then_this_crates_mount() {
         assert_same(&format!("{what}: after running the sequence again"), &dump(again.nvs()), run.states.last().unwrap());
         died_count += usize::from(*died);
     }
-    eprintln!("ESP-IDF as writer: {} crash images ({died_count} cut mid-write) taken by this crate's mount", cuts.len());
-    let _ = std::fs::remove_file(dir.join("images.bin"));
+    eprintln!("{name}: ESP-IDF as writer: {} crash images ({died_count} cut mid-write) taken by this crate's mount", cuts.len());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn esp_idf_cut_while_writing_then_this_crates_mount() {
+    let mut base_store = board();
+    // the C script creates namespaces itself, but start from a base that has them all so the sweep covers value writes
+    base_store.nvs().set_blob("tailnet", "directory", &pattern(9000, 1)).unwrap();
+    let base = base_store.nvs().flash().data.clone();
+    sweep_c_writer("main", base, SCRIPT, steps(), Some(("tn_settings", "wifi_meta", "wifi_profiles")), env_u64("NVS_C_WRITER_STRIDE", 11));
+}
+
+/// ESP-IDF's own page compaction (`FREEING` pages, half-copied target pages) cut at every Nth unit, and this crate's mount finishing it.
+#[test]
+fn esp_idf_cut_while_compacting_then_this_crates_mount() {
+    let probe: Step = Box::new(|s: &mut St| s.save_profiles(&list(5, 77).0, &list(5, 77).1));
+    let base = base_before_compaction(board(), |t| save(1 + (t as usize % 8), t), probe);
+    let script = "blob tn_settings wifi_profiles 784 77\nblob tn_settings wifi_meta 516 78\n";
+    let steps: Vec<Step> = vec![
+        Box::new(|s: &mut St| s.nvs().set_blob("tn_settings", "wifi_profiles", &pattern(784, 77))),
+        Box::new(|s: &mut St| s.nvs().set_blob("tn_settings", "wifi_meta", &pattern(516, 78))),
+    ];
+    sweep_c_writer("compaction", base, script, steps, None, env_u64("NVS_C_WRITER_STRIDE", 3));
 }

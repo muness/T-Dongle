@@ -274,7 +274,7 @@ pub fn sweep(sc: Scenario, stride: u64) {
     let exhaustive = std::env::var_os("NVS_SWEEP_STRIDE").is_some();
     // Every cut point for the clean-prefix model; the two half-programmed models use every third / fourth point (all of them when
     // NVS_SWEEP_STRIDE is set).
-    let mount_cut_every = if exhaustive { 1 } else { (total / stride / 40).max(1) };
+    let mount_cut_every = env_u64("NVS_MOUNT_CUT_EVERY", if exhaustive { 1 } else { (total / stride / 40).max(1) });
     for (tear, step) in [(Tear::Prefix, stride), (Tear::Bits(0x1234_5678_9abc_def1), stride * 3), (Tear::Bits(0x0fed_cba9_8765_4321), stride * 4 + 1)] {
         let step = if exhaustive { stride } else { step };
         let mut n = 0;
