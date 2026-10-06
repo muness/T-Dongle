@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 /* wifi_phy_mode_t values (esp_wifi_types_generic.h); wifi_link.inc asserts they still match. */
 enum { WIFI_LINK_PHY_LR, WIFI_LINK_PHY_11B, WIFI_LINK_PHY_11G, WIFI_LINK_PHY_11A, WIFI_LINK_PHY_HT20,
@@ -49,9 +50,26 @@ typedef struct {
     uint32_t last_disconnect_ms;     /* uptime at the last disconnect; meaningful when disconnects != 0 */
     uint16_t last_reason;            /* wifi_err_reason_t of the last disconnect */
     int8_t last_disconnect_rssi;     /* RSSI the driver reported at that disconnect */
+    /* Roaming (not part of any report line or JSON: the BSSID stays internal): an association to a different access point than the
+     * previous one is a roam, whether the network steered the dongle (802.11v) or the dongle lost one and joined another. */
+    uint32_t roams;
+    uint32_t last_connect_ms;        /* uptime at the last association; meaningful when connects != 0 */
+    uint8_t last_bssid[6];
+    bool have_bssid;
 } wifi_link_events;
 
 static inline void wifi_link_note_connect(wifi_link_events *e) { e->connects++; }
+/* An association completed to the access point `bssid`. Counts a connect, remembers when, and counts a roam when the access point is
+ * not the one the previous association used (the first association is never a roam). */
+static inline void wifi_link_note_association(wifi_link_events *e, const uint8_t bssid[6], uint32_t now_ms) {
+    wifi_link_note_connect(e);
+    e->last_connect_ms = now_ms;
+    if (bssid) {
+        if (e->have_bssid && memcmp(e->last_bssid, bssid, 6)) e->roams++;
+        memcpy(e->last_bssid, bssid, 6);
+        e->have_bssid = true;
+    }
+}
 static inline void wifi_link_note_disconnect(wifi_link_events *e, unsigned reason, int rssi, uint32_t now_ms) {
     e->disconnects++;
     if (reason == WIFI_LINK_REASON_BEACON_TIMEOUT) e->beacon_timeouts++;

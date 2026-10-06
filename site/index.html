@@ -66,14 +66,14 @@ label{display:block;font-size:.92em;color:var(--mute);margin-top:.5em}
 
 <section class="card">
 <h2>Add a Wi-Fi network</h2>
-<p>After flashing, the dongle needs a Wi-Fi network to join (2.4 GHz). Plug it in without the button, then enter the network here. Nothing leaves your computer: it goes straight to the dongle over USB. You can save up to 8.</p>
+<p>After flashing, the dongle needs a Wi-Fi network to join (2.4 GHz). Plug it in without the button, then enter the network here. Nothing leaves your computer: it goes straight to the dongle over USB. You can save up to 8. <b>No computer handy?</b> A dongle with no network saved opens its own open Wi-Fi, <b>TDongle-XXXXXX</b> (also in the button menu, Enter setup AP): join it with a phone and the setup page opens by itself.</p>
 <label for="ssid">Network name (SSID)</label><input id="ssid" type="text" autocomplete="off" maxlength="32" spellcheck="false">
 <label for="pass">Password (leave empty for an open network)</label><input id="pass" type="password" autocomplete="off" maxlength="63">
 <div class="row"><button id="wifi" type="button">Save network to dongle</button></div>
 <p class="msg" id="wifimsg" role="status" aria-live="polite"></p>
 </section>
 
-<p class="msg">Networks can also be added or removed later from the Android companion app or the serial console. Details are in the <a href="https://github.com/muness/T-Dongle#2-connect-it-to-your-wi-fi">README</a>.</p>
+<p class="msg">Networks can also be added or removed later from the dongle's setup Wi-Fi (hold the button), the Android companion app or the serial console. Details are in the <a href="https://github.com/muness/T-Dongle#2-connect-it-to-your-wi-fi">README</a>.</p>
 </main>
 <script>
 if (!("serial" in navigator)) document.getElementById("unsupported").style.display = "block";

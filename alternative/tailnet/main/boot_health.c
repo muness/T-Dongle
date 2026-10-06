@@ -31,7 +31,7 @@ static int errors[BOOT_STAGE_COUNT];
 static unsigned current_stage;
 static const char *stage_name(unsigned s) {
     static const char *const names[] = {"none","usb","settings","network","http",
-        "directory","routes","wifi","dns","manager","running","display"};
+        "directory","routes","wifi","dns","manager","running","display","setup"};
     return s<BOOT_STAGE_COUNT ? names[s] : "unknown";
 }
 void gateway_boot_begin(void) {

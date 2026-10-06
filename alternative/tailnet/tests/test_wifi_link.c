@@ -71,6 +71,28 @@ static void events(void) {
     wifi_link_note_disconnect(&e, 1, 500, 3000);
     assert(e.last_disconnect_rssi == 127 && e.beacon_timeouts == 1);
 }
+/* Roaming (v0.1.1 `roams=`): an association to a different access point than the previous one. Never part of a report. */
+static void roams(void) {
+    wifi_link_events e = {0};
+    const uint8_t a[6] = {2, 0, 0, 0, 0, 1}, b[6] = {2, 0, 0, 0, 0, 2};
+    wifi_link_note_association(&e, a, 1000);
+    assert(e.connects == 1 && e.roams == 0 && e.last_connect_ms == 1000 && e.have_bssid);        /* the first association is not a roam */
+    wifi_link_note_association(&e, a, 2000);
+    assert(e.connects == 2 && e.roams == 0 && e.last_connect_ms == 2000);                        /* the same access point again: a reconnect */
+    wifi_link_note_association(&e, b, 3000);
+    assert(e.connects == 3 && e.roams == 1 && !memcmp(e.last_bssid, b, 6));                      /* another one: a roam */
+    wifi_link_note_association(&e, a, 4000);
+    assert(e.roams == 2 && e.last_connect_ms == 4000);
+    wifi_link_note_association(&e, NULL, 5000);                                                  /* no address in the event: counted, never a roam */
+    assert(e.connects == 5 && e.roams == 2 && !memcmp(e.last_bssid, a, 6));
+    wifi_link_note_disconnect(&e, 8, -70, 6000);
+    assert(e.roams == 2 && e.have_bssid);                                                        /* losing the link is not a roam by itself */
+    /* The access point address stays out of every report. */
+    char out[WIFI_LINK_JSON_MAX], line[WIFI_LINK_LINE_MAX];
+    wifi_link_info l = link_full();
+    assert(wifi_link_json(out, sizeof(out), &l, &e) && !strstr(out, "bssid") && !strstr(out, "roams"));
+    assert(wifi_link_line(line, sizeof(line), &l, &e) && !strstr(line, "bssid") && !strstr(line, "roams"));
+}
 static void json_exact(void) {
     char out[WIFI_LINK_JSON_MAX];
     wifi_link_info l = link_full();
@@ -92,7 +114,7 @@ static void json_exact(void) {
 static void json_bounds(void) {
     /* Widest possible values must fit WIFI_LINK_JSON_MAX with room to spare, and every shorter buffer must refuse. */
     wifi_link_info l = link_widest();
-    wifi_link_events e = {UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT16_MAX, -128};
+    wifi_link_events e = {.connects = UINT32_MAX, .disconnects = UINT32_MAX, .beacon_timeouts = UINT32_MAX, .last_disconnect_ms = UINT32_MAX, .last_reason = UINT16_MAX, .last_disconnect_rssi = -128};
     char big[1024], tight[WIFI_LINK_JSON_MAX];
     size_t n = wifi_link_json(big, sizeof(big), &l, &e);
     assert(n > 0 && n < WIFI_LINK_JSON_MAX && n == strlen(big));
@@ -121,7 +143,7 @@ static void line_exact(void) {
     n = wifi_link_line(out, sizeof(out), &down, &e);
     assert(n && !strcmp(out, "wifi_link connected=0 join=disconnected selected=0 pinned=0 pin_failed=0 connects=1 disconnects=0 beacon_timeouts=0 last_disconnect_reason=0\r\n"));
     l = link_widest();
-    e = (wifi_link_events){UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT16_MAX, -128};
+    e = (wifi_link_events){.connects = UINT32_MAX, .disconnects = UINT32_MAX, .beacon_timeouts = UINT32_MAX, .last_disconnect_ms = UINT32_MAX, .last_reason = UINT16_MAX, .last_disconnect_rssi = -128};
     char big[1024];
     n = wifi_link_line(big, sizeof(big), &l, &e);
     assert(n > 0 && n < WIFI_LINK_LINE_MAX);
@@ -170,6 +192,7 @@ static void copy_macros(void) {
     assert(pool.err == 65535 && pool.avail == 5 && pool.illegal == 1);
 }
 int main(void) {
+    roams();
     names(); rssi_text(); join_states(); events(); json_exact(); json_bounds(); line_exact(); stats_lines(); copy_macros();
     puts("wifi_link: names, rssi tokens, event counters, JSON/line exact text, widest-value bounds, truncation and lwIP counter lines passed");
     return 0;

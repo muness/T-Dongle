@@ -1,0 +1,163 @@
+<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>T-Dongle setup</title>
+<style>
+:root{--bg:#0e1a24;--panel:#15252f;--line:#294050;--text:#eaf3f7;--mute:#9db3c0;--acc:#40dfff;--ok:#5fe0a0;--err:#ff8a80;--ease:cubic-bezier(.25,1,.5,1)}
+*{box-sizing:border-box}
+body{margin:0;font:17px/1.5 system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text)}
+main{max-width:30em;margin:0 auto;padding:1.25em 1em 3em}
+h1{font-size:1.45em;line-height:1.2;margin:.2em 0 .3em}
+.chip{display:inline-block;font-size:.75em;letter-spacing:.06em;text-transform:uppercase;color:var(--acc);border:1px solid var(--line);border-radius:2em;padding:.15em .8em}
+.lead{color:var(--mute);margin:0 0 1.2em}
+ol{margin:0 0 1.4em;padding:0;list-style:none;display:grid;gap:.4em;color:var(--mute);font-size:.9em}
+ol li::before{content:attr(data-n);display:inline-grid;place-items:center;width:1.6em;height:1.6em;margin-right:.6em;border-radius:50%;background:var(--panel);color:var(--acc);font-weight:600}
+form,.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:1em}
+label{display:block;font-weight:600;margin:.9em 0 0}
+label:first-of-type{margin-top:0}
+.hint{display:block;font-weight:400;font-size:.82em;color:var(--mute)}
+input{width:100%;font:inherit;color:var(--text);background:#0b141b;border:1px solid var(--line);border-radius:10px;padding:.65em .75em;margin-top:.3em;min-height:44px;transition:border-color .2s var(--ease),box-shadow .2s var(--ease)}
+input:focus-visible,button:focus-visible,summary:focus-visible{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(64,223,255,.35)}
+.nets{display:grid;grid-template-columns:minmax(0,1fr);gap:.4em;margin:.5em 0 0}
+.net{display:flex;justify-content:space-between;gap:1em;text-align:left;margin:0;min-height:44px;background:#0b141b;color:var(--text);border:1px solid var(--line);font-weight:400}
+.net:hover{border-color:var(--acc);background:#0b141b}
+.net span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.net span:last-child{color:var(--mute);white-space:nowrap}
+.saved{display:flex;justify-content:space-between;align-items:center;gap:1em;padding:.35em .4em .35em .9em;min-height:48px;border:1px solid var(--line);border-radius:12px;background:#0b141b}
+.saved span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#savedbox{display:grid;grid-template-columns:minmax(0,1fr);gap:.4em;margin-bottom:1.2em}#savedbox[hidden]{display:none}
+.saved button.quiet{flex:none;width:auto;margin:0;min-height:38px;padding:.3em .9em}
+.note{color:var(--mute);font-size:.9em;margin:.5em 0 0}
+.show{display:flex;align-items:center;gap:.5em;font-weight:400;font-size:.9em;margin-top:.5em;min-height:44px}
+.show input{width:auto;min-height:0;margin:0;accent-color:var(--acc)}
+details{margin-top:1em;color:var(--mute)}
+summary{cursor:pointer;min-height:44px;display:flex;align-items:center}
+summary::before{content:'▸';color:var(--acc);margin-right:.5em;transition:transform .2s var(--ease)}
+details[open] summary::before{transform:rotate(90deg)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:.8em}
+button{font:inherit;font-weight:600;min-height:48px;width:100%;border:0;border-radius:12px;padding:.7em 1em;cursor:pointer;background:var(--acc);color:#04202a;margin-top:1.1em;transition:transform .12s var(--ease),opacity .2s var(--ease),background-color .2s var(--ease)}
+button:hover{background:#7aebff}
+button:active{transform:translateY(2px) scale(.99)}
+button:disabled{opacity:.55;cursor:progress;transform:none}
+button.quiet{background:transparent;color:var(--mute);border:1px solid var(--line);margin-top:.7em}
+#result{margin-top:1em}
+#result p{margin:0}
+.msg{border-radius:12px;padding:.8em 1em;border:1px solid var(--line);animation:in .3s var(--ease)}
+.msg.err{border-color:var(--err);color:var(--err)}
+.done{text-align:center;animation:in .35s var(--ease)}
+.done svg{width:64px;height:64px;stroke:var(--ok);fill:none;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+.done circle{stroke-dasharray:151;stroke-dashoffset:151;animation:draw .6s var(--ease) forwards}
+.done path{stroke-dasharray:40;stroke-dashoffset:40;animation:draw .4s .35s var(--ease) forwards}
+.done h2{margin:.4em 0 .2em;font-size:1.2em}
+.done p{color:var(--mute);text-align:left;margin:.6em 0 0;font-size:.92em}
+.legend{display:grid;gap:.25em;margin:.8em 0 0;padding:0;list-style:none;text-align:left;font-size:.92em}
+.dot{display:inline-block;width:.8em;height:.8em;border-radius:50%;margin-right:.55em;vertical-align:-.05em}
+small{display:block;margin-top:1.2em;color:var(--mute);font-size:.8em}
+[hidden]{display:none!important}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-delay:0s!important;transition-duration:.01ms!important}}
+</style>
+<main>
+<span class=chip>T-Dongle setup</span>
+<h1>Connect your dongle to Wi-Fi</h1>
+<p class=lead>About a minute. Forwarding and tailnets are paused while this page is open.</p>
+<ol><li data-n=1>Pick the 2.4 GHz network the dongle should use</li><li data-n=2>Save it. Add more networks the same way if you like</li><li data-n=3>Tap Done; the dongle restarts and joins the best one it can find</li></ol>
+<form id=f autocomplete=off>
+<section id=savedbox hidden><label>Saved networks<span class=hint>The dongle joins the preferred network if it can, then the highest priority, then the strongest signal.</span></label><div id=savedlist class=nets style=margin-top:0></div></section>
+<label>Nearby networks<span class=hint>Tap one to use it.</span></label>
+<div id=nets class=nets></div>
+<button id=scan type=button class=quiet>Scan again</button>
+<label>Wi-Fi network name (SSID)<span class=hint>Exactly as it appears, including capitals. 2.4 GHz only.</span><input name=ssid maxlength=32 required autocapitalize=off autocorrect=off spellcheck=false></label>
+<label>Password<span class=hint>Leave empty for an open network. 8 to 63 characters.</span><input id=pw name=password type=password maxlength=63 autocomplete=new-password autocapitalize=off autocorrect=off spellcheck=false></label>
+<label class=show><input type=checkbox id=show>Show password</label>
+<details><summary>Advanced: name, slot, priority</summary>
+<label>Name<span class=hint>Shown on the dongle screen. Defaults to the network name.</span><input name=name maxlength=24></label>
+<div class=row><label>Slot (1 to 8)<input name=slot type=number inputmode=numeric min=1 max=8 value=1 required></label><label>Priority (0 to 100)<input name=priority type=number inputmode=numeric min=0 max=100 value=50 required></label></div>
+</details>
+<button id=save>Save network</button>
+<button id=cancel type=button class=quiet>Cancel setup</button>
+</form>
+<div id=result role=status aria-live=polite></div>
+<small>A network is saved on the dongle as soon as you tap Save, and saving into a slot that is already used replaces that network. Nothing here checks that the network reaches the Internet. Setup closes by itself after 10 minutes.</small>
+</main>
+<script>const token='@@TOKEN@@';
+const $=id=>document.getElementById(id),res=$('result'),f=$('f');
+$('show').onchange=e=>{$('pw').type=e.target.checked?'text':'password'};
+function say(html,cls){res.innerHTML='';const d=document.createElement('div');d.className=cls;if(typeof html==='string')d.textContent=html;else d.appendChild(html);res.appendChild(d)}
+function done(title,steps){
+ f.hidden=true;res.innerHTML='';
+ const d=document.createElement('div');d.className='card done';
+ d.innerHTML="<svg viewBox='0 0 52 52' aria-hidden=true><circle cx=26 cy=26 r=24></circle><path d='M14 27l8 8 16-17'></path></svg>";
+ const h=document.createElement('h2');h.textContent=title;d.appendChild(h);
+ const ul=document.createElement('ul');ul.className='legend';
+ steps.forEach(s=>{const li=document.createElement('li');const dot=document.createElement('span');dot.className='dot';dot.style.background=s[0];li.appendChild(dot);li.appendChild(document.createTextNode(s[1]));ul.appendChild(li)});
+ d.appendChild(ul);
+ const p=document.createElement('p');p.textContent='This page will stop responding when the dongle restarts. That is expected. You can reconnect your phone or laptop to your normal Wi-Fi.';
+ d.appendChild(p);res.appendChild(d);d.scrollIntoView({block:'nearest'});
+}
+const H={'X-Setup-Token':token};
+async function api(path,opt){
+ try{
+  const r=await fetch(path,Object.assign({headers:H},opt||{}));
+  let j=null;try{j=await r.json()}catch(e){}
+  return {ok:r.ok&&!(j&&j.ok===false),j:j,error:(j&&j.error)||null};
+ }catch(e){return {ok:null,j:null,error:null}}
+}
+function send(body){return api('/command',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify(body)})}
+function bars(r){return r>-60?'strong':r>-75?'ok':'weak'}
+const nets=$('nets');
+function render(j){
+ nets.innerHTML='';
+ const list=j.networks||[];
+ if(!list.length){const p=document.createElement('p');p.className='note';p.textContent=j.busy?'Scanning...':'No networks found. Type the name below.';nets.appendChild(p)}
+ list.forEach(n=>{const b=document.createElement('button');b.type='button';b.className='net quiet';
+  const a=document.createElement('span');a.textContent=n.ssid;const c=document.createElement('span');c.textContent=(n.secure?'':'open, ')+bars(n.rssi);
+  b.appendChild(a);b.appendChild(c);
+  b.onclick=()=>{f.ssid.value=n.ssid;if(!n.secure)f.password.value='';$('pw').focus()};nets.appendChild(b)});
+}
+async function scan(again){
+ const r=await api('/wifi-scan'+(again?'?again=1':''));
+ if(!r.j)return;
+ render(r.j);
+ $('scan').disabled=!!r.j.busy;$('scan').textContent=r.j.busy?'Scanning...':'Scan again';
+ if(r.j.busy)setTimeout(()=>scan(false),1500);
+}
+$('scan').onclick=()=>scan(true);scan(false);
+let nsaved=0,slotTouched=false;f.slot.oninput=()=>{slotTouched=true};
+async function loadSaved(){
+ const r=await api('/wifi-saved');
+ if(!r.j||!r.j.networks)return;
+ const j=r.j,L=$('savedlist');L.innerHTML='';nsaved=j.networks.length;$('savedbox').hidden=!nsaved;
+ $('cancel').textContent=nsaved?'Done':'Cancel setup';
+ j.networks.forEach(n=>{const row=document.createElement('div');row.className='saved';
+  const a=document.createElement('span');a.textContent=(n.preferred?'★ ':'')+(n.ssid.startsWith(n.name)?n.ssid:n.name+' ('+n.ssid+')');a.title=n.ssid;
+  const del=document.createElement('button');del.type='button';del.className='quiet';del.textContent='Delete';
+  del.onclick=async()=>{if(!confirm('Delete '+n.name+'?'))return;del.disabled=true;const d=await send({action:'wifi_remove',ssid:n.ssid});if(d.ok===false)say(d.error||'Could not delete.','msg err');setTimeout(loadSaved,600)};
+  row.appendChild(a);row.appendChild(del);L.appendChild(row)});
+ if(!slotTouched)f.slot.value=j.free||1;
+}
+loadSaved();
+const lights=[['#3a8dff','Breathing blue: setup is open'],['#ffb020','Amber, breathing: joining your network'],['#5fe0a0','Green with a brief glow: connected and USB ready'],['#ff5a4d','Red, two blinks: network not found or wrong password']];
+f.onsubmit=async e=>{
+ e.preventDefault();
+ const d=Object.fromEntries(new FormData(f));
+ d.slot=Number(d.slot);d.priority=Number(d.priority);d.action='wifi';
+ if(!d.name)d.name=d.ssid.slice(0,24);
+ if(d.password&&d.password.length<8){say('Passwords need at least 8 characters. Leave it empty only for an open network.','msg err');$('pw').focus();return}
+ if(!/^[ -~]*$/.test(d.ssid+d.name+d.password)){say('Only plain ASCII letters, numbers and symbols are supported for now.','msg err');return}
+ $('save').disabled=true;$('save').textContent='Saving...';
+ const r=await send(d);
+ $('save').disabled=false;$('save').textContent='Save network';
+ if(r.ok===false){say(r.error||'The dongle rejected that. Check the fields and try again.','msg err');return}
+ if(r.ok===null){say('The dongle did not answer. Check you are still joined to its Wi-Fi and try again.','msg err');return}
+ f.password.value='';
+ say('Saved '+d.ssid+'. Add another network, or tap Done.','msg');
+ f.ssid.value='';f.name.value='';slotTouched=false;
+ setTimeout(loadSaved,600);
+};
+$('cancel').onclick=async()=>{
+ $('cancel').disabled=true;
+ const r=await send({action:'setup_done'});
+ if(r.ok===false){say(r.error||'Could not finish. Try again.','msg err');$('cancel').disabled=false;return}
+ if(nsaved){done('Done. The dongle is restarting and joining your network.',lights);return}
+ f.hidden=true;say('Setup finished. The dongle is restarting.','msg');
+};
+</script>

@@ -6,3 +6,12 @@ CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
 CONFIG_ESPTOOLPY_FLASHFREQ_40M=y
 # Reproducible builds: no compile timestamps in the app image.
 CONFIG_APP_REPRODUCIBLE_BUILD=y
+
+# Roaming assist (v0.1.1): 802.11k neighbour reports and 802.11v BSS transition management, so the network can steer the dongle to a
+# better access point (the supplicant honours a BSS transition request by itself). Network-assisted only: ESP-IDF's own roaming app is
+# gated behind IDF_EXPERIMENTAL_FEATURES, and an RSSI-only rule, tried and measured on v0.1.x, ping-ponged between two access points of
+# similar strength. The support is built into both modes; the station asks for it per mode (wifi_roaming_assist() in gateway_main.c:
+# the bridge always, the tailnet gateway only with CONFIG_TDONGLE_WIFI_ROAMING_TAILNET).
+CONFIG_ESP_WIFI_11KV_SUPPORT=y
+CONFIG_ESP_WIFI_RRM_SUPPORT=y
+CONFIG_ESP_WIFI_WNM_SUPPORT=y

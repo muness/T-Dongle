@@ -5,7 +5,7 @@ r=Path(__file__).resolve().parents[1];out=r/'build-host/lcd';out.mkdir(parents=T
 source=(r/'main/lcd.c').read_text()
 assert 'xTaskCreate' not in source and 'ESP_ERROR_CHECK' not in source
 assert 'pixels[160]' in source and 'malloc' not in (r/'main/lcd_view.c').read_text()
-subprocess.run(['cc','-std=c11','-g','-fsanitize=address,undefined',str(r/'tests/test_lcd.c'),str(r/'main/lcd_view.c'),'-o',str(out/'test_lcd')],check=True)
+subprocess.run(['cc','-std=c11','-g','-fsanitize=address,undefined',str(r/'tests/test_lcd.c'),str(r/'main/lcd_view.c'),str(r/'../../main/traffic.c'),'-I',str(r/'../../main'),'-o',str(out/'test_lcd')],check=True)
 subprocess.run([str(out/'test_lcd'),str(out)],check=True)
 # Exercise the exact production DMA loop, including a timed-out transfer.
 draw=source[source.index('static void draw('):source.index('esp_err_t gateway_display_start(')]
@@ -29,6 +29,6 @@ strcpy(v.title,"RECOVERY");timeout=1;draw(&v);assert(calls==81 && !available && 
 available=1;timeout=0;fail_at=82;draw(&v);assert(calls==82 && !available && errors==2);draw(&v);assert(calls==82);}
 '''
 (out/'test_transfer.c').write_text(harness)
-subprocess.run(['cc','-std=c11','-g','-fsanitize=address,undefined','-I',str(r/'main'),str(out/'test_transfer.c'),str(r/'main/lcd_view.c'),'-o',str(out/'test_transfer')],check=True)
+subprocess.run(['cc','-std=c11','-g','-fsanitize=address,undefined','-I',str(r/'main'),str(out/'test_transfer.c'),str(r/'main/lcd_view.c'),str(r/'../../main/traffic.c'),'-I',str(r/'../../main'),'-o',str(out/'test_transfer')],check=True)
 subprocess.run([str(out/'test_transfer')],check=True)
 print('LCD transfer failures disable further DMA buffer reuse; unchanged screens do not redraw')

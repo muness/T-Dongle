@@ -15,7 +15,7 @@ formatter=control[start:control.index('mgmt_write(reply);',start)]
 #include <stdint.h>
 #include "boot_health.h"
 #include "tdongle_temperature.h"
-static int online,mounted,ready,tailnet,wifi_current=0;
+static int online,mounted,ready,tailnet,wifi_current=0,setup_active=0;
 static int gateway_tailnet_mode(void){return tailnet;}
 
 static int gateway_online(void){return online;}

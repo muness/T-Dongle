@@ -75,16 +75,16 @@ static void command_task(void *arg) {
     char line[512];
     for (;;) {
         gateway_display_tick();
-        if (xQueueReceive(commands, line, pdMS_TO_TICKS(1000)) != pdTRUE)
+        if (xQueueReceive(commands, line, pdMS_TO_TICKS(UI_POLL_MS)) != pdTRUE)
             continue;
         if (!strcmp(line, "help"))
             mgmt_write(gateway_tailnet_mode()?
-                       "T-Dongle tailnet gateway protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, mode wifi_bridge|tailnet_gateway, "
-                       "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/\r\n":
-                       "T-Dongle Wi-Fi bridge protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, mode wifi_bridge|tailnet_gateway, "
-                       "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Add Wi-Fi: profile {\"slot\":N,\"priority\":50,\"name\":\"X\",\"ssid\":\"X\",\"password\":\"X\"}, or muness.com/T-Dongle\r\n");
+                       "T-Dongle tailnet gateway protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, display BRIGHTNESS ROTATION DIM_SECONDS, setup [N], cancel, reset, confirm-reset, "
+                       "mode wifi_bridge|tailnet_gateway, capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/ or the button menu (setup access point)\r\n":
+                       "T-Dongle Wi-Fi bridge protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, display BRIGHTNESS ROTATION DIM_SECONDS, setup [N], cancel, reset, confirm-reset, "
+                       "mode wifi_bridge|tailnet_gateway, capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Add Wi-Fi: hold the button for the setup access point (TDongle-XXXXXX), or profile {\"slot\":N,\"priority\":50,\"name\":\"X\",\"ssid\":\"X\",\"password\":\"X\"}, or muness.com/T-Dongle\r\n");
         else if (!strcmp(line, "capabilities"))
-            mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n");
+            mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings" MEMORY_FEATURE "\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings,roaming_assist" MEMORY_FEATURE "\r\n");
         else if (!strcmp(line, "pm")) {
             pm_report();
         } else if (!strcmp(line, "status")) {
@@ -110,7 +110,7 @@ static void command_task(void *arg) {
             REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
             esp_rom_software_reset_system();
         } else
-            mgmt_write("ERR Use USB setup at http://192.168.77.1/\r\n");
+            mgmt_write(gateway_tailnet_mode()?"ERR Unknown command; type help. USB setup: http://192.168.77.1/\r\n":"ERR Unknown command; type help\r\n");
         mgmt_write("done>\r\n");
     }
 }
