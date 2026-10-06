@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 #include "../main/usb_identity.h"
 static void check(const uint8_t station[6]) {
     uint8_t device[6], host[6], again[6], again_host[6];
@@ -23,5 +24,9 @@ int main(void) {
             const uint8_t s[6] = {(uint8_t)b0, 1, 2, 3, 4, (uint8_t)b5};
             check(s);
         }
-    puts("USB identity: device and host MACs are distinct, unicast, locally administered and stable");
+    /* The product string, per mode (usb_identity.h): the bridge enumerates exactly as v0.1.x did, so a host keeps its network service name. */
+    assert(!strcmp(gateway_usb_product(false), "T-Dongle-S3 NCM"));
+    assert(!strcmp(gateway_usb_product(true), "T-Dongle-S3 tailnet gateway"));
+    assert(strlen(gateway_usb_product(false)) < 31 && strlen(gateway_usb_product(true)) < 31);   /* a USB string descriptor holds 31 UTF-16 characters */
+    puts("USB identity: device and host MACs are distinct, unicast, locally administered and stable; product string per mode");
 }

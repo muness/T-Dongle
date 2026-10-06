@@ -20,7 +20,8 @@ extern bool gateway_online(void);
 extern int wg_crypto_bench_run(void (*write)(const char *line));
 /* The `pm` command: the clock now, the scaling state and every CPU-max lock, then IDF's own lock table (heap buffer, truncated). An idle
  * gateway reports cpu_mhz=80 here; after a transfer the held_us counters have moved. See ADR 0016. */
-static void pm_report(void) {
+/* noinline: its 1 KB of locals would otherwise sit in command_task's frame for every command, not just `pm` (the control task has a 4 KB stack). */
+__attribute__((noinline)) static void pm_report(void) {
     tdongle_pm_status_t pm;
     char line[200];
     tdongle_pm_status(&pm);
@@ -58,7 +59,15 @@ static QueueHandle_t commands;
 static StaticQueue_t command_queue;
 static uint8_t command_bytes[2*512];
 static StaticTask_t command_tcb;
-static StackType_t command_stack[4096];
+/* 4 KB in the release image (tailnet heap is measured to the byte). The diagnostics image adds evidence commands (memory, wifistats: a 992 B frame, a
+ * 512 B line buffer and printf below it) that need 1 KB more to keep the same 1 KB margin; it is not heap-constrained like release tailnet.
+ * tools/check-control-stack.py enforces the margin for both and reads this size. */
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+#define CONTROL_STACK_BYTES 5120
+#else
+#define CONTROL_STACK_BYTES 4096
+#endif
+static StackType_t command_stack[CONTROL_STACK_BYTES];
 static int boot_sink(void *context,const char *data,size_t n) {
     char part[128];
     while(n){size_t take=n<127?n:127;memcpy(part,data,take);part[take]=0;mgmt_write(part);data+=take;n-=take;}
@@ -75,16 +84,16 @@ static void command_task(void *arg) {
     char line[512];
     for (;;) {
         gateway_display_tick();
-        if (xQueueReceive(commands, line, pdMS_TO_TICKS(1000)) != pdTRUE)
+        if (!gateway_ui_take_command(line, sizeof(line)) && xQueueReceive(commands, line, pdMS_TO_TICKS(UI_POLL_MS)) != pdTRUE)
             continue;
         if (!strcmp(line, "help"))
             mgmt_write(gateway_tailnet_mode()?
-                       "T-Dongle tailnet gateway protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, mode wifi_bridge|tailnet_gateway, "
-                       "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/\r\n":
-                       "T-Dongle Wi-Fi bridge protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, mode wifi_bridge|tailnet_gateway, "
-                       "capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Add Wi-Fi: profile {\"slot\":N,\"priority\":50,\"name\":\"X\",\"ssid\":\"X\",\"password\":\"X\"}, or muness.com/T-Dongle\r\n");
+                       "T-Dongle tailnet gateway protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, display BRIGHTNESS ROTATION DIM_SECONDS, setup [N], cancel, reset, confirm-reset, "
+                       "mode wifi_bridge|tailnet_gateway, capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Setup: http://192.168.77.1/ or the button menu (setup access point)\r\n":
+                       "T-Dongle Wi-Fi bridge protocol=1\r\nCommands: status, list, use N, del N, scan, profile JSON, display BRIGHTNESS ROTATION DIM_SECONDS, setup [N], cancel, reset, confirm-reset, "
+                       "mode wifi_bridge|tailnet_gateway, capabilities, pm, " MEMORY_COMMANDS "reboot, bootloader. Add Wi-Fi: hold the button for the setup access point (TDongle-XXXXXX), or profile {\"slot\":N,\"priority\":50,\"name\":\"X\",\"ssid\":\"X\",\"password\":\"X\"}, or muness.com/T-Dongle\r\n");
         else if (!strcmp(line, "capabilities"))
-            mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report" MEMORY_FEATURE "\r\n");
+            mgmt_write(gateway_tailnet_mode()?"capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings" MEMORY_FEATURE "\r\n":"capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings,roaming_assist" MEMORY_FEATURE "\r\n");
         else if (!strcmp(line, "pm")) {
             pm_report();
         } else if (!strcmp(line, "status")) {
@@ -110,7 +119,7 @@ static void command_task(void *arg) {
             REG_WRITE(RTC_CNTL_OPTION1_REG, RTC_CNTL_FORCE_DOWNLOAD_BOOT);
             esp_rom_software_reset_system();
         } else
-            mgmt_write("ERR Use USB setup at http://192.168.77.1/\r\n");
+            mgmt_write(gateway_tailnet_mode()?"ERR Unknown command; type help. USB setup: http://192.168.77.1/\r\n":"ERR Unknown command; type help\r\n");
         mgmt_write("done>\r\n");
     }
 }

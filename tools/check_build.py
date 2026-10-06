@@ -22,7 +22,11 @@ for opt in ('CONFIG_IDF_TARGET="esp32s3"', 'CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y', 
             'CONFIG_APP_REPRODUCIBLE_BUILD=y',
             # The tested W25Q128 boot-loops at QIO 80 MHz; ESP-IDF's own default is 80 MHz.
             'CONFIG_ESPTOOLPY_FLASHMODE_DIO=y', 'CONFIG_ESPTOOLPY_FLASHFREQ_40M=y',
-            'CONFIG_PARTITION_TABLE_CUSTOM=y', 'CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y'):
+            'CONFIG_PARTITION_TABLE_CUSTOM=y', 'CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y',
+            # Roaming assist (802.11k/v) is built into the one image; the station asks for it per mode (sdkconfig.defaults).
+            'CONFIG_ESP_WIFI_11KV_SUPPORT=y', 'CONFIG_ESP_WIFI_RRM_SUPPORT=y', 'CONFIG_ESP_WIFI_WNM_SUPPORT=y',
+            # The setup access point is open by owner decision (tests/test_open_ap.py guards the source).
+            'CONFIG_TDONGLE_SETUP_AP_OPEN=y'):
     # Kconfig silently drops a default whose dependency is off or that a stale cached sdkconfig overrides.
     assert opt in config, f'{opt} missing from the effective sdkconfig (stale build directory sdkconfig?)'
 diagnostics_option = 'CONFIG_TDONGLE_MEMORY_DIAGNOSTICS=y' in config
@@ -79,6 +83,15 @@ while i < len(descriptors):
 assert any(d['cls'] == 2 and d['subclass'] == 13 for d in interfaces), 'NCM control interface absent'
 assert any(d['cls'] == 2 and d['subclass'] == 2 for d in interfaces), 'CDC-ACM management console absent'
 assert any(d['cls'] == 10 and d['alt'] == 1 for d in interfaces)
+# The traffic counters wrap two TinyUSB NCM callbacks at link time (main/traffic_hooks.c): the wrappers must be in the image, and the
+# USB product strings of both modes (usb_identity.h) must be in it as UTF-8 source strings.
+image = (build / 'tdongle.elf').read_bytes()
+with (build / 'tdongle.elf').open('rb') as f:
+    symbols = ELFFile(f).get_section_by_name('.symtab')
+    for name in ('__wrap_tud_network_recv_cb', '__wrap_tud_network_xmit_cb'):
+        assert symbols.get_symbol_by_name(name), f'{name} missing: the traffic counters are not wired in'
+for text in (b'T-Dongle-S3 NCM\0', b'T-Dongle-S3 tailnet gateway\0'):
+    assert text in image, f'USB product string {text[:-1].decode()!r} missing from the image'
 print(json.dumps({'compiled_descriptors': 'PASS', 'variant': variant, 'vid': hex(vid), 'pid': hex(pid), 'usb_max_power_ma': 500,
                   'flash': images['app.bin'], 'bootloader_flash': images['bootloader.bin'], 'app_bytes': app_size,
                   'partitions': {k: [hex(v[2]), hex(v[3])] for k, v in partitions.items()}, 'interfaces': interfaces}, indent=2))

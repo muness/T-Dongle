@@ -10,6 +10,7 @@
 enum gateway_boot_stage {
     BOOT_USB=1, BOOT_SETTINGS, BOOT_NETWORK, BOOT_HTTP, BOOT_DIRECTORY,
     BOOT_ROUTES, BOOT_WIFI, BOOT_DNS, BOOT_MANAGER, BOOT_RUNNING, BOOT_DISPLAY,
+    BOOT_SETUP,   /* the setup access point (a setup boot's own start, in place of directory/routes/wifi/dns/manager) */
     BOOT_STAGE_COUNT
 };
 void gateway_boot_begin(void);

@@ -8,6 +8,7 @@ static int64_t esp_timer_get_time(void){return clock_us;}
 static bool tud_mounted(void){return configured;}
 static bool tud_suspended(void){return suspended;}
 static bool tud_ready(void){return configured && !suspended;}
+enum {DCD_EVENT_BUS_RESET=1,DCD_EVENT_UNPLUGGED=2,DCD_EVENT_SOF=3};   /* the values of TinyUSB device/dcd.h that matter here */
 #include "usb_health.inc"
 int main(void){
     for(unsigned i=0;i<8;i++)assert(gateway_usb_health(i)==0);
@@ -20,5 +21,9 @@ int main(void){
     for(unsigned i=0;i<10000;i++){tud_resume_cb();tud_suspend_cb(false);}
     assert(gateway_usb_health(0)==10002 && gateway_usb_health(1)==10001 && sizeof(usb_health)==20);
     configured=false;assert(!gateway_usb_health(5) && !gateway_usb_health(7));assert(gateway_usb_health(100)==0);
-    puts("USB suspend/resume: counters, uptime, flags and fixed20-byte storage pass");
+    /* Bus resets and unplugs (the Health screen's "USB resets"); other events, and the interrupt flag, change nothing. */
+    assert(gateway_usb_health(8)==0);
+    tud_event_hook_cb(0,DCD_EVENT_BUS_RESET,true);tud_event_hook_cb(0,DCD_EVENT_UNPLUGGED,false);tud_event_hook_cb(0,DCD_EVENT_SOF,true);
+    assert(gateway_usb_health(8)==2 && gateway_usb_health(0)==10002);
+    puts("USB suspend/resume: counters, uptime, flags and fixed 20-byte storage and bus-reset count pass");
 }

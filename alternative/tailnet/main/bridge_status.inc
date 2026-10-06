@@ -12,96 +12,97 @@
  *   wifi_tx.charged = done + aborted + flushed + stale + inflight (wifi_pin_budget.h) */
 typedef void (*bridge_emit_fn)(void *ctx, const char *section, const char *name, int64_t value);
 static void bridge_visit(bridge_emit_fn emit, void *ctx) {
-    tdongle_l2_stats_t l2;
-    tdongle_l2_stats(&l2);
-    tinyusb_net_tx_stats_t ring;
-    tinyusb_net_tx_ring_stats(&ring);
-    tinyusb_net_rx_stats_t rx;
-    tinyusb_net_rx_stats(&rx);
+    /* The three stats snapshots (about 0.5 KB) are on the heap for the length of one status command, not on the control task's 4 KB stack
+     * (tools/check-control-stack.py). Bridge mode only: tailnet never calls this, so the tailnet heap budget is not touched. */
+    struct {tdongle_l2_stats_t l2;tinyusb_net_tx_stats_t ring;tinyusb_net_rx_stats_t rx;} *w=malloc(sizeof(*w));
+    if(!w)return;
+    tdongle_l2_stats(&w->l2);
+    tinyusb_net_tx_ring_stats(&w->ring);
+    tinyusb_net_rx_stats(&w->rx);
 #define E(section, name, value) emit(ctx, section, name, (int64_t)(value))
-    E("link", "linked", l2.linked);
-    E("link", "changes", l2.link_changes);
-    E("link", "worker_stack_free", l2.worker_stack_free);
-    E("to_host", "frames", l2.w2h_frames);
-    E("to_host", "forwarded", l2.w2h_forwarded);
-    E("to_host", "invalid", l2.w2h_invalid);
-    E("to_host", "own_mac", l2.w2h_own_mac);
-    E("to_host", "link_down", l2.w2h_link_down);
-    E("to_host", "usb_not_ready", l2.w2h_usb_not_ready);
-    E("to_host", "ring_full", l2.w2h_ring_full);
-    E("to_host", "raced", l2.w2h_raced);
-    E("to_wifi", "frames", l2.h2w_frames);
-    E("to_wifi", "queued", l2.h2w_queued);
-    E("to_wifi", "invalid", l2.h2w_invalid);
-    E("to_wifi", "foreign_mac", l2.h2w_foreign_mac);
-    E("to_wifi", "link_down", l2.h2w_link_down);
-    E("to_wifi", "held", l2.h2w_held);
-    E("to_wifi", "resumes", l2.h2w_resumes);
-    E("to_wifi", "sent", l2.h2w_sent);
-    E("to_wifi", "stale", l2.h2w_stale);
-    E("to_wifi", "sojourn_drop", l2.h2w_sojourn_drop);
-    E("to_wifi", "link_down_queued", l2.h2w_link_down_queued);
-    E("to_wifi", "tx_failed", l2.h2w_tx_failed);
-    E("to_wifi", "tx_retries", l2.h2w_tx_retries);
-    E("to_wifi", "last_tx_error", l2.h2w_last_tx_error);
-    E("to_wifi", "queue_depth", l2.h2w_queue_depth);
-    E("to_wifi", "queue_high_water", l2.h2w_queue_high_water);
-    E("to_wifi", "codel_signals", l2.h2w_codel_signals);
-    E("to_wifi", "ce_marked", l2.h2w_ce_marked);
-    E("to_wifi", "codel_drop", l2.h2w_codel_drop);
-    E("to_wifi", "codel_count", l2.h2w_codel_count);
+    E("link", "linked", w->l2.linked);
+    E("link", "changes", w->l2.link_changes);
+    E("link", "worker_stack_free", w->l2.worker_stack_free);
+    E("to_host", "frames", w->l2.w2h_frames);
+    E("to_host", "forwarded", w->l2.w2h_forwarded);
+    E("to_host", "invalid", w->l2.w2h_invalid);
+    E("to_host", "own_mac", w->l2.w2h_own_mac);
+    E("to_host", "link_down", w->l2.w2h_link_down);
+    E("to_host", "usb_not_ready", w->l2.w2h_usb_not_ready);
+    E("to_host", "ring_full", w->l2.w2h_ring_full);
+    E("to_host", "raced", w->l2.w2h_raced);
+    E("to_wifi", "frames", w->l2.h2w_frames);
+    E("to_wifi", "queued", w->l2.h2w_queued);
+    E("to_wifi", "invalid", w->l2.h2w_invalid);
+    E("to_wifi", "foreign_mac", w->l2.h2w_foreign_mac);
+    E("to_wifi", "link_down", w->l2.h2w_link_down);
+    E("to_wifi", "held", w->l2.h2w_held);
+    E("to_wifi", "resumes", w->l2.h2w_resumes);
+    E("to_wifi", "sent", w->l2.h2w_sent);
+    E("to_wifi", "stale", w->l2.h2w_stale);
+    E("to_wifi", "sojourn_drop", w->l2.h2w_sojourn_drop);
+    E("to_wifi", "link_down_queued", w->l2.h2w_link_down_queued);
+    E("to_wifi", "tx_failed", w->l2.h2w_tx_failed);
+    E("to_wifi", "tx_retries", w->l2.h2w_tx_retries);
+    E("to_wifi", "last_tx_error", w->l2.h2w_last_tx_error);
+    E("to_wifi", "queue_depth", w->l2.h2w_queue_depth);
+    E("to_wifi", "queue_high_water", w->l2.h2w_queue_high_water);
+    E("to_wifi", "codel_signals", w->l2.h2w_codel_signals);
+    E("to_wifi", "ce_marked", w->l2.h2w_ce_marked);
+    E("to_wifi", "codel_drop", w->l2.h2w_codel_drop);
+    E("to_wifi", "codel_count", w->l2.h2w_codel_count);
     /* ECN across the bridge, counted whether or not CoDel is on: what the host's frames carry, and whether a server ever accepted an ECN setup. A CoDel that
      * marks nothing is either not seeing ECT frames (capable stays 0: ECN was not negotiated end to end) or not signalling. */
-    E("ecn", "not_ect", l2.h2w_ecn_not_ect);
-    E("ecn", "capable", l2.h2w_ecn_capable);
-    E("ecn", "ce", l2.h2w_ecn_ce);
-    E("ecn", "exempt", l2.h2w_ecn_exempt);
-    E("ecn", "not_ip", l2.h2w_ecn_not_ip);
-    E("ecn", "syn_setup", l2.h2w_syn_ecn_setup);
-    E("ecn", "synack_accept", l2.w2h_synack_ecn);
+    E("ecn", "not_ect", w->l2.h2w_ecn_not_ect);
+    E("ecn", "capable", w->l2.h2w_ecn_capable);
+    E("ecn", "ce", w->l2.h2w_ecn_ce);
+    E("ecn", "exempt", w->l2.h2w_ecn_exempt);
+    E("ecn", "not_ip", w->l2.h2w_ecn_not_ip);
+    E("ecn", "syn_setup", w->l2.h2w_syn_ecn_setup);
+    E("ecn", "synack_accept", w->l2.w2h_synack_ecn);
     /* The host side of the standing queue: the class driver's OUT NTBs. datagrams / ntbs is frames per NTB (how many its 3 buffers can hold); dwell is
      * the time since the newest NTB arrived (a held datagram ages here); hold_us is how long the host was kept waiting for room, per hold episode. */
-    E("rx_class", "ntbs", rx.ntbs);
-    E("rx_class", "ntb_bytes", rx.ntb_bytes);
-    E("rx_class", "ntb_max_bytes", rx.ntb_max_bytes);
-    E("rx_class", "datagrams", rx.datagrams);
-    E("rx_class", "dwell_us_sum", rx.dwell_us_sum);
-    E("rx_class", "dwell_us_max", rx.dwell_us_max);
-    E("rx_class", "holds", rx.holds);
-    E("rx_class", "hold_us_sum", rx.hold_us_sum);
-    E("rx_class", "hold_us_max", rx.hold_us_max);
-    E("usb_ring", "ring_bytes", ring.ring_bytes);
-    E("usb_ring", "high_water_slabs", ring.high_water_slabs);
-    E("usb_ring", "enqueued", ring.enqueued_frames);
-    E("usb_ring", "sent", ring.sent_frames);
-    E("usb_ring", "dropped_full", ring.dropped_full);
-    E("usb_ring", "dropped_link_down", ring.dropped_link_down);
-    E("usb_ring", "flushed_link_down", ring.flushed_link_down);
-    E("usb_ring", "grow_events", ring.grow_events);
-    E("usb_ring", "shrink_events", ring.shrink_events);
-    E("usb_ring", "grow_denied_heap", ring.grow_denied_heap);
-    E("usb_ring", "grow_denied_largest", ring.grow_denied_largest);
-    E("usb_ring", "ring_max_bytes", ring.max_bytes);
+    E("rx_class", "ntbs", w->rx.ntbs);
+    E("rx_class", "ntb_bytes", w->rx.ntb_bytes);
+    E("rx_class", "ntb_max_bytes", w->rx.ntb_max_bytes);
+    E("rx_class", "datagrams", w->rx.datagrams);
+    E("rx_class", "dwell_us_sum", w->rx.dwell_us_sum);
+    E("rx_class", "dwell_us_max", w->rx.dwell_us_max);
+    E("rx_class", "holds", w->rx.holds);
+    E("rx_class", "hold_us_sum", w->rx.hold_us_sum);
+    E("rx_class", "hold_us_max", w->rx.hold_us_max);
+    E("usb_ring", "ring_bytes", w->ring.ring_bytes);
+    E("usb_ring", "high_water_slabs", w->ring.high_water_slabs);
+    E("usb_ring", "enqueued", w->ring.enqueued_frames);
+    E("usb_ring", "sent", w->ring.sent_frames);
+    E("usb_ring", "dropped_full", w->ring.dropped_full);
+    E("usb_ring", "dropped_link_down", w->ring.dropped_link_down);
+    E("usb_ring", "flushed_link_down", w->ring.flushed_link_down);
+    E("usb_ring", "grow_events", w->ring.grow_events);
+    E("usb_ring", "shrink_events", w->ring.shrink_events);
+    E("usb_ring", "grow_denied_heap", w->ring.grow_denied_heap);
+    E("usb_ring", "grow_denied_largest", w->ring.grow_denied_largest);
+    E("usb_ring", "ring_max_bytes", w->ring.max_bytes);
     /* Where the time goes, in microseconds (sums wrap at 71 min: take two readings). Wi-Fi to host: the ring's cold start is the wait of the first frame
      * of a burst, commit to NTB (relay wake + deferral + TinyUSB task). Host to Wi-Fi: queueing and the transmit call. pm_note is the cost of the
      * clock raise inside the callback. */
-    E("timing", "cold_starts", ring.cold_starts);
-    E("timing", "cold_us_sum", ring.cold_us_sum);
-    E("timing", "cold_us_max", ring.cold_us_max);
-    E("timing", "pm_notes", l2.pm_notes);
-    E("timing", "pm_note_us_sum", l2.pm_note_us_sum);
-    E("timing", "pm_note_us_max", l2.pm_note_us_max);
-    E("timing", "wait_us_sum", l2.h2w_wait_us_sum);
-    E("timing", "wait_us_max", l2.h2w_wait_us_max);
-    E("timing", "tx_us_sum", l2.h2w_tx_us_sum);
-    E("timing", "tx_us_max", l2.h2w_tx_us_max);
+    E("timing", "cold_starts", w->ring.cold_starts);
+    E("timing", "cold_us_sum", w->ring.cold_us_sum);
+    E("timing", "cold_us_max", w->ring.cold_us_max);
+    E("timing", "pm_notes", w->l2.pm_notes);
+    E("timing", "pm_note_us_sum", w->l2.pm_note_us_sum);
+    E("timing", "pm_note_us_max", w->l2.pm_note_us_max);
+    E("timing", "wait_us_sum", w->l2.h2w_wait_us_sum);
+    E("timing", "wait_us_max", w->l2.h2w_wait_us_max);
+    E("timing", "tx_us_sum", w->l2.h2w_tx_us_sum);
+    E("timing", "tx_us_max", w->l2.h2w_tx_us_max);
     /* The radio's dwell: frames that found the allowance full, and how long each waited for a tx-done to free a charge. */
     /* The CoDel input per eligible frame: max(its own time in the dongle, time the pipe has been continuously full). */
-    E("timing", "signal_us_sum", l2.h2w_signal_us_sum);
-    E("timing", "signal_us_max", l2.h2w_signal_us_max);
-    E("timing", "room_waits", l2.h2w_room_waits);
-    E("timing", "room_wait_us_sum", l2.h2w_room_wait_us_sum);
-    E("timing", "room_wait_us_max", l2.h2w_room_wait_us_max);
+    E("timing", "signal_us_sum", w->l2.h2w_signal_us_sum);
+    E("timing", "signal_us_max", w->l2.h2w_signal_us_max);
+    E("timing", "room_waits", w->l2.h2w_room_waits);
+    E("timing", "room_wait_us_sum", w->l2.h2w_room_wait_us_sum);
+    E("timing", "room_wait_us_max", w->l2.h2w_room_wait_us_max);
     E("wifi_tx", "installed", wifi_pins_installed);
     E("wifi_tx", "tx_done_cb", wifi_pins_tx_done_ok);
     E("wifi_tx", "charged", atomic_load(&wifi_pins.tx_charged));
@@ -115,6 +116,7 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
     E("wifi_tx", "refused_pool", atomic_load(&wifi_pins.tx_refused_pool));
     E("wifi_tx", "refused_heap", atomic_load(&wifi_pins.tx_refused_heap));
 #undef E
+    free(w);
 }
 
 extern void mgmt_write(const char *s);

@@ -2,8 +2,8 @@
 """Guard: the setup Wi-Fi AP must never require a password.
 
 Owner decision (repeated, explicit): setup mode is an open network. This is a preprocessor-aware
-scan of legacy/portal.c (archived reference, see legacy/README.md), not a full C AST (that would need the whole ESP-IDF header tree). It fails
-if any WPA/password configuration of the AP can be reached while CONFIG_ADAPTER_OPEN_SETUP_AP is on,
+scan of alternative/tailnet/main/setup_ap.inc, not a full C AST (that would need the whole ESP-IDF header tree). It fails
+if any WPA/password configuration of the AP can be reached while CONFIG_TDONGLE_SETUP_AP_OPEN is on,
 if the option defaults off, or if a defaults file turns it off.
 """
 import re
@@ -11,8 +11,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-FLAG = 'CONFIG_ADAPTER_OPEN_SETUP_AP'
-FORBIDDEN_WHEN_OPEN = re.compile(r'WIFI_AUTH_(?!OPEN)\w+|pmf_cfg|strcpy\s*\(\s*\(char\s*\*\)\s*c\.ap\.password')
+FLAG = 'CONFIG_TDONGLE_SETUP_AP_OPEN'
+SOURCE = 'alternative/tailnet/main/setup_ap.inc'
+KCONFIG = 'main/Kconfig.projbuild'
+FORBIDDEN_WHEN_OPEN = re.compile(r'WIFI_AUTH_(?!OPEN)\w+|pmf_cfg|(?:strcpy|memcpy|strlcpy)\s*\(\s*(?:\(char\s*\*\)\s*)?config\.ap\.password')
 
 
 def branches(source):
@@ -37,43 +39,43 @@ def branches(source):
 
 class OpenSetupAp(unittest.TestCase):
     def test_kconfig_and_defaults_enable_open_ap(self):
-        kconfig = (ROOT / 'legacy/Kconfig.projbuild').read_text()
-        block = kconfig[kconfig.index('config ADAPTER_OPEN_SETUP_AP'):]
+        kconfig = (ROOT / KCONFIG).read_text()
+        block = kconfig[kconfig.index('config TDONGLE_SETUP_AP_OPEN'):]
         block = block.split('\n config ', 1)[0].split('endmenu', 1)[0]
         for f in ROOT.glob('sdkconfig.*'):
-            self.assertNotRegex(f.read_text(), r'(?m)^CONFIG_ADAPTER_OPEN_SETUP_AP=n',
+            self.assertNotRegex(f.read_text(), r'(?m)^CONFIG_TDONGLE_SETUP_AP_OPEN=n',
                                 f'{f.name} disables the open setup AP')
         self.assertIn('bool', block)
         self.assertRegex(block, r'default\s+y', 'Kconfig default for the open setup AP must be y')
 
     def test_no_password_reachable_when_open(self):
-        src = (ROOT / 'legacy/portal.c').read_text()
+        src = (ROOT / SOURCE).read_text()
         seen_open_auth = False
         for n, line, open_active in branches(src):
             code = line.split('//')[0]
             if open_active is True:
                 self.assertFalse(FORBIDDEN_WHEN_OPEN.search(code),
-                                 f'portal.c:{n} configures a password/WPA on the open-AP branch: {line.strip()}')
+                                 f'setup_ap.inc:{n} configures a password/WPA on the open-AP branch: {line.strip()}')
                 seen_open_auth |= 'WIFI_AUTH_OPEN' in code
         self.assertTrue(seen_open_auth, 'open-AP branch must set WIFI_AUTH_OPEN')
 
     def test_password_authmode_only_in_disabled_branch(self):
-        src = (ROOT / 'legacy/portal.c').read_text()
+        src = (ROOT / SOURCE).read_text()
         for n, line, open_active in branches(src):
             if 'WIFI_AUTH_WPA' in line.split('//')[0]:
                 self.assertIs(open_active, False,
-                              f'portal.c:{n} sets WPA outside the CONFIG_ADAPTER_OPEN_SETUP_AP=n branch')
+                              f'setup_ap.inc:{n} sets WPA outside the CONFIG_TDONGLE_SETUP_AP_OPEN=n branch')
 
     def test_identity_clears_password_when_open(self):
-        src = (ROOT / 'legacy/portal.c').read_text()
-        self.assertTrue(any(open_active is True and re.search(r'ap_pass\[0\]\s*=\s*0', line)
+        src = (ROOT / SOURCE).read_text()
+        self.assertTrue(any(open_active is True and re.search(r'setup_ap_password\[0\]\s*=\s*0', line)
                             for _, line, open_active in branches(src)),
-                        'portal_identity must blank the AP password under the open flag')
+                        'start_setup must blank the AP password under the open flag')
 
     def test_guard_detects_a_regression(self):
-        bad = '#if CONFIG_ADAPTER_OPEN_SETUP_AP\nc.ap.authmode = WIFI_AUTH_WPA2_PSK;\n#endif\n'
+        bad = '#if CONFIG_TDONGLE_SETUP_AP_OPEN\nconfig.ap.authmode = WIFI_AUTH_WPA2_PSK;\n#endif\n'
         self.assertTrue(any(a is True and FORBIDDEN_WHEN_OPEN.search(l) for _, l, a in branches(bad)))
-        good = '#if CONFIG_ADAPTER_OPEN_SETUP_AP\nc.ap.authmode = WIFI_AUTH_OPEN;\n#else\nc.ap.authmode = WIFI_AUTH_WPA2_PSK;\n#endif\n'
+        good = '#if CONFIG_TDONGLE_SETUP_AP_OPEN\nconfig.ap.authmode = WIFI_AUTH_OPEN;\n#else\nconfig.ap.authmode = WIFI_AUTH_WPA2_PSK;\n#endif\n'
         self.assertFalse(any(a is True and FORBIDDEN_WHEN_OPEN.search(l) for _, l, a in branches(good)))
 
 

@@ -29,7 +29,7 @@ Get the original with the 160×80 screen. The *Dual* and *Plus* variants are dif
 |---|---|
 | Speed | In bridge mode about **7 Mbit/s down, 5.5 Mbit/s up** with decent signal (measured on the v0.1 firmware). The chip's USB is USB 1.1 (12 Mbit/s), so it cannot go much faster. Fine for streaming, maps and apps; not a fast adapter. |
 | Wi-Fi | **2.4 GHz only.** WPA2 and WPA3 personal, or open networks. No enterprise (EAP) or captive-portal hotel Wi-Fi. |
-| Networks | Remembers up to 8, and joins the best one it can find. |
+| Networks | Remembers up to 8. It joins your preferred network if it can hear it, then the highest-priority one, then the strongest. |
 | Tested on | macOS, with one dongle. Linux and Raspberry Pi should work (standard CDC-NCM) but have not been tested yet. |
 
 In Wi-Fi bridge mode the device plugged into the dongle gets its address straight from your Wi-Fi network, as if it were on that network directly. It is a bridge for one device, not a router.
@@ -41,7 +41,7 @@ Open **[muness.com/T-Dongle](https://muness.com/T-Dongle/)** in desktop Chrome o
 1. Hold the dongle's button while you plug it into USB, then let go.
 2. Click **Install**, pick the port, and allow erase.
 3. Unplug the dongle and plug it back in without the button.
-4. On the same page, enter your Wi-Fi name and password under **Add a Wi-Fi network** (see step 2 below).
+4. Add your Wi-Fi network (see step 2 below): with your phone, on the dongle's own setup network, or from the same page.
 
 To update later, use the same page: click **Prepare for update**, then **Install**, and decline erase to keep your saved networks and your chosen mode. No button needed. This also works when updating from the older bridge-only releases (v0.1.x): your saved networks are kept and the dongle starts in Wi-Fi bridge mode.
 
@@ -64,23 +64,54 @@ Later updates need no button: run `./tools/build.sh` and `./tools/flash.sh` with
 
 ## 2. Connect it to your Wi-Fi
 
-The dongle has no Wi-Fi setup page of its own to join; you give it your network over USB, once. Pick whichever is easiest:
+1. Plug the dongle in. With no network saved yet it opens its own setup Wi-Fi: the screen shows **TDongle-XXXXXX** and **192.168.4.1**, and the light breathes blue.
+2. On your phone, join the **TDongle-XXXXXX** Wi-Fi. It has no password. Stay connected when the phone says there is no internet.
+3. The setup page usually opens on its own. If not, browse to **http://192.168.4.1**.
+4. Tap your network in the list, type its password, and tap **Save network**.
+5. Add more networks the same way if you like, such as home Wi-Fi, a travel router and your phone's hotspot.
+6. Tap **Done**. The dongle restarts, the light turns amber while it joins, then **green** when it is connected and ready.
 
-- **Flash page** (no app needed): with the dongle plugged in and running, open **[muness.com/T-Dongle](https://muness.com/T-Dongle/)** in desktop Chrome or Edge, enter the network name and password under **Add a Wi-Fi network**, and click **Save network to dongle**. Repeat for more networks (up to 8), such as home Wi-Fi, a travel router and your phone's hotspot.
+Setup closes by itself after 10 minutes. While it is open the dongle does not forward internet and no tailnet runs, and anyone nearby could join the setup Wi-Fi to add or delete saved networks, so finish and tap Done. The setup network can change Wi-Fi networks and nothing else.
+
+Prefer not to use a phone? Any of these also works:
+
+- **Flash page** (no app needed): with the dongle plugged in and running, open **[muness.com/T-Dongle](https://muness.com/T-Dongle/)** in desktop Chrome or Edge, enter the network name and password under **Add a Wi-Fi network**, and click **Save network to dongle**.
 - **Android companion app**: plug the dongle into the phone and add networks under *Networks*.
 - **Serial console**: `scan`, then `profile {"slot":1,"priority":50,"name":"Home","ssid":"MyNetwork","password":"secret-pass"}` (slot 1 to 8; the next free slot adds a network). `python3 tools/provision.py --port PORT --provision` asks for the same details interactively without echoing the password.
 
-The dongle joins the strongest saved network it can see. The screen shows **SET UP WI-FI** until one is saved, then **JOINING WI-FI**, then **WI-FI BRIDGE** once connected.
+The screen shows **SET UP WI-FI** until one is saved, then **JOINING WI-FI**, then **WI-FI BRIDGE** once connected.
 
-## 3. Manage networks later
+## 3. Add a network later
 
-Use the flash page card, the app, or the serial console: `list` shows what is saved, `use N` switches to network N now, and `del N` removes it.
+**Hold the button** for about 1.5 seconds to open the menu. Short presses step through it; hold again to choose.
 
-## The screen
+- **Enter setup AP** reopens the setup network (step 2). It restarts the dongle for the few minutes setup takes.
+- Choose a saved network to switch to it now. It also becomes the preferred network, kept across restarts.
+- **Factory reset** forgets every saved network and the display settings. It asks twice: hold to choose it, then hold again within 10 seconds. Short press cancels. The routing mode and any tailnets are kept.
 
-The screen is a status display with a title, two detail lines and the firmware version and USB state at the bottom: **SET UP WI-FI**, **JOINING WI-FI**, **WI-FI BRIDGE** (connected, with the USB host state), or in tailnet mode **TAILNET READY** and its sign-in and retry states. Green or "connected" means the dongle has joined Wi-Fi. It does not check whether that network actually reaches the internet.
+The setup page also lists what is saved, with a Delete button for each, and can set a name and a priority (0 to 100, default 50) per network. A higher priority wins over a stronger signal; the preferred network wins over both, unless it can barely be heard.
 
-The status light and the button menu of the older bridge-only releases (v0.1.x) are not in this firmware. The BOOT button is only for recovery: hold it while plugging in to enter the loader.
+## The screen and light
+
+A short press cycles the screen through **Connection**, **Traffic**, **Health** and **Setup**.
+
+- **Connection**: the state (**WI-FI BRIDGE**, **TAILNET READY**, **JOINING WI-FI**, ...), the network and its signal strength in dBm, and the firmware version and USB state.
+- **Traffic**: download and upload rate in Mbit/s, megabytes since start, frames, and a graph of the last 32 seconds.
+- **Health**: uptime, time on Wi-Fi, joins and the last disconnect reason, USB resets; free and lowest heap; boots, watchdog resets and panics since power-up. The three views rotate every 4 seconds.
+- **Setup**: the network in use, the mode, and how to open the menu.
+
+The backlight dims after 60 seconds (the first press only wakes it). Change that with the serial command `display BRIGHTNESS ROTATION DIM_SECONDS` (brightness 5 to 100, rotation 0 or 1 for 180 degrees, dim time 10 to 3600 s); it is remembered.
+
+| Light | Meaning |
+|---|---|
+| Breathing blue | Setup mode, or no network saved yet |
+| Breathing amber | Joining Wi-Fi, waiting for the USB side (tailnet mode: or waiting for the tailnet) |
+| Green | Connected to Wi-Fi and the USB link is ready (tailnet mode: and a tailnet is ready) |
+| Two red blinks, repeating | Network not found or wrong password (tailnet mode: a tailnet failed to connect) |
+| Breathing cyan | Tailnet mode: approve the sign-in in your browser |
+| Slow red breathing | Recovery mode after repeated crashes: services are off, see Troubleshooting |
+
+Green means the dongle has joined Wi-Fi. It does not check whether that network actually reaches the internet. The BOOT button is also the loader button: hold it while plugging in to enter the loader.
 
 ## Tailnet mode
 
@@ -96,14 +127,14 @@ Details and limits (8 peers per tailnet, IPv4 TCP/UDP from the USB side, no inbo
 
 ## Troubleshooting
 
-- **Screen stays on JOINING WI-FI.** Check the network is 2.4 GHz and the name and password are exact, including capitals. Phone hotspots often need "Maximize compatibility" (iPhone) or a 2.4 GHz band setting (Android).
+- **Screen stays on JOINING WI-FI, or the light stays amber or blinks red.** Check the network is 2.4 GHz and the name and password are exact, including capitals. Phone hotspots often need "Maximize compatibility" (iPhone) or a 2.4 GHz band setting (Android).
 - **Plugging it into a Mac takes over your internet.** macOS may rank the new Ethernet port above Wi-Fi. In System Settings, Network, use *Set Service Order* to drag Wi-Fi above **T-Dongle-S3 NCM**.
 - **Connected, but slow or dropping.** It is a small antenna on a USB stick. Move it away from metal and closer to the router, or use a short USB extension cable.
 - **Stuck, or will not flash.** Unplug it, hold the button, plug it back in, and run `./tools/flash.sh` again (or use the flash page). The chip's built-in loader always answers this way.
 
 ## For tinkerers
 
-The dongle also has a serial console on its USB port, at 115200 baud. Type `help`; input is not echoed. `status` shows the mode, connection, signal, uptime, memory and firmware version. `list`, `use N`, `del N`, `scan` and `profile` manage networks, `mode` switches mode, and `bootloader` restarts into the loader for flashing.
+The dongle also has a serial console on its USB port, at 115200 baud. Type `help`; input is not echoed. `status` shows the mode, connection, signal, uptime, memory and firmware version. `list`, `use N`, `del N`, `scan` and `profile` manage networks, `setup`, `reset` and `confirm-reset` do what the button menu does, `display` sets brightness, rotation and dim time, `mode` switches mode, and `bootloader` restarts into the loader for flashing.
 
 Everything else lives in [docs/REFERENCE.md](docs/REFERENCE.md): build and release, flash layout, versioning, every console command, upgrade behaviour and design decisions. Measurements and test history are in [docs/VALIDATION.md](docs/VALIDATION.md).
 

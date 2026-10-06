@@ -21,6 +21,7 @@ typedef struct {
     wifi_bandwidth_t bandwidth;
 } wifi_ap_record_t;
 typedef struct { uint8_t ssid[32], ssid_len, bssid[6], reason; int8_t rssi; } wifi_event_sta_disconnected_t;
+typedef struct { uint8_t ssid[32], ssid_len, bssid[6], channel; int authmode; } wifi_event_sta_connected_t;   /* the fields of the IDF event the link counters read */
 static bool host_wifi_associated = true;
 static bool host_wifi_fail_rssi, host_wifi_fail_phy, host_wifi_fail_bw, host_wifi_fail_ps, host_wifi_fail_power;
 static wifi_ap_record_t host_wifi_ap;

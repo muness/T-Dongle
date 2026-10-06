@@ -9,13 +9,13 @@ import os, subprocess, sys
 root=Path(__file__).resolve().parents[1]
 android=Path(sys.argv[1]); build=root/'build-host/status-contract';build.mkdir(parents=True,exist_ok=True)
 control=(root/'main/serial_setup.inc').read_text()
-start=control.index('snprintf(reply,sizeof(reply),')
+start=control.index('snprintf(reply,sizeof(reply),',control.index('serial_status(void)'))
 formatter=control[start:control.index('mgmt_write(reply);',start)]
 (build/'status.c').write_text('''#include <stdio.h>
 #include <stdint.h>
 #include "boot_health.h"
 #include "tdongle_temperature.h"
-static int online,mounted,ready,tailnet,wifi_current=0;
+static int online,mounted,ready,tailnet,wifi_current=0,setup_active=0;
 static int gateway_tailnet_mode(void){return tailnet;}
 
 static int gateway_online(void){return online;}
