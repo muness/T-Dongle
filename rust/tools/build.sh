@@ -29,6 +29,8 @@ if [ -f "$bl" ]; then
   espflash save-image "${flags[@]}" --merge --bootloader "$bl" --partition-table firmware/partitions.csv "$elf" "$dist/merged.bin"
   cp "$bl" "$dist/bootloader.bin"
 fi
+V=${TDONGLE_VERSION:-$version}
+python3 tools/package.py "$V" "$dist/app.bin" "$dist/tdongle-fw.elf" "$dist/package/tdongle-$V"
 python3 tools/check_boot_order.py firmware/src/main.rs
 python3 tools/check_rescue_first.py
 (cd "$dist" && shasum -a 256 ./*.bin > SHA256SUMS && cat SHA256SUMS)

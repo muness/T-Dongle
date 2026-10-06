@@ -68,7 +68,11 @@ use tdongle_serial::wifi_link::Events;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 
-const FIRMWARE: &str = "0.3.0-rust";
+/// The version `status`, `boot-status` and the LCD report: `TDONGLE_VERSION` when the release workflow sets it, else the development name.
+const FIRMWARE: &str = match option_env!("TDONGLE_VERSION") {
+    Some(v) => v,
+    None => "0.3.0-rust",
+};
 const MTU: usize = 1514;
 /// OUT endpoint buffers: EP0 (64) + ACM bulk OUT (64) + the NCM bulk OUT transfer buffer (one whole NTB).
 const EP_OUT_BYTES: usize = 64 + 64 + ncm::NTB_OUT_MAX;
