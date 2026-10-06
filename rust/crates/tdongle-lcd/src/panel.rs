@@ -159,10 +159,7 @@ pub const fn madctl_cmd(rotation: u8) -> Cmd {
 #[must_use]
 pub const fn window(x_start: u16, y_start: u16, x_end: u16, y_end: u16) -> ([u8; 4], [u8; 4]) {
     let (xs, xe, ys, ye) = (x_start + GAP_X, x_end + GAP_X, y_start + GAP_Y, y_end + GAP_Y);
-    (
-        [(xs >> 8) as u8, xs as u8, ((xe - 1) >> 8) as u8, (xe - 1) as u8],
-        [(ys >> 8) as u8, ys as u8, ((ye - 1) >> 8) as u8, (ye - 1) as u8],
-    )
+    ([(xs >> 8) as u8, xs as u8, ((xe - 1) >> 8) as u8, (xe - 1) as u8], [(ys >> 8) as u8, ys as u8, ((ye - 1) >> 8) as u8, (ye - 1) as u8])
 }
 
 /// The window of scanline `y` as `draw()` pushes it: `draw_bitmap(0, y, 160, y + 1)`.
@@ -189,13 +186,21 @@ pub fn to_wire(row: &[u16; 160]) -> [u8; ROW_WIRE_BYTES] {
     out
 }
 
-/// Every command of `esp_lcd_panel_init` plus the configuration calls of `gateway_display_start`, in order, for a given rotation.
-/// Hardware reset (RST pin, [`RESET_LOW_MS`] / [`RESET_HIGH_MS`]) comes before the first item and is not a command.
+/// The MADCTL write of `apply_locked` for a rotation change: `Some` only for rotation 0 or 1 (`rotation <= UI_ROTATION_MAX`), and the
+/// caller then repaints (C: `memset(&previous, 0xff, ...)`, i.e. `previous = View::POISONED`). 180 degrees flips both mirror flags; the
+/// window is symmetric (gap 1,26 inside 132x162), so the gap does not change.
+#[must_use]
+pub const fn rotation_cmd(rotation: u8) -> Option<Cmd> {
+    if rotation <= 1 { Some(madctl_cmd(rotation)) } else { None }
+}
+
+/// Every command of `esp_lcd_panel_init` plus the configuration calls of `gateway_display_start`, in order. The C always starts at
+/// rotation 0 and applies the stored rotation afterwards with [`rotation_cmd`]. Hardware reset (RST pin, [`RESET_LOW_MS`] /
+/// [`RESET_HIGH_MS`]) comes before the first item and is not a command.
 ///
-/// Order: SLPOUT (+100 ms), MADCTL(BGR), COLMOD(0x55), the 18 table entries, INVON, MADCTL(BGR|MV), MADCTL([`madctl`]), DISPON.
+/// Order: SLPOUT (+100 ms), MADCTL(BGR), COLMOD(0x55), the 18 table entries, INVON, MADCTL(BGR|MV), MADCTL(rotation 0), DISPON.
 #[derive(Clone, Copy, Debug)]
 pub struct Bringup {
-    rotation: u8,
     i: usize,
 }
 
@@ -203,10 +208,16 @@ pub struct Bringup {
 pub const BRINGUP_LEN: usize = 3 + INIT_SEQUENCE.len() + 4;
 
 impl Bringup {
-    /// Start the sequence for `rotation` (0 or 1).
+    /// Start the sequence.
     #[must_use]
-    pub const fn new(rotation: u8) -> Self {
-        Self { rotation, i: 0 }
+    pub const fn new() -> Self {
+        Self { i: 0 }
+    }
+}
+
+impl Default for Bringup {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -222,7 +233,7 @@ impl Iterator for Bringup {
             n if n < 3 + t => INIT_SEQUENCE[n - 3],
             n if n == 3 + t => Cmd::new(cmd::INVON, &[], 0),
             n if n == 4 + t => Cmd::new(cmd::MADCTL, &[MADCTL_BGR | MADCTL_MV], 0),
-            n if n == 5 + t => madctl_cmd(self.rotation),
+            n if n == 5 + t => madctl_cmd(0),
             n if n == 6 + t => Cmd::new(cmd::DISPON, &[], 0),
             _ => return None,
         };

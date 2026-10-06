@@ -18,8 +18,8 @@
 #![no_std]
 #![forbid(unsafe_code)]
 
-pub mod font;
 pub mod fmt;
+pub mod font;
 pub mod panel;
 pub mod render;
 pub mod state;
@@ -27,9 +27,7 @@ pub mod view;
 
 pub use render::render_row;
 pub use state::LcdState;
-pub use view::{
-    LAYOUT_ROWS, LAYOUT_STATUS, View, compose, compose_rows, format_count, format_duration, format_mbps, format_megabytes,
-};
+pub use view::{LAYOUT_ROWS, LAYOUT_STATUS, View, compose, compose_rows, format_count, format_duration, format_mbps, format_megabytes};
 
 /// C `LCD_PAGES`: Connection, Traffic, Health, Setup.
 pub const LCD_PAGES: u32 = 4;

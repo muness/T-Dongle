@@ -13,6 +13,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 tdongle-aqm = { path = "../crates/tdongle-aqm" }
+tdongle-lcd = { path = "../crates/tdongle-lcd" }
 tdongle-serial = { path = "../crates/tdongle-serial" }
 tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
 tdongle-usb-descriptors = { path = "../crates/tdongle-usb-descriptors" }
@@ -38,5 +39,11 @@ doc = false
 [[bin]]
 name = "saved_blobs"
 path = "fuzz_targets/saved_blobs.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "lcd_compose"
+path = "fuzz_targets/lcd_compose.rs"
 test = false
 doc = false

@@ -74,11 +74,7 @@ pub fn render_row(view: &View, y: usize, out: &mut [u16; 160]) {
     let t = &view.text;
     if view.layout == LAYOUT_ROWS {
         for i in 0..LCD_ROWS {
-            let color = if i == 0 {
-                if view.attention { ATTENTION } else { ACCENT }
-            } else {
-                TEXT
-            };
+            let color = if i == 0 { if view.attention { ATTENTION } else { ACCENT } } else { TEXT };
             line(out, y, i * ROW_BYTES, 4 + 13 * i, 1, color, t);
         }
         bars(out, y, view);

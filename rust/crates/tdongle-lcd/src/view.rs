@@ -98,11 +98,11 @@ pub fn format_duration(out: &mut [u8], s: u32) {
         if s < 60 {
             w.u(u64::from(s)).s("s");
         } else if s < 3600 {
-            w.u(u64::from(s / 60)).s("m").u02(s % 60);
+            w.u(u64::from(s / 60)).s("m").u02(s % 60).s("s");
         } else if s < 86400 {
-            w.u(u64::from(s / 3600)).s("h").u02(s % 3600 / 60);
+            w.u(u64::from(s / 3600)).s("h").u02(s % 3600 / 60).s("m");
         } else {
-            w.u(u64::from(s / 86400)).s("d").u02(s % 86400 / 3600);
+            w.u(u64::from(s / 86400)).s("d").u02(s % 86400 / 3600).s("h");
         }
     });
     snprintf(out, |w| {
@@ -156,13 +156,7 @@ fn signal_line(s: &LcdState, out: &mut [u8]) {
     }
     let mut level = [0u8; 12];
     if s.rssi_valid {
-        let r = if s.rssi > 0 {
-            0
-        } else if s.rssi < -127 {
-            -127
-        } else {
-            s.rssi
-        };
+        let r = s.rssi.clamp(-127, 0);
         snprintf(&mut level, |w| {
             w.i(r).s("dBm");
         });
