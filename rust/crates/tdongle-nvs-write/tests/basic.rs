@@ -135,3 +135,23 @@ fn bad_names_are_refused() {
     nvs.set_u8("n", "0123456789abcde", 1).unwrap();
     assert_eq!(nvs.set_u8("0123456789abcdef", "k", 1), Err(Error::InvalidKey));
 }
+
+#[test]
+fn the_engine_is_small() {
+    struct Null;
+    impl tdongle_nvs_write::Flash for Null {
+        type Error = ();
+        fn read(&mut self, _: u32, _: &mut [u8]) -> Result<(), ()> {
+            Err(())
+        }
+        fn write(&mut self, _: u32, _: &[u8]) -> Result<(), ()> {
+            Err(())
+        }
+        fn erase_sector(&mut self, _: u32) -> Result<(), ()> {
+            Err(())
+        }
+    }
+    let size = std::mem::size_of::<Nvs<Null>>();
+    eprintln!("size_of::<Nvs<_>>() = {size}");
+    assert!(size <= 700, "{size}");
+}

@@ -97,6 +97,15 @@ impl<F: Flash> Store<F> {
         Self { nvs }
     }
 
+    /// Mount again after an error of the flash driver: the engine refuses everything ([`Error::Broken`]) until it has re-read the partition,
+    /// which also finishes whatever the interrupted operation left (exactly what a cold start does).
+    ///
+    /// # Errors
+    /// See [`Nvs::mount`].
+    pub fn remount(&mut self) -> R<(), F> {
+        self.nvs.mount()
+    }
+
     /// The engine, for keys this type does not know (tailnet memberships and identities).
     pub fn nvs(&mut self) -> &mut Nvs<F> {
         &mut self.nvs

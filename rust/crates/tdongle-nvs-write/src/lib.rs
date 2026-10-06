@@ -12,7 +12,7 @@
 //! * [`Flash`] is the one trait the firmware implements (over `esp-storage` and the partition offset). Feature `sim` adds [`SimFlash`], an
 //!   in-memory flash with power-loss injection.
 //!
-//! No allocation, no unsafe code. The working set is a few 32-byte buffers on the stack plus [`Nvs`] itself (about 0.5 KiB).
+//! No allocation, no unsafe code. The working set is a few 32-byte buffers on the stack plus [`Nvs`] itself (360 bytes); the largest stack frames are the blob buffers of [`Store::load_all`] (about 2.5 KiB) and [`Store::save_profiles`] (about 1.8 KiB), so a task that calls the store needs 8 KiB of stack to be comfortable.
 //!
 //! # Atomicity
 //!
