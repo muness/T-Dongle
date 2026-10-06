@@ -4,6 +4,8 @@
  *   RX  The driver copies each received frame into a dynamic RX buffer and hands it to lwIP; the buffer stays pinned until the pbuf
  *       that wraps it is freed (CONFIG_LWIP_L2_TO_L3_COPY is off), possibly in a socket mailbox, the TCP window or the tcpip mailbox.
  *   TX  esp_wifi_internal_tx() copies the frame into a dynamic TX buffer, which stays until the frame is sent or dropped.
+ * (Transparent bridge mode, ADR 0023: it has no netif and copies each received frame out of the driver buffer at once, so only the TX half
+ * applies, at wifi_pins_tx() in wifi_pins.inc: the same counters, callback and floor.)
  * Both are bounded only by the driver's pool sizes (16 dynamic RX and TX buffers, 26.6 KB each), which is far more than the 6
  * buffers the budget has room for (ml_heap_budget.h). ADR 0022 held TX to 6 by shrinking the pool, which cost upload throughput
  * (board: pool 16, TCP up +25 %, but heap minimum 2,536 B). Here both directions are counted at the one place each starts, and
@@ -123,6 +125,8 @@ typedef struct {
     gw_wp_lock_t lock;
     uint32_t tx_stamp[GW_WTX_RING];   /* ms at which each outstanding TX charge was made, oldest first from tx_head */
     uint32_t tx_head, tx_count;       /* guarded by lock */
+    atomic_uint tx_limit;             /* 0: the driver's pool (GATEWAY_WIFI_TX_POOL); else the most TX charges outstanding (the transparent bridge keeps the radio
+                                       * fed with a few frames, not the whole pool: every frame beyond that is delay, ADR 0023 amendment 2) */
     atomic_uint pins;                 /* RX buffers delivered to lwIP and not yet freed (bits 0-7) and TX charges outstanding (bits 8-15), one word
                                        * so the band's joint limit is decided on both at once. tx field == tx_count, changed under the lock */
     /* Evidence. All monotonic except the high-water marks. */
@@ -163,22 +167,43 @@ static inline IRAM_ATTR void gw_wtx_pop_head(gateway_wifi_pins *b) {
     b->tx_count--;
 }
 
-/* TX, before esp_wifi_internal_tx. `free_internal` is the free internal heap measured by the caller (injected for the tests), `now_ms`
- * a millisecond clock (wraps are fine). On GW_WTX_BAND or GW_WTX_ELASTIC the frame is charged and the caller MUST release it exactly
- * once: gw_wtx_abort if esp_wifi_internal_tx fails, otherwise the driver's tx-done, a flush or the lease does. */
-static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, size_t free_internal, uint32_t now_ms) {
-    gw_wtx_verdict v;
-    unsigned stale = 0, count;
-    GW_WP_ENTER(b);
-    /* Charges are in order, so only the head can be the oldest: expire from there. */
+/* Expire charges older than the lease. Caller holds the lock; returns how many (the caller releases them from `pins` and counts them). Charges are in
+ * order, so only the head can be the oldest. */
+static inline unsigned gw_wtx_expire_locked(gateway_wifi_pins *b, uint32_t now_ms) {
+    unsigned stale = 0;
     while (b->tx_count && (int32_t)(now_ms - b->tx_stamp[b->tx_head]) > (int32_t)GW_WTX_LEASE_MS) {
         gw_wtx_pop_head(b);
         stale++;
     }
     if (stale) atomic_fetch_sub_explicit(&b->pins, stale * GW_WP_TX_ONE, memory_order_acq_rel);
+    return stale;
+}
+/* Room for one more charge under the limit now, for a caller that would rather wait than be refused (the bridge's worker). It must heal a leaked charge
+ * exactly as admission does: a caller that never reaches gw_wtx_admit while the allowance LOOKS full would otherwise keep a full allowance of leaked
+ * charges for ever (the lease is only ever applied under the lock). So when the allowance looks full, expire under the same lock and look again. */
+static inline bool gw_wtx_room(gateway_wifi_pins *b, uint32_t now_ms) {
+    const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);
+    const unsigned cap = limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL;
+    if (gw_wtx_outstanding(b) < cap) return true;
+    GW_WP_ENTER(b);
+    const unsigned stale = gw_wtx_expire_locked(b, now_ms);
+    GW_WP_EXIT(b);
+    if (stale) atomic_fetch_add_explicit(&b->tx_stale, stale, memory_order_relaxed);
+    return gw_wtx_outstanding(b) < cap;
+}
+
+/* TX, before esp_wifi_internal_tx. `free_internal` is the free internal heap measured by the caller (injected for the tests), `now_ms`
+ * a millisecond clock (wraps are fine). On GW_WTX_BAND or GW_WTX_ELASTIC the frame is charged and the caller MUST release it exactly
+ * once: gw_wtx_abort if esp_wifi_internal_tx fails, otherwise the driver's tx-done, a flush or the lease does. */
+static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, size_t free_internal, uint32_t now_ms) {
+    gw_wtx_verdict v;
+    unsigned count;
+    GW_WP_ENTER(b);
+    const unsigned stale = gw_wtx_expire_locked(b, now_ms);
     unsigned word = atomic_load_explicit(&b->pins, memory_order_relaxed);
     for (;;) {                                             /* RX changes the word without our lock: decide on a snapshot, commit with a CAS */
-        if (b->tx_count >= (unsigned)GATEWAY_WIFI_TX_POOL) v = GW_WTX_POOL;
+        const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);
+        if (b->tx_count >= (limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL)) v = GW_WTX_POOL;
         else if (gw_wp_tx_in_band(word)) v = GW_WTX_BAND;
         else if (ml_hb_ok(free_internal, gw_wtx_cost(len))) v = GW_WTX_ELASTIC;
         else v = GW_WTX_HEAP;

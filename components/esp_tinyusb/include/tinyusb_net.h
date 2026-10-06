@@ -23,6 +23,10 @@ extern "C" {
  */
 typedef esp_err_t (*tusb_net_rx_cb_t)(void *buffer, uint16_t len, void *ctx);
 
+/** Returned by the receive callback: "not now, offer this datagram again". The class driver keeps it (and stops re-arming the OUT endpoint when its
+ *  receive buffers fill, so the host is NAKed); nothing is dropped and the TinyUSB task never waits. Call tinyusb_net_rx_resume() once there is room. */
+#define TUSB_NET_RX_HOLD ((esp_err_t)0x10C)   /* ESP_ERR_NOT_FINISHED */
+
 /**
  * @brief Free Tx buffer callback type
  */
@@ -233,6 +237,42 @@ void tinyusb_net_tx_elastic_kick(void);
 
 /** @brief The USB link went away (detach): frames queued so far are stale and are flushed. Any task context. */
 void tinyusb_net_tx_ring_link_down(void);
+
+/**
+ * @brief The source of the queued frames changed (the bridge's Wi-Fi link dropped or came back): discard what is queued
+ *
+ * Bumps the link generation (the mechanism a USB detach uses): frames committed before this call are discarded by the next drain,
+ * counted in `flushed_link_down`, and never reach the host; frames committed after it are unaffected. Never blocks, any task
+ * context. A frame being committed concurrently with the call may fall on either side, which is the right answer for a frame that
+ * was received while the link was changing.
+ */
+void tinyusb_net_tx_ring_flush(void);
+
+/**
+ * @brief Offer a datagram the receive callback held (TUSB_NET_RX_HOLD) again, from the TinyUSB task
+ *
+ * Any task context, coalescing, never touches class state itself: it defers tud_network_recv_renew() to the TinyUSB task. May wait for the TinyUSB
+ * event queue like any usbd_defer_func() caller, so call it from a worker that holds no lock, not from a callback.
+ */
+void tinyusb_net_rx_resume(void);
+
+/** Receive-side counters (the unified image, once the ring is enabled): see tinyusb_net.c. Microseconds wrap at 71 minutes. */
+typedef struct {
+    uint32_t ntbs, ntb_bytes, ntb_max_bytes;       /*!< OUT NTBs completed, their bytes, the largest */
+    uint32_t datagrams;                            /*!< datagrams offered to the receive callback (a held one is offered again) */
+    uint32_t dwell_us_sum, dwell_us_max;           /*!< per offer: time since the newest OUT NTB completed */
+    uint32_t holds, hold_us_sum, hold_us_max;      /*!< hold episodes, and how long each kept the host waiting for room */
+} tinyusb_net_rx_stats_t;
+void tinyusb_net_rx_stats(tinyusb_net_rx_stats_t *out);
+
+/**
+ * @brief Move the elastic cap of the transmit ring at run time (a tuning knob; not persisted)
+ *
+ * Raising lets the worker grow further; lowering retires chunks above the new cap (frames in them drain first, nothing is dropped).
+ * @return ESP_OK, ESP_ERR_INVALID_ARG (more than TINYUSB_NET_TX_MAX_CHUNKS), ESP_ERR_INVALID_STATE (ring not started)
+ */
+esp_err_t tinyusb_net_tx_ring_set_max_chunks(unsigned chunks);
+unsigned tinyusb_net_tx_ring_max_chunks(void);
 
 /** @brief Snapshot the transmit-ring counters */
 void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out);

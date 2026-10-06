@@ -65,6 +65,35 @@ assert low["records"][0]["min"] == 29000 and min(x["min"] for x in low["records"
 assert low["records"][0]["wifi_rx_pins"] == 4 and low["records"][0]["wifi_tx_inflight"] == 2
 assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 22 and usb["rx_inflight"] == 0 and usb["rx_dropped_busy"] == 0
 
+# The transparent bridge's counters (bridge_status.inc): one report, keys "<section>_<name>", the identities readable from what it prints.
+bridge = reports("bridge", "bridge")[0]
+assert bridge["active"] is True and bridge["link_linked"] == 1 and bridge["link_changes"] == 5 and bridge["link_worker_stack_free"] == 1900
+assert bridge["to_host_frames"] == bridge["to_host_forwarded"] + bridge["to_host_invalid"] + bridge["to_host_own_mac"] + bridge["to_host_link_down"] + bridge["to_host_usb_not_ready"] + bridge["to_host_ring_full"]
+assert bridge["to_wifi_frames"] == bridge["to_wifi_queued"] + bridge["to_wifi_invalid"] + bridge["to_wifi_foreign_mac"] + bridge["to_wifi_link_down"]
+assert bridge["to_wifi_queued"] == bridge["to_wifi_sent"] + bridge["to_wifi_stale"] + bridge["to_wifi_sojourn_drop"] + bridge["to_wifi_link_down_queued"] + bridge["to_wifi_tx_failed"] + bridge["to_wifi_queue_depth"]
+assert bridge["timing_pm_note_us_max"] == 400 and bridge["timing_wait_us_max"] == 800 and bridge["to_host_raced"] == 1 and bridge["timing_cold_starts"] == 21
+assert bridge["rx_class_datagrams"] == 55 and bridge["rx_class_ntbs"] == 30 and bridge["to_wifi_ce_marked"] == 5 and bridge["to_wifi_codel_drop"] == 4 and bridge["timing_signal_us_max"] == 12000 and bridge["timing_room_wait_us_max"] == 1500
+# bridgetune: show, set (applied to the real setters in the other tests), reject, and not confused with other commands.
+tune = [x for x in sections["bridgetune_show"] if isinstance(x, str)]
+assert "bridgetune q=3 resume=1 inflight=6 ring=10 sojourn_ms=100 codel=0 target_us=5000 interval_ms=100" in tune and any(x.startswith("bridgetune_bounds q=1..8") for x in tune) and "#handled 1" in tune
+assert "bridgetune q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 codel=1 target_us=4000 interval_ms=100" in sections["bridgetune_set"]
+assert any("ERR bridgetune: q out of range" in x for x in sections["bridgetune_bad"]) and any("q=2 resume=1 inflight=8 ring=4 sojourn_ms=100 codel=1" in x for x in sections["bridgetune_bad"])
+assert any("ERR bridgetune: unknown key" in x for x in sections["bridgetune_bad2"]) and "#handled 0" in sections["bridgetune_other"]
+assert bridge["ecn_capable"] == 22 and bridge["ecn_syn_setup"] == 2 and bridge["ecn_synack_accept"] == 1 and bridge["ecn_not_ect"] == 11
+assert bridge["to_wifi_last_tx_error"] == -1 and bridge["usb_ring_ring_bytes"] == 9144 and bridge["usb_ring_dropped_full"] == 7 and bridge["usb_ring_enqueued"] == 90
+assert bridge["wifi_tx_installed"] == 1 and bridge["wifi_tx_tx_done_cb"] == 1 and bridge["wifi_tx_charged"] == 10 and bridge["wifi_tx_refused_pool"] == 5
+assert bridge["wifi_tx_charged"] == bridge["wifi_tx_done"] + bridge["wifi_tx_aborted"] + bridge["wifi_tx_flushed"] + bridge["wifi_tx_stale"] + bridge["wifi_tx_inflight"]
+assert reports("bridge_tailnet", "bridge")[0]["active"] is False and "#handled 1" in sections["bridge"]
+# The serial status lines: new lines only, one per section, every field of the report, every line within the console buffer.
+lines = [x for x in sections["bridge_status_lines"] if isinstance(x, str) and x.startswith("bridge_")]
+assert [l.split()[0] for l in lines] == ["bridge_link", "bridge_to_host", "bridge_to_wifi", "bridge_ecn", "bridge_rx_class", "bridge_usb_ring", "bridge_timing", "bridge_wifi_tx"], lines
+assert all(len(l) < 448 for l in lines)
+assert sum(l.count("=") for l in lines) == len([k for k in bridge if k not in ("schema", "kind", "active")]), lines
+fields = {(l.split()[0][7:], w.split("=")[0]): int(w.split("=")[1]) for l in lines for w in l.split()[1:]}
+assert fields[("to_host", "frames")] == 100 and fields[("to_wifi", "frames")] == 76 and fields[("to_wifi", "last_tx_error")] == -1
+assert fields[("to_host", "ring_full")] == 3 and fields[("wifi_tx", "installed")] == 1
+assert all(fields[(sec, name)] == bridge[sec + "_" + name] for (sec, name) in fields), "the serial lines and the report print the same numbers"
+
 members = sections["members"]
 phases = reports("members", "phases")
 assert len(phases) == 1 and phases[0]["member"] == 7 and phases[0]["attempt"] == 1 and len(phases[0]["owner_order"]) == 8
@@ -184,5 +213,5 @@ assert [x["kind"] for x in kinds] == ["wifi_link", "lwip_stats"] and kinds[1]["e
 for command, lines in sections.items():
     for item in lines:
         if isinstance(item, dict):
-            assert len(json.dumps(item, separators=(",", ":"))) < 1800, (command, item["kind"])  # bounded, fits the console queue in a few chunks
+            assert len(json.dumps(item, separators=(",", ":"))) < (2800 if item["kind"] == "bridge" else 1800), (command, item["kind"])   # the bridge report lists every counter of seven sections  # bounded, fits the console queue in a few chunks
 print("Serial reports: heap, attribution, lwip, usb, route, phases, admission, bench, guard and wifistats parse as bounded one-line JSON.")

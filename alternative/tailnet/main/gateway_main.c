@@ -70,6 +70,43 @@ _Static_assert(CONFIG_LWIP_UDP_RECVMBOX_SIZE <= ML_HB_PIN_BUFFERS, "a UDP socket
 _Static_assert(CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM >= GATEWAY_WIFI_TX_BAND_MAX && CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM <= GW_WTX_RING,
                "the Wi-Fi TX pool must hold the TX band and fit the pin budget's FIFO (wifi_pin_budget.h)");
 _Static_assert(GATEWAY_WIFI_TX_POOL == CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM, "the pin budget must follow the configured TX pool");
+/* The transparent bridge's ring (ADR 0023): Wi-Fi to host. Same mechanism, same floors, no gate (there is no negotiation). Sized from evidence:
+ * 32 frames cost heap and, with the then 16-slot host queue, ping; 12 lost 5% / 37% of UDP download at 4 / 8 Mbit/s; the board's ring sweep at 8 Mbit/s
+ * (ring = 2 / 6 / 10 chunks) lost 12% / 9% / 7% with the heap minimum still 102 KB. Nothing can backpressure Wi-Fi, so on this direction the ring is the
+ * burst absorber, and its delay exists only while a download runs (the host-side latency under upload does not pass through it). 8 permanent frames +
+ * 10 elastic chunks of 2 = 28 frames = 42.7 KB = 49 ms of USB time at the bus limit: two A-MPDU bursts and then some, elastic (grown only above the
+ * heap floor and returned 10 s after the burst), bounded in time by the assert below, and below the ring's 32-slab limit. */
+#define GATEWAY_BRIDGE_TX_BASE_FRAMES 8u
+#define GATEWAY_BRIDGE_TX_MAX_CHUNKS 10u
+#define GATEWAY_BRIDGE_TX_MAX_FRAMES (GATEWAY_BRIDGE_TX_BASE_FRAMES + GATEWAY_BRIDGE_TX_MAX_CHUNKS * TINYUSB_NET_TX_CHUNK_SLABS)
+#define GATEWAY_BRIDGE_RING_MAX_DRAIN_MS 50u   /* the longest a full ring may take to drain at the USB bus limit */
+/* Host to Wi-Fi: the radio is given this many frames at a time, not the driver's 16. The TX block-ack window is 6 (CONFIG_ESP_WIFI_TX_BA_WIN), so
+ * 6 in flight is one full aggregate; every frame beyond is queueing delay in front of every other packet (16 frames at 6.5 Mbit/s are 30 ms). With
+ * USB backpressure (tdongle_l2.h) this and the host queue (3) are the whole standing queue in the dongle. */
+#define GATEWAY_BRIDGE_WIFI_TX_INFLIGHT 6u
+_Static_assert(GATEWAY_BRIDGE_WIFI_TX_INFLIGHT >= GATEWAY_WIFI_TX_BAND_MAX && GATEWAY_BRIDGE_WIFI_TX_INFLIGHT <= GATEWAY_WIFI_TX_POOL &&
+               GATEWAY_BRIDGE_WIFI_TX_INFLIGHT >= CONFIG_ESP_WIFI_TX_BA_WIN,
+               "the bridge's Wi-Fi TX allowance must hold the band and a full block-ack aggregate, within the pool");
+_Static_assert(GATEWAY_BRIDGE_TX_BASE_FRAMES >= 2 && GATEWAY_BRIDGE_TX_BASE_FRAMES <= TINYUSB_NET_TX_MAX_BASE_SLABS &&
+               GATEWAY_BRIDGE_TX_MAX_CHUNKS <= TINYUSB_NET_TX_MAX_CHUNKS && GATEWAY_BRIDGE_TX_MAX_FRAMES >= 8,
+               "the bridge ring configuration is outside what the ring supports");
+_Static_assert(GATEWAY_BRIDGE_TX_MAX_FRAMES * TINYUSB_NET_TX_SLAB_BYTES / 875 <= GATEWAY_BRIDGE_RING_MAX_DRAIN_MS,
+               "a full bridge ring would hold more than GATEWAY_BRIDGE_RING_MAX_DRAIN_MS of USB time: that is queueing delay on every packet");
+_Static_assert(TDONGLE_L2_HOST_QUEUE_LIMIT * TDONGLE_L2_SLOT_BYTES / 875 <= 6,
+               "the host -> Wi-Fi standing queue must drain, at the USB OUT limit, in a few milliseconds: it is behind the host's own backpressure");
+/* Boot-heap neutrality against the original bridge: its permanent buffering was 32 pool frames of 1,524 B, its worker's stack and TCB. */
+_Static_assert(GATEWAY_BRIDGE_TX_BASE_FRAMES * TINYUSB_NET_TX_SLAB_BYTES + 1536 + 340 +
+               TDONGLE_L2_HOST_SLOTS * TDONGLE_L2_SLOT_BYTES + GATEWAY_BRIDGE_TASK_STACK + 340 <=
+               32 * 1524 + 3072 + 340,   /* the original l2.c: 32 pool frames, the 3,072 B stack of its worker, its TCB */
+               "the bridge's permanent buffering (ring base, ring worker, host queue, forwarder) grew past what the original bridge held");
+/* Bridge task scheme (gateway.h): the same core and the same constants as the tailnet mode, with the l2 forwarder where usb_routes is. */
+_Static_assert(GATEWAY_TASK_BRIDGE_CORE == TINYUSB_DEFAULT_TASK_AFFINITY && GATEWAY_TASK_BRIDGE_CORE == GATEWAY_TASK_USB_TX_CORE &&
+               GATEWAY_TASK_USB_TX_PRIO > GATEWAY_TASK_TINYUSB_PRIO && GATEWAY_TASK_TINYUSB_PRIO > GATEWAY_TASK_BRIDGE_PRIO &&
+               GATEWAY_TASK_BRIDGE_PRIO > GATEWAY_TASK_USB_TX_WORK_PRIO,
+               "bridge, core 1: usb_txq relay > TinyUSB > l2 forwarder > usb_txq heap work");
+_Static_assert(GATEWAY_TASK_BRIDGE_PRIO == GATEWAY_TASK_USB_ROUTES_PRIO && GATEWAY_TASK_BRIDGE_CORE == GATEWAY_TASK_USB_ROUTES_CORE,
+               "the bridge's forwarder takes usb_routes' place in the scheme: one set of constants for both modes");
+_Static_assert(GATEWAY_TASK_BRIDGE_PRIO < 22, "the bridge's tasks stay below the IDF system tasks (esp_timer 22, ipc 24) and the Wi-Fi task (23)");
 _Static_assert(GATEWAY_USB_TX_FLOOR_FREE == ML_HB_FLOOR, "the USB ring grows only above the one elastic floor");
 _Static_assert(GATEWAY_USB_TX_FLOOR_FREE >= ML_ADM_RECOVERY_BYTES + ML_ADM_NEG_PEAK_BYTES,
                "growth must leave one negotiation peak and the recovery reserve");
@@ -195,6 +232,11 @@ static wifi_config_t wifi_config;
 #include "wifi_profiles.inc"
 #include "wifi_link.inc"
 #include "wifi_pins.inc"
+#ifdef CONFIG_TDONGLE_MEMORY_DIAGNOSTICS
+#define GATEWAY_BRIDGE_TUNE 1
+#endif
+#include "bridge_status.inc"
+void gateway_bridge_status(void){if(!gateway_tailnet_mode())bridge_status_lines();}
 #include "serial_setup.inc"
 
 extern const char setup_html_start[] asm("_binary_setup_html_start");
@@ -527,15 +569,13 @@ static esp_err_t usb_tx(void *handle, void *buffer, size_t len) {
         rt_stat(RT_STAT_USB_TX_ERR);
     return result;
 }
-/* Called only for tdongle_l2 (bridge mode) frames sent with tinyusb_net_send_sync. */
-static void usb_free_tx(void *buffer, void *ctx) { if(!gateway_tailnet_mode())tdongle_l2_release(buffer); }
 static gateway_usb_rx_budget usb_rx_budget;
 static void usb_free_rx(void *handle, void *buffer) {
     free(buffer);
     gateway_usb_rx_release(&usb_rx_budget);
 }
 static esp_err_t usb_rx(void *buffer, uint16_t len, void *ctx) {
-    if(!gateway_tailnet_mode())return tdongle_l2_host(buffer,len);
+    if(!gateway_tailnet_mode())return tdongle_l2_host(buffer,len);   /* TinyUSB task: copies into the bridge's queue and returns (ADR 0023) */
     if (!usb_interface) return ESP_ERR_INVALID_STATE;
     if (!gateway_usb_rx_admit(&usb_rx_budget, len, heap_caps_get_free_size(MALLOC_CAP_INTERNAL)))
         return ESP_ERR_NO_MEM;
@@ -557,18 +597,18 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t event,
     if (base == WIFI_EVENT && event == WIFI_EVENT_STA_DISCONNECTED) {
         online = false;
         wifi_link_event_disconnected((const wifi_event_sta_disconnected_t *)data);
-        if(!gateway_tailnet_mode())tdongle_l2_link(false);
-        else wifi_pins_link_changed();
+        if(!gateway_tailnet_mode())tdongle_l2_link(false);   /* first: nothing new is submitted, then the driver's cleared queues are accounted */
+        wifi_pins_link_changed();
         if(!wifi_scan_pauses_reconnect && wifi_current>=0 && wifi_pinned.slot!=wifi_current)
             wifi_retry_after[wifi_current]=(uint32_t)(esp_timer_get_time()/1000)+60000;
         /* Worker rescans with backoff; never reconnect recursively here. */
     }
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED)wifi_link_event_connected();
-    if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && gateway_tailnet_mode())wifi_pins_link_changed();
+    if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED)wifi_pins_link_changed();   /* both modes: the driver cleared its TX queues */
     if(base==WIFI_EVENT && event==WIFI_EVENT_STA_CONNECTED && !gateway_tailnet_mode()){online=true;tdongle_l2_link(true);}
     if (base == IP_EVENT && event == IP_EVENT_STA_GOT_IP) {
         online = true;
-        if(gateway_tailnet_mode())wifi_pins_hook_rx();
+        wifi_pins_hook_rx();   /* no-op without a netif (bridge mode) */
     }
 }
 static esp_err_t json_reply(httpd_req_t *req, cJSON *j) {
@@ -1320,28 +1360,30 @@ static esp_err_t start_usb(void) {
                                     "USB network",
                                     ""};
     tinyusb_config_t usb = TINYUSB_DEFAULT_CONFIG();
-    if(gateway_tailnet_mode())usb.task.priority = GATEWAY_TASK_TINYUSB_PRIO;   /* ADR 0022: the IN pipe must not wait behind wg_mgr */
+    usb.task.priority = GATEWAY_TASK_TINYUSB_PRIO;   /* both modes (ADR 0022, 0023): the IN pipe must not wait behind forwarding work */
     usb.event_cb = usb_event;
     usb.descriptor.string = strings;
     usb.descriptor.string_count = sizeof(strings) / sizeof(strings[0]);
     esp_err_t result=tinyusb_driver_install(&usb);
     if(result!=ESP_OK)return result;
-    tinyusb_net_config_t net = {.on_recv_callback = usb_rx,
-                                .free_tx_buffer = usb_free_tx};
+    /* No free_tx_buffer: every frame to the host goes through the transmit ring, which copies it and owns the copy. */
+    tinyusb_net_config_t net = {.on_recv_callback = usb_rx};
     if(gateway_tailnet_mode()){uint8_t device[6];gateway_usb_macs(identity_mac,device,net.mac_addr);}
     else memcpy(net.mac_addr, identity_mac, 6);
     result=tinyusb_net_init(&net);
-    if(result==ESP_OK && gateway_tailnet_mode()){
-        const tinyusb_net_tx_config_t tx = {.base_frames = GATEWAY_USB_TX_BASE_FRAMES, .max_chunks = GATEWAY_USB_TX_MAX_CHUNKS,
+    if(result==ESP_OK){
+        const bool tailnet=gateway_tailnet_mode();
+        const tinyusb_net_tx_config_t tx = {.base_frames = tailnet?GATEWAY_USB_TX_BASE_FRAMES:GATEWAY_BRIDGE_TX_BASE_FRAMES,
+                                            .max_chunks = tailnet?GATEWAY_USB_TX_MAX_CHUNKS:GATEWAY_BRIDGE_TX_MAX_CHUNKS,
                                             .priority = GATEWAY_TASK_USB_TX_PRIO, .work_priority = GATEWAY_TASK_USB_TX_WORK_PRIO, .core = GATEWAY_TASK_USB_TX_CORE,
                                             .floor_free = GATEWAY_USB_TX_FLOOR_FREE, .floor_largest = GATEWAY_USB_TX_FLOOR_LARGEST,
-                                            .idle_ms = GATEWAY_USB_TX_IDLE_MS, .gate = usb_tx_gate,
+                                            .idle_ms = GATEWAY_USB_TX_IDLE_MS, .gate = tailnet?usb_tx_gate:NULL,   /* the bridge has no negotiation to yield to */
                                             .pm_begin = usb_tx_pm_begin, .pm_end = usb_tx_pm_end};
         tdongle_pm_burst_register(&usb_tx_pm, "usb_txq");   /* ADR 0016: one CPU-max hold mechanism, worker-only begin/end */
         /* The shared runtime's state is built on first use; do that here, before the worker (1,536 B of stack) can ask the gate. */
-        ml_neg_t *neg=ml_rt_negotiation();
+        ml_neg_t *neg=tailnet?ml_rt_negotiation():NULL;
         result=tinyusb_net_tx_ring_start(&tx);
-        if(result==ESP_OK)ml_neg_set_observer(neg,usb_tx_negotiation_changed,NULL);
+        if(result==ESP_OK && neg)ml_neg_set_observer(neg,usb_tx_negotiation_changed,NULL);
     }
     extern esp_err_t gateway_console_start(void);
     esp_err_t console=gateway_console_start();
@@ -1448,12 +1490,18 @@ static void wifi_power_save_off(void) {
     if(e!=ESP_OK)ESP_LOGW("wifi","esp_wifi_set_ps(NONE) failed: %s; modem sleep stays on",esp_err_to_name(e));
 }
 static esp_err_t start_wifi(void) {
+    esp_netif_t *sta=NULL;   /* the transparent bridge has no STA netif: frames go through the bridge, not lwIP */
     if(gateway_tailnet_mode()){
-        esp_netif_t *sta=esp_netif_create_default_wifi_sta();
+        sta=esp_netif_create_default_wifi_sta();
         if(!sta)return ESP_ERR_NO_MEM;
-        wifi_pins_install(sta);   /* ADR 0022 amendment 2: count and bound the driver buffers this netif pins, before Wi-Fi runs */
     }
-    if(!gateway_tailnet_mode()){uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);START_TRY(tdongle_l2_start(mac));}
+    wifi_pins_install(sta);   /* ADR 0022 amendment 2, ADR 0023: count and bound the driver TX buffers in both modes (RX too with a netif), before Wi-Fi runs */
+    if(!gateway_tailnet_mode()){
+        uint8_t mac[6];esp_read_mac(mac,ESP_MAC_WIFI_STA);
+        wifi_pins_set_tx_limit(GATEWAY_BRIDGE_WIFI_TX_INFLIGHT);   /* the radio's allowance in bridge mode (ADR 0023 amendment 2) */
+        const tdongle_l2_config_t bridge={.wifi_tx=wifi_pins_tx,.wifi_room=wifi_pins_tx_room,.rx_resume=tinyusb_net_rx_resume,.task_priority=GATEWAY_TASK_BRIDGE_PRIO,.task_core=GATEWAY_TASK_BRIDGE_CORE,.task_stack=GATEWAY_BRIDGE_TASK_STACK};
+        START_TRY(tdongle_l2_start(mac,&bridge));
+    }
     wifi_init_config_t w=WIFI_INIT_CONFIG_DEFAULT();
     START_TRY(esp_wifi_init(&w));
     START_TRY(esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,wifi_event,NULL));
@@ -1498,10 +1546,10 @@ void app_main(void) {
     nvs_handle_t early;
     if(nvs_flash_init()==ESP_OK && nvs_open("tn_settings",NVS_READONLY,&early)==ESP_OK){tdongle_mode_load(early,&runtime_mode);nvs_close(early);}
 
-    /* Frequency scaling is for the tailnet gateway, whose forwarding tasks hold the CPU-max lock while they have
-     * work. The transparent bridge mode of this image forwards from Wi-Fi and USB callbacks that hold none, so it
-     * stays at the fixed boot frequency (240 MHz). A failure leaves the same fixed frequency. */
-    if(gateway_tailnet_mode())tdongle_pm_start();
+    /* Frequency scaling for both modes (ADR 0016, 0023): 240 MHz while forwarding work is pending, 80 MHz when idle. The tailnet's tasks
+     * hold CPU-max locks while they have work; the transparent bridge notes forwarding activity in its Wi-Fi and USB callbacks and its
+     * transmit ring holds a lock while frames are queued. A failure leaves the fixed boot frequency (240 MHz). */
+    tdongle_pm_start();
     members_lock=xSemaphoreCreateMutexStatic(&members_mutex);
     wifi_scan_lock=xSemaphoreCreateMutexStatic(&scan_mutex);
     gateway_startup_sequence();

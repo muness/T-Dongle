@@ -1,42 +1,743 @@
+/* The transparent bridge's forwarding logic (l2.c) against stand-ins for its neighbours: a scripted USB transmit ring, a scripted Wi-Fi
+ * transmit, a clock the test moves. The end-to-end behaviour with the real ring, the real Wi-Fi budget and real threads is
+ * alternative/tailnet/tests/test_bridge_path.c; this file pins every branch and counter of l2.c itself.
+ *
+ * Rules checked here for every case:
+ *  - the callbacks (the Wi-Fi RX callback and tdongle_l2_host) never wait, allocate or call the Wi-Fi driver: each stand-in asserts it is
+ *    not entered while `in_callback` is set;
+ *  - every frame that enters either callback is counted exactly once, as forwarded or as one named drop;
+ *  - the driver's RX buffer is freed exactly once per call, before the callback returns, on every path. */
 #include <assert.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <setjmp.h>
 #include "tdongle_l2.h"
-#include "freertos/queue.h"
-struct queue {unsigned entries[32],n;};
-static jmp_buf idle;
-static unsigned freed,sent,tx,queue_calls,fail_queue;static int send_error,tx_error;static bool ready=true,fail_task,fail_alloc;
-static unsigned char observed[1514];static size_t observed_len;
-static void *allocate(size_t n,size_t size){return fail_alloc?NULL:calloc(n,size);}
+#include "tdongle_aqm.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_timer.h"
+/* esp_timer's one-shot API, as l2.c uses it (the shared stub header only has the clock). */
+typedef void *esp_timer_handle_t;
+typedef struct { void (*callback)(void *); void *arg; const char *name; } esp_timer_create_args_t;
+esp_err_t esp_timer_create(const esp_timer_create_args_t *, esp_timer_handle_t *);
+esp_err_t esp_timer_start_once(esp_timer_handle_t, uint64_t);
+esp_err_t esp_timer_delete(esp_timer_handle_t);
+
+/* ---- the world ---- */
+static bool in_callback;                 /* inside tdongle_l2_host or the Wi-Fi RX callback: nothing here may wait or allocate */
+static unsigned freed, link_calls, flushes, notifies, note_activity_calls;
+static bool fail_alloc, fail_task;
+static void *worker_arg;
+static esp_err_t ring_result = 0;
+static unsigned ring_calls;
+static unsigned char ring_seen[2000];
+static uint16_t ring_seen_len;
+static esp_err_t tx_script[64];          /* results of consecutive wifi_tx calls; past the end: tx_default */
+static unsigned tx_calls, tx_script_n;
+static esp_err_t tx_default;
+static unsigned char tx_seen[2000];
+static uint16_t tx_seen_len;
+static int64_t now_us_v;                  /* the clock, in microseconds */
+static unsigned waits;                   /* retry waits the worker made */
+static void (*wait_hook)(void);
+static bool timer_armed; static uint64_t timer_due; static void (*timer_cb)(void *);
+static int cb_registered;                /* 1 = receive registered, 0 = unregistered */
+static int order[8], order_n;            /* the order of reg_rxcb / flush / link_state in one tdongle_l2_link call */
+static void (*ring_hook)(void);          /* runs inside tinyusb_net_tx_ring_send: "something else happens while the callback copies" */
+static bool fail_timer;
+static void *allocate(size_t n, size_t size) {
+    assert(!in_callback);
+    return fail_alloc ? NULL : calloc(n, size);
+}
 #define calloc allocate
 #include "../l2.c"
 #undef calloc
-QueueHandle_t xQueueCreate(unsigned n,unsigned s){if(++queue_calls==fail_queue)return NULL;return calloc(1,sizeof(struct queue));}
-int xQueueSend(QueueHandle_t q,const void *p,unsigned t){if(q->n==32)return 0;q->entries[q->n++]=*(unsigned*)p;return 1;}
-int xQueueReceive(QueueHandle_t q,void *p,unsigned t){if(!q->n){if(t==portMAX_DELAY)longjmp(idle,1);return 0;}*(unsigned*)p=q->entries[0];memmove(q->entries,q->entries+1,--q->n*sizeof(unsigned));return 1;}
-void vQueueDelete(QueueHandle_t q){free(q);}
-int xTaskCreate(void(*f)(void*),const char*n,unsigned s,void*a,unsigned p,void*h){return !fail_task;}
-void vTaskDelay(unsigned n){}
-bool tud_ready(void){return ready;}
-void tud_network_link_state(int i,bool c){}
-void esp_wifi_internal_free_rx_buffer(void*p){freed++;}
-esp_err_t esp_wifi_internal_reg_rxcb(int i,esp_err_t(*f)(void*,uint16_t,void*)){return 0;}
-esp_err_t esp_wifi_internal_tx(int i,void*b,uint16_t n){tx++;memcpy(observed,b,n);observed_len=n;return tx_error;}
-esp_err_t tinyusb_net_send_sync(void*b,size_t n,void*c,unsigned t){sent++;memcpy(observed,b,n);observed_len=n;if(!send_error)tdongle_l2_release(c);return send_error;}
-static void drain(void){if(!setjmp(idle))transmit(NULL);}
-int main(void){
- unsigned char mac[6]={2,1,2,3,4,5},packet[1514]={0};
- fail_alloc=true;assert(tdongle_l2_start(mac)==ESP_ERR_NO_MEM && !pool && !available && !pending);fail_alloc=false;
- for(unsigned i=1;i<=2;i++){queue_calls=0;fail_queue=i;assert(tdongle_l2_start(mac)==ESP_ERR_NO_MEM && !pool && !available && !pending);}fail_queue=0;fail_task=true;assert(tdongle_l2_start(mac)==ESP_ERR_NO_MEM);fail_task=false;
- assert(tdongle_l2_start(mac)==ESP_OK);tdongle_l2_link(true);
- /* ARP, IPv4 DHCP and IPv6 retain every byte; no address rewriting. */
- for(unsigned protocol=0;protocol<3;protocol++){packet[6]=9;packet[12]=protocol==0?8:protocol==1?8:0x86;packet[13]=protocol==0?6:protocol==1?0:0xdd;packet[20]=protocol;receive(packet,600,(void*)1);drain();assert(observed_len==600 && !memcmp(observed,packet,600) && available->n==32);}
- memcpy(packet+6,mac,6);unsigned before=sent;receive(packet,600,(void*)1);drain();assert(sent==before);tdongle_l2_host(packet,600);assert(tx==1 && !memcmp(observed,packet,600));
- packet[6]=9;receive(packet,600,(void*)1);tdongle_l2_link(false);drain();assert(sent==before && available->n==32);tdongle_l2_link(true);
- send_error=-1;receive(packet,600,(void*)1);drain();assert(sent==before+30 && available->n==32);send_error=0;
- unsigned drops=freed;receive(packet,13,(void*)1);receive(packet,1515,(void*)1);ready=false;receive(packet,600,(void*)1);assert(freed==drops+3 && available->n==32);ready=true;
- for(unsigned i=0;i<35;i++)receive(packet,600,(void*)1);assert(pending->n==32 && available->n==0);drain();assert(available->n==32);
- memcpy(packet+6,mac,6);tx=0;tx_error=-1;tdongle_l2_host(packet,600);assert(tx==20);free(pool);vQueueDelete(available);vQueueDelete(pending);
- return 0;
+
+bool tud_ready(void) { return true; }
+void tud_network_link_state(int i, bool c) { (void)i; (void)c; link_calls++; order[order_n++ % 8] = 3; }
+void esp_wifi_internal_free_rx_buffer(void *p) { (void)p; freed++; }
+esp_err_t esp_wifi_internal_reg_rxcb(int i, esp_err_t (*f)(void *, uint16_t, void *)) {
+    (void)i;
+    cb_registered = f == receive;
+    assert(f == receive || f == NULL);
+    order[order_n++ % 8] = f ? 1 : 0;
+    return 0;
+}
+esp_err_t tinyusb_net_tx_ring_send(const void *b, uint16_t n) {
+    ring_calls++;
+    if (ring_hook) { void (*h)(void) = ring_hook; ring_hook = NULL; h(); }
+    if (ring_result == ESP_OK) {
+        memcpy(ring_seen, b, n);
+        ring_seen_len = n;
+    }
+    return ring_result;
+}
+void tinyusb_net_tx_ring_flush(void) { flushes++; order[order_n++ % 8] = 2; }
+int xTaskCreatePinnedToCore(void (*f)(void *), const char *n, uint32_t s, void *a, unsigned p, TaskHandle_t *h, int c) {
+    (void)f; (void)n; (void)s; (void)p; (void)c;
+    if (fail_task) return 0;
+    worker_arg = a;
+    *h = (TaskHandle_t)&worker_arg;
+    return pdPASS;
+}
+int xTaskNotifyGive(TaskHandle_t h) { assert(h); notifies++; return pdPASS; }   /* allowed in a callback: it never blocks */
+/* The worker's retry wait: time passes until the armed timer fires (or the timeout), and the test may act meanwhile. */
+uint32_t ulTaskNotifyTake(int c, TickType_t t) {
+    (void)c;
+    assert(!in_callback);
+    waits++;
+    if (timer_armed) { now_us_v = (int64_t)timer_due; timer_armed = false; timer_cb(NULL); }
+    else now_us_v += (int64_t)t * TEST_TICK_MS * 1000;
+    if (wait_hook) wait_hook();
+    return 1;
+}
+void vTaskDelay(TickType_t t) { (void)t; assert(0 && "the bridge never sleeps on the RTOS tick"); }
+TickType_t xTaskGetTickCount(void) { return 0; }
+int64_t esp_timer_get_time(void) { return now_us_v; }
+esp_err_t esp_timer_create(const esp_timer_create_args_t *a, esp_timer_handle_t *h) { if (fail_timer) return -1; timer_cb = a->callback; *h = &timer_cb; return 0; }
+esp_err_t esp_timer_start_once(esp_timer_handle_t h, uint64_t us) { (void)h; assert(!in_callback); if (timer_armed) return ESP_ERR_INVALID_STATE; timer_armed = true; timer_due = (uint64_t)now_us_v + us; return 0; }
+esp_err_t esp_timer_delete(esp_timer_handle_t h) { (void)h; return 0; }
+unsigned uxTaskGetStackHighWaterMark(TaskHandle_t h) { (void)h; return 1234; }
+void tdongle_pm_note_activity(void) { note_activity_calls++; }
+static unsigned char ce_seen[2000];
+static uint16_t ce_len;
+static esp_err_t wifi_tx(void *b, uint16_t n) {
+    if (n > 34 && (((unsigned char *)b)[15] & 3) == 3) { memcpy(ce_seen, b, n); ce_len = n; }
+    assert(!in_callback);                /* the Wi-Fi driver is called by the worker only */
+    esp_err_t r = tx_calls < tx_script_n ? tx_script[tx_calls] : tx_default;
+    tx_calls++;
+    if (r == ESP_OK) {
+        memcpy(tx_seen, b, n);
+        tx_seen_len = n;
+    }
+    return r;
+}
+
+/* ---- helpers ---- */
+static const uint8_t mac[6] = {2, 1, 2, 3, 4, 5};
+static tdongle_l2_stats_t stats(void) { tdongle_l2_stats_t s; tdongle_l2_stats(&s); return s; }
+static void frame(uint8_t *f, size_t len, const uint8_t *dst, const uint8_t *src, unsigned tag) {
+    memset(f, 0, len);
+    memcpy(f, dst, 6);
+    memcpy(f + 6, src, 6);
+    for (size_t i = 12; i < len; i++) f[i] = (uint8_t)(tag + i);
+}
+static const uint8_t unicast_dst[6] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55}, bcast[6] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+                     mcast[6] = {0x01, 0x00, 0x5e, 0x00, 0x00, 0xfb}, peer[6] = {0x00, 0x1a, 0x2b, 0x3c, 0x4d, 0x5e};
+static esp_err_t wifi_in(const uint8_t *f, uint16_t len) {   /* the driver calls the RX callback in the Wi-Fi task */
+    in_callback = true;
+    esp_err_t r = receive((void *)f, len, (void *)f);
+    in_callback = false;
+    return r;
+}
+static esp_err_t host_in(const uint8_t *f, uint16_t len) {   /* TinyUSB task */
+    in_callback = true;
+    esp_err_t r = tdongle_l2_host((void *)f, len);
+    in_callback = false;
+    return r;
+}
+static unsigned pump(void) { return drain(); }              /* one wake-up of the worker */
+static unsigned resumes;
+static bool room = true;
+static bool wifi_room(void) { assert(!in_callback); return room; }
+static void rx_resume(void) { assert(!in_callback); resumes++; }
+static tdongle_l2_config_t config(void) {
+    return (tdongle_l2_config_t){.wifi_tx = wifi_tx, .wifi_room = wifi_room, .rx_resume = rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
+}
+static void reset_world(void) {
+    freed = link_calls = flushes = notifies = note_activity_calls = ring_calls = tx_calls = tx_script_n = waits = order_n = 0;
+    ring_result = ESP_OK; tx_default = ESP_OK; now_us_v = 1000000; wait_hook = NULL; ring_hook = NULL; timer_armed = false; resumes = 0; room = true; fail_alloc = fail_task = fail_timer = false;
+}
+static void start(void) {
+    if (l2.slots) { free(l2.slots); l2.slots = NULL; }
+    reset_world();
+    tdongle_l2_config_t c = config();
+    assert(tdongle_l2_start(mac, &c) == ESP_OK);
+}
+/* The identities the counters keep, at rest. */
+static void check_identities(void) {
+    tdongle_l2_stats_t s = stats();
+    assert(s.w2h_frames == s.w2h_forwarded + s.w2h_invalid + s.w2h_own_mac + s.w2h_link_down + s.w2h_usb_not_ready + s.w2h_ring_full);
+    assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down);
+    assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_codel_drop + s.h2w_queue_depth);
+}
+
+static void test_start(void) {
+    memset(&l2, 0, sizeof(l2));
+    tdongle_l2_config_t c = config();
+    assert(tdongle_l2_start(mac, NULL) == ESP_ERR_INVALID_ARG);
+    c.wifi_tx = NULL; assert(tdongle_l2_start(mac, &c) == ESP_ERR_INVALID_ARG);
+    c = config(); c.task_stack = 0; assert(tdongle_l2_start(mac, &c) == ESP_ERR_INVALID_ARG);
+    c = config();
+    fail_alloc = true; assert(tdongle_l2_start(mac, &c) == ESP_ERR_NO_MEM && !l2.slots); fail_alloc = false;
+    fail_task = true; assert(tdongle_l2_start(mac, &c) == ESP_ERR_NO_MEM && !l2.slots); fail_task = false;   /* the slots are freed again */
+    assert(tdongle_l2_host((void *)bcast, 60) == ESP_ERR_INVALID_STATE);    /* not started: nothing to hand over, nothing counted */
+    assert(stats().h2w_frames == 0);
+    assert(tdongle_l2_start(mac, &c) == ESP_OK && l2.slots && l2.worker);
+    assert(tdongle_l2_start(mac, &c) == ESP_ERR_INVALID_STATE);             /* once */
+    free(l2.slots); l2.slots = NULL;
+}
+
+/* Wi-Fi -> host */
+static void test_to_host(void) {
+    start();
+    uint8_t f[1600];
+    /* Before the link is up the callback is not registered; a frame that races the disconnect is counted and its buffer freed. */
+    frame(f, 600, unicast_dst, peer, 1);
+    assert(wifi_in(f, 600) == ESP_OK && ring_calls == 0 && stats().w2h_link_down == 1 && freed == 1);
+    tdongle_l2_link(true);
+    assert(cb_registered && link_calls == 1 && flushes == 1);
+    /* ARP, IPv4 (DHCP) and IPv6 bytes reach the ring exactly as received: no address rewriting. */
+    for (unsigned k = 0; k < 3; k++) {
+        const uint16_t len = 100 + 400 * k;
+        frame(f, len, k == 0 ? bcast : unicast_dst, peer, 7 * k);
+        f[12] = k == 2 ? 0x86 : 0x08; f[13] = k == 0 ? 0x06 : k == 1 ? 0x00 : 0xdd;
+        assert(wifi_in(f, len) == ESP_OK && ring_seen_len == len && !memcmp(ring_seen, f, len));
+    }
+    assert(stats().w2h_forwarded == 3 && freed == 4);
+    /* Filters: our own MAC as the source (the host's frame echoed back), a runt, an oversize frame. */
+    frame(f, 600, unicast_dst, mac, 3);
+    unsigned calls = ring_calls;
+    assert(wifi_in(f, 600) == ESP_OK && ring_calls == calls && stats().w2h_own_mac == 1);
+    frame(f, 600, unicast_dst, peer, 4);
+    assert(wifi_in(f, 13) == ESP_OK && wifi_in(f, TDONGLE_L2_FRAME_MAX + 1) == ESP_OK && wifi_in(f, 0) == ESP_OK && stats().w2h_invalid == 3);
+    assert(wifi_in(f, TDONGLE_L2_FRAME_MAX) == ESP_OK && stats().w2h_forwarded == 4 && ring_seen_len == TDONGLE_L2_FRAME_MAX);
+    assert(wifi_in(f, 14) == ESP_OK && stats().w2h_forwarded == 5);
+    /* Ring refusals are told apart: full (backpressure) and not ready (cable out). */
+    ring_result = ESP_ERR_NO_MEM; assert(wifi_in(f, 600) == ESP_OK);
+    ring_result = ESP_ERR_INVALID_STATE; assert(wifi_in(f, 600) == ESP_OK && wifi_in(f, 600) == ESP_OK);
+    ring_result = ESP_ERR_INVALID_ARG; assert(wifi_in(f, 600) == ESP_OK);
+    ring_result = ESP_OK;
+    tdongle_l2_stats_t s = stats();
+    assert(s.w2h_ring_full == 1 && s.w2h_usb_not_ready == 2 && s.w2h_invalid == 4 && s.w2h_frames == 14);
+    check_identities();
+    assert(freed == s.w2h_frames);       /* the driver buffer: once per call, whatever happened to the frame */
+    /* The link goes down: the callback is unregistered, later frames are counted, and the ring is flushed. */
+    tdongle_l2_link(false);
+    assert(!cb_registered && flushes == 2 && !stats().linked);
+    assert(wifi_in(f, 600) == ESP_OK && stats().w2h_link_down == 2);
+    assert(notifies == 0);               /* the receive path never wakes the l2 worker */
+    check_identities();
+}
+
+/* Which frames raise the clock: a unicast frame that is forwarded, in either direction; never chatter, never a frame that is dropped. */
+static void test_pm_notes(void) {
+    start();
+    uint8_t f[200];
+    tdongle_l2_link(true);
+    note_activity_calls = 0;
+    frame(f, 100, unicast_dst, peer, 1); wifi_in(f, 100);
+    assert(note_activity_calls == 1);
+    frame(f, 100, bcast, peer, 1); wifi_in(f, 100);
+    frame(f, 100, mcast, peer, 1); wifi_in(f, 100);
+    assert(note_activity_calls == 1 && stats().w2h_forwarded == 3);      /* forwarded, but not a reason to hold 240 MHz */
+    frame(f, 100, unicast_dst, mac, 1); wifi_in(f, 100);                 /* filtered */
+    wifi_in(f, 5);                                                       /* invalid */
+    assert(note_activity_calls == 1);
+    frame(f, 100, peer, mac, 2); host_in(f, 100);
+    assert(note_activity_calls == 2 && stats().h2w_queued == 1);
+    frame(f, 100, bcast, mac, 2); host_in(f, 100);                       /* DHCP discover, ARP request */
+    assert(note_activity_calls == 2 && stats().h2w_queued == 2);
+    frame(f, 100, peer, peer, 2); host_in(f, 100);                       /* foreign source */
+    host_in(f, 10);                                                      /* runt */
+    assert(note_activity_calls == 2);
+    tdongle_l2_link(false);
+    frame(f, 100, peer, mac, 2); host_in(f, 100);                        /* link down */
+    assert(note_activity_calls == 2);
+    pump();
+    check_identities();
+}
+
+/* host -> Wi-Fi */
+static void test_to_wifi(void) {
+    start();
+    uint8_t f[1600];
+    frame(f, 600, peer, mac, 1);
+    assert(host_in(f, 600) == ESP_ERR_INVALID_STATE && stats().h2w_link_down == 1);          /* Wi-Fi not up yet */
+    tdongle_l2_link(true);
+    notifies = 0;
+    for (unsigned k = 0; k < 3; k++) {                                                          /* ARP, DHCP, IPv6: bytes untouched, source is the STA MAC */
+        const uint16_t len = 120 + 500 * k;
+        frame(f, len, k == 0 ? bcast : peer, mac, 9 * k);
+        assert(host_in(f, len) == ESP_OK && notifies == k + 1);
+        assert(pump() == 1 && tx_seen_len == len && !memcmp(tx_seen, f, len));
+    }
+    assert(stats().h2w_sent == 3 && stats().h2w_queue_depth == 0);
+    /* Filters. */
+    frame(f, 600, peer, peer, 1);
+    assert(host_in(f, 600) == ESP_OK && stats().h2w_foreign_mac == 1);
+    assert(host_in(f, 13) == ESP_ERR_INVALID_ARG && host_in(f, TDONGLE_L2_FRAME_MAX + 1) == ESP_ERR_INVALID_ARG && stats().h2w_invalid == 2);
+    frame(f, TDONGLE_L2_FRAME_MAX, peer, mac, 5);
+    assert(host_in(f, TDONGLE_L2_FRAME_MAX) == ESP_OK && pump() == 1 && tx_seen_len == TDONGLE_L2_FRAME_MAX && !memcmp(tx_seen, f, tx_seen_len));
+    assert(tx_calls == 4);                                                                       /* nothing filtered reached the driver */
+    /* A full queue holds the offer (USB backpressure), drops nothing, keeps the old ones in order, and never blocks. */
+    frame(f, 200, peer, mac, 0);
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) { f[20] = (uint8_t)i; assert(host_in(f, 200) == ESP_OK); }
+    assert(stats().h2w_queue_depth == TDONGLE_L2_HOST_QUEUE_LIMIT && stats().h2w_queue_high_water == TDONGLE_L2_HOST_QUEUE_LIMIT);   /* the limit, not the slot count */
+    f[20] = 99;
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD && host_in(f, 200) == TUSB_NET_RX_HOLD && stats().h2w_held == 2);
+    unsigned sent_before = stats().h2w_sent;
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) {
+        /* one frame at a time: it is the oldest, tx_seen proves the order */
+        unsigned tail = atomic_load(&l2.tail);
+        assert(l2.slots[tail & SLOT_MASK].bytes[20] == (uint8_t)i);
+        deliver(&l2.slots[tail & SLOT_MASK]);
+        atomic_store(&l2.tail, tail + 1);
+        assert(tx_seen[20] == (uint8_t)i);
+    }
+    assert(stats().h2w_sent == sent_before + TDONGLE_L2_HOST_QUEUE_LIMIT && stats().h2w_queue_depth == 0);
+    check_identities();
+    assert(tx_calls == 4 + TDONGLE_L2_HOST_QUEUE_LIMIT);
+}
+
+static unsigned owed_calls;
+static void deliver_one_manually(void) { unsigned tail = atomic_load(&l2.tail); deliver(&l2.slots[tail & SLOT_MASK]); atomic_store(&l2.tail, tail + 1); }
+/* USB backpressure: hold at the limit, resume exactly once when the worker drains to the resume depth, no wedge on any interleaving. */
+static void test_backpressure(void) {
+    uint8_t f[200];
+    start(); tdongle_l2_link(true);
+    frame(f, 200, peer, mac, 1);
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD && stats().h2w_held == 1 && stats().h2w_frames == TDONGLE_L2_HOST_QUEUE_LIMIT && l2.held);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD && stats().h2w_held == 2 && resumes == 0);        /* nothing drained: nothing to resume */
+    check_identities();
+    /* The worker drains: resume is asked for when the depth reaches RESUME_DEPTH, once, not at every frame. */
+    assert(pump() == TDONGLE_L2_HOST_QUEUE_LIMIT);
+    assert(resumes == 1 && !l2.held && stats().h2w_resumes == 1);
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && resumes == 1);                           /* re-offered datagram accepted; no flag, no resume */
+    check_identities();
+    /* Interleaving A: the worker drains between the callback's full check and its re-check. The callback must not strand the datagram: it sees the
+     * room (and takes it) or the worker's resume covers it. */
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    /* simulate: the callback has set held and the worker finished everything before the callback re-reads the tail */
+    atomic_store(&l2.held, true);
+    pump();                                                                                     /* the worker sees the flag and resumes */
+    assert(resumes == 2 && !l2.held);
+    assert(host_in(f, 200) == ESP_OK);                                                          /* the re-offer is accepted */
+    pump();
+    /* Interleaving B: held is set, the worker has already taken it (resume owed), and the callback's re-check finds room: it must still say HOLD
+     * (the owed resume re-offers this datagram) rather than take the room twice. */
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    atomic_store(&l2.held, true);                      /* ... the callback, after storing the flag */
+    deliver_one_manually();                            /* the worker consumed one frame meanwhile (depth 2: no resume yet: above the resume depth) */
+    assert(host_in(f, 200) == ESP_OK);                 /* room: a normal enqueue (limit 3, depth 2). held was left set by the earlier store */
+    pump();
+    assert(resumes >= 3 && !l2.held);                  /* the stale flag is released by the next drain: a harmless extra resume, never a missed one */
+    /* A link change releases a held datagram (the backlog is stale). */
+    start(); tdongle_l2_link(true);
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD && l2.held);
+    tdongle_l2_link(false);
+    assert(resumes == 1 && !l2.held);
+    pump();
+    check_identities();
+    /* A wedged Wi-Fi link: frames wait for the radio's allowance, the host stays held, and the sojourn limit frees the queue; the held datagram resumes. */
+    start(); tdongle_l2_link(true);
+    room = false;
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD);
+    assert(pump() == TDONGLE_L2_HOST_QUEUE_LIMIT);
+    assert(tx_calls == 0 && stats().h2w_tx_failed == 1 && stats().h2w_sojourn_drop == TDONGLE_L2_HOST_QUEUE_LIMIT - 1 && resumes == 1);   /* the driver was never called while the allowance was full; the first frame used its window, the rest had aged out behind it */
+    room = true;
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && stats().h2w_sent == 1);
+    check_identities();
+    (void)owed_calls;
+}
+
+/* The slot counters run free: the queue keeps working across the wrap of the 32-bit counters. */
+static void test_counter_wrap(void) {
+    start();
+    uint8_t f[100];
+    tdongle_l2_link(true);
+    atomic_store(&l2.head, 0xfffffffcu); atomic_store(&l2.tail, 0xfffffffcu);
+    for (unsigned round = 0; round < 10; round++) {
+        for (unsigned i = 0; i < 3; i++) { frame(f, 100, peer, mac, round * 3 + i); assert(host_in(f, 100) == ESP_OK); }
+        for (unsigned i = 0; i < 3; i++) {
+            unsigned tail = atomic_load(&l2.tail);
+            deliver(&l2.slots[tail & SLOT_MASK]);
+            atomic_store(&l2.tail, tail + 1);
+            assert(tx_seen[20] == (uint8_t)(round * 3 + i + 20));
+        }
+    }
+    assert(atomic_load(&l2.head) == 0xfffffffcu + 30 && stats().h2w_sent == 30 && stats().h2w_queue_depth == 0);
+    check_identities();
+}
+
+/* A link change makes what was queued stale, in both directions; a frame is never sent into the wrong association. */
+static void test_link_flap(void) {
+    start();
+    uint8_t f[200];
+    tdongle_l2_link(true);
+    frame(f, 200, peer, mac, 1);
+    for (unsigned i = 0; i < 3; i++) assert(host_in(f, 200) == ESP_OK);
+    tdongle_l2_link(false);                       /* the association ended with three frames queued */
+    assert(pump() == 3 && tx_calls == 0 && stats().h2w_link_down_queued == 3);
+    for (unsigned i = 0; i < 4; i++) assert(host_in(f, 200) == ESP_ERR_INVALID_STATE);   /* link down: refused, counted */
+    assert(stats().h2w_link_down == 4);
+    tdongle_l2_link(true);
+    for (unsigned i = 0; i < 3; i++) assert(host_in(f, 200) == ESP_OK);
+    tdongle_l2_link(false);                       /* a quick flap: down and up again before the worker ran */
+    tdongle_l2_link(true);
+    assert(pump() == 3 && tx_calls == 0 && stats().h2w_stale == 3);          /* queued under the first association of this link: stale */
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && tx_calls == 1);       /* the new association works */
+    check_identities();
+    /* tdongle_l2_link orders its steps: stop (or start) the callback, flush the ring, then tell the host. */
+    order_n = 0; tdongle_l2_link(false);
+    assert(order_n == 3 && order[0] == 0 && order[1] == 2 && order[2] == 3);
+    order_n = 0; tdongle_l2_link(true);
+    assert(order_n == 3 && order[0] == 2 && order[1] == 1 && order[2] == 3);   /* connect: flush the old association's frames, then open the callback */
+    assert(stats().link_changes == 7);
+}
+
+static unsigned hook_calls;
+static void drop_link_in_wait(void) { if (++hook_calls == 1) tdongle_l2_link(false); }
+static void advance_us(int64_t us) { now_us_v += us; }
+/* A refused transmit is retried on the retry timer (not the RTOS tick) until the frame's sojourn limit, never forever, only when retrying can help. */
+static void test_retry(void) {
+    uint8_t f[200];
+    frame(f, 200, peer, mac, 1);
+    const unsigned limit_us = TDONGLE_L2_SOJOURN_MS * 1000u;
+    /* Refused twice, then taken: two 500 us waits, not two 10 ms ticks. */
+    start(); tdongle_l2_link(true);
+    tx_script[0] = ESP_ERR_NO_MEM; tx_script[1] = ESP_ERR_NO_MEM; tx_script_n = 2;
+    assert(host_in(f, 200) == ESP_OK);
+    const int64_t t0 = now_us_v;
+    assert(pump() == 1);
+    assert(stats().h2w_sent == 1 && stats().h2w_tx_retries == 2 && waits == 2 && now_us_v - t0 == 2 * TDONGLE_L2_RETRY_US && stats().h2w_last_tx_error == ESP_ERR_NO_MEM);
+    /* Always refused: it stops at the sojourn limit measured from the callback, counts one failure, and the frame behind it gets its own full window. */
+    start(); tdongle_l2_link(true);
+    tx_default = ESP_ERR_NO_MEM;
+    assert(host_in(f, 200) == ESP_OK);
+    advance_us(5000);                                  /* it already waited 5 ms in the queue: only 15 ms of retries remain */
+    assert(pump() == 1);
+    assert(stats().h2w_tx_failed == 1 && stats().h2w_tx_retries == (limit_us - 5000) / TDONGLE_L2_RETRY_US && now_us_v - t0 > 0);
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && stats().h2w_tx_failed == 2 && stats().h2w_tx_retries == (limit_us - 5000) / TDONGLE_L2_RETRY_US + limit_us / TDONGLE_L2_RETRY_US);
+    /* A final error is not retried. */
+    start(); tdongle_l2_link(true);
+    tx_default = -1;    /* ESP_FAIL */
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && tx_calls == 1 && waits == 0 && stats().h2w_tx_failed == 1 && stats().h2w_last_tx_error == -1);
+    /* The link drops while the worker waits: the frame is abandoned at once. */
+    start(); tdongle_l2_link(true);
+    tx_default = ESP_ERR_NO_MEM; hook_calls = 0; wait_hook = drop_link_in_wait;
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && tx_calls == 2 && stats().h2w_tx_failed == 1);
+    check_identities();
+    /* The timer cannot be created: the bridge does not start (nothing half built). */
+    free(l2.slots); l2.slots = NULL;                      /* the previous start's queue: the harness frees it (production never stops the bridge) */
+    memset(&l2, 0, sizeof(l2)); fail_timer = true;
+    tdongle_l2_config_t c = config();
+    assert(tdongle_l2_start(mac, &c) == ESP_ERR_NO_MEM && !l2.slots);
+    fail_timer = false;
+}
+
+/* The standing queue is bounded in time too: a frame older than the sojourn limit when the worker reaches it is dropped unsent. */
+static void test_sojourn(void) {
+    uint8_t f[200];
+    frame(f, 200, peer, mac, 1);
+    start(); tdongle_l2_link(true);
+    for (unsigned i = 0; i < 3; i++) assert(host_in(f, 200) == ESP_OK);
+    advance_us(TDONGLE_L2_SOJOURN_MS * 1000u - 1);       /* just inside the limit: sent */
+    assert(pump() == 3 && stats().h2w_sent == 3 && stats().h2w_sojourn_drop == 0);
+    assert(stats().h2w_wait_us_max == TDONGLE_L2_SOJOURN_MS * 1000u - 1 && stats().h2w_wait_us_sum == 3 * (TDONGLE_L2_SOJOURN_MS * 1000u - 1));
+    for (unsigned i = 0; i < 3; i++) assert(host_in(f, 200) == ESP_OK);
+    advance_us(TDONGLE_L2_SOJOURN_MS * 1000u);           /* at the limit: dropped, counted, never sent */
+    tx_calls = 0;
+    assert(pump() == 3 && tx_calls == 0 && stats().h2w_sojourn_drop == 3);
+    check_identities();
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && stats().h2w_sent == 4);     /* the queue recovers at once */
+    assert(stats().h2w_tx_us_max == 0);                                            /* the stub's call takes no time */
+    check_identities();
+}
+
+/* tdongle_l2_stats reads tail before head: a worker that finishes frames between the loads cannot make the depth negative. */
+static void test_depth_never_wraps(void) {
+    start(); tdongle_l2_link(true);
+    atomic_store(&l2.head, 7); atomic_store(&l2.tail, 7);
+    assert(stats().h2w_queue_depth == 0);
+    atomic_store(&l2.head, 9); atomic_store(&l2.tail, 7);
+    assert(stats().h2w_queue_depth == 2);
+}
+
+static void late_link_down(void) { tdongle_l2_link(false); }
+/* A frame in the RX callback while the association ends passes the link check, is stamped with the NEW generation by the ring, and would
+ * outlive the change: the callback notices the epoch moved and flushes again. */
+static void test_rx_race(void) {
+    uint8_t f[200];
+    start(); tdongle_l2_link(true);
+    frame(f, 200, unicast_dst, peer, 1);
+    const unsigned flushes_before = flushes;
+    ring_hook = late_link_down;                          /* the event task runs inside the ring send */
+    assert(wifi_in(f, 200) == ESP_OK);
+    assert(stats().w2h_raced == 1 && stats().w2h_forwarded == 1 && flushes == flushes_before + 2);   /* the change's own flush, and the callback's */
+    wifi_in(f, 200);                                     /* link is down now: counted, no race */
+    assert(stats().w2h_raced == 1 && stats().w2h_link_down == 1);
+    check_identities();
+}
+
+static void open_room_after_three(void) { if (++hook_calls == 3) room = true; }
+
+/* Tuning: bounds are checked as a whole, a rejected set changes nothing, a set takes effect at once. */
+static void test_tuning(void) {
+    start();
+    tdongle_l2_tuning_t t, back; tdongle_l2_get_tuning(&t);
+    assert(t.queue_limit == TDONGLE_L2_HOST_QUEUE_LIMIT && t.resume_depth == TDONGLE_L2_HOST_RESUME_DEPTH && t.sojourn_ms == TDONGLE_L2_SOJOURN_MS && t.codel &&
+           t.codel_target_us == TDONGLE_CODEL_TARGET_US_DEFAULT && t.codel_interval_ms == TDONGLE_CODEL_INTERVAL_MS_DEFAULT);
+    tdongle_l2_tuning_t bad = t;
+    bad.queue_limit = 0; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.queue_limit = TDONGLE_L2_HOST_SLOTS + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.resume_depth = t.queue_limit; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.sojourn_ms = TDONGLE_L2_SOJOURN_MS_MIN - 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.sojourn_ms = TDONGLE_L2_SOJOURN_MS_MAX + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.codel_target_us = TDONGLE_L2_CODEL_TARGET_US_MIN - 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.codel_target_us = TDONGLE_L2_CODEL_TARGET_US_MAX + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.codel_interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MIN - 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.codel_interval_ms = TDONGLE_L2_CODEL_INTERVAL_MS_MAX + 1; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
+    bad = t; bad.queue_limit = 5; bad.sojourn_ms = 0; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);   /* one bad field: nothing applied */
+    tdongle_l2_get_tuning(&back); assert(!memcmp(&back, &t, sizeof(t)));
+    t.queue_limit = 5; t.resume_depth = 2; t.sojourn_ms = 40;
+    assert(tdongle_l2_set_tuning(&t) == ESP_OK);
+    tdongle_l2_get_tuning(&back); assert(!memcmp(&back, &t, sizeof(t)));
+    uint8_t f[200]; frame(f, 200, peer, mac, 1);
+    tdongle_l2_link(true);
+    for (unsigned i = 0; i < 5; i++) assert(host_in(f, 200) == ESP_OK);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD);                                         /* the new limit */
+    assert(pump() == 5 && resumes == 1);                                                  /* resumed at depth 2 (once) */
+    advance_us(40000); assert(host_in(f, 200) == ESP_OK);
+    advance_us(40000); tx_calls = 0; assert(pump() == 1 && tx_calls == 0 && stats().h2w_sojourn_drop == 1);   /* the new sojourn limit: 40 ms */
+    check_identities();
+}
+
+
+/* The radio's dwell: a frame that waited for room is counted, with how long. */
+static void test_room_wait_stats(void) {
+    uint8_t f[200]; frame(f, 200, peer, mac, 1);
+    start(); tdongle_l2_link(true);
+    room = false;
+    assert(host_in(f, 200) == ESP_OK);
+    hook_calls = 0;
+    wait_hook = open_room_after_three;
+    assert(pump() == 1);
+    wait_hook = NULL;
+    tdongle_l2_stats_t s = stats();
+    assert(s.h2w_room_waits == 1 && s.h2w_room_wait_us_max == 3 * TDONGLE_L2_RETRY_US && s.h2w_room_wait_us_sum == 3 * TDONGLE_L2_RETRY_US && s.h2w_sent == 1);
+    check_identities();
+}
+
+
+/* ---- CoDel at the hand-to-radio ---- */
+static uint16_t ipv4_frame(uint8_t *f, unsigned ecn, unsigned proto, unsigned payload, bool syn) {
+    memset(f, 0, 200);
+    memcpy(f, peer, 6); memcpy(f + 6, mac, 6);
+    f[12] = 0x08; f[13] = 0x00; f[14] = 0x45; f[15] = (uint8_t)ecn;
+    const unsigned total = 20 + payload; f[16] = (uint8_t)(total >> 8); f[17] = (uint8_t)total; f[22] = 64; f[23] = (uint8_t)proto;
+    f[26] = 10; f[29] = 1; f[30] = 10; f[33] = 2;
+    if (proto == 6) { f[14 + 20 + 12] = 0x50; f[14 + 20 + 13] = syn ? 0x02 : 0x10; }
+    uint32_t sum = 0;
+    for (unsigned i = 14; i < 34; i += 2) sum += (f[i] << 8) | f[i + 1];
+    while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+    f[24] = (uint8_t)(~sum >> 8); f[25] = (uint8_t)~sum;
+    return (uint16_t)(14 + total);
+}
+static bool ipv4_checksum_ok(const uint8_t *f) {
+    uint32_t sum = 0;
+    for (unsigned i = 14; i < 34; i += 2) sum += (f[i] << 8) | f[i + 1];
+    while (sum >> 16) sum = (sum & 0xffff) + (sum >> 16);
+    return (uint16_t)sum == 0xffff;
+}
+static void codel_on(unsigned target_us, unsigned interval_ms) {
+    tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t);
+    t.codel = true; t.codel_target_us = target_us; t.codel_interval_ms = interval_ms;
+    assert(tdongle_l2_set_tuning(&t) == ESP_OK);
+}
+/* Saturate the pipe with real holds: each iteration the host offers one more frame than the queue takes (the last offer is answered TUSB_NET_RX_HOLD), time
+ * passes, and the worker drains (and resumes). `iterations` of `step_us` each. */
+static void saturate(unsigned iterations, unsigned step_us, const uint8_t *f, uint16_t len, bool unused) {
+    (void)unused;
+    for (unsigned i = 0; i < iterations; i++) {
+        for (unsigned k = 0; k <= TDONGLE_L2_HOST_QUEUE_LIMIT; k++) host_in(f, len);
+        advance_us(step_us);
+        pump();
+    }
+}
+static void test_codel(void) {
+    uint8_t f[200], g[200];
+    /* Off: nothing is touched, however long the pipe is full. */
+    start(); tdongle_l2_link(true);
+    { tdongle_l2_tuning_t d; tdongle_l2_get_tuning(&d); assert(d.codel && d.codel_target_us == 5000 && d.codel_interval_ms == 100); d.codel = false; assert(tdongle_l2_set_tuning(&d) == ESP_OK); }   /* the defaults are RFC 8289's, on */
+    uint16_t n = ipv4_frame(f, 2, 17, 100, false);
+    saturate(200, 2000, f, n, false);
+    assert(stats().h2w_codel_signals == 0 && stats().h2w_ce_marked == 0 && stats().h2w_codel_drop == 0 && !memcmp(tx_seen, f, n));
+    /* On, ECT(0): marked CE once the pipe has been full for a whole interval, never dropped; checksum valid; payload and addresses untouched. */
+    start(); tdongle_l2_link(true);
+    codel_on(5000, 100);
+    saturate(30, 2000, f, n, false);                 /* 60 ms: below the interval */
+    assert(stats().h2w_codel_signals == 0);
+    saturate(150, 2000, f, n, false);                /* 300 ms more */
+    tdongle_l2_stats_t s = stats();
+    assert(s.h2w_ce_marked > 3 && s.h2w_codel_drop == 0 && s.h2w_codel_signals == s.h2w_ce_marked);
+    assert(s.h2w_sent == s.h2w_queued && s.h2w_codel_count > 0);       /* a marked frame is a sent frame */
+    ce_len = 0;
+    for (unsigned i = 0; i < 400 && !ce_len; i++) saturate(1, 2000, f, n, false);
+    assert(ce_len == n && (ce_seen[15] & 3) == 3 && ipv4_checksum_ok(ce_seen));
+    assert(!memcmp(ce_seen, f, 15) && !memcmp(ce_seen + 16, f + 16, 8) && !memcmp(ce_seen + 26, f + 26, n - 26));   /* only TOS and the header checksum changed */
+    check_identities();
+    /* Not-ECT frames are dropped at the same rate, counted separately and in the identity. */
+    start(); tdongle_l2_link(true);
+    codel_on(5000, 100);
+    n = ipv4_frame(f, 0, 17, 100, false);
+    saturate(300, 2000, f, n, false);
+    s = stats();
+    assert(s.h2w_codel_drop > 3 && s.h2w_ce_marked == 0 && s.h2w_codel_signals == s.h2w_codel_drop);
+    assert(s.h2w_sent + s.h2w_codel_drop == s.h2w_queued - s.h2w_queue_depth);
+    check_identities();
+    /* Frames CoDel must never touch: ARP, SYN, DHCP: never marked, never dropped, whatever the signal. */
+    unsigned dropped = stats().h2w_codel_drop, signals = stats().h2w_codel_signals;
+    memset(g, 0, 60); memcpy(g, peer, 6); memcpy(g + 6, mac, 6); g[12] = 0x08; g[13] = 0x06;                       /* ARP */
+    saturate(20, 2000, g, 60, false);
+    n = ipv4_frame(f, 0, 6, 20, true);  saturate(20, 2000, f, n, false);                                          /* TCP SYN */
+    n = ipv4_frame(f, 0, 17, 20, false); f[14 + 20 + 2] = 0; f[14 + 20 + 3] = 67; saturate(20, 2000, f, n, false);  /* DHCP */
+    assert(stats().h2w_codel_drop == dropped && stats().h2w_codel_signals == signals);
+    check_identities();
+    /* The holds stop: after an interval without one the signal is zero, CoDel leaves its dropping state, and nothing more is signalled. */
+    n = ipv4_frame(f, 0, 17, 100, false);
+    advance_us(150000);
+    const unsigned before = stats().h2w_codel_drop + stats().h2w_ce_marked;
+    for (unsigned i = 0; i < 400; i++) { host_in(f, n); pump(); advance_us(2500); }       /* 4 Mbit/s of 100 B... a steady unheld flow */
+    assert(stats().h2w_codel_drop + stats().h2w_ce_marked == before && stats().h2w_codel_count == 0);
+    /* Retuning restarts the controller. */
+    codel_on(1000, 50);
+    saturate(10, 2000, f, n, false);
+    check_identities();
+}
+
+/* The hold-evidenced busy period (ADR 0023 amendment 7). A sender below the pipe's rate is never held and is never signalled, whatever its rate; a sender
+ * that saturates the pipe is held again and again and is signalled once the holds have lasted target + interval; holds that stop for an interval end it. */
+static void steady_flow(unsigned frames, unsigned spacing_us, uint8_t *f, uint16_t n) { for (unsigned i = 0; i < frames; i++) { host_in(f, n); pump(); advance_us(spacing_us); } }
+static void test_hold_evidenced_period(void) {
+    uint8_t f[1600], g[1600];
+    /* 1. The case the board found: a steady non-responsive UDP flow at about 5 Mbit/s (1,400 B every 2.2 ms), below the pipe, no holds: ZERO signals in 4 s. */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    uint16_t n = ipv4_frame(f, 0, 17, 1300, false);                    /* not-ECT UDP: the worst case, a drop if it is ever signalled */
+    steady_flow(1800, 2200, f, n);
+    tdongle_l2_stats_t s = stats();
+    assert(s.h2w_held == 0 && s.h2w_codel_signals == 0 && s.h2w_codel_drop == 0 && s.h2w_ce_marked == 0 && s.h2w_sent == 1800 && s.h2w_signal_us_max < 5000);
+    /* ... and the same at 2.5 ms spacing with 6 ms gaps mixed in (the old gap-based signal restarted on those; this one never started). */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    for (unsigned i = 0; i < 1000; i++) { host_in(f, n); pump(); advance_us(i % 7 == 0 ? 6500 : 2200); }
+    assert(stats().h2w_held == 0 && stats().h2w_codel_signals == 0);
+    /* 2. A saturating flow with holds recurring every 2 ms: no signal for target + interval, then they start and speed up. */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    n = ipv4_frame(f, 0, 17, 100, false);
+    unsigned first_us = 0, t0 = (unsigned)now_us_v;
+    for (unsigned i = 0; i < 400 && !first_us; i++) { saturate(1, 2000, f, n, false); if (stats().h2w_codel_signals) first_us = (unsigned)now_us_v - t0; }
+    assert(stats().h2w_held > 20 && first_us >= 100000 && first_us <= 112000);       /* the first hold started the period; one interval of excess later, the first signal */
+    saturate(300, 2000, f, n, false);
+    assert(stats().h2w_codel_signals >= 6 && stats().h2w_codel_count >= 2);
+    /* 3. The holds stop for an interval: the signal is zero, CoDel leaves its dropping state (count 0), and a steady unheld flow is never signalled again. */
+    advance_us(120000);
+    const unsigned acts = stats().h2w_codel_signals;
+    steady_flow(600, 2200, f, n);
+    assert(stats().h2w_codel_signals == acts && stats().h2w_codel_count == 0);
+    /* 4. Isolated holds (one burst every 150 ms, an interval and a half apart) never form a period: no signal in 6 s. */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    for (unsigned round = 0; round < 40; round++) {
+        saturate(1, 2000, f, n, false);                                               /* one hold */
+        steady_flow(70, 2200, f, n);                                                  /* then 150 ms of unheld traffic */
+    }
+    assert(stats().h2w_held >= 40 && stats().h2w_codel_signals == 0);
+    /* 5. Holds that DO recur within the interval (every 90 ms) are a standing backlog, however light the rest of the traffic is. */
+    start(); tdongle_l2_link(true); codel_on(5000, 100);
+    for (unsigned round = 0; round < 40; round++) { saturate(1, 2000, f, n, false); steady_flow(40, 2200, f, n); }
+    assert(stats().h2w_codel_signals > 0);
+    /* 6. The interval is CoDel's: a tuned interval moves the horizon. */
+    start(); tdongle_l2_link(true); codel_on(5000, 400);
+    t0 = (unsigned)now_us_v; first_us = 0;
+    for (unsigned i = 0; i < 400 && !first_us; i++) { saturate(1, 2000, f, n, false); if (stats().h2w_codel_signals) first_us = (unsigned)now_us_v - t0; }
+    assert(first_us >= 400000 && first_us <= 412000);
+    /* A link change forgets the period. */
+    tdongle_l2_link(false); tdongle_l2_link(true);
+    assert(hold_period_age((uint32_t)now_us_v) == 0);
+    (void)g;
+    check_identities();
+}
+
+/* What the ingress counts about ECN, always, and what a real stack's frames look like. These are assembled from the RFC 793/3168 field layouts and the
+ * header shapes macOS and Linux emit (IP options absent, TCP data offset 8 with timestamps; SYN carrying ECE|CWR; ECT(0) on data, not-ECT on SYN and pure ACK),
+ * not a capture from a machine. */
+static uint16_t tcp_frame(uint8_t *f, bool v6, unsigned tos, unsigned flags, unsigned payload) {
+    memset(f, 0, 1600);
+    memcpy(f, peer, 6); memcpy(f + 6, mac, 6);
+    unsigned ihl = 20, l4;
+    if (!v6) {
+        f[12] = 0x08; f[13] = 0x00; f[14] = 0x45; f[15] = (uint8_t)tos; l4 = 14 + ihl;
+        const unsigned total = ihl + 32 + payload; f[16] = (uint8_t)(total >> 8); f[17] = (uint8_t)total; f[20] = 0x40; f[22] = 64; f[23] = 6;
+    } else {
+        f[12] = 0x86; f[13] = 0xdd; f[14] = (uint8_t)(0x60 | (tos >> 4)); f[15] = (uint8_t)((tos & 15) << 4); l4 = 14 + 40;
+        f[18] = (uint8_t)((32 + payload) >> 8); f[19] = (uint8_t)(32 + payload); f[20] = 6; f[21] = 64;
+    }
+    f[l4] = 0xc3; f[l4 + 1] = 0x50; f[l4 + 2] = 0x14; f[l4 + 3] = 0x51; f[l4 + 12] = 0x80; f[l4 + 13] = (uint8_t)flags;        /* data offset 8 words */
+    return (uint16_t)(l4 + 32 + payload);
+}
+static void test_ecn_counters(void) {
+    uint8_t f[1600];
+    start(); tdongle_l2_link(true);
+    uint16_t n = tcp_frame(f, false, 0x00, 0xc2, 0);        /* SYN, ECE, CWR: an ECN-setup SYN, itself not-ECT, exempt (setup) */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_EXEMPT && tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYN_ECN_SETUP);
+    host_in(f, n); pump();
+    n = tcp_frame(f, false, 0x02, 0x18, 1000);               /* data: PSH|ACK, ECT(0) */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); host_in(f, n); pump();
+    n = tcp_frame(f, false, 0x00, 0x10, 0);                  /* pure ACK: not-ECT */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_NOT_ECT); host_in(f, n); pump();
+    n = tcp_frame(f, false, 0x03, 0x18, 500);                /* already CE */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CE); host_in(f, n); pump();
+    n = tcp_frame(f, true, 0x02, 0x18, 1000);                /* IPv6 data, ECT(0) */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); host_in(f, n); pump();
+    n = tcp_frame(f, true, 0x01, 0x18, 1000);                /* IPv6 data, ECT(1) */
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE); host_in(f, n); pump();
+    n = tcp_frame(f, true, 0x00, 0xc2, 0); assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYN_ECN_SETUP); host_in(f, n); pump();
+    memset(f, 0, 60); memcpy(f, peer, 6); memcpy(f + 6, mac, 6); f[12] = 0x08; f[13] = 0x06; host_in(f, 60); pump();       /* ARP */
+    tdongle_l2_stats_t s = stats();
+    assert(s.h2w_ecn_capable == 3 && s.h2w_ecn_not_ect == 1 && s.h2w_ecn_ce == 1 && s.h2w_ecn_exempt == 2 && s.h2w_ecn_not_ip == 1 && s.h2w_syn_ecn_setup == 2);
+    /* A SYN-ACK from the server (ECE, no CWR) is counted on the way to the host; one with CWR is not an accept. */
+    n = tcp_frame(f, false, 0x00, 0x52, 0);                  /* SYN|ACK|ECE */
+    assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYNACK_ECN_ACCEPT);
+    memcpy(f, mac, 6); memcpy(f + 6, peer, 6);
+    wifi_in(f, n);
+    n = tcp_frame(f, false, 0x00, 0xd2, 0);                  /* SYN|ACK|ECE|CWR */
+    assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_OTHER);
+    assert(stats().w2h_synack_ecn == 1);
+    /* IPv4 with options: the TCP header starts after the longer IP header, and everything is still found. */
+    n = tcp_frame(f, false, 0x02, 0x18, 100);
+    memmove(f + 14 + 24, f + 14 + 20, n - 14 - 20); memset(f + 14 + 20, 0, 4); f[14] = 0x46; n += 4;
+    assert(tdongle_ecn_classify(f, n) == TDONGLE_ECN_CAPABLE);
+    f[14 + 24 + 13] = 0xc2; assert(tdongle_tcp_ecn_syn(f, n) == TDONGLE_TCP_SYN_ECN_SETUP);
+    check_identities();
+}
+
+static void test_tick_scale(void) {
+    printf("  retry period %u us, sojourn limit %u ms, queue limit %u of %u slots (tick %d ms: unused by the worker)\n", TDONGLE_L2_RETRY_US, TDONGLE_L2_SOJOURN_MS,
+           TDONGLE_L2_HOST_QUEUE_LIMIT, TDONGLE_L2_HOST_SLOTS, TEST_TICK_MS);
+    assert(sizeof(host_slot_t) <= TDONGLE_L2_SLOT_BYTES);
+}
+
+int main(void) {
+    test_start();
+    test_to_host();
+    test_pm_notes();
+    test_to_wifi();
+    test_backpressure();
+    test_counter_wrap();
+    test_link_flap();
+    test_retry();
+    test_sojourn();
+    test_depth_never_wraps();
+    test_rx_race();
+    test_tuning();
+    test_codel();
+    test_hold_evidenced_period();
+    test_ecn_counters();
+    test_room_wait_stats();
+    test_tick_scale();
+    free(l2.slots);
+    puts("Bridge l2: filters, both directions, every drop counted once, the driver buffer freed once, queue order and wrap, stale links, bounded retry, clock notes");
+    return 0;
 }

@@ -776,6 +776,128 @@ static void test_link_loss(void) {
     assert(delivered_frames == 1);
 }
 
+/* The receive path's backpressure: a callback that holds a datagram makes the class driver keep it (recv_cb false, no renew); tinyusb_net_rx_resume()
+ * defers ONE renew to the TinyUSB task however many times it is asked; a consumed datagram renews as before. */
+static esp_err_t rx_result;
+static unsigned rx_calls;
+static esp_err_t hold_cb(void *buffer, uint16_t len, void *ctx) { (void)buffer; (void)len; (void)ctx; rx_calls++; return rx_result; }
+static void test_rx_hold(void) {
+    tinyusb_net_deinit();
+    tinyusb_net_config_t ncfg = {.on_recv_callback = hold_cb};
+    assert(tinyusb_net_init(&ncfg) == ESP_OK);
+    uint8_t d[100] = {0};
+    recv_renew_calls = 0; pending = 0;
+    rx_result = ESP_OK;
+    assert(tud_network_recv_cb(d, 100) && recv_renew_calls == 1);             /* consumed: renewed */
+    rx_result = TUSB_NET_RX_HOLD;
+    assert(!tud_network_recv_cb(d, 100) && recv_renew_calls == 1 && rx_calls == 2);    /* held: refused, NOT renewed (the class keeps it) */
+    rx_result = ESP_ERR_NO_MEM;
+    assert(tud_network_recv_cb(d, 100) && recv_renew_calls == 2);             /* any other error: the datagram was dropped by the callee, move on */
+    tinyusb_net_rx_resume(); tinyusb_net_rx_resume(); tinyusb_net_rx_resume();
+    assert(pending == 1 && recv_renew_calls == 2);                            /* coalesced into one deferred call, nothing renewed in the caller */
+    run_deferred();
+    assert(pending == 0 && recv_renew_calls == 3);
+    tinyusb_net_rx_resume();                                                  /* and it can be asked again afterwards */
+    assert(pending == 1);
+    run_deferred();
+    assert(recv_renew_calls == 4);
+    tinyusb_net_deinit();
+    tinyusb_net_config_t again = {.free_tx_buffer = released_ring};
+    assert(tinyusb_net_init(&again) == ESP_OK);
+}
+
+/* The elastic cap as a run-time knob: lowering retires the chunks above it (frames in them drain first), raising lets the worker grow again. */
+static void advance_mock_idle(void) { atomic_fetch_add(&mock_tick, pdMS_TO_TICKS(IDLE_MS + 600)); }
+static void test_set_max_chunks(void) {
+    ring_reset(cfg_with(3, 10));
+    assert(tinyusb_net_tx_ring_max_chunks() == 10 && stats().max_bytes == (3 + 10 * CHUNK_FRAMES) * SLAB);
+    ntb_credit = 0; grow_to(14); pump();
+    assert(stats().chunks >= 5);
+    assert(tinyusb_net_tx_ring_set_max_chunks(13) == ESP_ERR_INVALID_ARG);
+    assert(tinyusb_net_tx_ring_set_max_chunks(2) == ESP_OK && tinyusb_net_tx_ring_max_chunks() == 2 && stats().max_bytes == (3 + 2 * CHUNK_FRAMES) * SLAB);
+    check_invariants();
+    assert(delivered_frames == 0);                                   /* nothing was dropped by lowering the cap */
+    ntb_credit = -1;
+    drain_all();
+    for (int i = 0; i < 10; i++) { pump(); advance_mock_idle(); }
+    assert(s_tx.chunks_present <= 2 && s_tx.chunks_live <= 2 && s_tx.flushed == 0);
+    check_invariants();
+    ntb_credit = 0;
+    for (int i = 0; i < 40; i++) { send_len(1500); pump(); }         /* growth now stops at the new cap */
+    assert(stats().chunks <= 2);
+    ntb_credit = -1; drain_all();
+    assert(tinyusb_net_tx_ring_set_max_chunks(10) == ESP_OK);        /* ... and raising it lets the ring grow again */
+    ntb_credit = 0;
+    for (int i = 0; i < 40; i++) { send_len(1500); pump(); }
+    assert(stats().chunks > 2 && stats().chunks <= 10);
+    ntb_credit = -1; drain_all();
+    assert(tinyusb_net_tx_ring_set_max_chunks(0) == ESP_OK && tinyusb_net_tx_ring_max_chunks() == 0);
+    for (int i = 0; i < 10; i++) pump();
+    check_invariants();
+}
+
+/* Receive evidence: NTBs and bytes from the OUT completion, per-datagram dwell, hold episodes and how long the host waited. */
+static esp_err_t rx_script;
+static esp_err_t evid_cb(void *buffer, uint16_t len, void *ctx) { (void)buffer; (void)len; (void)ctx; return rx_script; }
+static void test_rx_evidence(void) {
+    tinyusb_net_deinit();
+    tinyusb_net_config_t ncfg = {.on_recv_callback = evid_cb};
+    assert(tinyusb_net_init(&ncfg) == ESP_OK);
+    ring_reset(cfg_with(3, 4));                                       /* the ring being enabled turns the evidence on */
+    tinyusb_net_rx_stats_t before; tinyusb_net_rx_stats(&before);
+    uint8_t d[100] = {0};
+    atomic_store(&mock_us, 5000000);
+    __wrap_netd_xfer_cb(0, 0x01, 0, 3000);                            /* an OUT NTB of 3,000 B (the real callback is a stub) */
+    atomic_store(&mock_us, 5000400);
+    rx_script = TUSB_NET_RX_HOLD;
+    assert(!tud_network_recv_cb(d, 100));                             /* 400 us after the NTB: held */
+    atomic_store(&mock_us, 5002400);
+    assert(!tud_network_recv_cb(d, 100));                             /* offered again, still held: one episode */
+    atomic_store(&mock_us, 5009400);
+    rx_script = ESP_OK;
+    assert(tud_network_recv_cb(d, 100));                              /* taken after 9,000 us of hold */
+    tinyusb_net_rx_stats_t st; tinyusb_net_rx_stats(&st);
+    assert(st.ntbs == before.ntbs + 1 && st.ntb_bytes == before.ntb_bytes + 3000 && st.ntb_max_bytes >= 3000 && st.datagrams == before.datagrams + 3);
+    assert(st.holds == before.holds + 1 && st.hold_us_sum == before.hold_us_sum + 9000 && st.hold_us_max == 9000);
+    assert(st.dwell_us_max == 9400 && st.dwell_us_sum == before.dwell_us_sum + 400 + 2400 + 9400);
+    tinyusb_net_deinit();
+    tinyusb_net_config_t again = {.free_tx_buffer = released_ring};
+    assert(tinyusb_net_init(&again) == ESP_OK);
+}
+
+/* tinyusb_net_tx_ring_flush(): the producer's own source changed (the transparent bridge's Wi-Fi link). Queued frames are stale, frames queued
+ * after the call are not, and it never blocks. */
+static void test_producer_flush(void) {
+    ring_reset(cfg_with(3, 10));
+    ntb_credit = 0; grow_to(6); pump();
+    assert(s_tx.frames_queued == 6 && s_tx.gen == 0);
+    uint32_t flushed = s_tx.flushed;
+    notify_count = 0;
+    in_producer = 1;                                     /* the bridge calls it from its event task: it must not wait or defer */
+    tinyusb_net_tx_ring_flush();
+    in_producer = 0;
+    assert(s_tx.gen == 1 && notify_count == 1);          /* the generation moved and the worker was woken to flush */
+    ntb_credit = -1;
+    delivered_seq = next_seq;                            /* the stale frames are never observed */
+    assert(send_len(300) == ESP_OK);                     /* a frame after the call carries the new generation */
+    pump(); in_complete(); pump();
+    assert(delivered_frames == 1 && s_tx.flushed == flushed + 6 && s_tx.frames_queued == 0);
+    check_pm(); check_invariants();
+    /* On an empty ring it is harmless; frames after it are delivered. */
+    tinyusb_net_tx_ring_flush();
+    delivered_seq = next_seq;
+    assert(send_len(300) == ESP_OK);
+    pump(); in_complete(); pump();
+    assert(delivered_frames == 2 && s_tx.gen == 2 && s_tx.flushed == flushed + 6);
+    /* A stopped ring ignores it. */
+    tinyusb_net_deinit();
+    uint16_t gen = s_tx.gen;
+    tinyusb_net_tx_ring_flush();
+    assert(s_tx.gen == gen);
+    tinyusb_net_config_t ncfg = {.free_tx_buffer = released_ring};
+    assert(tinyusb_net_init(&ncfg) == ESP_OK);
+}
+
 #if CONFIG_PM_ENABLE
 /* The CPU-frequency lock follows the queue: acquired by the worker after the first frame, released by the worker
  * after the last one left, never doubled, and not touched by producer or consumer. */
@@ -1089,6 +1211,10 @@ int main(void) {
     test_exactly_once_and_triggers();
     test_sync_and_ring_share_the_pipe();
     test_link_loss();
+    test_producer_flush();
+    test_rx_hold();
+    test_set_max_chunks();
+    test_rx_evidence();
     test_drain_evidence_and_priority();
 #if CONFIG_PM_ENABLE
     test_pm_lock();

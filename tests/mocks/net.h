@@ -23,7 +23,11 @@ typedef uint32_t TickType_t;
 #define BIT0 1
 #define pdTRUE 1
 #define portMAX_DELAY ((TickType_t)0xFFFFFFFFu)
-#define pdMS_TO_TICKS(ms) ((TickType_t)(ms))
+/* The tick the host tests model: 1 ms by default, 10 ms (CONFIG_FREERTOS_HZ=100, the firmware's) with -DTEST_TICK_MS=10. */
+#ifndef TEST_TICK_MS
+#define TEST_TICK_MS 1
+#endif
+#define pdMS_TO_TICKS(ms) ((TickType_t)((ms) / TEST_TICK_MS))
 #define ESP_RETURN_ON_FALSE(a,e,...) do {if(!(a))return e;}while(0)
 #define ESP_LOGW(...) do { assert(!in_crit); } while (0)
 typedef void *TaskHandle_t;
@@ -85,7 +89,8 @@ static bool tud_ready(void){assert(!in_crit);return usb_ready;}
 static bool tud_network_can_xmit(uint16_t n){assert(!in_crit&&!in_producer);return allow_tx && n<=1518 && ntb_credit!=0;}
 uint16_t tud_network_xmit_cb(uint8_t*,void*,uint16_t);
 static void tud_network_xmit(void *ref,uint16_t n){assert(!in_crit&&!in_producer);if(pre_copy_hook)pre_copy_hook();uint8_t dest[1518];uint16_t got=tud_network_xmit_cb(dest,ref,n);assert(got==n);if(xmit_hook)xmit_hook(dest,n);if(ntb_credit>0)ntb_credit--;}
-static void tud_network_recv_renew(void){}
+static void (*recv_renew_hook)(void);static int recv_renew_calls;
+static void tud_network_recv_renew(void){recv_renew_calls++;if(recv_renew_hook)recv_renew_hook();}
 static uint8_t tusb_get_mac_string_id(void){return 6;}
 static void tinyusb_descriptors_set_string(const char *s,uint8_t id){(void)s;(void)id;}
 static int xTaskCreatePinnedToCore(void(*f)(void*),const char *n,int stack,void *a,unsigned prio,TaskHandle_t *h,int core){task_core=core;(void)f;(void)n;(void)a;if(task_create_fail)return 0;task_created++;task_stack=stack;task_prio=(int)prio;*h=(TaskHandle_t)&task_created;return pdPASS;}

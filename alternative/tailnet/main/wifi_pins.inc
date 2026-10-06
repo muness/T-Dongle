@@ -1,13 +1,19 @@
-/* The Wi-Fi pin budget on the STA netif (wifi_pin_budget.h, ADR 0022 amendment 2). Included by gateway_main.c after wifi_link.inc;
- * tailnet mode only (bridge mode copies each frame out of the driver buffer at once and has no lwIP on the Wi-Fi side).
+/* The Wi-Fi pin budget (wifi_pin_budget.h, ADR 0022 amendment 2, ADR 0023). Included by gateway_main.c after wifi_link.inc. One mechanism
+ * for both modes of the image; what differs is only who submits a frame:
+ *   tailnet mode  the STA netif's driver hooks below (lwIP wlanif -> transmit_wrap), plus the RX hooks on its lwIP netif;
+ *   bridge mode   there is no netif: the bridge's host -> Wi-Fi worker (tdongle_l2) calls wifi_pins_tx() itself, and a received frame is
+ *                 copied out of the driver buffer at once (nothing pins RX), so only the TX half applies. wifi_pins_install(NULL).
+ * Both feed the same counters and the same tx-done callback, so the accounting identity (charged = done + aborted + flushed + stale +
+ * in flight) and the heap floor hold in either mode.
  *
  * Three hooks, all installed once, before Wi-Fi starts:
- *   TX  the netif driver's transmit / transmit_wrap, replacing IDF's wifi_transmit (components/esp_wifi/src/wifi_netif.c): the same
- *       call, esp_wifi_internal_tx(WIFI_IF_STA, ...), behind gw_wtx_admit. lwIP's wlanif calls transmit_wrap for every frame.
+ *   TX  wifi_pins_tx(): the same call IDF's wifi_transmit makes, esp_wifi_internal_tx(WIFI_IF_STA, ...), behind gw_wtx_admit. In tailnet
+ *       mode it replaces the netif driver's transmit / transmit_wrap (components/esp_wifi/src/wifi_netif.c): lwIP's wlanif calls
+ *       transmit_wrap for every frame.
  *   TX  esp_wifi_set_tx_done_cb: one global callback, ours (nothing in IDF 5.5.5 uses it), releases the charge.
- *   RX  netif->input and the pbuf's custom free function: the driver's RX buffer is wrapped by a custom pbuf (esp_pbuf_allocate) that
- *       lwIP frees exactly once, wherever it ends up (a socket mailbox, the TCP window, the tcpip mailbox), so counting at input and
- *       at that free is exact. A refused frame is freed here, before lwIP sees it.
+ *   RX  (tailnet only) netif->input and the pbuf's custom free function: the driver's RX buffer is wrapped by a custom pbuf
+ *       (esp_pbuf_allocate) that lwIP frees exactly once, wherever it ends up (a socket mailbox, the TCP window, the tcpip mailbox), so
+ *       counting at input and at that free is exact. A refused frame is freed here, before lwIP sees it.
  * The IDF handlers are left as they are for everything else (the driver handle, the MAC filter, the RX callback IDF registers on
  * every connect, which still ends in esp_netif_receive -> wlanif_input -> netif->input). */
 #include "esp_private/wifi.h"
@@ -34,15 +40,14 @@ static uint32_t wifi_pins_now_ms(void) { return (uint32_t)(xTaskGetTickCount() *
  * ACKs, ARP, DHCP, DNS, keepalives. */
 #define WIFI_PINS_SMALL_FRAME 256u
 
-static esp_err_t wifi_pins_transmit_wrap(void *h, void *buffer, size_t len, void *netstack_buffer) {
-    (void)h;
-    (void)netstack_buffer;
-    if (len > UINT16_MAX) return ESP_ERR_INVALID_ARG;
+/* Send one frame on the STA interface, charged to the budget. ESP_ERR_NO_MEM: refused for buffers (the bridge retries it for a few
+ * milliseconds, lwIP's TCP keeps the segment). Any context that may call esp_wifi_internal_tx. */
+static esp_err_t wifi_pins_tx(void *buffer, uint16_t len) {
     const size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
     if (wifi_pins_tx_done_ok) {
         if (!gw_wtx_admitted(gw_wtx_admit(&wifi_pins, (unsigned)len, free_internal, wifi_pins_now_ms())))
             return ESP_ERR_NO_MEM;     /* wlanif: ERR_MEM; tcp_output keeps the segment and retries (no loss, no window cut) */
-        const int result = esp_wifi_internal_tx(WIFI_IF_STA, buffer, (uint16_t)len);
+        const int result = esp_wifi_internal_tx(WIFI_IF_STA, buffer, len);
         if (result != ESP_OK) gw_wtx_abort(&wifi_pins);     /* no driver buffer exists, so no tx-done will come */
         return result;
     }
@@ -51,7 +56,18 @@ static esp_err_t wifi_pins_transmit_wrap(void *h, void *buffer, size_t len, void
         atomic_fetch_add_explicit(&wifi_pins.tx_refused_heap, 1, memory_order_relaxed);
         return ESP_ERR_NO_MEM;
     }
-    return esp_wifi_internal_tx(WIFI_IF_STA, buffer, (uint16_t)len);
+    return esp_wifi_internal_tx(WIFI_IF_STA, buffer, len);
+}
+/* Bridge: the worker waits for a free charge instead of being refused (and counting a refusal) every retry period. */
+static bool wifi_pins_tx_room(void) { return gw_wtx_room(&wifi_pins, wifi_pins_now_ms()); }
+__attribute__((unused)) static unsigned wifi_pins_tx_limit_now(void) { return atomic_load_explicit(&wifi_pins.tx_limit, memory_order_relaxed); }
+/* Bridge: the most frames the radio is given at once (0: the driver's pool). See GATEWAY_BRIDGE_WIFI_TX_INFLIGHT in gateway_main.c. */
+static void wifi_pins_set_tx_limit(unsigned limit) { atomic_store_explicit(&wifi_pins.tx_limit, limit, memory_order_relaxed); }
+static esp_err_t wifi_pins_transmit_wrap(void *h, void *buffer, size_t len, void *netstack_buffer) {
+    (void)h;
+    (void)netstack_buffer;
+    if (len > UINT16_MAX) return ESP_ERR_INVALID_ARG;
+    return wifi_pins_tx(buffer, (uint16_t)len);
 }
 static esp_err_t wifi_pins_transmit(void *h, void *buffer, size_t len) { return wifi_pins_transmit_wrap(h, buffer, len, NULL); }
 static void wifi_pins_driver_free_rx(void *h, void *buffer) {
@@ -92,13 +108,17 @@ static err_t wifi_pins_input(struct pbuf *p, struct netif *netif) {
     return wifi_pins_orig_input(p, netif);
 }
 
-/* After esp_netif_create_default_wifi_sta(), before esp_wifi_init(): nothing is in flight, so the TX hooks go in without a lock. Failure
+/* After esp_netif_create_default_wifi_sta() (or with NULL in bridge mode), before esp_wifi_init(): nothing is in flight, so the TX hooks go in without a lock. Failure
  * leaves IDF's own handlers in place (the budget is then off and the status says so). The RX hook is NOT installed here: the lwIP netif
  * behind `sta` does not exist yet (esp_netif_new() only allocates it zeroed; netif_add(), which sets netif->input = tcpip_input, runs in
  * esp_netif_start_api() on WIFI_EVENT_STA_START), so lwip->input is NULL now. wifi_pins_hook_rx() does it once the netif is added. */
 static esp_netif_t *wifi_pins_sta;
 static volatile bool wifi_pins_rx_hooked;
 static void wifi_pins_install(esp_netif_t *sta) {
+    if (!sta) {     /* the transparent bridge: no netif to hook, its worker submits through wifi_pins_tx(); the RX hooks have nothing to attach to */
+        wifi_pins_installed = true;
+        return;
+    }
     esp_netif_iodriver_handle h = esp_netif_get_io_driver(sta);
     if (!h) {
         ESP_LOGW("wifi", "pin budget not installed: STA netif has no driver handle");

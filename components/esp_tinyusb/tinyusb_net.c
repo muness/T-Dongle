@@ -179,7 +179,8 @@ esp_err_t tinyusb_net_send_sync(void *buffer, uint16_t len, void *buff_free_arg,
  *   The producer, tinyusb_net_tx_ring_link_down() and the worker bump the
  *   generation the first time they find USB not ready, so frames queued before
  *   a cable pull are discarded by the next drain instead of being delivered to
- *   the next host.
+ *   the next host. tinyusb_net_tx_ring_flush() is the same bump requested by the
+ *   producer's own side (the transparent bridge's Wi-Fi link changed).
  * - Full ring: no free slab and no room in the open one: the new frame is
  *   dropped and counted (tail drop); lwIP/TCP treat it as ordinary loss.
  * - Drain triggers, both in the TinyUSB task: a deferred do_drain requested by
@@ -244,6 +245,7 @@ static struct {
     uint8_t *base;
     uint8_t base_slabs;
     // ---- under the lock ----
+    unsigned max_chunks;            // elastic cap now: starts as cfg.max_chunks, tinyusb_net_tx_ring_set_max_chunks() moves it (a tuning knob)
     tx_chunk_t chunk[TX_MAX_CHUNKS];
     tx_slab_t slab[TX_MAX_SLABS];
     uint8_t fifo[TX_MAX_SLABS];     // slab ids, oldest (consumer) first, newest (open, producer) last
@@ -288,6 +290,23 @@ static struct {
     _Atomic uint32_t pm_acquired, pm_released;
     _Atomic uint32_t demotions;
 } s_tx;
+
+/* Receive-side evidence (the unified image only: gated on the ring being enabled, so the legacy bridge makes no extra clock read). A datagram's dwell
+ * is measured from the newest OUT NTB to complete, which is when the class driver could first have handed it over: held datagrams show up as dwell and
+ * as hold time. datagrams / ntbs is how many frames an NTB carries, i.e. how many frames the class driver's receive buffers can hold. */
+static struct {
+    _Atomic uint32_t ntbs, ntb_bytes, ntb_max_bytes, datagrams, dwell_us_sum, dwell_us_max, holds, hold_us_sum, hold_us_max;
+    uint32_t ntb_us, hold_since_us;     // TinyUSB task only
+} s_rx;
+
+void tinyusb_net_rx_stats(tinyusb_net_rx_stats_t *out)
+{
+    *out = (tinyusb_net_rx_stats_t) {
+        .ntbs = atomic_load(&s_rx.ntbs), .ntb_bytes = atomic_load(&s_rx.ntb_bytes), .ntb_max_bytes = atomic_load(&s_rx.ntb_max_bytes),
+        .datagrams = atomic_load(&s_rx.datagrams), .dwell_us_sum = atomic_load(&s_rx.dwell_us_sum), .dwell_us_max = atomic_load(&s_rx.dwell_us_max),
+        .holds = atomic_load(&s_rx.holds), .hold_us_sum = atomic_load(&s_rx.hold_us_sum), .hold_us_max = atomic_load(&s_rx.hold_us_max),
+    };
+}
 
 static portMUX_TYPE s_tx_mux = portMUX_INITIALIZER_UNLOCKED;
 #define TX_ENTER() portENTER_CRITICAL(&s_tx_mux)
@@ -412,7 +431,7 @@ static bool tx_pressure_locked(void)
 {
     // popcount(mask) <= 1 without a libgcc call inside the critical section: clearing the lowest set bit leaves nothing
     _Static_assert(TX_GROW_HEADROOM == 1u, "the pressure test below is written for one free slab");
-    return s_tx.chunks_present < s_tx.cfg.max_chunks && (s_tx.alloc_mask & (s_tx.alloc_mask - 1u)) == 0u;
+    return s_tx.chunks_present < s_tx.max_chunks && (s_tx.alloc_mask & (s_tx.alloc_mask - 1u)) == 0u;
 }
 
 /* Consumer, under the lock: the oldest committed record, or false when there is none. */
@@ -660,7 +679,7 @@ static void tx_try_grow(void)
         }
         bool published = false;
         TX_ENTER();
-        if (epoch == s_tx.epoch && s_tx.chunks_present < s_tx.cfg.max_chunks) {
+        if (epoch == s_tx.epoch && s_tx.chunks_present < s_tx.max_chunks) {
             for (unsigned c = 0; c < TX_MAX_CHUNKS; c++) {
                 tx_chunk_t *ch = &s_tx.chunk[c];
                 if (ch->mem == NULL) {
@@ -687,7 +706,7 @@ static void tx_try_grow(void)
 
 size_t tinyusb_net_tx_elastic_reclaim(uint32_t wait_ms)
 {
-    if (!atomic_load_explicit(&s_tx.enabled, memory_order_acquire) || s_tx.cfg.max_chunks == 0) {
+    if (!atomic_load_explicit(&s_tx.enabled, memory_order_acquire) || s_tx.max_chunks == 0) {
         return 0;
     }
     TX_ENTER();
@@ -707,6 +726,38 @@ size_t tinyusb_net_tx_elastic_reclaim(uint32_t wait_ms)
         tx_reap();
     }
     return (size_t)atomic_load(&s_tx.present_mirror) * TX_CHUNK_BYTES;
+}
+
+esp_err_t tinyusb_net_tx_ring_set_max_chunks(unsigned chunks)
+{
+    if (!atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    ESP_RETURN_ON_FALSE(chunks <= TX_MAX_CHUNKS, ESP_ERR_INVALID_ARG, TAG, "chunks out of range");
+    TX_ENTER();
+    s_tx.max_chunks = chunks;
+    s_tx.epoch++;                       // a growth that allocated against the old cap and publishes after this is discarded
+    unsigned retired = 0;
+    for (unsigned c = chunks; c < TX_MAX_CHUNKS; c++) {
+        if (s_tx.chunk[c].mem && !s_tx.chunk[c].retiring) {
+            tx_retire_chunk_locked(c, TX_WHY_RECLAIM);
+            retired++;
+        }
+    }
+    TX_EXIT();
+    if (retired) {
+        atomic_fetch_add_explicit(&s_tx.reclaim_events, 1, memory_order_relaxed);
+    }
+    tx_reap();
+    return ESP_OK;
+}
+
+unsigned tinyusb_net_tx_ring_max_chunks(void)
+{
+    TX_ENTER();
+    unsigned n = s_tx.max_chunks;
+    TX_EXIT();
+    return n;
 }
 
 void tinyusb_net_tx_elastic_kick(void)
@@ -731,6 +782,17 @@ void tinyusb_net_tx_ring_link_down(void)
     if (s_tx.worker && atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {
         tx_note_link_down();
         xTaskNotifyGive(s_tx.worker);       // the worker queues a drain, which discards the stale frames
+    }
+}
+
+/* The path the frames come from changed (the transparent bridge's Wi-Fi association dropped or came back): everything queued so far
+ * belongs to the previous one. The same generation mechanism as a USB detach, requested by the producer's own side instead of
+ * discovered by it: bump the generation and let the worker queue a drain, which discards the older records (counted as flushed). */
+void tinyusb_net_tx_ring_flush(void)
+{
+    if (s_tx.worker && atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {
+        atomic_fetch_add_explicit(&s_tx.gen, 1, memory_order_release);
+        xTaskNotifyGive(s_tx.worker);
     }
 }
 
@@ -858,6 +920,14 @@ static void do_drain(void *ctx)
 bool __real_netd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes);
 bool __wrap_netd_xfer_cb(uint8_t rhport, uint8_t ep_addr, xfer_result_t result, uint32_t xferred_bytes)
 {
+    if (!(ep_addr & 0x80u) && atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {     // an OUT NTB arrived: stamp it BEFORE the class driver offers its datagrams
+        s_rx.ntb_us = (uint32_t)esp_timer_get_time();
+        atomic_fetch_add_explicit(&s_rx.ntbs, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&s_rx.ntb_bytes, xferred_bytes, memory_order_relaxed);
+        if (xferred_bytes > atomic_load_explicit(&s_rx.ntb_max_bytes, memory_order_relaxed)) {
+            atomic_store_explicit(&s_rx.ntb_max_bytes, xferred_bytes, memory_order_relaxed);
+        }
+    }
     bool ret = __real_netd_xfer_cb(rhport, ep_addr, result, xferred_bytes);
     if ((ep_addr & 0x80u) && atomic_load_explicit(&s_tx.enabled, memory_order_acquire)) {
         uint32_t now_us = (uint32_t)esp_timer_get_time();   // only with the ring on: the legacy bridge's IN path makes no extra call
@@ -981,6 +1051,7 @@ esp_err_t tinyusb_net_tx_ring_start(const tinyusb_net_tx_config_t *cfg)
     uint8_t *base = heap_caps_malloc(cfg->base_frames * TX_SLAB_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     ESP_RETURN_ON_FALSE(base, ESP_ERR_NO_MEM, TAG, "Failed to allocate TX ring");
     s_tx.cfg = *cfg;
+    s_tx.max_chunks = cfg->max_chunks;
     s_tx.base = base;
     s_tx.base_slabs = (uint8_t)cfg->base_frames;
     s_tx.alloc_mask = (1u << cfg->base_frames) - 1u;
@@ -1007,11 +1078,12 @@ void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out)
     present = s_tx.chunks_present;
     hw_bytes = s_tx.high_water_bytes;
     hw_slabs = s_tx.high_water_slabs;
+    unsigned max_chunks_now = s_tx.max_chunks;
     TX_EXIT();
     *out = (tinyusb_net_tx_stats_t) {
         .ring_bytes = (s_tx.base_slabs + chunks * TX_CHUNK_SLABS) * TX_SLAB_BYTES,
         .base_bytes = s_tx.base_slabs * TX_SLAB_BYTES,
-        .max_bytes = (s_tx.base_slabs + s_tx.cfg.max_chunks * TX_CHUNK_SLABS) * TX_SLAB_BYTES,
+        .max_bytes = (s_tx.base_slabs + max_chunks_now * TX_CHUNK_SLABS) * TX_SLAB_BYTES,
         .elastic_held_bytes = present * TX_CHUNK_BYTES,
         .chunks = chunks,
         .high_water_bytes = hw_bytes,
@@ -1114,13 +1186,59 @@ void tinyusb_net_deinit(void)
 //--------------------------------------------------------------------+
 // tinyusb callbacks
 //--------------------------------------------------------------------+
+/* Receive path (host -> device). The NCM class driver hands each datagram to this callback from the TinyUSB task and expects the glue logic to call
+ * tud_network_recv_renew() when it is ready for more. It also supports the glue logic REFUSING a datagram: returning false leaves it (and the rest of
+ * its NTB) where it is, the class driver stops re-arming the OUT endpoint once its CFG_TUD_NCM_OUT_NTB_N receive buffers are full, and the host sees
+ * NAKs: real backpressure, with the TinyUSB task never blocked. The datagram is offered again by the next tud_network_recv_renew().
+ * The receive callback says "not now" with TUSB_NET_RX_HOLD; any other result means the datagram was consumed (or dropped, counted by the callee). */
 bool tud_network_recv_cb(const uint8_t *src, uint16_t size)
 {
-    if (s_net_obj.rx_cb) {
-        s_net_obj.rx_cb((void *)src, size, s_net_obj.ctx);
+    const bool stats = atomic_load_explicit(&s_tx.enabled, memory_order_relaxed);
+    uint32_t now = 0;
+    if (stats) {
+        now = (uint32_t)esp_timer_get_time();
+        uint32_t dwell = now - s_rx.ntb_us;
+        atomic_fetch_add_explicit(&s_rx.datagrams, 1, memory_order_relaxed);
+        atomic_fetch_add_explicit(&s_rx.dwell_us_sum, dwell, memory_order_relaxed);
+        if (dwell > atomic_load_explicit(&s_rx.dwell_us_max, memory_order_relaxed)) {
+            atomic_store_explicit(&s_rx.dwell_us_max, dwell, memory_order_relaxed);
+        }
+    }
+    if (s_net_obj.rx_cb && s_net_obj.rx_cb((void *)src, size, s_net_obj.ctx) == TUSB_NET_RX_HOLD) {
+        if (stats && s_rx.hold_since_us == 0) {
+            s_rx.hold_since_us = now ? now : 1u;
+            atomic_fetch_add_explicit(&s_rx.holds, 1, memory_order_relaxed);
+        }
+        return false;                                   // no renew: that is what would deliver it again
+    }
+    if (stats && s_rx.hold_since_us) {                  // the held datagram has been taken: how long the host was kept waiting for room
+        uint32_t held = now - s_rx.hold_since_us;
+        atomic_fetch_add_explicit(&s_rx.hold_us_sum, held, memory_order_relaxed);
+        if (held > atomic_load_explicit(&s_rx.hold_us_max, memory_order_relaxed)) {
+            atomic_store_explicit(&s_rx.hold_us_max, held, memory_order_relaxed);
+        }
+        s_rx.hold_since_us = 0;
     }
     tud_network_recv_renew();
     return true;
+}
+
+/* A refused datagram is waiting in the class driver: offer it again, in the TinyUSB task. Any task may ask; asks coalesce. On a USB reset or a
+ * detach the class driver re-initialises its receive state, so a renew that arrives afterwards finds nothing pending and does nothing, and the
+ * next SET_INTERFACE renews by itself: a deferred renew cannot wedge the endpoint. */
+static atomic_bool s_renew_pending;
+static void do_renew(void *ctx)
+{
+    (void) ctx;
+    atomic_store(&s_renew_pending, false);              // before renewing: a hold that happens during it asks again
+    tud_network_recv_renew();
+}
+
+void tinyusb_net_rx_resume(void)
+{
+    if (!atomic_exchange(&s_renew_pending, true)) {
+        usbd_defer_func(do_renew, NULL, false);         // may wait for TinyUSB; the caller is a worker task that holds no lock
+    }
 }
 
 uint16_t tud_network_xmit_cb(uint8_t *dst, void *ref, uint16_t arg)

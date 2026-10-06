@@ -24,7 +24,7 @@ Two things follow. The latency tail wants a fast CPU while packets are moving. A
 - **Why 80 is the floor.** 80 MHz is the APB clock. Below it the APB drops with the CPU, which breaks UART and SPI LCD timing and the Wi-Fi driver's own `ESP_PM_APB_FREQ_MAX` lock (esp_wifi/src/wifi_init.c), which on the S3 is satisfied at 80 MHz. So Wi-Fi never forces the CPU above 80.
 - **Why no light sleep.** USB must stay enumerated and the CDC/NCM links must answer at any time. Tickless idle and light sleep are off, so DFS is the only power state.
 - **Fail safe.** If `esp_pm_configure()` fails, `tdongle_pm_start()` logs, reports the error in `/status` (`power.configure_error`) and the CPU stays at the boot frequency, 240 MHz: fixed at the maximum. The locks then count but take nothing.
-- **Transparent bridge mode of the unified image.** Scaling is configured only in tailnet mode. The bridge mode forwards from Wi-Fi and USB callbacks that hold no lock, so it stays fixed at 240 MHz. The archived legacy build (`TDONGLE_LEGACY_BRIDGE`) does not link `tdongle_runtime` and its sdkconfig is untouched.
+- **Transparent bridge mode of the unified image.** *Superseded by ADR 0023: scaling is configured in both modes; the bridge's callbacks note forwarding activity and its USB ring holds `usb_txq` while frames are queued.* Originally: scaling was configured only in tailnet mode, the bridge forwarded from Wi-Fi and USB callbacks that hold no lock, so it stayed fixed at 240 MHz. The archived legacy build (`TDONGLE_LEGACY_BRIDGE`) does not link `tdongle_runtime` and its sdkconfig is untouched.
 
 ### B. One helper: `tdongle_pm_burst_t`
 
