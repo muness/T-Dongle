@@ -41,7 +41,12 @@ pub fn arm() {
             sys::wdt_hal_init(ctx, sys::wdt_inst_t_WDT_RWDT, 0, false);
             let ticks = (WATCHDOG_MS * u64::from(sys::rtc_clk_slow_freq_get_hz()) / 1000) as u32;
             sys::wdt_hal_write_protect_disable(ctx);
-            sys::wdt_hal_config_stage(ctx, sys::wdt_stage_t_WDT_STAGE0, ticks, sys::wdt_stage_action_t_WDT_STAGE_ACTION_RESET_SYSTEM);
+            sys::wdt_hal_config_stage(
+                ctx,
+                sys::wdt_stage_t_WDT_STAGE0,
+                ticks,
+                sys::wdt_stage_action_t_WDT_STAGE_ACTION_RESET_SYSTEM, /* value 3: the digital system, not the RTC (RESET_RTC is 4); see tdongle_rescue::RWDT_RESET */
+            );
             sys::wdt_hal_enable(ctx);
             sys::wdt_hal_write_protect_enable(ctx);
         }

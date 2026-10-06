@@ -113,6 +113,26 @@ fn healthy_needs_thirty_continuous_seconds_and_one_bad_check_restarts_the_clock(
 }
 
 #[test]
+fn every_reset_path_the_image_can_take_keeps_the_rtc_domain() {
+    for path in IMAGE_RESET_PATHS {
+        assert_eq!(path.scope(), ResetScope::DigitalOnly, "{path:?} would wipe STORE0 and the bootloader would see no magic");
+    }
+    // and the ones that do wipe it are exactly the ones the image must not use
+    assert_eq!(ResetPath::RtcWatchdogResetsRtc.scope(), ResetScope::IncludingRtc, "the first release used this action: irqoff ended with count 0");
+    assert_eq!(ResetPath::PowerOn.scope(), ResetScope::IncludingRtc);
+    assert_eq!(RWDT_RESET, ResetScope::DigitalOnly);
+}
+
+#[test]
+fn a_watchdog_reset_that_keeps_the_rtc_domain_is_counted_and_one_that_wipes_it_is_not() {
+    // irqoff round 1 with a digital-only reset: the word survives and the bootloader counts it
+    let armed_after_demote = demoted_word(0);
+    assert_eq!(bootloader_decision(armed_after_demote, false), BootDecision::App(word(HANDED, 1)));
+    // with the RTC wiped (the bug) the word is gone: the bootloader sees nothing and the count restarts
+    assert_eq!(bootloader_decision(0, false), BootDecision::App(0));
+}
+
+#[test]
 fn selftest_commands_parse() {
     assert_eq!(Selftest::parse("spin"), Some(Selftest::Spin));
     assert_eq!(Selftest::parse(" irqoff "), Some(Selftest::IrqOff));

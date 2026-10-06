@@ -107,6 +107,52 @@ impl Default for HealthyTimer {
     }
 }
 
+/// How far a reset reaches. The rescue count lives in `RTC_CNTL_STORE0`, which only survives a reset that leaves the RTC domain alone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetScope {
+    /// The digital core and its peripherals; the RTC domain, and so `STORE0`, survive.
+    DigitalOnly,
+    /// The RTC domain too: `STORE0` is wiped and the bootloader sees a fresh power-on.
+    IncludingRtc,
+}
+
+/// Every way an image can end up reset, with the scope the hardware gives it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ResetPath {
+    /// A software reset (`software_reset`, `esp_restart`): the panic handler, the supervisor's stall reset, a deliberate reset, the self-tests that panic.
+    Software,
+    /// The TIMG1 watchdog, stage action "reset system" (digital core only).
+    TimerGroupWatchdog,
+    /// The RTC watchdog with the action this crate configures ([`RWDT_RESET`]).
+    RtcWatchdog,
+    /// The RTC watchdog with the action esp-hal calls `ResetSystem`, which is the one that resets the RTC domain as well (the first release of the rescue used it).
+    RtcWatchdogResetsRtc,
+    /// Loss of power.
+    PowerOn,
+}
+
+impl ResetPath {
+    /// The scope of the reset (ESP32-S3 TRM, RTC_CNTL_WDTCONFIG0 stage actions: 2 reset CPU, 3 reset the main system without the RTC, 4 reset the main system and the RTC).
+    #[must_use]
+    pub const fn scope(self) -> ResetScope {
+        match self {
+            Self::Software | Self::TimerGroupWatchdog => ResetScope::DigitalOnly,
+            Self::RtcWatchdog => match RWDT_RESET {
+                ResetScope::DigitalOnly => ResetScope::DigitalOnly,
+                ResetScope::IncludingRtc => ResetScope::IncludingRtc,
+            },
+            Self::RtcWatchdogResetsRtc | Self::PowerOn => ResetScope::IncludingRtc,
+        }
+    }
+}
+
+/// The paths an image takes on purpose or by its own watchdogs; every one must keep the RTC domain, or the bootloader cannot count the failed boot.
+pub const IMAGE_RESET_PATHS: [ResetPath; 3] = [ResetPath::Software, ResetPath::TimerGroupWatchdog, ResetPath::RtcWatchdog];
+
+/// The scope the RTC watchdog is configured with: digital core only. (esp-hal: `RwdtStageAction::ResetCore`, the value 3; IDF: `WDT_STAGE_ACTION_RESET_SYSTEM`. esp-hal's
+/// `ResetSystem` is the value 4, RTC included, and wiped `STORE0` on the board: `irqoff` ended with count 0 and no ROM mode.)
+pub const RWDT_RESET: ResetScope = ResetScope::DigitalOnly;
+
 /// The console's deliberate-breakage commands (`selftest NAME`): each must end in a reset, and [`LIMIT`] of them in a row must end in ROM download mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Selftest {

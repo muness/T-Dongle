@@ -40,7 +40,10 @@ pub fn arm() {
     // SAFETY: `RTC_TIMER` is a zero-sized marker; `esp_hal::init` has finished with it and dropped its `Rtc`. Only `arm` creates this one.
     let mut rtc = Rtc::new(unsafe { RTC_TIMER::steal() });
     rtc.rwdt.set_timeout(RwdtStage::Stage0, Duration::from_millis(WATCHDOG_MS));
-    rtc.rwdt.set_stage_action(RwdtStage::Stage0, RwdtStageAction::ResetSystem);
+    // esp-hal's naming is the reverse of what one expects: `ResetCore` (3) resets the digital system and leaves the RTC domain (and STORE0) alone; `ResetSystem` (4) resets the
+    // RTC too, which wiped the rescue count on the board. `crate::RWDT_RESET` says which one this crate means.
+    const _: () = assert!(matches!(crate::RWDT_RESET, crate::ResetScope::DigitalOnly));
+    rtc.rwdt.set_stage_action(RwdtStage::Stage0, RwdtStageAction::ResetCore);
     rtc.rwdt.enable();
     critical_section::with(|cs| *RWDT.borrow_ref_mut(cs) = Some(rtc.rwdt));
 }

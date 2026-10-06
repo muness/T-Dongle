@@ -156,7 +156,7 @@ fn panic(info: &PanicInfo<'_>) -> ! {
         None => rec.note_panic(format_args!("{}", info.message())),
     }
     store(&rec);
-    esp_println::println!("PANIC: {}", info);
+    // No I/O here: a print that blocks (a full UART FIFO) would leave the reset to the watchdog. Record, then reset the digital core at once (the RTC domain survives).
     esp_hal::system::software_reset()
 }
 

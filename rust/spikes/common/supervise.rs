@@ -68,7 +68,6 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
             Verdict::Stalled(task) => {
                 healthy.observe(now, false);
                 guard::hang(task);
-                esp_println::println!("hang: {} made no progress", task);
                 esp_hal::system::software_reset()
             }
         }
