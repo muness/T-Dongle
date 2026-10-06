@@ -59,7 +59,7 @@ void menu_render(const menu_state *m, const menu_context *c, const char *(*netwo
     if (item == 0) snprintf(rows[1], MENU_ROW_CHARS + 1, "%s", c->setup_active ? "Cancel setup AP" : "Enter setup AP");
     else if (item <= c->saved_count) {
         const char *name = network_name ? network_name(ctx, item) : "";
-        snprintf(rows[1], MENU_ROW_CHARS + 1, "%u %.22s", item, name ? name : "");
+        snprintf(rows[1], MENU_ROW_CHARS + 1, "%u %.22s", item & 15u, name ? name : "");
     } else if (item == reset_item(c)) snprintf(rows[1], MENU_ROW_CHARS + 1, "Factory reset...");
     else snprintf(rows[1], MENU_ROW_CHARS + 1, "Exit menu");
     snprintf(rows[3], MENU_ROW_CHARS + 1, "Short: next  Hold: select");
