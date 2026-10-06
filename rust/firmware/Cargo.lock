@@ -1914,6 +1914,7 @@ version = "0.3.0-dev"
 name = "tdongle-ui"
 version = "0.3.0-dev"
 dependencies = [
+ "tdongle-lcd",
  "tdongle-traffic",
 ]
 

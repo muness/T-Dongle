@@ -19,9 +19,75 @@ use tdongle_ui::menu::ROWS;
 use tdongle_ui::settings::Settings;
 use tdongle_ui::setup_boot::Session;
 use tdongle_ui::text::Text;
-use tdongle_ui::ui::{Command, Content, Inputs, LcdFields, Snapshot, Ui, POLL_MS};
+use tdongle_ui::ui::{Command, Content, Inputs, Snapshot, Ui, POLL_MS};
+
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
 
 use crate::{FIRMWARE, SAVED, STORED};
+
+/// Self-verification counters for the `ui` status line (so the UI can be checked over serial, with nobody looking at the dongle).
+pub static PANEL_STATE: AtomicU8 = AtomicU8::new(0); // 0 not started, 1 ok, 2 spi init failed, 3 backlight failed (panel ok), 4 draw failed
+pub static SPI_ERRORS: AtomicU32 = AtomicU32::new(0);
+pub static FRAMES_DRAWN: AtomicU32 = AtomicU32::new(0);
+pub static LAST_VIEW_CRC: AtomicU32 = AtomicU32::new(0);
+pub static LAST_PAGE: AtomicU32 = AtomicU32::new(0);
+pub static BACKLIGHT_PCT: AtomicU32 = AtomicU32::new(0);
+pub static ROTATION: AtomicU8 = AtomicU8::new(0);
+pub static BUTTON_PRESSES: AtomicU32 = AtomicU32::new(0);
+pub static BUTTON_HOLDS: AtomicU32 = AtomicU32::new(0);
+pub static MENU_OPEN: AtomicBool = AtomicBool::new(false);
+pub static LED_RGB: AtomicU32 = AtomicU32::new(0);
+pub static LED_WRITES: AtomicU32 = AtomicU32::new(0);
+/// Milliseconds from reset to the first frame with the backlight on (0 = not yet).
+pub static BOOT_SCREEN_MS: AtomicU32 = AtomicU32::new(0);
+/// `ui press short|long`: milliseconds of injected button-down still to deliver (0 = none), set by the console.
+pub static INJECT_MS: AtomicU32 = AtomicU32::new(0);
+
+fn crc32(view: &View) -> u32 {
+    let mut crc = !0u32;
+    let mut feed = |b: u8| {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xEDB8_8320 & (!(crc & 1)).wrapping_add(1));
+        }
+    };
+    view.text.iter().for_each(|&b| feed(b));
+    view.bars.iter().for_each(|&b| feed(b));
+    feed(u8::from(view.attention));
+    feed(view.layout);
+    feed(view.bar_count);
+    !crc
+}
+
+/// The `ui` line of `status`.
+pub fn write_status_line(out: &mut alloc::string::String) {
+    use core::fmt::Write;
+    let state = match PANEL_STATE.load(Ordering::Relaxed) {
+        0 => "not_started",
+        1 => "ok",
+        2 => "spi_init_failed",
+        3 => "backlight_failed",
+        _ => "draw_failed",
+    };
+    let rgb = LED_RGB.load(Ordering::Relaxed);
+    let _ = write!(
+        out,
+        "ui panel_init={} spi_errors={} frames_drawn={} last_view_crc={:08x} last_page={} backlight_pct={} rotation={} button_presses={} button_holds={} menu_open={} led_rgb={:06x} led_writes={} boot_screen_ms={}\r\n",
+        state,
+        SPI_ERRORS.load(Ordering::Relaxed),
+        FRAMES_DRAWN.load(Ordering::Relaxed),
+        LAST_VIEW_CRC.load(Ordering::Relaxed),
+        LAST_PAGE.load(Ordering::Relaxed),
+        BACKLIGHT_PCT.load(Ordering::Relaxed),
+        ROTATION.load(Ordering::Relaxed),
+        BUTTON_PRESSES.load(Ordering::Relaxed),
+        BUTTON_HOLDS.load(Ordering::Relaxed),
+        u8::from(MENU_OPEN.load(Ordering::Relaxed)),
+        rgb,
+        LED_WRITES.load(Ordering::Relaxed),
+        BOOT_SCREEN_MS.load(Ordering::Relaxed)
+    );
+}
 
 /// The panel on SPI2 (mode 0, 20 MHz, CS/DC/RST on plain GPIOs).
 struct Panel {
@@ -43,6 +109,9 @@ impl Panel {
             ok &= self.spi.write(data).is_ok();
         }
         self.cs.set_high();
+        if !ok {
+            SPI_ERRORS.fetch_add(1, Ordering::Relaxed);
+        }
         ok
     }
 
@@ -64,6 +133,7 @@ impl Panel {
             let wire = panel::to_wire(&row);
             let ok = self.command(panel::cmd::CASET, &cas) && self.command(panel::cmd::RASET, &ras) && self.command(panel::cmd::RAMWR, &wire);
             if !ok {
+                PANEL_STATE.store(4, Ordering::Relaxed);
                 return; // the panel does not answer: keep `previous`, try again next poll
             }
             if y % 8 == 7 {
@@ -71,6 +141,11 @@ impl Panel {
             }
         }
         self.previous = *view;
+        FRAMES_DRAWN.fetch_add(1, Ordering::Relaxed);
+        LAST_VIEW_CRC.store(crc32(view), Ordering::Relaxed);
+        if PANEL_STATE.load(Ordering::Relaxed) == 4 {
+            PANEL_STATE.store(1, Ordering::Relaxed);
+        }
     }
 }
 
@@ -102,54 +177,6 @@ impl Led {
             }
         }
     }
-}
-
-fn to_state(f: &LcdFields) -> LcdState {
-    let mut s = LcdState::ZERO;
-    s.bridge = f.bridge;
-    s.wifi = f.wifi;
-    s.saved_wifi = f.saved_wifi;
-    s.recovery = f.recovery;
-    s.starting = f.starting;
-    s.installing = f.installing;
-    s.usb = f.usb;
-    s.usb_configured = f.usb_configured;
-    s.usb_suspended = f.usb_suspended;
-    s.saved = f.saved;
-    s.enabled = f.enabled;
-    s.ready = f.ready;
-    s.login = f.login;
-    s.failed = f.failed;
-    s.page = f.page;
-    s.rssi_valid = f.rssi_valid;
-    s.rssi = f.rssi;
-    s.set_ssid(f.ssid.as_bytes());
-    s.setup = f.setup;
-    s.set_ap_ssid(f.ap_ssid.as_bytes());
-    s.setup_seconds_left = f.setup_seconds_left;
-    s.down_kbps = f.down_kbps;
-    s.up_kbps = f.up_kbps;
-    s.down_bytes = f.down_bytes;
-    s.up_bytes = f.up_bytes;
-    s.down_frames = f.down_frames;
-    s.up_frames = f.up_frames;
-    s.bars[..LCD_BARS].copy_from_slice(&f.bars[..LCD_BARS]);
-    s.uptime_s = f.uptime_s;
-    s.wifi_up_s = f.wifi_up_s;
-    s.connects = f.connects;
-    s.last_reason = f.last_reason;
-    s.usb_resets = f.usb_resets;
-    s.heap_free = f.heap_free;
-    s.heap_min = f.heap_min;
-    s.heap_largest = f.heap_largest;
-    s.reset_reason = f.reset_reason;
-    s.boots = f.boots;
-    s.watchdogs = f.watchdogs;
-    s.panics = f.panics;
-    s.health_view = f.health_view;
-    s.active_slot = f.active_slot;
-    s.set_active_name(f.active_name.as_bytes());
-    s
 }
 
 fn settings() -> (Option<Settings>, bool) {
@@ -195,6 +222,7 @@ pub async fn ui_task(hw: Hardware) -> ! {
         Some(Backlight { channel })
     } else {
         note("backlight PWM failed");
+        PANEL_STATE.store(3, Ordering::Relaxed);
         None
     };
 
@@ -205,6 +233,7 @@ pub async fn ui_task(hw: Hardware) -> ! {
         .map(|s| s.with_sck(hw.clk).with_mosi(hw.mosi));
     let Ok(spi) = spi else {
         note("panel SPI failed");
+        PANEL_STATE.store(2, Ordering::Relaxed);
         loop {
             Timer::after_secs(3600).await;
         }
@@ -233,6 +262,9 @@ pub async fn ui_task(hw: Hardware) -> ! {
     boot.usb_configured = crate::CONFIGURED.load(Ordering::Relaxed);
     let view = compose(&boot, FIRMWARE);
     p.draw(&view).await;
+    if PANEL_STATE.load(Ordering::Relaxed) == 0 {
+        PANEL_STATE.store(1, Ordering::Relaxed);
+    }
 
     // The stored brightness and rotation, as soon as the init task has read them (at most 700 ms: then the defaults).
     let waited = Instant::now();
@@ -246,12 +278,28 @@ pub async fn ui_task(hw: Hardware) -> ! {
         Timer::after_millis(20).await;
     };
     apply(&mut p, backlight.as_ref(), display.backlight_percent(false), display.rotation).await;
+    BOOT_SCREEN_MS.store(Instant::now().as_millis() as u32, Ordering::Relaxed);
 
     let mut ui = Ui::new(Instant::now().as_millis());
     let mut names: [Text<24>; 8] = [Text::new(); 8];
+    let mut inject_until: u64 = 0;
+    let mut was_down = false;
+    let mut down_since: u64 = 0;
     loop {
         Timer::after_millis(u64::from(POLL_MS)).await;
         let now = Instant::now().as_millis();
+        let req = INJECT_MS.swap(0, Ordering::Relaxed);
+        if req != 0 {
+            inject_until = now + u64::from(req);
+        }
+        let down = button.is_low() || now < inject_until;
+        if down && !was_down {
+            down_since = now;
+            BUTTON_PRESSES.fetch_add(1, Ordering::Relaxed);
+        } else if !down && was_down && now - down_since >= tdongle_ui::button::HOLD_MS {
+            BUTTON_HOLDS.fetch_add(1, Ordering::Relaxed);
+        }
+        was_down = down;
         let (stored, _) = settings();
         let display = stored.unwrap_or(display);
         // Snapshot and names are copied out of the shared state before anything is formatted or sent.
@@ -307,7 +355,7 @@ pub async fn ui_task(hw: Hardware) -> ! {
         };
         let lookup = |slot: u32| -> Option<&str> { names.get((slot as usize).wrapping_sub(1)).map(Text::as_str) };
         let inputs = Inputs {
-            button_down: button.is_low(),
+            button_down: down,
             setup_active: false,
             setup_session: Session::inactive(),
             wifi_ready: connected,
@@ -323,10 +371,12 @@ pub async fn ui_task(hw: Hardware) -> ! {
             network_name: &lookup,
         };
         let actions = ui.tick(now, &inputs);
+        LAST_PAGE.store(ui.page, Ordering::Relaxed);
+        MENU_OPEN.store(ui.menu.open, Ordering::Relaxed);
         if let Some(d) = actions.draw {
             apply(&mut p, backlight.as_ref(), d.backlight_percent, d.rotation).await;
             let view = match &d.content {
-                Content::Status(f) => compose(&to_state(f), FIRMWARE),
+                Content::Status(f) => compose(f, FIRMWARE),
                 Content::Menu { rows, attention } => {
                     let mut text = [[0u8; tdongle_lcd::ROW_BYTES]; ROWS];
                     for (dst, src) in text.iter_mut().zip(rows.iter()) {
@@ -341,6 +391,8 @@ pub async fn ui_task(hw: Hardware) -> ! {
         }
         if let Some(w) = actions.led {
             led.write(&w.frame);
+            LED_RGB.store(u32::from(w.color.r) << 16 | u32::from(w.color.g) << 8 | u32::from(w.color.b), Ordering::Relaxed);
+            LED_WRITES.fetch_add(1, Ordering::Relaxed);
         }
         if let Some(cmd) = ui.take_command() {
             dispatch(cmd);
@@ -354,12 +406,14 @@ async fn apply(p: &mut Panel, backlight: Option<&Backlight>, percent: u32, rotat
         if percent != p.percent {
             b.apply(percent);
             p.percent = percent;
+            BACKLIGHT_PCT.store(percent, Ordering::Relaxed);
         }
     }
     if rotation != p.rotation {
         if let Some(c) = panel::rotation_cmd(rotation) {
             p.send(c).await;
             p.rotation = rotation;
+            ROTATION.store(rotation, Ordering::Relaxed);
             p.previous = View::POISONED; // repaint
         }
     }

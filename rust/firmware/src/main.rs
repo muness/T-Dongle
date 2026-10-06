@@ -1578,6 +1578,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         u8::from(joined.is_some() && best.is_some() && joined.map(|j| j.bssid) == best.map(|b| b.bssid)),
         u8::from(PIN_BSS.load(Ordering::Relaxed))
     );
+    ui::write_status_line(out);
 }
 
 fn tdongle_traffic_reading() -> tdongle_traffic::Reading {
@@ -1670,6 +1671,18 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 supervise::selftest(kind);
             }
             None => s.push_str("usage: selftest spin|irqoff|panic|console\r\n"),
+        },
+        #[cfg(feature = "diagnostics")]
+        u if u.starts_with("ui press ") => match &u["ui press ".len()..] {
+            "short" => {
+                ui::INJECT_MS.store(120, Ordering::Relaxed);
+                s.push_str("ui press short injected\r\n");
+            }
+            "long" => {
+                ui::INJECT_MS.store(1700, Ordering::Relaxed);
+                s.push_str("ui press long injected\r\n");
+            }
+            _ => s.push_str("usage: ui press short|long\r\n"),
         },
         #[cfg(feature = "diagnostics")]
         r if r.starts_with("ring max ") => match r["ring max ".len()..].trim().parse::<u32>() {
