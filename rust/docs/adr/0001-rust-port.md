@@ -48,7 +48,7 @@ Why `std` regardless of S4's no_std starting-heap advantage:
 
 1. **No spike makes no_std cheaper per membership; it only starts with a larger heap.** TLS is +21 KB per membership in Rust (`embedded-tls` pins a 16,640 B read buffer; C frees its buffers dynamically at 1,336 B steady) and preallocated smoltcp sockets are +9.6 to +26 KB. The headline N=2 claim therefore depends on an estimate of the radio's heap use that S4 could not measure.
 2. **The gateway needs lwIP NAPT, DNS, DHCP and a TLS stack with hardware acceleration; no_std has smoltcp (no NAT) and `mbedtls-rs` that builds only with `use-gcc` and stubbed libc symbols.** Phase 3 would have to write a NAT. std keeps the C's lwIP and mbedTLS, which are the parts the C's own ADRs sized and validated.
-3. **USB (weakened, not withdrawn).** IN is fine on the stock no_std OTG driver (7.41 Mbit/s). OUT was capped at 4.6 Mbit/s by one-packet arming and needs the driver patch (multi-packet transfers) to reach the C bridge's about 5.8 up; a patched driver is code we would own. Whether the patch reaches 7 Mbit/s OUT is decided by the board, not argued here.
+3. **USB (withdrawn again, on measurement).** The patched no_std OTG driver matches or beats the C bridge in both directions: OUT 8.41 Mbit/s alone (C up about 5.8), IN 7.41 (C down about 7). Stock OUT was 4.54. The cost is a vendored driver we own (about 150 changed lines, host-modelled).
 4. **Risk of the unknown, not of the language.** The S3 deviations above are all reachable (esp-wifi-sys for the RX callback, a DWC2 patch) but each is new code on the data path, which the acceptance gates would have to re-validate from zero.
 
 ### USB OUT patch (multi-packet transfers in the vendored `embassy-usb-synopsys-otg`)
@@ -65,11 +65,19 @@ The patch (`rust/vendor/embassy-usb-synopsys-otg`, `[patch.crates-io]` in the sp
 * The pure logic is `rust/crates/tdongle-usb-out`, tested against a model of the core (random NTB sizes at every boundary, random interrupt/task/host interleavings, held endpoint): every NTB arrives whole and in order.
 * **DMA mode** was considered and not done: the esp-hal OTG start-up never sets `GAHBCFG.DMAEN`, and a DMA path needs its own buffer ownership and error handling. Slave mode with a whole-NTB transfer removes the per-packet NAK; DMA would also remove the interrupt per packet. Revisit if the board shows the patched OUT below 7 Mbit/s.
 * Upstreaming: `embassy_usb_driver::EndpointOut::read_transfer` (embassy #2753) already exists with a packet-by-packet default; the driver-side override and `read_chunk`'s short flag are the upstreamable part.
-* Target (board): OUT alone at least 7 Mbit/s, IN not below 7.41. `s2-stock-app.bin` (same image, `stock-out` feature) is the A/B baseline.
+* **Board A/B (coordinator, every flash verified against the running ELF, 0 drops throughout):**
+
+  | Build | OUT 6M offered | OUT 8M offered | OUT max | IN max |
+  |---|---|---|---|---|
+  | `out=stock` | 4.43 | 4.53 | 4.54 | 7.39 |
+  | `out=multi`, run 1 | 5.95 | 7.94 | 8.41 | 7.41 |
+  | `out=multi`, run 2 | 5.96 | 7.95 | 8.40 | 7.41 |
+
+  OUT improves 85% and passes the 7 Mbit/s target; IN is unchanged. The USB path is no longer the limit. DMA stays undone, with no evidence it is needed.
 
 ### Revisit with the board data (S2 passed, S3 failed)
 
-What the board changes: **the USB reason for std is weaker** (item 3 above): IN is as fast as the C, backpressure works, and OUT is limited by something we can fix in a vendored driver (below), not by the bus.
+What the board changes: **the USB reason for std is gone** (item 3 above): with the vendored multi-packet OUT patch the no_std USB path measures at or above the C bridge in both directions (OUT 8.41, IN 7.41 Mbit/s), and backpressure works.
 What it does not change: the other three reasons stand, and the one thing that would have counted for no_std, a larger heap, is still an estimate (S4 never ran, the radio's heap use has never been
 measured). The one no_std component that failed on the board is the one with the most unknowns, the Wi-Fi driver under esp-radio, and the failure is not yet explained. So:
 

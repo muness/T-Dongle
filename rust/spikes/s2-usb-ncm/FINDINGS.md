@@ -81,3 +81,11 @@ Backpressure: `hold on` under a 3 Mbit/s flood froze `rx_frames`; `hold off` res
 ## Patched OUT (multi-packet), and the console modes
 The vendored driver arms the NCM OUT endpoint for a whole NTB (3,200 B, 50 packets); `s2-app.bin` is the patched build and `s2-stock-app.bin` the same image with the `stock-out` feature (stock one-packet arming) for the A/B.
 `status` shows `out=multi|stock`. Console: `reflect` (default), `sink` (count OUT, send nothing), `source RATE_KBPS|max` (1,442 B broadcast frames on IN). Host model: `rust/crates/tdongle-usb-out`.
+
+## Board A/B of the OUT patch (coordinator; every flash verified against the running ELF; 0 drops throughout)
+| Build | OUT 6M offered | OUT 8M offered | OUT max | IN max |
+|---|---|---|---|---|
+| out=stock | 4.43 | 4.53 | 4.54 | 7.39 |
+| out=multi, run 1 | 5.95 | 7.94 | 8.41 | 7.41 |
+| out=multi, run 2 | 5.96 | 7.95 | 8.40 | 7.41 |
+OUT +85%, above the C bridge's upload of about 5.8; IN unchanged. USB is no longer the limit for the no_std stack.
