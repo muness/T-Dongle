@@ -37,6 +37,7 @@ tdongle-tailnet-tls = { path = "../crates/tdongle-tailnet-tls" }
 tdongle-tailnet-types = { path = "../crates/tdongle-tailnet-types" }
 tdongle-tailnet-usbnet = { path = "../crates/tdongle-tailnet-usbnet" }
 tdongle-tailnet-engine = { path = "../crates/tdongle-tailnet-engine", features = ["fuzzing"] }
+tdongle-tailnet-wifimux = { path = "../crates/tdongle-tailnet-wifimux" }
 tdongle-tailnet-wg = { path = "../crates/tdongle-tailnet-wg" }
 
 [[bin]]
@@ -312,5 +313,11 @@ doc = false
 [[bin]]
 name = "tailnet_engine_udp"
 path = "fuzz_targets/tailnet_engine_udp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_wifimux_rx"
+path = "fuzz_targets/tailnet_wifimux_rx.rs"
 test = false
 doc = false
