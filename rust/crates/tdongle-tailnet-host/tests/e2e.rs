@@ -383,13 +383,13 @@ fn rss_kib() -> u64 {
     out.and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok()).unwrap_or(0)
 }
 
-/// The soak: two memberships on two control servers carry steady traffic for `TAILNET_SOAK_SECS` (default 600 = ten minutes) while the direct path is
+/// The soak: two memberships on two control servers carry steady traffic for `TAILNET_SOAK_SECS` (default 100 s so CI stays under two minutes; the ten-minute run is opt-in, TAILNET_SOAK_SECS=600) while the direct path is
 /// flapped every 90 s (UDP cut for 10 s: shorter than the 60 s the C trusts a direct path for, so the connections ride it out; the long cut is
 /// `direct_path_falls_back_to_derp_after_the_trust_lapses`). Nothing may leak, nothing may churn, the model heap's floor must never be crossed, and the transactions must succeed.
 #[test]
 fn soak_ten_minutes_with_two_tailnets() {
     use std::sync::atomic::{AtomicBool, AtomicU32};
-    let secs: u64 = std::env::var("TAILNET_SOAK_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(600);
+    let secs: u64 = std::env::var("TAILNET_SOAK_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(100);
     let mut a = go_or_skip!();
     let mut b = go_or_skip!();
     a.peer("gopeer").expect("peer a");
