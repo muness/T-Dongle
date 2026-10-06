@@ -1,0 +1,16 @@
+[package]
+name = "tdongle-dhcp"
+description = "The DHCP server of the setup access point (ADR 0024), behaviour-matched to ESP-IDF v5.5.5 lwIP dhcpserver.c as configured by the C firmware. Pure, no_std, no allocation, host-tested."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true
