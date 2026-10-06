@@ -5,6 +5,8 @@
 
 #[path = "../../common/ops.rs"]
 mod ops;
+#[path = "../../common/guard.rs"]
+mod guard;
 mod acm;
 mod ncm;
 
@@ -27,6 +29,8 @@ use static_cell::StaticCell;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 const MTU: usize = 1514;
+/// OUT endpoint buffers: EP0 (64) + ACM bulk OUT (64) + the NCM bulk OUT transfer buffer (one whole NTB).
+const EP_OUT_BYTES: usize = 64 + 64 + ncm::NTB_OUT_MAX;
 
 type Drv = UsbDriver<'static>;
 
@@ -166,11 +170,30 @@ type NcmSender = ncm::Sender<'static, Drv>;
 type NcmReceiver = ncm::Receiver<'static, Drv>;
 type AcmPort = acm::Acm<'static, Drv>;
 
+static STATE: embassy_sync::once_lock::OnceLock<guard::State> = embassy_sync::once_lock::OnceLock::new();
+
+/// Feeds the watchdogs every 500 ms and marks the boot stable after `STABLE_AFTER_MS`.
+#[embassy_executor::task]
+async fn heartbeat_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
+    let mut marked = false;
+    loop {
+        dogs.feed();
+        if !marked && Instant::now().as_millis() >= tdongle_boot_guard::STABLE_AFTER_MS {
+            guard::mark_stable(safe_mode);
+            marked = true;
+        }
+        Timer::after_millis(500).await;
+    }
+}
+
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
+    let state = STATE.get_or_init(guard::begin);
     let peripherals = esp_hal::init(esp_hal::Config::default());
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
+    let dogs = guard::Dogs::arm(peripherals.TIMG1, peripherals.RTC_TIMER);
+    guard::stage(tdongle_boot_guard::Stage::Usb);
 
     // Stable "chip MAC" -> 12 uppercase hex digits for the serial and the NCM iMACAddress string (same as the C firmware).
     let mac = esp_hal::efuse::base_mac_address();
@@ -180,8 +203,14 @@ async fn main(spawner: Spawner) -> ! {
 
     let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
     // OUT endpoints: EP0 (64) + ACM bulk (64) + NCM bulk (64) = 192 B needed.
-    static EP_OUT: StaticCell<[u8; 192]> = StaticCell::new();
-    let driver = UsbDriver::new(usb, EP_OUT.init([0; 192]), OtgConfig::default());
+    static EP_OUT: StaticCell<[u8; EP_OUT_BYTES]> = StaticCell::new();
+    let mut otg_config = OtgConfig::default();
+    // PATCH (vendor/embassy-usb-synopsys-otg): the NCM bulk OUT endpoint (0x04) is armed for a whole NTB.
+    #[cfg(not(feature = "stock-out"))]
+    {
+        otg_config.out_transfer_bytes[4] = ncm::NTB_OUT_MAX as u16;
+    }
+    let driver = UsbDriver::new(usb, EP_OUT.init([0; EP_OUT_BYTES]), otg_config);
 
     let mut config = embassy_usb::Config::new(0x303A, 0x4001);
     config.bcd_usb = UsbVersion::Two; // C: bcdUSB 0x0200 (upstream default 0x0210 also makes the host fetch a BOS)
@@ -218,6 +247,7 @@ async fn main(spawner: Spawner) -> ! {
     let dev = b.build();
     spawner.spawn(usb_task(dev).unwrap());
     spawner.spawn(console_task(acm).unwrap());
+    spawner.spawn(heartbeat_task(dogs, state.boot.safe_mode).unwrap());
     spawner.spawn(rx_task(rx).unwrap());
     spawner.spawn(tx_task(tx).unwrap());
     core::future::pending().await
@@ -377,7 +407,8 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
             reply(
                 port,
                 format_args!(
-                    "status mode=spike_s2 path={}{} up_ms={} alt={} dtr={} resets={} hold={} rx_ntbs={} rx_frames={} rx_bytes={} rx_runt={} rx_bad_ntb={} rx_drop={} tx_frames={} tx_bytes={} chan_full={} filter={:#x} ntb_in={}",
+                    "status mode=spike_s2 out={} path={}{} up_ms={} alt={} dtr={} resets={} hold={} rx_ntbs={} rx_frames={} rx_bytes={} rx_runt={} rx_bad_ntb={} rx_drop={} tx_frames={} tx_bytes={} chan_full={} filter={:#x} ntb_in={}",
+                    if cfg!(feature = "stock-out") { "stock" } else { "multi" },
                     ["reflect", "sink", "source"][usize::from(MODE.load(Ordering::Relaxed)).min(2)],
                     if MODE.load(Ordering::Relaxed) == MODE_SOURCE { if SOURCE_KBPS.load(Ordering::Relaxed) == 0 { "(max)" } else { "(rate)" } } else { "" },
                     up,
@@ -435,16 +466,25 @@ async fn handle(port: &mut AcmPort, cmd: &str) {
             reply(port, format_args!("hold off (held {} ms)", held)).await
         }
         "boot-status" => {
-            let mut l = Line::<320> { buf: [0; 320], len: 0 };
-            ops::boot_status(&mut l, "s2-usb-ncm", ESP_APP_DESC.app_elf_sha256(), Instant::now().as_millis());
+            let mut l = Line::<400> { buf: [0; 400], len: 0 };
+            if let Some(state) = STATE.try_get() {
+                guard::boot_status(&mut l, "s2-usb-ncm", ESP_APP_DESC.app_elf_sha256(), state, Instant::now().as_millis(), None);
+            }
             reply(port, format_args!("{}", core::str::from_utf8(&l.buf[..l.len]).unwrap_or(""))).await
         }
+        "normal" => {
+            guard::leave_safe_mode();
+            reply(port, format_args!("leaving safe mode: resetting")).await;
+            Timer::after(Duration::from_millis(200)).await;
+            esp_hal::system::software_reset()
+        }
         "bootloader" => {
+            guard::leave_safe_mode(); // a deliberate reset is not a failed boot
             reply(port, format_args!("rebooting to ROM download mode")).await;
             Timer::after(Duration::from_millis(200)).await;
             ops::enter_bootloader()
         }
-        "help" | "?" => reply(port, format_args!("commands: status | boot-status | bootloader | reflect | sink | source RATE_KBPS|max | hold on | hold off | help")).await,
+        "help" | "?" => reply(port, format_args!("commands: status | boot-status | bootloader | normal | reflect | sink | source RATE_KBPS|max | hold on | hold off | help")).await,
         _ => reply(port, format_args!("unknown command: {}", cmd)).await,
     }
 }

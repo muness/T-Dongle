@@ -75,5 +75,9 @@ single number decides whether the OTG driver needs the multi-packet patch.
 ## Board result (coordinator, 2026-10-06): PASS
 Flashed app-only and verified against the running ELF; boots under the C bootloader; `bootloader` and `boot-status` work. Enumerates as "T-Dongle-S3 NCM", serial and NCM MAC = chip MAC.
 The reflector carries 2, 4, 8 and max Mbit/s of UDP broadcast with no drops (rx_drop 0, chan_full 0) and saturates at **4.58 Mbit/s in each direction at the same time (9.2 Mbit/s on the bus)**;
-the full-speed bulk ceiling at 64-byte packets is about 9.7. **The single-packet, non-DMA OTG driver is not the bandwidth bottleneck here; the multi-packet patch listed above is not needed for bandwidth.**
+the full-speed bulk ceiling at 64-byte packets is about 9.7. **CORRECTED (second board session, one direction at a time): this conclusion was wrong.** `source max` (IN alone) reaches 7.41 Mbit/s, 0 drops; `sink` (OUT alone) stays at 4.52 / 4.62 / 4.62 Mbit/s at 6 / 8 / max offered, 0 drops. OUT is the bottleneck (one-packet arming), and the multi-packet patch **is** required for OUT; see the ADR section "USB OUT patch". The earlier both-directions-at-once figure (4.58 each) was the OUT cap, not the bus.
 Backpressure: `hold on` under a 3 Mbit/s flood froze `rx_frames`; `hold off` resumed with no drops, bad NTBs, runts or resets.
+
+## Patched OUT (multi-packet), and the console modes
+The vendored driver arms the NCM OUT endpoint for a whole NTB (3,200 B, 50 packets); `s2-app.bin` is the patched build and `s2-stock-app.bin` the same image with the `stock-out` feature (stock one-packet arming) for the A/B.
+`status` shows `out=multi|stock`. Console: `reflect` (default), `sink` (count OUT, send nothing), `source RATE_KBPS|max` (1,442 B broadcast frames on IN). Host model: `rust/crates/tdongle-usb-out`.

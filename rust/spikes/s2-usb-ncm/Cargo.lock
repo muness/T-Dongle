@@ -538,14 +538,13 @@ dependencies = [
 [[package]]
 name = "embassy-usb-synopsys-otg"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6efd0c0e0b21bcf91b475b8fa47347c1df32c9a99728ae1e1b0e6625862dfd1a"
 dependencies = [
  "critical-section",
  "embassy-sync 0.8.0",
  "embassy-time",
  "embassy-usb-driver",
  "portable-atomic",
+ "tdongle-usb-out",
 ]
 
 [[package]]
@@ -808,7 +807,6 @@ dependencies = [
  "esp-metadata-generated",
  "esp-sync",
  "log",
- "portable-atomic",
 ]
 
 [[package]]
@@ -1486,12 +1484,15 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embassy-time",
  "embassy-usb",
+ "embassy-usb-synopsys-otg",
  "esp-backtrace",
  "esp-bootloader-esp-idf",
  "esp-hal",
  "esp-println",
  "esp-rtos",
  "static_cell",
+ "tdongle-boot-guard",
+ "tdongle-usb-out",
 ]
 
 [[package]]
@@ -1682,6 +1683,14 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "tdongle-boot-guard"
+version = "0.3.0-dev"
+
+[[package]]
+name = "tdongle-usb-out"
+version = "0.3.0-dev"
 
 [[package]]
 name = "termcolor"

@@ -10,18 +10,26 @@ publish = false
 esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
 esp-rtos = { version = "0.4", features = ["esp32s3", "embassy"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
-esp-println = { version = "0.18", features = ["esp32s3"] }
-esp-backtrace = { version = "0.20", features = ["esp32s3", "panic-handler", "println"] }
+esp-println = { version = "0.18", default-features = false, features = ["esp32s3", "uart", "critical-section"] }
+esp-backtrace = { version = "0.20", default-features = false, features = ["esp32s3", "println"] }
 embassy-executor = "0.10"
 embassy-time = "0.5"
 embassy-sync = "0.8"
 embassy-futures = "0.1"
 embassy-usb = { version = "0.6", default-features = false }
 static_cell = "2.1"
+tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
+embassy-usb-synopsys-otg = "0.4"
+tdongle-usb-out = { path = "../../crates/tdongle-usb-out" }
+
+[patch.crates-io]
+embassy-usb-synopsys-otg = { path = "../../vendor/embassy-usb-synopsys-otg" }
 
 [features]
 # Compile-time backpressure demo: the NCM receive task never calls read_packet.
 hold-rx = []
+# Stock one-packet OUT transfers (no vendored-driver multi-packet arming): the A/B baseline.
+stock-out = []
 
 [profile.release]
 opt-level = "s"
