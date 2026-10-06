@@ -1,7 +1,6 @@
 # S3 (no_std): S1 + S2 as a bridge (USB CDC-NCM <-> Wi-Fi STA raw L2), host->Wi-Fi through the real `tdongle-bridge` crate
 
-Builds; merged image `s3.bin` (16 MiB, app image 494,432 B = 11.79% of the 4 MiB partition, headers `e9 03 02 40` at 0 and `e9 05 02 40` at 0x20000 = DIO / 40 MHz / 16 MB).
-**Not run on hardware. `s3.bin` was built with dummy credentials: rebuild with `WIFI_SSID=.. WIFI_PASS=.. cargo build --release` and re-run espflash save-image before flashing.**
+Builds as an app-only image `rust/spikes/dist/s3-app.bin` (0x20000; 515,120 B = 12.3% of the 4 MiB partition; DIO / 40 MHz / 16 MB; `esptool image_info` valid). **Not run on hardware.** No credentials are built in: it reads the saved networks from the NVS (read-only), scans (hidden SSIDs included), joins the best-ranked visible saved network (`tdongle-wifi-policy`) and otherwise tries the list in order. The ACM console also answers `bootloader` and `boot-status`; USB serial = base MAC. Build: `rust/spikes/build-app.sh s3-bridge`.
 (Written by the coordinator from the spike agent's report; the Write tool refused the agent's own attempt.)
 
 Versions equal S1/S2 (esp-hal 1.2.2, esp-radio 1.0.0-beta.1, esp-rtos 0.4.0, esp-alloc 0.11.0, embassy-usb 0.6.0, embassy-executor 0.10.0) plus `embassy-net-driver` 0.2, `critical-section` and the path crates `tdongle-bridge`, `-aqm`, `-spsc`, `-serial`, `-traffic`.

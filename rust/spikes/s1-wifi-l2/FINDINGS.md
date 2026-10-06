@@ -96,3 +96,8 @@ magic 0xE9, byte2 = 0x02 (DIO), byte3 = 0x40 (16 MB flash size, freq nibble 0x0 
 Logging: esp-println `auto` = USB-Serial-JTAG on the S3's GPIO19/20 (the same pins the OTG stack will use in S2; fine for this spike).
 Counter line every 5 s: `CNT frames=.. bytes=.. max=.. uc_us=.. bc=.. mc=.. uc_other=.. arp=.. ip4=.. ip6=.. eapol=.. other=.. runt=.. src_us=.. gw_arp_reply=.. tx_ok=.. tx_none=.. rssi=.. heap_used=..`
 Pass criteria on hardware: `gw_arp_reply` > 0 (ARP probe with src = STA MAC, sender IP 0.0.0.0, was answered by the gateway), `src_us` should stay 0.
+
+## Update: app-only image, NVS credentials, console
+`rust/spikes/dist/s1-app.bin` (0x20000 only; build with `rust/spikes/build-app.sh s1-wifi-l2`) replaces the merged `s1.bin` and has no built-in credentials: it reads the saved networks
+from the NVS (read-only), scans with `show_hidden`, joins the best-ranked visible one. It now runs under an embassy executor with a USB CDC-ACM console (serial = base MAC; `status` with
+`mode=spike_s1`, `boot-status`, `bootloader`, `gw A.B.C.D` to set the ARP-probe target at run time). esp-println output still goes to USB-Serial-JTAG, which disappears once the OTG device starts.
