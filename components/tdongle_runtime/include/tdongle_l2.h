@@ -17,17 +17,22 @@
 
 /* The largest Ethernet frame the bridge carries (1,500 byte MTU + header; no VLAN tag): anything else is dropped and counted. */
 #define TDONGLE_L2_FRAME_MAX 1514u
-/* Host -> Wi-Fi hand-off queue. Its job is to decouple the TinyUSB task from the Wi-Fi driver, not to buffer: whatever stands in it is latency
- * added to every packet behind it (the first board A/B of ADR 0023 measured 52 ms average ping under TCP upload with 16 slots, against 24 ms
- * on the unbuffered original). So it is sized by the bandwidth-delay product of the path it feeds and bounded in time as well as in frames:
- *  - TDONGLE_L2_HOST_SLOTS physical slots (a power of two: the counters run free), 1,524 B each;
- *  - TDONGLE_L2_HOST_QUEUE_LIMIT frames at most may stand in it. USB OUT delivers at most ~875 B/ms and a LAN round trip is 3 to 10 ms, so the
- *    delay product is 2.6 to 8.8 KB: 6 full frames (9 KB, 10 ms) covers the worst case plus the frames of one worker wake-up; a seventh frame
- *    is the sender's cue to slow down, dropped here exactly where TCP expects a bottleneck to drop it;
- *  - TDONGLE_L2_SOJOURN_MS: a frame that has been in the dongle (queue plus retries) this long is dropped, whatever the depth (CoDel's
- *    target reduced to its essence: a stalled Wi-Fi link must not turn the queue into a delay line). 20 ms is twice the queue's own 10 ms. */
-#define TDONGLE_L2_HOST_SLOTS 8u
-#define TDONGLE_L2_HOST_QUEUE_LIMIT 6u
+/* Host -> Wi-Fi hand-off queue, and USB backpressure. The queue's job is to decouple the TinyUSB task from the Wi-Fi driver, not to buffer:
+ * everything that stands in it is latency for every packet behind it. The first two board A/Bs of ADR 0023 measured it: 16 slots, then 6, still
+ * gave ping under TCP upload of 52 and 59 ms against 18-24 ms on the original, which blocked in the USB OUT callback so that USB NAKed and the
+ * queue stayed on the host (macOS schedules interface queues per flow, so a ping bypasses the bulk queue there). Dropping at a limit only turns
+ * a queue into loss. So the limit is not a drop point but a flow-control point:
+ *  - TDONGLE_L2_HOST_QUEUE_LIMIT frames (3) may stand here. At the limit the callback returns TUSB_NET_RX_HOLD: the NCM class driver keeps the
+ *    datagram, stops re-arming the OUT endpoint when its CFG_TUD_NCM_OUT_NTB_N receive buffers fill, and the host is NAKed. The TinyUSB task
+ *    never blocks and nothing is dropped;
+ *  - when the worker has drained the queue to TDONGLE_L2_HOST_RESUME_DEPTH (1) it asks for the held datagram again (rx_resume ->
+ *    tinyusb_net_rx_resume()), so the pipe keeps a frame of runway;
+ *  - 4 physical slots (a power of two: the counters run free), 1,524 B each;
+ *  - TDONGLE_L2_SOJOURN_MS remains as a safety net for a stalled Wi-Fi link (CoDel's target reduced to its essence), not as the steady-state
+ *    mechanism: with backpressure it should read 0. */
+#define TDONGLE_L2_HOST_SLOTS 4u
+#define TDONGLE_L2_HOST_QUEUE_LIMIT 3u
+#define TDONGLE_L2_HOST_RESUME_DEPTH 1u
 #define TDONGLE_L2_SLOT_BYTES 1524u
 #define TDONGLE_L2_SOJOURN_MS 20u
 /* A refusal for buffers (the budget's, or the driver's pool) clears as frames leave the antenna, about every 0.3 to 1 ms at the Wi-Fi rate, so the
@@ -39,6 +44,12 @@ typedef struct {
     /* Required. Sends one frame on the STA interface through the Wi-Fi TX budget (wifi_pins.inc): ESP_OK when the driver took it,
      * ESP_ERR_NO_MEM when it was refused for buffers (retried every TDONGLE_L2_RETRY_US until the frame's sojourn limit), anything else is final. Worker task only. */
     esp_err_t (*wifi_tx)(void *frame, uint16_t len);
+    /* Optional. True when the radio can take another frame now (wifi_pins_tx_room). While it is false the worker waits instead of calling wifi_tx and
+     * being refused: the bridge keeps few frames in the driver (GATEWAY_BRIDGE_WIFI_TX_INFLIGHT), and a full allowance is the normal state of a link
+     * that is the bottleneck, not an error. */
+    bool (*wifi_room)(void);
+    /* Required with a host that can be held: ask the USB layer to offer the held datagram again (tinyusb_net_rx_resume). Called by the worker. */
+    void (*rx_resume)(void);
     unsigned task_priority;      /* the host -> Wi-Fi worker: GATEWAY_TASK_BRIDGE_PRIO */
     int task_core;
     uint32_t task_stack;         /* bytes */
@@ -55,13 +66,14 @@ typedef struct {
     uint32_t w2h_link_down;      /* the Wi-Fi link was marked down: the callback was racing the disconnect */
     uint32_t w2h_usb_not_ready;  /* USB not configured (cable out, host asleep) or the ring not started */
     uint32_t w2h_ring_full;      /* no room in the USB transmit ring, at its elastic cap: backpressure drop */
-    /* host -> Wi-Fi. h2w_frames = queued + invalid + foreign_mac + link_down + queue_full, always. */
-    uint32_t h2w_frames;         /* frames the TinyUSB receive callback handed over */
+    /* host -> Wi-Fi. h2w_frames = queued + invalid + foreign_mac + link_down, always. */
+    uint32_t h2w_frames;         /* frames the TinyUSB receive callback took (a held offer is not a frame until it is taken) */
     uint32_t h2w_queued;
     uint32_t h2w_invalid;
     uint32_t h2w_foreign_mac;    /* source is not the STA MAC: the bridge speaks for the STA address only; filtered by design */
     uint32_t h2w_link_down;      /* Wi-Fi not connected when the frame arrived */
-    uint32_t h2w_queue_full;     /* the hand-off queue is full: backpressure drop */
+    uint32_t h2w_held;           /* offers refused with TUSB_NET_RX_HOLD at the queue limit: USB backpressure, nothing dropped */
+    uint32_t h2w_resumes;        /* times the worker asked for held datagrams again */
     /* The worker. h2w_queued = sent + stale + sojourn_drop + link_down_queued + tx_failed + queue depth, always (at rest). */
     uint32_t h2w_sent;           /* the Wi-Fi driver took the frame */
     uint32_t h2w_stale;          /* queued before the link changed: dropped without sending */
@@ -85,6 +97,7 @@ esp_err_t tdongle_l2_start(const uint8_t mac[6], const tdongle_l2_config_t *conf
 /* The STA associated or lost its association. Event task. Frames queued toward the host and toward Wi-Fi from the previous
  * association are discarded (generation), the host sees the carrier change. */
 void tdongle_l2_link(bool connected);
-/* TinyUSB receive callback: never blocks. ESP_OK: queued, or filtered by design (counted). An error: dropped, counted. */
+/* TinyUSB receive callback: never blocks. ESP_OK: queued, or filtered by design (counted). TUSB_NET_RX_HOLD: the queue is at its limit; the datagram
+ * stays in the USB class driver and is offered again after rx_resume (counted as h2w_held, not as a frame). Any other error: dropped, counted. */
 esp_err_t tdongle_l2_host(void *buffer, uint16_t len);
 void tdongle_l2_stats(tdongle_l2_stats_t *out);

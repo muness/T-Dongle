@@ -108,9 +108,9 @@ int main(void) {
     check_pm_idle();
     const tdongle_l2_stats_t s = l2_stats();
     const tinyusb_net_tx_stats_t t = ring_stats();
-    assert(s.w2h_frames > ITERATIONS / 2 && s.h2w_frames == ITERATIONS && s.w2h_forwarded > 1000 && s.h2w_sent > 1000);
-    printf("PASS: transparent bridge across eight threads: to host %u/%u forwarded (%u ring-full, %u flushed, %u link-down), to Wi-Fi %u/%u sent (%u queue-full, %u refused, %u stale, %u link-down), %u link changes, ring grew %u times\n",
-           s.w2h_forwarded, s.w2h_frames, s.w2h_ring_full, t.flushed_link_down, s.w2h_link_down, s.h2w_sent, s.h2w_frames, s.h2w_queue_full, s.h2w_tx_failed, s.h2w_stale,
+    assert(s.w2h_frames > ITERATIONS / 2 && s.h2w_frames <= ITERATIONS && s.w2h_forwarded > 1000 && s.h2w_sent > 1000);
+    printf("PASS: transparent bridge across eight threads: to host %u/%u forwarded (%u ring-full, %u flushed, %u link-down), to Wi-Fi %u/%u sent (%u held, %u refused, %u stale, %u link-down), %u link changes, ring grew %u times\n",
+           s.w2h_forwarded, s.w2h_frames, s.w2h_ring_full, t.flushed_link_down, s.w2h_link_down, s.h2w_sent, s.h2w_frames, s.h2w_held, s.h2w_tx_failed, s.h2w_stale,
            s.h2w_link_down + s.h2w_link_down_queued, s.link_changes, t.grow_events);
     return 0;
 }

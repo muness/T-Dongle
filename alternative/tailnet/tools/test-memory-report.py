@@ -69,7 +69,7 @@ assert usb["tx_ntb_count"] == 2 and usb["rx_inflight_max"] == 22 and usb["rx_inf
 bridge = reports("bridge", "bridge")[0]
 assert bridge["active"] is True and bridge["link_linked"] == 1 and bridge["link_changes"] == 5 and bridge["link_worker_stack_free"] == 1900
 assert bridge["to_host_frames"] == bridge["to_host_forwarded"] + bridge["to_host_invalid"] + bridge["to_host_own_mac"] + bridge["to_host_link_down"] + bridge["to_host_usb_not_ready"] + bridge["to_host_ring_full"]
-assert bridge["to_wifi_frames"] == bridge["to_wifi_queued"] + bridge["to_wifi_invalid"] + bridge["to_wifi_foreign_mac"] + bridge["to_wifi_link_down"] + bridge["to_wifi_queue_full"]
+assert bridge["to_wifi_frames"] == bridge["to_wifi_queued"] + bridge["to_wifi_invalid"] + bridge["to_wifi_foreign_mac"] + bridge["to_wifi_link_down"]
 assert bridge["to_wifi_queued"] == bridge["to_wifi_sent"] + bridge["to_wifi_stale"] + bridge["to_wifi_sojourn_drop"] + bridge["to_wifi_link_down_queued"] + bridge["to_wifi_tx_failed"] + bridge["to_wifi_queue_depth"]
 assert bridge["timing_pm_note_us_max"] == 400 and bridge["timing_wait_us_max"] == 800 and bridge["to_host_raced"] == 1 and bridge["timing_cold_starts"] == 21
 assert bridge["to_wifi_last_tx_error"] == -1 and bridge["usb_ring_ring_bytes"] == 9144 and bridge["usb_ring_dropped_full"] == 7 and bridge["usb_ring_enqueued"] == 90
@@ -82,7 +82,7 @@ assert [l.split()[0] for l in lines] == ["bridge_link", "bridge_to_host", "bridg
 assert all(len(l) < 384 for l in lines)
 assert sum(l.count("=") for l in lines) == len([k for k in bridge if k not in ("schema", "kind", "active")]), lines
 fields = {(l.split()[0][7:], w.split("=")[0]): int(w.split("=")[1]) for l in lines for w in l.split()[1:]}
-assert fields[("to_host", "frames")] == 100 and fields[("to_wifi", "frames")] == 80 and fields[("to_wifi", "last_tx_error")] == -1
+assert fields[("to_host", "frames")] == 100 and fields[("to_wifi", "frames")] == 76 and fields[("to_wifi", "last_tx_error")] == -1
 assert fields[("to_host", "ring_full")] == 3 and fields[("wifi_tx", "installed")] == 1
 assert all(fields[(sec, name)] == bridge[sec + "_" + name] for (sec, name) in fields), "the serial lines and the report print the same numbers"
 

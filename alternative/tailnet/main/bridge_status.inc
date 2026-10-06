@@ -7,7 +7,7 @@
  *   `bridge` (diagnostics build)   one JSON line, keys "<section>_<name>".
  * Identities that hold at rest (tests/test_bridge_path.c checks them on the real code):
  *   to_host.frames  = forwarded + invalid + own_mac + link_down + usb_not_ready + ring_full
- *   to_wifi.frames  = queued + invalid + foreign_mac + link_down + queue_full
+ *   to_wifi.frames  = queued + invalid + foreign_mac + link_down   (held offers are not frames)
  *   to_wifi.queued  = sent + stale + sojourn_drop + link_down_queued + tx_failed + queue_depth
  *   wifi_tx.charged = done + aborted + flushed + stale + inflight (wifi_pin_budget.h) */
 typedef void (*bridge_emit_fn)(void *ctx, const char *section, const char *name, int64_t value);
@@ -33,7 +33,8 @@ static void bridge_visit(bridge_emit_fn emit, void *ctx) {
     E("to_wifi", "invalid", l2.h2w_invalid);
     E("to_wifi", "foreign_mac", l2.h2w_foreign_mac);
     E("to_wifi", "link_down", l2.h2w_link_down);
-    E("to_wifi", "queue_full", l2.h2w_queue_full);
+    E("to_wifi", "held", l2.h2w_held);
+    E("to_wifi", "resumes", l2.h2w_resumes);
     E("to_wifi", "sent", l2.h2w_sent);
     E("to_wifi", "stale", l2.h2w_stale);
     E("to_wifi", "sojourn_drop", l2.h2w_sojourn_drop);

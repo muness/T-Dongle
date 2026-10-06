@@ -89,7 +89,8 @@ static bool tud_ready(void){assert(!in_crit);return usb_ready;}
 static bool tud_network_can_xmit(uint16_t n){assert(!in_crit&&!in_producer);return allow_tx && n<=1518 && ntb_credit!=0;}
 uint16_t tud_network_xmit_cb(uint8_t*,void*,uint16_t);
 static void tud_network_xmit(void *ref,uint16_t n){assert(!in_crit&&!in_producer);if(pre_copy_hook)pre_copy_hook();uint8_t dest[1518];uint16_t got=tud_network_xmit_cb(dest,ref,n);assert(got==n);if(xmit_hook)xmit_hook(dest,n);if(ntb_credit>0)ntb_credit--;}
-static void tud_network_recv_renew(void){}
+static void (*recv_renew_hook)(void);static int recv_renew_calls;
+static void tud_network_recv_renew(void){recv_renew_calls++;if(recv_renew_hook)recv_renew_hook();}
 static uint8_t tusb_get_mac_string_id(void){return 6;}
 static void tinyusb_descriptors_set_string(const char *s,uint8_t id){(void)s;(void)id;}
 static int xTaskCreatePinnedToCore(void(*f)(void*),const char *n,int stack,void *a,unsigned prio,TaskHandle_t *h,int core){task_core=core;(void)f;(void)n;(void)a;if(task_create_fail)return 0;task_created++;task_stack=stack;task_prio=(int)prio;*h=(TaskHandle_t)&task_created;return pdPASS;}

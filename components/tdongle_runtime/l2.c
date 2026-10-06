@@ -25,6 +25,7 @@ typedef struct {
 } host_slot_t;
 _Static_assert(sizeof(host_slot_t) <= TDONGLE_L2_SLOT_BYTES, "TDONGLE_L2_SLOT_BYTES is the size the heap budget is written with");
 _Static_assert((TDONGLE_L2_HOST_SLOTS & (TDONGLE_L2_HOST_SLOTS - 1u)) == 0, "the slot counters run free: the slot count must divide 2^32");
+_Static_assert(TDONGLE_L2_HOST_RESUME_DEPTH < TDONGLE_L2_HOST_QUEUE_LIMIT, "resume below the limit, or the pipe is released at the moment it is refused again");
 _Static_assert(TDONGLE_L2_HOST_QUEUE_LIMIT >= 2 && TDONGLE_L2_HOST_QUEUE_LIMIT <= TDONGLE_L2_HOST_SLOTS, "the standing-queue limit lives inside the slot array");
 _Static_assert((uint64_t)TDONGLE_L2_SOJOURN_MS * 1000u < TDONGLE_PM_ACTIVITY_HOLD_US,
                "a frame waiting for Wi-Fi must be inside the forwarding activity hold, or the clock drops under it");
@@ -36,6 +37,9 @@ _Static_assert(TDONGLE_L2_RETRY_US >= 100u && (uint64_t)TDONGLE_L2_RETRY_US * 4u
 
 static struct {
     esp_err_t (*wifi_tx)(void *frame, uint16_t len);
+    bool (*wifi_room)(void);
+    void (*rx_resume)(void);
+    atomic_bool held;            /* the callback refused a datagram at the queue limit and the worker owes the USB layer a resume */
     host_slot_t *slots;
     TaskHandle_t worker;
     esp_timer_handle_t retry_timer;
@@ -45,7 +49,7 @@ static struct {
     atomic_bool linked;
     atomic_uint link_changes;
     atomic_uint w2h_frames, w2h_forwarded, w2h_invalid, w2h_own_mac, w2h_link_down, w2h_usb_not_ready, w2h_ring_full, w2h_raced;
-    atomic_uint h2w_frames, h2w_queued, h2w_invalid, h2w_foreign_mac, h2w_link_down, h2w_queue_full;
+    atomic_uint h2w_frames, h2w_queued, h2w_invalid, h2w_foreign_mac, h2w_link_down, h2w_held, h2w_resumes;
     atomic_uint h2w_sent, h2w_stale, h2w_sojourn_drop, h2w_link_down_queued, h2w_tx_failed, h2w_tx_retries, h2w_queue_high_water;
     atomic_int h2w_last_tx_error;
     atomic_uint pm_notes, pm_note_us_sum, pm_note_us_max, h2w_wait_us_sum, h2w_wait_us_max, h2w_tx_us_sum, h2w_tx_us_max;
@@ -112,25 +116,34 @@ static esp_err_t receive(void *buffer, uint16_t len, void *driver_buffer) {
 esp_err_t tdongle_l2_host(void *buffer, uint16_t len) {
     const uint8_t *frame = buffer;
     if (!l2.slots) return ESP_ERR_INVALID_STATE;
-    BUMP(h2w_frames);
+    /* h2w_frames counts frames TAKEN (queued or dropped by name); a held offer comes back and is counted when it is finally taken. */
     if (len < 14 || len > TDONGLE_L2_FRAME_MAX) {
+        BUMP(h2w_frames);
         BUMP(h2w_invalid);
         return ESP_ERR_INVALID_ARG;
     }
     if (memcmp(frame + 6, l2.identity, 6)) {
+        BUMP(h2w_frames);
         BUMP(h2w_foreign_mac);
         return ESP_OK;
     }
     if (!atomic_load_explicit(&l2.linked, memory_order_acquire)) {
+        BUMP(h2w_frames);
         BUMP(h2w_link_down);
         return ESP_ERR_INVALID_STATE;
     }
     /* tail first, then head: head only grows, so head - tail can never be negative whatever the worker does between the two loads. */
-    const unsigned tail = atomic_load_explicit(&l2.tail, memory_order_acquire);
+    unsigned tail = atomic_load_explicit(&l2.tail, memory_order_acquire);
     const unsigned head = atomic_load_explicit(&l2.head, memory_order_relaxed);
     if (head - tail >= TDONGLE_L2_HOST_QUEUE_LIMIT) {
-        BUMP(h2w_queue_full);
-        return ESP_ERR_NO_MEM;
+        /* Backpressure: say "not now" (the USB class driver keeps the datagram and NAKs the host), and make sure the worker will say "now". The flag is
+         * published BEFORE the queue is looked at again, so a worker that drains in between either sees it (and resumes) or this look sees its room. */
+        atomic_store_explicit(&l2.held, true, memory_order_seq_cst);
+        tail = atomic_load_explicit(&l2.tail, memory_order_seq_cst);
+        if (head - tail >= TDONGLE_L2_HOST_QUEUE_LIMIT || !atomic_exchange_explicit(&l2.held, false, memory_order_seq_cst)) {
+            BUMP(h2w_held);      /* (the second case: the worker already took the flag and owes a resume that re-offers this datagram) */
+            return TUSB_NET_RX_HOLD;
+        }
     }
     if (unicast(frame)) note_activity();
     host_slot_t *slot = &l2.slots[head & SLOT_MASK];
@@ -139,6 +152,7 @@ esp_err_t tdongle_l2_host(void *buffer, uint16_t len) {
     slot->enq_us = now_us();
     memcpy(slot->bytes, buffer, len);
     atomic_store_explicit(&l2.head, head + 1u, memory_order_release);
+    BUMP(h2w_frames);
     BUMP(h2w_queued);
     note_max(&l2.h2w_queue_high_water, head + 1u - tail);
     xTaskNotifyGive(l2.worker);                          /* never blocks */
@@ -172,6 +186,17 @@ static void deliver(const host_slot_t *slot) {
     ADD(h2w_wait_us_sum, waited);
     note_max(&l2.h2w_wait_us_max, waited);
     for (;;) {
+        if (l2.wifi_room && !l2.wifi_room()) {
+            /* The radio has its allowance in flight: that is the bottleneck working, not a failure. Wait for a frame to leave the antenna. The sojourn
+             * limit still bounds the wait (a link that never completes anything). */
+            if (now_us() - slot->enq_us >= limit) {
+                BUMP(h2w_tx_failed);
+                return;
+            }
+            BUMP(h2w_tx_retries);
+            retry_wait();
+            continue;
+        }
         /* The slot is read in place: only this task frees it (by advancing tail), and the driver copies the frame inside the call. */
         const uint32_t t0 = now_us();
         const esp_err_t result = l2.wifi_tx((void *)slot->bytes, slot->len);
@@ -194,6 +219,11 @@ static void deliver(const host_slot_t *slot) {
     }
 }
 
+static void resume(void) {
+    BUMP(h2w_resumes);
+    if (l2.rx_resume) l2.rx_resume();
+}
+
 /* Everything queued so far; returns how many frames were handled. */
 static unsigned drain(void) {
     unsigned handled = 0;
@@ -201,8 +231,12 @@ static unsigned drain(void) {
         const unsigned tail = atomic_load_explicit(&l2.tail, memory_order_relaxed);
         if (tail == atomic_load_explicit(&l2.head, memory_order_acquire)) return handled;
         deliver(&l2.slots[tail & SLOT_MASK]);
-        atomic_store_explicit(&l2.tail, tail + 1u, memory_order_release);    /* the slot is the producer's again */
+        atomic_store_explicit(&l2.tail, tail + 1u, memory_order_seq_cst);    /* the slot is the producer's again */
         handled++;
+        /* The queue has room again: if the callback refused a datagram, ask the USB layer to offer it. Below the resume depth, not the limit, so the pipe
+         * is refilled while the worker still has frames to send. */
+        if (atomic_load_explicit(&l2.head, memory_order_acquire) - (tail + 1u) <= TDONGLE_L2_HOST_RESUME_DEPTH && atomic_exchange_explicit(&l2.held, false, memory_order_seq_cst))
+            resume();
     }
 }
 
@@ -220,6 +254,8 @@ esp_err_t tdongle_l2_start(const uint8_t mac[6], const tdongle_l2_config_t *conf
     memset(&l2, 0, sizeof(l2));
     memcpy(l2.identity, mac, 6);
     l2.wifi_tx = config->wifi_tx;
+    l2.wifi_room = config->wifi_room;
+    l2.rx_resume = config->rx_resume;
     l2.slots = calloc(TDONGLE_L2_HOST_SLOTS, sizeof(host_slot_t));
     if (!l2.slots) return ESP_ERR_NO_MEM;
     const esp_timer_create_args_t timer = {.callback = retry_fire, .name = "l2_retry"};
@@ -251,6 +287,8 @@ void tdongle_l2_link(bool connected) {
         esp_wifi_internal_reg_rxcb(ESP_IF_WIFI_STA, NULL);
         tinyusb_net_tx_ring_flush();                     /* frames received before the link dropped must not reach the host after it */
     }
+    /* A datagram held at the queue limit belongs to the old association's backlog: the queue is stale now, so let the USB layer re-offer it. */
+    if (atomic_exchange_explicit(&l2.held, false, memory_order_seq_cst)) resume();
     tud_network_link_state(0, connected);
 }
 
@@ -264,7 +302,7 @@ void tdongle_l2_stats(tdongle_l2_stats_t *out) {
         .w2h_own_mac = LOAD(w2h_own_mac), .w2h_link_down = LOAD(w2h_link_down), .w2h_usb_not_ready = LOAD(w2h_usb_not_ready),
         .w2h_ring_full = LOAD(w2h_ring_full), .w2h_raced = LOAD(w2h_raced),
         .h2w_frames = LOAD(h2w_frames), .h2w_queued = LOAD(h2w_queued), .h2w_invalid = LOAD(h2w_invalid),
-        .h2w_foreign_mac = LOAD(h2w_foreign_mac), .h2w_link_down = LOAD(h2w_link_down), .h2w_queue_full = LOAD(h2w_queue_full),
+        .h2w_foreign_mac = LOAD(h2w_foreign_mac), .h2w_link_down = LOAD(h2w_link_down), .h2w_held = LOAD(h2w_held), .h2w_resumes = LOAD(h2w_resumes),
         .h2w_sent = LOAD(h2w_sent), .h2w_stale = LOAD(h2w_stale), .h2w_sojourn_drop = LOAD(h2w_sojourn_drop),
         .h2w_link_down_queued = LOAD(h2w_link_down_queued),
         .h2w_tx_failed = LOAD(h2w_tx_failed), .h2w_tx_retries = LOAD(h2w_tx_retries), .h2w_last_tx_error = LOAD(h2w_last_tx_error),

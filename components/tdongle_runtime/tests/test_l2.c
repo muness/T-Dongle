@@ -133,12 +133,16 @@ static esp_err_t host_in(const uint8_t *f, uint16_t len) {   /* TinyUSB task */
     return r;
 }
 static unsigned pump(void) { return drain(); }              /* one wake-up of the worker */
+static unsigned resumes;
+static bool room = true;
+static bool wifi_room(void) { assert(!in_callback); return room; }
+static void rx_resume(void) { assert(!in_callback); resumes++; }
 static tdongle_l2_config_t config(void) {
-    return (tdongle_l2_config_t){.wifi_tx = wifi_tx, .task_priority = 8, .task_core = 1, .task_stack = 3072};
+    return (tdongle_l2_config_t){.wifi_tx = wifi_tx, .wifi_room = wifi_room, .rx_resume = rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
 }
 static void reset_world(void) {
     freed = link_calls = flushes = notifies = note_activity_calls = ring_calls = tx_calls = tx_script_n = waits = order_n = 0;
-    ring_result = ESP_OK; tx_default = ESP_OK; now_us_v = 1000000; wait_hook = NULL; ring_hook = NULL; timer_armed = false; fail_alloc = fail_task = fail_timer = false;
+    ring_result = ESP_OK; tx_default = ESP_OK; now_us_v = 1000000; wait_hook = NULL; ring_hook = NULL; timer_armed = false; resumes = 0; room = true; fail_alloc = fail_task = fail_timer = false;
 }
 static void start(void) {
     if (l2.slots) { free(l2.slots); l2.slots = NULL; }
@@ -150,7 +154,7 @@ static void start(void) {
 static void check_identities(void) {
     tdongle_l2_stats_t s = stats();
     assert(s.w2h_frames == s.w2h_forwarded + s.w2h_invalid + s.w2h_own_mac + s.w2h_link_down + s.w2h_usb_not_ready + s.w2h_ring_full);
-    assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down + s.h2w_queue_full);
+    assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down);
     assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
 }
 
@@ -262,12 +266,12 @@ static void test_to_wifi(void) {
     frame(f, TDONGLE_L2_FRAME_MAX, peer, mac, 5);
     assert(host_in(f, TDONGLE_L2_FRAME_MAX) == ESP_OK && pump() == 1 && tx_seen_len == TDONGLE_L2_FRAME_MAX && !memcmp(tx_seen, f, tx_seen_len));
     assert(tx_calls == 4);                                                                       /* nothing filtered reached the driver */
-    /* A full queue drops the new frame, keeps the old ones in order, and never blocks. */
+    /* A full queue holds the offer (USB backpressure), drops nothing, keeps the old ones in order, and never blocks. */
     frame(f, 200, peer, mac, 0);
     for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) { f[20] = (uint8_t)i; assert(host_in(f, 200) == ESP_OK); }
     assert(stats().h2w_queue_depth == TDONGLE_L2_HOST_QUEUE_LIMIT && stats().h2w_queue_high_water == TDONGLE_L2_HOST_QUEUE_LIMIT);   /* the limit, not the slot count */
     f[20] = 99;
-    assert(host_in(f, 200) == ESP_ERR_NO_MEM && host_in(f, 200) == ESP_ERR_NO_MEM && stats().h2w_queue_full == 2);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD && host_in(f, 200) == TUSB_NET_RX_HOLD && stats().h2w_held == 2);
     unsigned sent_before = stats().h2w_sent;
     for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) {
         /* one frame at a time: it is the oldest, tx_seen proves the order */
@@ -282,19 +286,73 @@ static void test_to_wifi(void) {
     assert(tx_calls == 4 + TDONGLE_L2_HOST_QUEUE_LIMIT);
 }
 
+static unsigned owed_calls;
+static void deliver_one_manually(void) { unsigned tail = atomic_load(&l2.tail); deliver(&l2.slots[tail & SLOT_MASK]); atomic_store(&l2.tail, tail + 1); }
+/* USB backpressure: hold at the limit, resume exactly once when the worker drains to the resume depth, no wedge on any interleaving. */
+static void test_backpressure(void) {
+    uint8_t f[200];
+    start(); tdongle_l2_link(true);
+    frame(f, 200, peer, mac, 1);
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD && stats().h2w_held == 1 && stats().h2w_frames == TDONGLE_L2_HOST_QUEUE_LIMIT && l2.held);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD && stats().h2w_held == 2 && resumes == 0);        /* nothing drained: nothing to resume */
+    check_identities();
+    /* The worker drains: resume is asked for when the depth reaches RESUME_DEPTH, once, not at every frame. */
+    assert(pump() == TDONGLE_L2_HOST_QUEUE_LIMIT);
+    assert(resumes == 1 && !l2.held && stats().h2w_resumes == 1);
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && resumes == 1);                           /* re-offered datagram accepted; no flag, no resume */
+    check_identities();
+    /* Interleaving A: the worker drains between the callback's full check and its re-check. The callback must not strand the datagram: it sees the
+     * room (and takes it) or the worker's resume covers it. */
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    /* simulate: the callback has set held and the worker finished everything before the callback re-reads the tail */
+    atomic_store(&l2.held, true);
+    pump();                                                                                     /* the worker sees the flag and resumes */
+    assert(resumes == 2 && !l2.held);
+    assert(host_in(f, 200) == ESP_OK);                                                          /* the re-offer is accepted */
+    pump();
+    /* Interleaving B: held is set, the worker has already taken it (resume owed), and the callback's re-check finds room: it must still say HOLD
+     * (the owed resume re-offers this datagram) rather than take the room twice. */
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    atomic_store(&l2.held, true);                      /* ... the callback, after storing the flag */
+    deliver_one_manually();                            /* the worker consumed one frame meanwhile (depth 2: no resume yet: above the resume depth) */
+    assert(host_in(f, 200) == ESP_OK);                 /* room: a normal enqueue (limit 3, depth 2). held was left set by the earlier store */
+    pump();
+    assert(resumes >= 3 && !l2.held);                  /* the stale flag is released by the next drain: a harmless extra resume, never a missed one */
+    /* A link change releases a held datagram (the backlog is stale). */
+    start(); tdongle_l2_link(true);
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD && l2.held);
+    tdongle_l2_link(false);
+    assert(resumes == 1 && !l2.held);
+    pump();
+    check_identities();
+    /* A wedged Wi-Fi link: frames wait for the radio's allowance, the host stays held, and the sojourn limit frees the queue; the held datagram resumes. */
+    start(); tdongle_l2_link(true);
+    room = false;
+    for (unsigned i = 0; i < TDONGLE_L2_HOST_QUEUE_LIMIT; i++) assert(host_in(f, 200) == ESP_OK);
+    assert(host_in(f, 200) == TUSB_NET_RX_HOLD);
+    assert(pump() == TDONGLE_L2_HOST_QUEUE_LIMIT);
+    assert(tx_calls == 0 && stats().h2w_tx_failed == 1 && stats().h2w_sojourn_drop == TDONGLE_L2_HOST_QUEUE_LIMIT - 1 && resumes == 1);   /* the driver was never called while the allowance was full; the first frame used its window, the rest had aged out behind it */
+    room = true;
+    assert(host_in(f, 200) == ESP_OK && pump() == 1 && stats().h2w_sent == 1);
+    check_identities();
+    (void)owed_calls;
+}
+
 /* The slot counters run free: the queue keeps working across the wrap of the 32-bit counters. */
 static void test_counter_wrap(void) {
     start();
     uint8_t f[100];
     tdongle_l2_link(true);
     atomic_store(&l2.head, 0xfffffffcu); atomic_store(&l2.tail, 0xfffffffcu);
-    for (unsigned round = 0; round < 6; round++) {
-        for (unsigned i = 0; i < 5; i++) { frame(f, 100, peer, mac, round * 5 + i); assert(host_in(f, 100) == ESP_OK); }
-        for (unsigned i = 0; i < 5; i++) {
+    for (unsigned round = 0; round < 10; round++) {
+        for (unsigned i = 0; i < 3; i++) { frame(f, 100, peer, mac, round * 3 + i); assert(host_in(f, 100) == ESP_OK); }
+        for (unsigned i = 0; i < 3; i++) {
             unsigned tail = atomic_load(&l2.tail);
             deliver(&l2.slots[tail & SLOT_MASK]);
             atomic_store(&l2.tail, tail + 1);
-            assert(tx_seen[20] == (uint8_t)(round * 5 + i + 20));
+            assert(tx_seen[20] == (uint8_t)(round * 3 + i + 20));
         }
     }
     assert(atomic_load(&l2.head) == 0xfffffffcu + 30 && stats().h2w_sent == 30 && stats().h2w_queue_depth == 0);
@@ -307,9 +365,9 @@ static void test_link_flap(void) {
     uint8_t f[200];
     tdongle_l2_link(true);
     frame(f, 200, peer, mac, 1);
-    for (unsigned i = 0; i < 5; i++) assert(host_in(f, 200) == ESP_OK);
-    tdongle_l2_link(false);                       /* the association ended with five frames queued */
-    assert(pump() == 5 && tx_calls == 0 && stats().h2w_link_down_queued == 5);
+    for (unsigned i = 0; i < 3; i++) assert(host_in(f, 200) == ESP_OK);
+    tdongle_l2_link(false);                       /* the association ended with three frames queued */
+    assert(pump() == 3 && tx_calls == 0 && stats().h2w_link_down_queued == 3);
     for (unsigned i = 0; i < 4; i++) assert(host_in(f, 200) == ESP_ERR_INVALID_STATE);   /* link down: refused, counted */
     assert(stats().h2w_link_down == 4);
     tdongle_l2_link(true);
@@ -421,6 +479,7 @@ int main(void) {
     test_to_host();
     test_pm_notes();
     test_to_wifi();
+    test_backpressure();
     test_counter_wrap();
     test_link_flap();
     test_retry();

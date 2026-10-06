@@ -776,6 +776,36 @@ static void test_link_loss(void) {
     assert(delivered_frames == 1);
 }
 
+/* The receive path's backpressure: a callback that holds a datagram makes the class driver keep it (recv_cb false, no renew); tinyusb_net_rx_resume()
+ * defers ONE renew to the TinyUSB task however many times it is asked; a consumed datagram renews as before. */
+static esp_err_t rx_result;
+static unsigned rx_calls;
+static esp_err_t hold_cb(void *buffer, uint16_t len, void *ctx) { (void)buffer; (void)len; (void)ctx; rx_calls++; return rx_result; }
+static void test_rx_hold(void) {
+    tinyusb_net_deinit();
+    tinyusb_net_config_t ncfg = {.on_recv_callback = hold_cb};
+    assert(tinyusb_net_init(&ncfg) == ESP_OK);
+    uint8_t d[100] = {0};
+    recv_renew_calls = 0; pending = 0;
+    rx_result = ESP_OK;
+    assert(tud_network_recv_cb(d, 100) && recv_renew_calls == 1);             /* consumed: renewed */
+    rx_result = TUSB_NET_RX_HOLD;
+    assert(!tud_network_recv_cb(d, 100) && recv_renew_calls == 1 && rx_calls == 2);    /* held: refused, NOT renewed (the class keeps it) */
+    rx_result = ESP_ERR_NO_MEM;
+    assert(tud_network_recv_cb(d, 100) && recv_renew_calls == 2);             /* any other error: the datagram was dropped by the callee, move on */
+    tinyusb_net_rx_resume(); tinyusb_net_rx_resume(); tinyusb_net_rx_resume();
+    assert(pending == 1 && recv_renew_calls == 2);                            /* coalesced into one deferred call, nothing renewed in the caller */
+    run_deferred();
+    assert(pending == 0 && recv_renew_calls == 3);
+    tinyusb_net_rx_resume();                                                  /* and it can be asked again afterwards */
+    assert(pending == 1);
+    run_deferred();
+    assert(recv_renew_calls == 4);
+    tinyusb_net_deinit();
+    tinyusb_net_config_t again = {.free_tx_buffer = released_ring};
+    assert(tinyusb_net_init(&again) == ESP_OK);
+}
+
 /* tinyusb_net_tx_ring_flush(): the producer's own source changed (the transparent bridge's Wi-Fi link). Queued frames are stale, frames queued
  * after the call are not, and it never blocks. */
 static void test_producer_flush(void) {
@@ -1123,6 +1153,7 @@ int main(void) {
     test_sync_and_ring_share_the_pipe();
     test_link_loss();
     test_producer_flush();
+    test_rx_hold();
     test_drain_evidence_and_priority();
 #if CONFIG_PM_ENABLE
     test_pm_lock();

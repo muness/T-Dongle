@@ -125,6 +125,8 @@ typedef struct {
     gw_wp_lock_t lock;
     uint32_t tx_stamp[GW_WTX_RING];   /* ms at which each outstanding TX charge was made, oldest first from tx_head */
     uint32_t tx_head, tx_count;       /* guarded by lock */
+    atomic_uint tx_limit;             /* 0: the driver's pool (GATEWAY_WIFI_TX_POOL); else the most TX charges outstanding (the transparent bridge keeps the radio
+                                       * fed with a few frames, not the whole pool: every frame beyond that is delay, ADR 0023 amendment 2) */
     atomic_uint pins;                 /* RX buffers delivered to lwIP and not yet freed (bits 0-7) and TX charges outstanding (bits 8-15), one word
                                        * so the band's joint limit is decided on both at once. tx field == tx_count, changed under the lock */
     /* Evidence. All monotonic except the high-water marks. */
@@ -142,6 +144,11 @@ static inline bool gw_wp_rx_in_band(unsigned word) { return gw_wp_rx(word) < GAT
 static inline bool gw_wp_tx_in_band(unsigned word) { return gw_wp_tx(word) < GATEWAY_WIFI_TX_BAND_MAX && gw_wp_rx(word) + gw_wp_tx(word) < GATEWAY_WIFI_BAND_TOTAL; }
 /* Readers without the lock (status, diagnostics, the tests). */
 static inline unsigned gw_wtx_outstanding(const gateway_wifi_pins *b) { return gw_wp_tx(atomic_load_explicit(&b->pins, memory_order_relaxed)); }
+/* Room for one more charge under the limit now (a relaxed read, for a caller that would rather wait than be refused and count a refusal). */
+static inline bool gw_wtx_room(const gateway_wifi_pins *b) {
+    const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);
+    return gw_wtx_outstanding(b) < (limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL);
+}
 static inline unsigned gw_wrx_inflight(const gateway_wifi_pins *b) { return gw_wp_rx(atomic_load_explicit(&b->pins, memory_order_relaxed)); }
 
 typedef enum { GW_WTX_BAND, GW_WTX_ELASTIC, GW_WTX_POOL, GW_WTX_HEAP } gw_wtx_verdict;
@@ -180,7 +187,8 @@ static inline gw_wtx_verdict gw_wtx_admit(gateway_wifi_pins *b, unsigned len, si
     if (stale) atomic_fetch_sub_explicit(&b->pins, stale * GW_WP_TX_ONE, memory_order_acq_rel);
     unsigned word = atomic_load_explicit(&b->pins, memory_order_relaxed);
     for (;;) {                                             /* RX changes the word without our lock: decide on a snapshot, commit with a CAS */
-        if (b->tx_count >= (unsigned)GATEWAY_WIFI_TX_POOL) v = GW_WTX_POOL;
+        const unsigned limit = atomic_load_explicit(&b->tx_limit, memory_order_relaxed);
+        if (b->tx_count >= (limit ? limit : (unsigned)GATEWAY_WIFI_TX_POOL)) v = GW_WTX_POOL;
         else if (gw_wp_tx_in_band(word)) v = GW_WTX_BAND;
         else if (ml_hb_ok(free_internal, gw_wtx_cost(len))) v = GW_WTX_ELASTIC;
         else v = GW_WTX_HEAP;

@@ -23,6 +23,10 @@ extern "C" {
  */
 typedef esp_err_t (*tusb_net_rx_cb_t)(void *buffer, uint16_t len, void *ctx);
 
+/** Returned by the receive callback: "not now, offer this datagram again". The class driver keeps it (and stops re-arming the OUT endpoint when its
+ *  receive buffers fill, so the host is NAKed); nothing is dropped and the TinyUSB task never waits. Call tinyusb_net_rx_resume() once there is room. */
+#define TUSB_NET_RX_HOLD ((esp_err_t)0x10C)   /* ESP_ERR_NOT_FINISHED */
+
 /**
  * @brief Free Tx buffer callback type
  */
@@ -243,6 +247,14 @@ void tinyusb_net_tx_ring_link_down(void);
  * was received while the link was changing.
  */
 void tinyusb_net_tx_ring_flush(void);
+
+/**
+ * @brief Offer a datagram the receive callback held (TUSB_NET_RX_HOLD) again, from the TinyUSB task
+ *
+ * Any task context, coalescing, never touches class state itself: it defers tud_network_recv_renew() to the TinyUSB task. May wait for the TinyUSB
+ * event queue like any usbd_defer_func() caller, so call it from a worker that holds no lock, not from a callback.
+ */
+void tinyusb_net_rx_resume(void);
 
 /** @brief Snapshot the transmit-ring counters */
 void tinyusb_net_tx_ring_stats(tinyusb_net_tx_stats_t *out);

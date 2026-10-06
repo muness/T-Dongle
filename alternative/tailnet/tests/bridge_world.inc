@@ -48,9 +48,51 @@ static void air_observe(const uint8_t *f, uint16_t len) {              /* the pp
 #define HEAP_BRIDGE 140000L         /* about what the bridge image has free: no tailnet runtime, no membership */
 static bool wifi_up;
 #define BRIDGE_RING_BASE 8u            /* gateway_main.c: GATEWAY_BRIDGE_TX_BASE_FRAMES */
-#define BRIDGE_RING_CHUNKS 2u          /* GATEWAY_BRIDGE_TX_MAX_CHUNKS */
+#define BRIDGE_RING_CHUNKS 6u          /* GATEWAY_BRIDGE_TX_MAX_CHUNKS */
+#define BRIDGE_WIFI_INFLIGHT 6u        /* GATEWAY_BRIDGE_WIFI_TX_INFLIGHT */
 #define BRIDGE_RING_FRAMES (BRIDGE_RING_BASE + BRIDGE_RING_CHUNKS * TINYUSB_NET_TX_CHUNK_SLABS)
 static size_t heap_must_stay_above = ML_HB_RESERVE;   /* the lowest free heap any operation may leave (a case with a deliberately tiny heap lowers it) */
+/* ---- the NCM class driver's receive side (ncm_device.c): OUT NTBs fill, then the endpoint is NAKed; a datagram the glue logic refuses stays put ----
+ * tud_network_recv_renew() walks the pending datagrams into tud_network_recv_cb() (the real one, in tinyusb_net.c) until it refuses one, with the
+ * class driver's re-entrancy rule: a renew called from inside the callback just asks the loop to go round again. */
+#define CLASS_CAP_FRAMES 6u                       /* CFG_TUD_NCM_OUT_NTB_N (3) NTBs of two full frames: what the class holds before NAKing the host */
+typedef struct { uint16_t len; uint8_t b[TDONGLE_L2_FRAME_MAX]; } cls_dgram;
+static cls_dgram cls_q[CLASS_CAP_FRAMES + 2];
+static unsigned cls_n, cls_naks, cls_taken;
+static bool cls_active, cls_again;
+static void class_pump(void) {                    /* tud_network_recv_renew() */
+    cls_again = true;
+    if (cls_active) return;
+    cls_active = true;
+    while (cls_again) {
+        cls_again = false;
+        if (cls_n && tud_network_recv_cb(cls_q[0].b, cls_q[0].len)) {          /* true: the datagram was taken (the callback already renewed) */
+            memmove(&cls_q[0], &cls_q[1], (cls_n - 1) * sizeof(cls_dgram));
+            cls_n--;
+            cls_taken++;
+        }
+    }
+    cls_active = false;
+}
+static void class_reset(void) { cls_n = 0; }     /* netd_reset(): the class driver re-initialises its receive state */
+/* The host (the Mac) writes one datagram: accepted into the class driver's NTBs, or NAKed (the host keeps it and tries again later). */
+static bool host_usb_send(const uint8_t *f, uint16_t len) {
+    if (cls_n >= CLASS_CAP_FRAMES) { cls_naks++; return false; }
+    cls_q[cls_n].len = len;
+    memcpy(cls_q[cls_n].b, f, len);
+    cls_n++;
+    class_pump();
+    return true;
+}
+/* The receive callback tinyusb_net_init is given: the TinyUSB task calling the bridge. */
+static esp_err_t bridge_rx_cb(void *buffer, uint16_t len, void *ctx) {
+    (void)ctx;
+    in_producer = 1;
+    const esp_err_t r = tdongle_l2_host(buffer, len);
+    in_producer = 0;
+    return r;
+}
+
 static void clock_tick_hook(void) {                /* every vTaskDelay(1) is one tick of real time */
     atomic_fetch_add(&mock_us, TEST_TICK_MS * 1000u);
 #ifndef BRIDGE_THREADS
@@ -77,6 +119,7 @@ static void world_reset(long total, bool dfs) {
     usb_have = air_have = false; atomic_store(&usb_delivered, 0); atomic_store(&air_delivered, 0);
     atomic_store(&host_carrier, 0); atomic_store(&host_carrier_changes, 0);
     xmit_hook = usb_observe;
+    recv_renew_hook = class_pump; cls_n = cls_naks = cls_taken = 0; cls_active = cls_again = false; recv_renew_calls = 0;
     /* CPU-frequency locks: the real burst and activity objects */
     atomic_store(&usb_txq_lock, 0); atomic_store(&fwd_lock, 0);
     tdongle_pm_burst_init(&usb_tx_pm, "usb_txq", &pm_ops, &usb_txq_lock);
@@ -89,6 +132,7 @@ static void world_reset(long total, bool dfs) {
     pthread_mutex_init(&wifi_pins.lock, NULL);
     wifi_pins_tx_done_ok = false; wifi_pins_installed = false; wifi_pins_rx_hooked = false;
     wifi_pins_install(NULL);
+    wifi_pins_set_tx_limit(BRIDGE_WIFI_INFLIGHT);
     wifi_pins_start();
     assert(wifi_pins_installed && wifi_pins_tx_done_ok && drv_done_cb == wifi_pins_tx_done);
     /* the ring, then the bridge, in the order gateway_main.c starts them */
@@ -98,7 +142,7 @@ static void world_reset(long total, bool dfs) {
     assert(tinyusb_net_tx_ring_start(&tx) == ESP_OK);
     free(l2.slots);
     memset(&l2, 0, sizeof(l2));
-    const tdongle_l2_config_t bridge = {.wifi_tx = wifi_pins_tx, .task_priority = 8, .task_core = 1, .task_stack = 3072};
+    const tdongle_l2_config_t bridge = {.wifi_tx = wifi_pins_tx, .wifi_room = wifi_pins_tx_room, .rx_resume = tinyusb_net_rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
     assert(tdongle_l2_start(sta_mac, &bridge) == ESP_OK);
     wifi_up = false;
 }
@@ -137,20 +181,20 @@ static size_t heap_free_now(void) { return heap_caps_get_free_size(MALLOC_CAP_IN
 static void settle(void) {
     ntb_credit = -1; allow_tx = 1; usb_ready = 1; drv_force_error = 0;
     for (int i = 0; i < 400; i++) {
-        drv_complete(GATEWAY_WIFI_TX_POOL); pump_l2(); pump_ring(); usb_bus();      /* the air first: frames the driver holds must leave before the queue pushes more */
-        if (!s_tx.frames_queued && l2_stats().h2w_queue_depth == 0 && !drv_depth() && !pending) break;
+        drv_complete(GATEWAY_WIFI_TX_POOL); pump_l2(); run_deferred(); class_pump(); pump_ring(); usb_bus();      /* the air first: frames the driver holds must leave before the queue pushes more */
+        if (!s_tx.frames_queued && l2_stats().h2w_queue_depth == 0 && !drv_depth() && !pending && !cls_n) break;
     }
     pump_ring();
-    assert(!s_tx.frames_queued && l2_stats().h2w_queue_depth == 0 && !drv_depth());
+    assert(!s_tx.frames_queued && l2_stats().h2w_queue_depth == 0 && !drv_depth() && !cls_n);
 }
 
 /* ---- checks that hold between any two operations ---- */
 static void check_world(void) {
     const tdongle_l2_stats_t s = l2_stats();
     assert(s.w2h_frames == s.w2h_forwarded + s.w2h_invalid + s.w2h_own_mac + s.w2h_link_down + s.w2h_usb_not_ready + s.w2h_ring_full);
-    assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down + s.h2w_queue_full);
+    assert(s.h2w_frames == s.h2w_queued + s.h2w_invalid + s.h2w_foreign_mac + s.h2w_link_down);   /* a held offer is not a frame */
     assert(s.h2w_queued == s.h2w_sent + s.h2w_stale + s.h2w_sojourn_drop + s.h2w_link_down_queued + s.h2w_tx_failed + s.h2w_queue_depth);
-    assert(s.h2w_queue_depth <= TDONGLE_L2_HOST_QUEUE_LIMIT && s.h2w_queue_high_water <= TDONGLE_L2_HOST_QUEUE_LIMIT);
+    assert(s.h2w_queue_depth <= TDONGLE_L2_HOST_QUEUE_LIMIT && s.h2w_queue_high_water <= TDONGLE_L2_HOST_QUEUE_LIMIT && cls_n <= CLASS_CAP_FRAMES);
     /* The ring: every frame the bridge handed it is queued, delivered to an NTB or flushed, and the USB side saw exactly the delivered ones. */
     const tinyusb_net_tx_stats_t r = ring_stats();
     assert(s.w2h_forwarded == r.enqueued_frames);
@@ -162,7 +206,7 @@ static void check_world(void) {
     const unsigned charged = atomic_load(&wifi_pins.tx_charged), inflight = gw_wtx_outstanding(&wifi_pins);
     assert(charged == atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_aborted) + atomic_load(&wifi_pins.tx_flushed) +
                       atomic_load(&wifi_pins.tx_stale) + inflight);
-    assert(inflight <= GATEWAY_WIFI_TX_POOL);
+    assert(inflight <= BRIDGE_WIFI_INFLIGHT && drv_depth() <= GATEWAY_WIFI_TX_POOL);       /* the radio's allowance (charges), not the pool; a lease-expired charge may outlive its frame */
     assert(charged == drv_calls && charged == drv_accepted + atomic_load(&wifi_pins.tx_aborted));     /* every charge reached the driver; a refusal was aborted */
     assert(s.h2w_sent == drv_accepted && drv_accepted == drv_aired + drv_cleared + drv_depth());
     assert(drv_aired <= atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_unmatched));       /* every aired frame produced a tx-done event */

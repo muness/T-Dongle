@@ -236,7 +236,20 @@ int main(void) {
     g_tx_calls = 0;
     assert(wifi_pins_tx((void *)"x", 1514) == ESP_ERR_NO_MEM && g_tx_calls == 0 && atomic_load(&wifi_pins.tx_refused_heap) == 1);
     wifi_pins_link_changed();                                  /* the driver cleared its queues: the charges go, no netif needed */
-    assert(wifi_pins_tx_outstanding() == 0 && atomic_load(&wifi_pins.tx_flushed) == GATEWAY_WIFI_TX_BAND_MAX);
+    /* The bridge's allowance (ADR 0023 amendment 2): fewer frames in flight than the pool, waited for through wifi_pins_tx_room(), refused as pool-full if asked anyway. */
+    g_free_heap = 1u << 20;
+    assert(wifi_pins_tx_room());                               /* limit 0: the driver's pool */
+    wifi_pins_set_tx_limit(2);
+    assert(wifi_pins_tx((void *)"x", 1514) == ESP_OK && wifi_pins_tx_room() && wifi_pins_tx((void *)"x", 1514) == ESP_OK);
+    assert(!wifi_pins_tx_room());
+    g_tx_calls = 0;
+    assert(wifi_pins_tx((void *)"x", 1514) == ESP_ERR_NO_MEM && g_tx_calls == 0 && atomic_load(&wifi_pins.tx_refused_pool) == 1);
+    g_done_cb(WIFI_IF_STA, NULL, NULL, true);
+    assert(wifi_pins_tx_room() && wifi_pins_tx((void *)"x", 1514) == ESP_OK);
+    wifi_pins_set_tx_limit(0);
+    wifi_pins_link_changed();
+    assert(wifi_pins_tx_outstanding() == 0);
+    assert(wifi_pins_tx_outstanding() == 0 && atomic_load(&wifi_pins.tx_flushed) >= GATEWAY_WIFI_TX_BAND_MAX);
     assert(atomic_load(&wifi_pins.tx_charged) == atomic_load(&wifi_pins.tx_done) + atomic_load(&wifi_pins.tx_aborted) +
                                                   atomic_load(&wifi_pins.tx_flushed) + atomic_load(&wifi_pins.tx_stale) + wifi_pins_tx_outstanding());
     (void)g_ticks;

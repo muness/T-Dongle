@@ -1126,13 +1126,36 @@ void tinyusb_net_deinit(void)
 //--------------------------------------------------------------------+
 // tinyusb callbacks
 //--------------------------------------------------------------------+
+/* Receive path (host -> device). The NCM class driver hands each datagram to this callback from the TinyUSB task and expects the glue logic to call
+ * tud_network_recv_renew() when it is ready for more. It also supports the glue logic REFUSING a datagram: returning false leaves it (and the rest of
+ * its NTB) where it is, the class driver stops re-arming the OUT endpoint once its CFG_TUD_NCM_OUT_NTB_N receive buffers are full, and the host sees
+ * NAKs: real backpressure, with the TinyUSB task never blocked. The datagram is offered again by the next tud_network_recv_renew().
+ * The receive callback says "not now" with TUSB_NET_RX_HOLD; any other result means the datagram was consumed (or dropped, counted by the callee). */
 bool tud_network_recv_cb(const uint8_t *src, uint16_t size)
 {
-    if (s_net_obj.rx_cb) {
-        s_net_obj.rx_cb((void *)src, size, s_net_obj.ctx);
+    if (s_net_obj.rx_cb && s_net_obj.rx_cb((void *)src, size, s_net_obj.ctx) == TUSB_NET_RX_HOLD) {
+        return false;                                   // no renew: that is what would deliver it again
     }
     tud_network_recv_renew();
     return true;
+}
+
+/* A refused datagram is waiting in the class driver: offer it again, in the TinyUSB task. Any task may ask; asks coalesce. On a USB reset or a
+ * detach the class driver re-initialises its receive state, so a renew that arrives afterwards finds nothing pending and does nothing, and the
+ * next SET_INTERFACE renews by itself: a deferred renew cannot wedge the endpoint. */
+static atomic_bool s_renew_pending;
+static void do_renew(void *ctx)
+{
+    (void) ctx;
+    atomic_store(&s_renew_pending, false);              // before renewing: a hold that happens during it asks again
+    tud_network_recv_renew();
+}
+
+void tinyusb_net_rx_resume(void)
+{
+    if (!atomic_exchange(&s_renew_pending, true)) {
+        usbd_defer_func(do_renew, NULL, false);         // may wait for TinyUSB; the caller is a worker task that holds no lock
+    }
 }
 
 uint16_t tud_network_xmit_cb(uint8_t *dst, void *ref, uint16_t arg)
