@@ -1,0 +1,17 @@
+[package]
+name = "tdongle-tailnet-members"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The tailnet gateway's membership registry and the setup page's member API: the stored `members` JSON (byte-compatible with the C cJSON code), and add/enable/disable/remove with the C's exact HTTP replies. Sans-IO, allocation free."
+
+[lints]
+workspace = true
+
+[dependencies]
+zeroize = { version = "1", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
