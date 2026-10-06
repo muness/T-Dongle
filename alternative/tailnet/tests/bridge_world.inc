@@ -89,6 +89,7 @@ static void air_observe(const uint8_t *f, uint16_t len) {              /* the pp
 /* ---- the world ---- */
 #define HEAP_BRIDGE 140000L         /* about what the bridge image has free: no tailnet runtime, no membership */
 static bool wifi_up;
+static bool world_keep_defaults;               /* leave the production tuning in place (the defaults test) */
 #define BRIDGE_RING_BASE 8u            /* gateway_main.c: GATEWAY_BRIDGE_TX_BASE_FRAMES */
 #define BRIDGE_RING_CHUNKS 10u          /* GATEWAY_BRIDGE_TX_MAX_CHUNKS */
 #define BRIDGE_WIFI_INFLIGHT 6u        /* GATEWAY_BRIDGE_WIFI_TX_INFLIGHT */
@@ -186,6 +187,9 @@ static void world_reset(long total, bool dfs) {
     memset(&l2, 0, sizeof(l2));
     const tdongle_l2_config_t bridge = {.wifi_tx = wifi_pins_tx, .wifi_room = wifi_pins_tx_room, .rx_resume = tinyusb_net_rx_resume, .task_priority = 8, .task_core = 1, .task_stack = 4096};
     assert(tdongle_l2_start(sta_mac, &bridge) == ESP_OK);
+    if (!world_keep_defaults) {                       /* CoDel is on by default; the cases that are about something else run with it off, the CoDel cases turn it on */
+        tdongle_l2_tuning_t t; tdongle_l2_get_tuning(&t); t.codel = false; assert(tdongle_l2_set_tuning(&t) == ESP_OK);
+    }
     wifi_up = false;
 }
 /* wifi_event() in gateway_main.c, for the bridge. The driver clears its TX queues on a link change, silently. */

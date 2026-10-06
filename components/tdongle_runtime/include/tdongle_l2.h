@@ -40,6 +40,7 @@
 #define TDONGLE_L2_CODEL_TARGET_US_MAX 50000u
 #define TDONGLE_L2_CODEL_INTERVAL_MS_MIN 20u
 #define TDONGLE_L2_CODEL_INTERVAL_MS_MAX 1000u
+#define TDONGLE_L2_CODEL_DEFAULT true
 #define TDONGLE_L2_HOST_IDLE_US 6000u           /* default: 1.5 x the spacing of 3,200 B NTBs at 6.7 Mbit/s (3.8 ms): a host faster than ~4.3 Mbit/s into a pipe of 6.7 never leaves a gap this long */
 #define TDONGLE_L2_HOST_IDLE_US_MIN 500u
 #define TDONGLE_L2_HOST_IDLE_US_MAX 50000u
@@ -71,7 +72,8 @@ typedef struct {
     uint32_t queue_limit;        /* 1..TDONGLE_L2_HOST_SLOTS: frames that may stand in the bulk queue before the host is held */
     uint32_t resume_depth;       /* 0..queue_limit-1: drain to this depth before the held datagram is offered again */
     uint32_t sojourn_ms;         /* TDONGLE_L2_SOJOURN_MS_MIN..MAX: age at which a frame is dropped */
-    /* CoDel/ECN on the ingress (tdongle_aqm.h, ADR 0023 amendment 4): off by default until the board says otherwise. */
+    /* CoDel/ECN on the ingress (tdongle_aqm.h, ADR 0023 amendments 4-6): ON by default at RFC 8289's 5 ms target and 100 ms interval (the board's third sweep:
+ * load ping halved, download better, upload about 15% lower; looser targets bought nothing). The same defaults in the release and diagnostics images. */
     bool codel;
     uint32_t codel_target_us;    /* TDONGLE_L2_CODEL_TARGET_US_MIN..MAX */
     uint32_t codel_interval_ms;  /* TDONGLE_L2_CODEL_INTERVAL_MS_MIN..MAX */

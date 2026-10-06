@@ -338,6 +338,7 @@ esp_err_t tdongle_l2_start(const uint8_t mac[6], const tdongle_l2_config_t *conf
     atomic_store(&l2.t_queue_limit, TDONGLE_L2_HOST_QUEUE_LIMIT);
     atomic_store(&l2.t_resume, TDONGLE_L2_HOST_RESUME_DEPTH);
     atomic_store(&l2.t_sojourn_ms, TDONGLE_L2_SOJOURN_MS);
+    atomic_store(&l2.t_codel, TDONGLE_L2_CODEL_DEFAULT);
     atomic_store(&l2.t_codel_target_us, TDONGLE_CODEL_TARGET_US_DEFAULT);
     atomic_store(&l2.t_codel_interval_ms, TDONGLE_CODEL_INTERVAL_MS_DEFAULT);
     atomic_store(&l2.t_host_idle_us, TDONGLE_L2_HOST_IDLE_US);

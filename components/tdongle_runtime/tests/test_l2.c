@@ -475,7 +475,7 @@ static void open_room_after_three(void) { if (++hook_calls == 3) room = true; }
 static void test_tuning(void) {
     start();
     tdongle_l2_tuning_t t, back; tdongle_l2_get_tuning(&t);
-    assert(t.queue_limit == TDONGLE_L2_HOST_QUEUE_LIMIT && t.resume_depth == TDONGLE_L2_HOST_RESUME_DEPTH && t.sojourn_ms == TDONGLE_L2_SOJOURN_MS && !t.codel &&
+    assert(t.queue_limit == TDONGLE_L2_HOST_QUEUE_LIMIT && t.resume_depth == TDONGLE_L2_HOST_RESUME_DEPTH && t.sojourn_ms == TDONGLE_L2_SOJOURN_MS && t.codel &&
            t.codel_target_us == TDONGLE_CODEL_TARGET_US_DEFAULT && t.codel_interval_ms == TDONGLE_CODEL_INTERVAL_MS_DEFAULT);
     tdongle_l2_tuning_t bad = t;
     bad.queue_limit = 0; assert(tdongle_l2_set_tuning(&bad) == ESP_ERR_INVALID_ARG);
@@ -557,6 +557,7 @@ static void test_codel(void) {
     uint8_t f[200], g[200];
     /* Off: nothing is touched, however long the pipe is full. */
     start(); tdongle_l2_link(true);
+    { tdongle_l2_tuning_t d; tdongle_l2_get_tuning(&d); assert(d.codel && d.codel_target_us == 5000 && d.codel_interval_ms == 100 && d.host_idle_us == 6000); d.codel = false; assert(tdongle_l2_set_tuning(&d) == ESP_OK); }   /* the defaults are RFC 8289's, on */
     uint16_t n = ipv4_frame(f, 2, 17, 100, false);
     saturate(200, 2000, f, n, false);
     assert(stats().h2w_codel_signals == 0 && stats().h2w_ce_marked == 0 && stats().h2w_codel_drop == 0 && !memcmp(tx_seen, f, n));
