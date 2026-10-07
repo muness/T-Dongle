@@ -151,6 +151,7 @@ The diet ended at 150 KB of statics for one membership and an image that did not
 | TLS record buffer | 16,640 shared, one holder at a time | one block of the record's own length per record (about 2 KB from a Go derper; 16,640 at most; a longer header is refused before any allocation), handshake records as negotiation class | `tdongle-tailnet-tls::lease`, vendored `embedded-tls` patch `lease2` |
 | control workspace (`ctl::Bulk`) | 17,744 shared | taken per negotiation or map message, negotiation class | `shared::BulkSource` |
 | radio receive ring, host receive frames, NAT queues | 15,172 + 3,064 + 12,000 | one block per frame, of its length, above the floor | firmware `wifi_rx` / `usb_rx`, `wifimux::Ring` |
+| DERP relay write record and staging frame | 3,648 in the derp future of every slot | taken per run (waiting for memory does not hide a stop) | `derp_slot` |
 | peer directory | 23,320 | one block per record and per staged update (a 10-peer tailnet holds 2.9 KB); refused at the floor | `RamDirectory`, engine `hb_ok` on stage and commit |
 
 Admission now charges what the pool holds for a running membership (the windows) with the C's arithmetic; the runtime's own state is a heap block the firmware admits before any membership (`tailnet::start`: heap >= state + steady pool use + floor, else a counted refusal and a bridge boot).
@@ -169,24 +170,24 @@ Admission now charges what the pool holds for a running membership (the windows)
 | DRAM `0x3FC88000..0x3FCDB700` | 341,760 |
 | IRAM overlap (`.rwdata_dummy`) | 42,856 |
 | `.data` (the NAT table, the mux, the Wi-Fi blobs) | 44,028 |
-| `.bss` without the heap (task storage, stack table, bridge, USB) | 89,480 |
-| **stack** (what is left; the link asserts >= 40,960) | 42,512 |
-| regular heap | 122,880 |
+| `.bss` without the heap (task storage, stack table, bridge, USB) | 85,960 |
+| **stack** (what is left; the link asserts >= 40,960) | 41,936 |
+| regular heap | 126,976 |
 | heap in dram2 (all of it; the bridge image takes 64 KB) | 73,728 |
 | heap in the data cache (`ESP_HAL_CONFIG_DATA_CACHE_SIZE=32KB`, the C's own size) | 32,768 |
-| **heap in all** (the bridge image: 196,608) | 229,376 |
+| **heap in all** (the bridge image: 196,608) | 233,472 |
 
-The heap must hold, and a `const` assert in `tailnet::budget` says so: the Wi-Fi driver and USB (60 KB: **48 KB from the bridge's board run, heap minimum 102 KB of 192 KB with the ring at its 42 KB maximum, plus 12 KB margin; an estimate**), the bridge ring's permanent slots 12,288, tailnet's own state 106,064 (`Shared` 59,088, the windows 22,528 + 3,072, a record or workspace in flight 4,096, a full directory 6,912, elastic frames 10,240) and `ML_HB_FLOOR` 29,884: **209,676, headroom 19,700**. `members-2` does not fit: the assert fails at 262,692 bytes needed against 229,376, before its 18.5 KB of extra statics shrink the heap further (about 52 KB short); the C's three are further away. A tailnet bigger than the directory's 24 records per membership is truncated exactly as before (the C keeps the directory in flash: the open item).
+The heap must hold, and a `const` assert in `tailnet::budget` says so: the Wi-Fi driver and USB (60 KB: **48 KB from the bridge's board run, heap minimum 102 KB of 192 KB with the ring at its 42 KB maximum, plus 12 KB margin; an estimate**), the bridge ring's permanent slots 12,288, tailnet's own state 109,648 (`Shared` 59,088, the windows 22,528 + 3,072, the DERP relay's write record and staging frame and a TLS record or control workspace in flight 7,680, a full directory 6,912, elastic frames 10,240, the receive ring 128) and `ML_HB_FLOOR` 29,884: **213,260, headroom 20,212**. `members-2` does not fit: the assert fails at about 265,000 bytes needed against 233,472, before its 15 KB of extra statics shrink the heap further (about 47 KB short); the C's three are further away. A tailnet bigger than the directory's 24 records per membership is truncated exactly as before (the C keeps the directory in flash: the open item).
 
 ### Per crate (M-elf, one membership)
 
 | | before | now |
 |---|---:|---:|
-| `tdongle-tailnet-runtime` total (the diet's definition: `Shared` + futures + socket buffers + lease + Bulk) | 149,968 | `Shared` 59,088 (a heap block; the directory is in it by value only) + futures 24,504 = **83,592** static or at start; windows, records and workspace pooled |
-| marginal per membership, statics | 58.8 KB (22.7 of it sockets) | **36.2 KB** (Slot 8,112, engine member 9,560, futures 18.5 KB) + 22,528 pooled windows; the first extra membership also needs the 12-slot pool and 24 parked-packet blocks (+5.9 KB) |
+| `tdongle-tailnet-runtime` total (the diet's definition: `Shared` + futures + socket buffers + lease + Bulk) | 149,968 | `Shared` 59,088 (a heap block; the directory is in it by value only) + futures 20,984 = **80,072** static or at start; windows, records and workspace pooled |
+| marginal per membership, statics | 58.8 KB (22.7 of it sockets) | **32.7 KB** (Slot 8,112, engine member 9,560, futures 15,008) + 22,528 pooled windows; the first extra membership also needs the 12-slot pool and 24 parked-packet blocks (+5.9 KB) |
 | `tdongle-tailnet-engine` | directory 23,320, pool 12 slots, 24 JIT blocks | directory by content, 8 slots and 16 blocks at one membership (the other four slots could never be used), refusal at the floor |
 | `tdongle-tailnet-wifimux` | queues (4 + 4) x 1,504 | 12 B a slot, frames on demand |
-| firmware tailnet statics (first link attempt: about 233,000: `Shared` 122,576, sockets 26,884, futures 24,232, NAT 19,144, ring 15,172, mux 14,160, ...) | 233,000 | **53,835** (NAT 19,136, futures 24,504, stack table 4,536, mux 2,240, the rest 3.4 KB) |
+| firmware tailnet statics (first link attempt: about 233,000: `Shared` 122,576, sockets 26,884, futures 24,232, NAT 19,144, ring 15,172, mux 14,160, ...) | 233,000 | **50,315** (NAT 19,136, futures 20,984, stack table 4,536, mux 2,240, the rest 3.4 KB) |
 
 ### Host measurements (`cargo test --release -p tdongle-tailnet-host --test e2e`, loopback, real Tailscale testcontrol and DERP, 13 tests)
 

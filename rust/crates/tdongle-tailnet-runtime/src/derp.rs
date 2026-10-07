@@ -31,6 +31,7 @@ use tdongle_tailnet_engine::{DerpNote, Input, PeerDirectory};
 use tdongle_tailnet_fw::{Platform, Storage};
 use tdongle_tailnet_tls::lease::{LeasedTlsDerp, ReadError};
 use tdongle_tailnet_tls::transport::{ConnectError, TlsParams};
+use tdongle_tailnet_pool::{Class, PoolBuf};
 use tdongle_tailnet_tls::{DEFAULT_ANCHORS, WRITE_RECORD_BYTES};
 use tdongle_tailnet_types::{FixedStr, Key32};
 
@@ -54,26 +55,26 @@ struct Acts {
 }
 
 /// The link and everything around it.
-struct Drv<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
+struct Drv<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     sh: &'a Shared<R, P, S, D>,
     idx: usize,
     member: u32,
     link: Link<DERP_TXQ>,
     acts: Acts,
-    stage: &'a RefCell<[u8; MAX_SEND_FRAME]>,
+    stage: &'a RefCell<PoolBuf<'p>>,
     holds_token: bool,
     clock_fed: Option<bool>,
 }
 
-struct DrvSink<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
+struct DrvSink<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     sh: &'a Shared<R, P, S, D>,
     idx: usize,
     member: u32,
     acts: &'a mut Acts,
-    stage: &'a RefCell<[u8; MAX_SEND_FRAME]>,
+    stage: &'a RefCell<PoolBuf<'p>>,
 }
 
-impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_, R, P, S, D> {
+impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_, '_, R, P, S, D> {
     fn action(&mut self, a: Action<'_>) {
         let member = self.member;
         match a {
@@ -124,8 +125,8 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_
     }
 }
 
-impl<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, R, P, S, D> {
-    fn new(sh: &'a Shared<R, P, S, D>, idx: usize, member: u32, key: Key32, stage: &'a RefCell<[u8; MAX_SEND_FRAME]>) -> Self {
+impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p, R, P, S, D> {
+    fn new(sh: &'a Shared<R, P, S, D>, idx: usize, member: u32, key: Key32, stage: &'a RefCell<PoolBuf<'p>>) -> Self {
         Drv {
             sh,
             idx,
@@ -257,7 +258,7 @@ impl<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, R, P, S
     }
 }
 
-impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drop for Drv<'_, R, P, S, D> {
+impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drop for Drv<'_, '_, R, P, S, D> {
     fn drop(&mut self) {
         if self.holds_token || self.link.want_token() {
             self.sh.token.release(self.sh.now(), key_derp(self.member));
@@ -270,7 +271,7 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drop for Drv<'_, R,
 /// `work` is passed **already pinned** (`pin!` at the call site): a future moved into this function and pinned here lives twice in the caller's frame
 /// (as the argument and as the pinned local), and the TLS handshake future is 3 KB.
 async fn drive<T, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(
-    d: &mut Drv<'_, R, P, S, D>,
+    d: &mut Drv<'_, '_, R, P, S, D>,
     egress: bool,
     mut work: core::pin::Pin<&mut impl Future<Output = T>>,
 ) -> Option<T> {
@@ -298,13 +299,26 @@ where
     let slot = &sh.slots[idx];
     let mut tcp = net.tcp(TcpRole::Derp, idx).expect("the Net has no DERP TCP handle for this slot");
     let mut run_rx = slot.run.receiver().expect("slot run receivers");
-    let stage = RefCell::new([0u8; MAX_SEND_FRAME]);
-    let mut wbuf = [0u8; WRITE_RECORD_BYTES];
     loop {
         let run = wait_active(&mut run_rx).await;
         let alive = Alive::new(&slot.alive, ALIVE_DERP);
         let key = slot.ident.lock(|i| i.borrow().wg.clone());
-        select(relay(sh, idx, run.id, key, &mut tcp, &stage, &mut wbuf), wait_changed(&mut run_rx, run)).await;
+        // the TLS write record and the staging frame (3.6 KB) are taken from the pool for as long as the membership runs, not held by every idle slot; waiting for them
+        // does not hide a stop (the run state is watched meanwhile), and a pool that says no is a counted wait, not a failure
+        let mem = sh.mem();
+        let taken = select(
+            async {
+                let wbuf = mem.alloc_wait(Class::Socket, WRITE_RECORD_BYTES).await;
+                let stage = mem.alloc_wait(Class::Socket, MAX_SEND_FRAME).await;
+                (wbuf, stage)
+            },
+            wait_changed(&mut run_rx, run),
+        )
+        .await;
+        if let Either::First((mut wbuf, stage)) = taken {
+            let stage = RefCell::new(stage);
+            select(relay(sh, idx, run.id, key, &mut tcp, &stage, &mut wbuf[..]), wait_changed(&mut run_rx, run)).await;
+        }
         // the membership stopped (or changed): the socket's windows go back to the pool, the reset reaches the server
         tcp.release().await;
         sh.token.release(sh.now(), key_derp(run.id));
@@ -317,14 +331,14 @@ where
 }
 
 /// The membership's relay for as long as it runs: one connect cycle after another, as the link decides.
-async fn relay<R, P, S, D, T>(
+async fn relay<'p, R, P, S, D, T>(
     sh: &Shared<R, P, S, D>,
     idx: usize,
     member: u32,
     key: Key32,
     tcp: &mut T,
-    stage: &RefCell<[u8; MAX_SEND_FRAME]>,
-    wbuf: &mut [u8; WRITE_RECORD_BYTES],
+    stage: &RefCell<PoolBuf<'p>>,
+    wbuf: &mut [u8],
 ) where
     R: RawMutex,
     P: Platform,
@@ -382,7 +396,7 @@ async fn relay<R, P, S, D, T>(
     }
 }
 
-async fn stream<R, P, S, D, T>(d: &mut Drv<'_, R, P, S, D>, tcp: &mut T, wbuf: &mut [u8; WRITE_RECORD_BYTES], host: &str)
+async fn stream<R, P, S, D, T>(d: &mut Drv<'_, '_, R, P, S, D>, tcp: &mut T, wbuf: &mut [u8], host: &str)
 where
     R: RawMutex,
     P: Platform,
@@ -483,23 +497,23 @@ where
 }
 
 /// A copy of the staged bytes (the write future must not hold the staging buffer's `RefCell` borrow across the link's calls).
-fn stage_bytes(stage: &RefCell<[u8; MAX_SEND_FRAME]>, n: usize) -> StagedRef<'_> {
+fn stage_bytes<'s, 'p>(stage: &'s RefCell<PoolBuf<'p>>, n: usize) -> StagedRef<'s, 'p> {
     StagedRef { guard: stage.borrow(), n }
 }
 
-struct StagedRef<'a> {
-    guard: core::cell::Ref<'a, [u8; MAX_SEND_FRAME]>,
+struct StagedRef<'s, 'p> {
+    guard: core::cell::Ref<'s, PoolBuf<'p>>,
     n: usize,
 }
 
-impl core::ops::Deref for StagedRef<'_> {
+impl core::ops::Deref for StagedRef<'_, '_> {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
         &self.guard[..self.n]
     }
 }
 
-impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, R, P, S, D> {
+impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S, D> {
     fn link_timing_rx_frame(&self) -> u64 {
         u64::from(Timing::DEFAULT.rx_frame_ms)
     }

@@ -114,7 +114,7 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 120 * 1024;
+    pub const HEAP_REGULAR: usize = 124 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
@@ -677,9 +677,13 @@ pub const TAILNET_HEAP_BYTES: usize = core::mem::size_of::<Sh>()
     + core::mem::size_of::<RxRing>()
     + MEMBERS * Windows::PER_MEMBER
     + Windows::GATEWAY.gateway()
-    + 4_096
+    + POOL_TRANSIENT
     + DIR_LIVE_FULL
     + ELASTIC_TYPICAL;
+
+/// What the pool holds besides windows while a membership runs: the DERP relay's write record and staging frame (3,584 per membership) and a TLS record or a control
+/// workspace in flight (the workspace is inside the floor).
+pub const POOL_TRANSIENT: usize = MEMBERS * 3_584 + 4_096;
 
 /// The directory when every membership's tailnet is as big as the directory allows (`DIR_PEERS` records of 288 bytes per membership); a smaller tailnet holds less.
 /// The bank a commit builds beside it and the staged updates of a map in flight are elastic ([`ELASTIC_TYPICAL`]).
