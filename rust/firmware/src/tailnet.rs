@@ -78,9 +78,15 @@ static RX_BYTES_PEAK: AtomicU32 = AtomicU32::new(0);
 static HEAP_MIN_NO_NEG: AtomicU32 = AtomicU32::new(u32::MAX);
 /// Ethernet frames the USB side can hold between the NCM receiver task and the runtime (backpressure beyond that: the OUT endpoint is not re-armed).
 pub const USB_RX_FRAMES: usize = 2;
-/// Peers per membership the flash directory holds (and updates a map may stage): the heap bounds it, not the partition (a commit's index is about 100 bytes a peer
-/// while it runs, so 128 peers need 13 KB above the elastic floor; a bigger tailnet keeps what fits and counts the rest). The C's FAT volume holds more.
-pub const DIR_PEERS: usize = 128;
+/// Records the flash directory keeps cached in RAM (the most recently used peers; the WireGuard-resident ones are pinned). There is no peer cap: the records,
+/// their versions and the hash tables that find them are in the `peerstore` partition, which holds about 1,300 live peers for each membership
+/// ([`DIR_GEOMETRY`]); the directory's RAM is fixed (`size_of::<Dir>()`, about 2.8 KB inside the shared state) whatever the tailnet's size.
+pub const DIR_CACHE: usize = 8;
+/// How the `peerstore` partition is cut between the memberships.
+pub const DIR_GEOMETRY: tdongle_tailnet_engine::flashdir::Geometry = match tdongle_tailnet_engine::flashdir::Geometry::of(crate::dirflash::PEERSTORE_SIZE, MEMBERS) {
+    Some(g) => g,
+    None => panic!("the peerstore partition is too small"),
+};
 /// Sockets of the embassy-net stack: 3 per membership (control, DERP, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + one for the lookup in flight (the dials and SNTP take turns on it) + 1 spare.
 const STACK_SOCKETS: usize = 3 * MEMBERS + 6;
 
@@ -754,7 +760,7 @@ pub fn link(up: bool) {
 // The statics and the types they have
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-type Dir = FlashDirectory<EspDirFlash, MEMBERS, DIR_PEERS>;
+type Dir = FlashDirectory<EspDirFlash, MEMBERS, DIR_CACHE>;
 /// The shared state of the runtime.
 pub type Sh = Shared<TaskLock, FwPlatform, FwStorage, Dir>;
 type Tap = NaptTap<'static, NAPT_FLOWS>;
@@ -948,9 +954,9 @@ pub const POOL_TRANSIENT: usize = 3_584 + 4_096 + USB_HTTP_BYTES;
 /// The USB-side stack's socket table and the two `/status` servers' windows (1 KB + 2 KB each), all taken once at start.
 pub const USB_HTTP_BYTES: usize = 3 * 640 + 2 * (1024 + 2048) + 512;
 
-/// What the directory keeps on the heap: the view of the live peers (name, address, position: about 36 bytes a peer with its name) for an ordinary tailnet of two dozen
-/// peers per membership. The records themselves are in flash; a commit's index is elastic ([`ELASTIC_TYPICAL`]).
-pub const DIR_LIVE_FULL: usize = MEMBERS * 24 * 36;
+/// What the directory keeps on the heap between commits: nothing (its counters and cache are inside the shared state, the records in flash). A commit's bitmap
+/// (a bit per slot, about 200 bytes) is elastic ([`ELASTIC_TYPICAL`]).
+pub const DIR_LIVE_FULL: usize = 0;
 
 /// What the elastic frames hold in ordinary use (a few radio frames waiting for the stack, a few host frames, the mux's NAT queues, a map being applied): a tuning
 /// figure; each consumer is refused at the floor, so the peak is bounded by the heap, not by this.
@@ -1509,10 +1515,10 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             tdongle_tailnet_map::types::MAX_DERP_REGIONS,
             m.dns,
             m.dir_peers,
-            DIR_PEERS,
+            DIR_GEOMETRY.capacity(),
             m.dir_overflow,
             m.stage_dropped,
-            DIR_PEERS
+            DIR_GEOMETRY.tx_slots()
         );
         let _ = write!(out, "tn_ctl slot={} stage={} connected={} end=\"{}\" error=\"{}\"\r\n", i, st.control_stage, st.connected as u8, st.last_end.as_str(), st.last_error.as_str());
     }

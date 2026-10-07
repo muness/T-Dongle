@@ -335,10 +335,10 @@ impl<D: crate::dir::PeerDirectory, const M: usize, const P: usize, const K: usiz
     /// Visit every directory record of membership `slot`.
     pub fn directory_lines(&self, slot: usize, mut f: impl FnMut(DirLine<'_>)) {
         let Some(m) = self.members.get(slot).and_then(|m| m.as_ref()) else { return };
-        for j in 0..self.sh.dir.count(slot) {
-            let (Some((name, ip)), Some(info)) = (self.sh.dir.peer_view(slot, j), self.sh.dir.peer_info(slot, j)) else { continue };
-            f(DirLine { name, alias: self.sh.book.find(m.rt.id, ip).unwrap_or(0), info });
-        }
+        self.sh.dir.for_each_peer(slot, &mut |name, info| {
+            f(DirLine { name, alias: self.sh.book.find(m.rt.id, info.ip).unwrap_or(0), info });
+            true
+        });
     }
     /// Aliases in the book / cached by the router.
     pub fn alias_counts(&self) -> (usize, usize) {
