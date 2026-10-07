@@ -716,7 +716,6 @@ async fn main(spawner: Spawner) -> ! {
     int_spawner.spawn(usb_task(SendDevice(dev)).unwrap());
     int_spawner.spawn(console_task(acm_rd, acm_wr, bridge, state).unwrap());
     int_spawner.spawn(supervise::supervisor_task(dogs, state.boot.safe_mode).unwrap());
-    int_spawner.spawn(supervise::reattach_task().unwrap());
     supervise::THREAD_SPAWNER.get_or_init(|| spawner.make_send());
     spawner.spawn(supervise::thread_pulse_task().unwrap());
     spawner.spawn(usb_rx_task(rx, producer).unwrap());
@@ -1683,10 +1682,7 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
         loop {
             supervise::console_alive().await;
             let mut pkt = [0u8; 64];
-            supervise::READER_WAITING.store(true, Ordering::Relaxed);
-            let read = select(rd.read_packet(&mut pkt), Timer::after_millis(500)).await;
-            supervise::READER_WAITING.store(false, Ordering::Relaxed);
-            let len = match read {
+            let len = match select(rd.read_packet(&mut pkt), Timer::after_millis(500)).await {
                 Either::First(Ok(len)) => len,
                 Either::First(Err(_)) => break,
                 Either::Second(()) => continue,

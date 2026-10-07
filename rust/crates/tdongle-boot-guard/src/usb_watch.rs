@@ -2,16 +2,15 @@
 //! driver wake-up keeps the heartbeats advancing and the watchdog fed while the host sees a dead port (the lockout after an esptool reset). These rules read what the OTG core
 //! itself says, independently of the driver's tasks, and name the failure so the next `boot-status` carries `previous_hang=usb`.
 //!
-//! Inputs are sampled by the firmware every supervisor tick (register reads: the device frame number, the suspend bit, the interrupt status against its mask, the endpoint
-//! enable bit of the console's OUT endpoint). A suspended or absent host (no frames: a power-only charger, a host asleep) is never a failure: nothing is required of a
+//! Inputs are sampled by the firmware every supervisor tick (register reads: the device frame number, the suspend bit, the interrupt status against its mask). There was a third
+//! rule, "the console waits on an OUT endpoint whose `EPENA` is clear", and it is gone: `EPENA` is not what this driver keeps set while it waits, and on the board it tripped 31
+//! times in two minutes of healthy idle (`trips=0/0/31`). A suspended or absent host (no frames: a power-only charger, a host asleep) is never a failure: nothing is required of a
 //! device nobody is talking to. Pure: `no_std`, no unsafe code.
 
 /// The host is sending frames but the device has not been configured within this long (ms).
 pub const CONFIGURE_MS: u32 = 10_000;
 /// An enabled interrupt cause has stayed pending (nothing serviced it) this long (ms).
 pub const IRQ_MS: u32 = 3_000;
-/// The console is waiting for host data but its OUT endpoint has stayed disabled this long (ms): the host's bytes would be NAKed for ever.
-pub const OUT_MS: u32 = 3_000;
 
 /// What the OTG core and the console showed at one tick.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -24,10 +23,6 @@ pub struct Sample {
     pub configured: bool,
     /// Interrupt causes that are both pending and enabled (the event bits the driver's handler clears): non-zero for long means the handler is not running.
     pub pending: u32,
-    /// The console task is inside a read, so its OUT endpoint must be enabled.
-    pub reader_waiting: bool,
-    /// The console's OUT endpoint is enabled (`DOEPCTL.EPENA`).
-    pub out_armed: bool,
 }
 
 /// What failed.
@@ -37,8 +32,6 @@ pub enum Fault {
     NotConfigured,
     /// An enabled interrupt stayed pending: the USB interrupt handler is not servicing the core.
     IrqNotServiced,
-    /// The console waits for data on an endpoint the stack never enabled.
-    OutNotArmed,
 }
 
 impl Fault {
@@ -46,12 +39,11 @@ impl Fault {
     pub const HANG: &'static str = "usb";
 }
 
-/// The three timers.
+/// The two timers.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct UsbWatch {
     unconfigured_since: Option<u64>,
     pending_since: Option<u64>,
-    out_since: Option<u64>,
 }
 
 fn run(since: &mut Option<u64>, bad: bool, now: u64, limit: u32) -> bool {
@@ -72,7 +64,7 @@ impl UsbWatch {
     /// A fresh watch.
     #[must_use]
     pub const fn new() -> Self {
-        Self { unconfigured_since: None, pending_since: None, out_since: None }
+        Self { unconfigured_since: None, pending_since: None }
     }
 
     /// Look at one sample at `now_ms`; the first fault found, if any.
@@ -84,11 +76,8 @@ impl UsbWatch {
         }
         let not_configured = run(&mut self.unconfigured_since, s.host_active && !s.configured, now_ms, CONFIGURE_MS);
         let irq = run(&mut self.pending_since, s.pending != 0, now_ms, IRQ_MS);
-        let out = run(&mut self.out_since, s.reader_waiting && !s.out_armed && s.configured, now_ms, OUT_MS);
         if irq {
             Some(Fault::IrqNotServiced)
-        } else if out {
-            Some(Fault::OutNotArmed)
         } else if not_configured {
             Some(Fault::NotConfigured)
         } else {
@@ -98,8 +87,7 @@ impl UsbWatch {
 }
 
 /// The rules plus the decision to act on them. **Shadow by default**: the first image with these rules reset a healthy board about eight seconds after every boot (a1b8f4e,
-/// board run): the `OutNotArmed` input (`DOEPCTL.EPENA`) is not what the driver keeps set while it waits (the stock one-packet endpoint re-arms with DOEPTSIZ and CNAK, and the core
-/// clears EPENA), so an idle console with the port open tripped it at once. A rule's trips are counted and reported (`usb_live trips=`) whether or not they are enforced; they
+/// board run, from a rule that is now deleted). A rule's trips are counted and reported (`usb_live trips=`) whether or not they are enforced; they
 /// reset the chip only when `enforce` is on (the `selftest usb` command turns it on; the console's `usbwatch enforce on|off` flips it) until the board has shown that no rule trips
 /// on a healthy idle device.
 #[derive(Clone, Copy, Debug, Default)]
@@ -107,8 +95,8 @@ pub struct Policy {
     watch: UsbWatch,
     /// Reset on a fault (otherwise only count it).
     pub enforce: bool,
-    /// Trips per rule: not configured, interrupt not serviced, OUT not armed.
-    pub trips: [u32; 3],
+    /// Trips per rule: not configured, interrupt not serviced.
+    pub trips: [u32; 2],
     /// The most recent fault, enforced or not.
     pub last: Option<Fault>,
 }
@@ -117,7 +105,7 @@ impl Policy {
     /// Shadow mode.
     #[must_use]
     pub const fn new() -> Self {
-        Self { watch: UsbWatch::new(), enforce: false, trips: [0; 3], last: None }
+        Self { watch: UsbWatch::new(), enforce: false, trips: [0; 2], last: None }
     }
 
     /// Look at a sample; `Some` only when a rule tripped **and** `enforce` is on. A tripped rule starts its clock again, so it is counted once per limit, not once per tick.
@@ -126,7 +114,6 @@ impl Policy {
         let i = match fault {
             Fault::NotConfigured => 0,
             Fault::IrqNotServiced => 1,
-            Fault::OutNotArmed => 2,
         };
         self.trips[i] = self.trips[i].saturating_add(1);
         self.last = Some(fault);
@@ -139,7 +126,7 @@ impl Policy {
 mod tests {
     use super::*;
 
-    const OK: Sample = Sample { host_active: true, suspended: false, configured: true, pending: 0, reader_waiting: true, out_armed: true };
+    const OK: Sample = Sample { host_active: true, suspended: false, configured: true, pending: 0 };
 
     fn run_for(w: &mut UsbWatch, s: &Sample, from: u64, to: u64) -> Option<Fault> {
         let mut t = from;
@@ -162,14 +149,14 @@ mod tests {
     fn no_host_is_never_a_fault() {
         // a charger: no frames, never configured, nothing pending
         let mut w = UsbWatch::new();
-        let s = Sample { host_active: false, configured: false, reader_waiting: false, out_armed: false, ..OK };
+        let s = Sample { host_active: false, configured: false, ..OK };
         assert_eq!(run_for(&mut w, &s, 0, 600_000), None);
     }
 
     #[test]
     fn a_host_that_never_gets_the_device_configured_is_a_fault_after_ten_seconds() {
         let mut w = UsbWatch::new();
-        let s = Sample { configured: false, reader_waiting: false, ..OK };
+        let s = Sample { configured: false, ..OK };
         assert_eq!(run_for(&mut w, &s, 0, 10_000), None);
         assert_eq!(w.check(10_600, &s), Some(Fault::NotConfigured));
     }
@@ -177,7 +164,7 @@ mod tests {
     #[test]
     fn configuring_in_time_resets_the_clock() {
         let mut w = UsbWatch::new();
-        let unconf = Sample { configured: false, reader_waiting: false, ..OK };
+        let unconf = Sample { configured: false, ..OK };
         assert_eq!(run_for(&mut w, &unconf, 0, 9_000), None);
         assert_eq!(run_for(&mut w, &OK, 9_500, 60_000), None);
         // a later re-enumeration starts a new ten seconds
@@ -202,21 +189,9 @@ mod tests {
     }
 
     #[test]
-    fn a_console_waiting_on_a_disabled_endpoint_is_a_fault() {
-        let mut w = UsbWatch::new();
-        let s = Sample { out_armed: false, ..OK };
-        assert_eq!(run_for(&mut w, &s, 0, 3_000), None);
-        assert_eq!(w.check(3_600, &s), Some(Fault::OutNotArmed));
-        // armed again in time: no fault
-        let mut w = UsbWatch::new();
-        assert_eq!(run_for(&mut w, &s, 0, 2_000), None);
-        assert_eq!(run_for(&mut w, &OK, 2_500, 60_000), None);
-    }
-
-    #[test]
     fn a_suspended_host_clears_everything() {
         let mut w = UsbWatch::new();
-        let bad = Sample { pending: 1, out_armed: false, configured: false, ..OK };
+        let bad = Sample { pending: 1, configured: false, ..OK };
         assert_eq!(run_for(&mut w, &bad, 0, 2_500), None);
         let asleep = Sample { suspended: true, ..bad };
         assert_eq!(run_for(&mut w, &asleep, 3_000, 600_000), None);
@@ -241,35 +216,44 @@ mod tests {
         assert!(t <= 4_000, "{t}");
     }
 
-    /// The board's healthy idle device (a1b8f4e run): configured, a host sending frames, nothing pending, the console waiting in a read, and `EPENA` clear. Sixty seconds of that
-    /// must not reset the chip under the shipped policy; the rule that would have (and did) is counted, which is how the next board run finds out.
+    /// The board's healthy idle device: configured, a host sending frames, nothing pending. Ten minutes of that must not trip any rule, shadow or enforced (the board saw
+    /// `trips=0/0` for the two rules that remain).
     #[test]
-    fn the_boards_idle_samples_survive_sixty_seconds_in_shadow_mode_and_the_regression_is_visible() {
-        let board = Sample { host_active: true, suspended: false, configured: true, pending: 0, reader_waiting: true, out_armed: false };
-        let mut p = Policy::new();
-        for t in (0..=600_000u64).step_by(500) {
-            assert_eq!(p.decide(t, &board), None, "reset at {t} ms");
-        }
-        assert!(p.trips[2] > 0, "the OUT-not-armed rule must have tripped on this input (that was the regression)");
-        assert_eq!(p.trips[0] + p.trips[1], 0);
-        // enforced, the same input resets after the limit: this is why enforcement is off until the board agrees
-        let mut p = Policy::new();
-        p.enforce = true;
-        let mut at = None;
-        for t in (0..=60_000u64).step_by(500) {
-            if let Some(f) = p.decide(t, &board) {
-                at = Some((t, f));
-                break;
+    fn the_boards_idle_samples_never_trip_in_ten_minutes_even_enforced() {
+        let board = Sample { host_active: true, suspended: false, configured: true, pending: 0 };
+        for enforce in [false, true] {
+            let mut p = Policy::new();
+            p.enforce = enforce;
+            for t in (0..=600_000u64).step_by(500) {
+                assert_eq!(p.decide(t, &board), None, "enforce={enforce} reset at {t} ms");
             }
+            assert_eq!(p.trips, [0, 0]);
         }
-        assert_eq!(at.map(|(_, f)| f), Some(Fault::OutNotArmed));
+    }
+
+    /// With the interrupt handler masked and the bus left attached (the self-test), the host's next transaction stays pending and the shadow policy counts it without resetting;
+    /// enforced, it resets within four seconds.
+    #[test]
+    fn masked_interrupt_selftest_is_counted_in_shadow_and_resets_when_enforced() {
+        let stuck = Sample { host_active: true, suspended: false, configured: true, pending: 1 << 4 };
+        let mut shadow = Policy::new();
+        for t in (0..=20_000u64).step_by(500) {
+            assert_eq!(shadow.decide(t, &stuck), None);
+        }
+        assert!(shadow.trips[1] >= 3);
+        let mut enforced = Policy::new();
+        enforced.enforce = true;
+        let hit = (0..=20_000u64).step_by(500).find_map(|t| enforced.decide(t, &stuck).map(|f| (t, f)));
+        let (t, f) = hit.unwrap();
+        assert_eq!(f, Fault::IrqNotServiced);
+        assert!(t <= 4_000);
     }
 
     /// The whole supervisor on the host model for 60 s of idle uptime: both heartbeats advance, the USB samples are the board's, the verdict stays healthy and nothing resets.
     #[test]
     fn sixty_seconds_idle_whole_supervisor_model() {
         use crate::watch::{Verdict, Watch};
-        let board = Sample { host_active: true, suspended: false, configured: true, pending: 0, reader_waiting: true, out_armed: false };
+        let board = Sample { host_active: true, suspended: false, configured: true, pending: 0 };
         let mut watch = Watch::new(["thread", "console"], [8_000, 3_000], 0);
         let mut policy = Policy::new();
         let (mut thread, mut console) = (0u32, 0u32);
