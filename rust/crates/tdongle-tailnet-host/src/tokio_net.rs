@@ -36,6 +36,8 @@ pub struct NetControl {
     pub dns_redirect: Mutex<Option<SocketAddr>>,
     /// Milliseconds a DERP connect takes before it is made (a slow start of the relay link, as after a move to another region: traffic arrives while it comes up).
     pub derp_connect_delay_ms: AtomicU32,
+    /// Milliseconds every write to a DERP connection takes (a relay at about 1.4 KB per this many ms).
+    pub derp_write_delay_ms: AtomicU32,
 }
 
 impl Default for NetControl {
@@ -52,6 +54,7 @@ impl Default for NetControl {
             control_routes: Mutex::new(Vec::new()),
             dns_redirect: Mutex::new(None),
             derp_connect_delay_ms: AtomicU32::new(0),
+            derp_write_delay_ms: AtomicU32::new(0),
         }
     }
 }
@@ -199,7 +202,15 @@ impl Write for TokioTcp {
         if !self.alive() {
             return Err(NetError::Closed);
         }
-        self.stream.as_mut().ok_or(NetError::Closed)?.write(buf).await.map_err(|_| NetError::Io)
+        let n = self.stream.as_mut().ok_or(NetError::Closed)?.write(buf).await.map_err(|_| NetError::Io)?;
+        if self.extra {
+            // a relay that takes its time (a round trip per window, a slow link): the writer is paced, the sender above it must be held back, not dropped
+            let ms = self.ctl.derp_write_delay_ms.load(Ordering::Relaxed);
+            if ms != 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(u64::from(ms))).await;
+            }
+        }
+        Ok(n)
     }
     async fn flush(&mut self) -> Result<(), NetError> {
         if !self.alive() {

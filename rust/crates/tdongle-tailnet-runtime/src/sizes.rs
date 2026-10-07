@@ -58,7 +58,7 @@ pub const fn slot_static_bytes<R: RawMutex>() -> usize {
 pub fn member_sizes<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>) -> MemberSizes {
     let eng = tdongle_tailnet_engine::GatewayEngine::<D>::per_member_bytes();
     let slot = slot_static_bytes::<R>();
-    let queues = crate::shared::UDP_Q + crate::shared::DERP_Q;
+    let queues = crate::shared::UDP_Q + crate::shared::DERP_Q_STATIC;
     let ws = core::mem::size_of::<tdongle_tailnet_ctl::SessionBuf>();
     MemberSizes {
         control: future_bytes(sh, FUT_CONTROL) + ws,
@@ -112,7 +112,7 @@ pub const fn static_sizes<D: PeerDirectory>() -> StaticSizes {
         bulk: core::mem::size_of::<tdongle_tailnet_ctl::Bulk>(),
         session_buf: core::mem::size_of::<tdongle_tailnet_ctl::SessionBuf>(),
         udp_q: crate::shared::UDP_Q,
-        derp_q: crate::shared::DERP_Q,
+        derp_q: crate::shared::DERP_Q_STATIC,
         host_q: crate::shared::HOST_Q,
         dns_q: crate::shared::DNS_Q,
         lease: tdongle_tailnet_tls::READ_RECORD_BYTES,

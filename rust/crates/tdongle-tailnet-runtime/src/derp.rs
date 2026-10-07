@@ -145,8 +145,9 @@ static XQ: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw
 /// A packet was queued: wakes the visit manager, and (second signal: a signal has one waiter) the link's loop, which pumps what waits for its region.
 static X_SIG: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
 static X_PUMP: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
-/// Packets that may wait for a visit (TCP sends a window of them while the link switches).
-pub const XQ_MAX: usize = 16;
+/// Bytes of packets that may wait for a visit (TCP sends a window of them while the link switches); when it is full the packets stay in the relay queue, which holds the
+/// host back.
+pub const XQ_BYTES: usize = 12 * 1024;
 /// How long a packet waits for the link to reach its region before it is dropped (TCP in the tunnel retransmits).
 pub const X_EXPIRE_MS: u32 = 10_000;
 /// Visit timing in ms, `[idle, minimum, hold-off]`: the link leaves a region it visited after `idle` without a packet for it, never before `minimum` (control has to push the
@@ -184,12 +185,14 @@ enum Visit {
 }
 static VISIT: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, Visit> = embassy_sync::signal::Signal::new();
 
-fn push_x<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>, idx: usize, region: u16, dst: &[u8], data: &[u8]) {
+/// Queue a packet for a visit. `false` (nothing queued, nothing counted as dropped): no room in the byte bound or no heap above the floor; the caller leaves the packet where
+/// it is and tries again.
+fn push_x<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>, idx: usize, region: u16, dst: &[u8], data: &[u8]) -> bool {
     use core::sync::atomic::Ordering::Relaxed;
     let mut v = alloc::vec::Vec::new();
     if !tdongle_tailnet_admission::heap::hb_ok(sh.mem().heap.free(), data.len() + 64) || v.try_reserve_exact(data.len()).is_err() {
         X_COUNTS[3].fetch_add(1, Relaxed);
-        return;
+        return false;
     }
     v.extend_from_slice(data);
     let mut key = [0u8; 32];
@@ -197,7 +200,7 @@ fn push_x<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R,
     let now = (sh.now() as u32).max(1);
     let ok = XQ.lock(|q| {
         let mut q = q.borrow_mut();
-        if q.len() >= XQ_MAX {
+        if q.iter().map(|p| p.data.len() + 64).sum::<usize>() + data.len() + 64 > XQ_BYTES {
             return false;
         }
         q.push(XPacket { slot: idx as u8, region, dst: key, data: v, at_ms: now });
@@ -213,6 +216,7 @@ fn push_x<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R,
     } else {
         X_COUNTS[2].fetch_add(1, Relaxed);
     }
+    ok
 }
 
 impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S, D> {
@@ -230,6 +234,9 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
             before - q.len()
         });
         X_COUNTS[6].fetch_add(expired as u32, Relaxed);
+        if expired != 0 {
+            X_PUMP.signal(());
+        }
         if self.link.state() != State::Ready {
             return;
         }
@@ -251,6 +258,7 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
                     break;
                 }
                 Ok(()) => {
+                    X_PUMP.signal(());
                     X_COUNTS[1].fetch_add(1, Relaxed);
                     if u32::from(region) == VISITING.load(Relaxed) {
                         VISIT_LAST_MS.store((now as u32).max(1), Relaxed);
@@ -447,6 +455,8 @@ struct Drv<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     /// The region the link is visiting (see [`derp_extra`]), and the target the engine last commanded (where it returns to).
     visiting: Option<u16>,
     home_target: Target,
+    /// The relay queue's front packet is for a region whose waiting queue is full: wait for the visit to drain it, not for the relay queue to be non-empty.
+    egress_blocked: bool,
 }
 
 struct DrvSink<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
@@ -526,6 +536,7 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
             clock_fed: None,
             visiting: None,
             home_target: Target::new(0, "", 443),
+            egress_blocked: false,
         }
     }
 
@@ -620,6 +631,7 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
 
     /// Move the engine's relay packets into the link (which counts the ones it cannot send).
     fn pump_egress(&mut self) {
+        self.egress_blocked = false;
         // packets that waited for the link to reach their region (a visit, see `derp_extra`)
         self.pump_xq();
         let mut eg = [0u8; 32 + MAX_PACKET + 32];
@@ -633,7 +645,11 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
             // a packet for a peer homed on another region: a relay server only forwards to clients connected to it, so it goes to the member's link to that region
             let region = u16::from_be_bytes([eg[32], eg[33]]);
             if region != 0 && region != self.link.target().region {
-                push_x(self.sh, self.idx, region, &eg[..32], &eg[34..n]);
+                if !push_x(self.sh, self.idx, region, &eg[..32], &eg[34..n]) {
+                    // no room for it yet: it stays at the front of the relay queue (which then fills and holds the host back) until the visit sends what waits
+                    self.egress_blocked = true;
+                    break;
+                }
                 self.sh.slots[self.idx].derp_q.discard_front();
                 continue;
             }
@@ -671,8 +687,11 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
                 None => pending::<()>().await,
             }
         };
+        let blocked = self.egress_blocked;
         let eg = async {
-            if egress {
+            if egress && blocked {
+                select(X_PUMP.wait(), Timer::after_millis(50)).await;
+            } else if egress {
                 // the home queue, and the packets that waited for the link to reach their region
                 select(slot.derp_q.wait_nonempty(), X_PUMP.wait()).await;
             } else {
@@ -901,20 +920,24 @@ where
         if d.acts.send.is_some() {
             continue;
         }
-        // back-pressure towards the network: a record (the relay's writes are about 2 KB, up to 16 KB) is read only when the host queue can take what it
-        // carries, so a slow USB side slows the TCP connection instead of dropping packets the relay already delivered
-        // (not in the middle of a relay frame: the link's 5 s record timer runs from its first byte, and a full host queue during a download held it past that)
-        if !d.link.rx_in_frame() && sh.host_q.free_bytes() < crate::derp::HOST_ROOM {
-            if let Either::Second(()) = select(Timer::after_millis(2), d.wait(true)).await
-                && d.must_abort()
-            {
-                return;
-            }
-            continue;
-        }
         // wait for the server or for the link
-        match select(conn.wait_record(), d.wait(true)).await {
-            Either::First(Ok(())) => {
+        match select(conn.wait_record_len(), d.wait(true)).await {
+            Either::First(Ok(len)) => {
+                // back-pressure towards the network: the record is read only when the host queue can take what it carries (its length is known from the header), so a slow
+                // USB side slows the TCP connection instead of dropping packets the relay already delivered. Not in the middle of a relay frame: the link's 5 s record timer
+                // runs from its first byte; and a record longer than the queue is read when the queue is empty.
+                // (a frame in the record is at least ~80 bytes of IP packet; the host queue adds 3 bytes of header to each, and 1/16 covers that.) A frame often straddles two records
+                // (the relay writes 2 KB at a time), so the gate holds mid-frame too, but for at most 3 s: the link's 5 s record timer runs from the frame's first byte.
+                // plus one packet of slack: other producers push to the host queue while the record is being read
+                let need = (len + len / 16 + 32 + 1600).min(crate::shared::HOST_Q - 64);
+                let waited_since = sh.now();
+                while sh.host_q.free_bytes() < need && (!d.link.rx_in_frame() || sh.now().saturating_sub(waited_since) < 3000) {
+                    if let Either::Second(()) = select(Timer::after_millis(2), d.wait(true)).await
+                        && d.must_abort()
+                    {
+                        return;
+                    }
+                }
                 let stall = d.link_timing_rx_frame();
                 let r = conn
                     .read_with(

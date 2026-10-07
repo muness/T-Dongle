@@ -213,6 +213,141 @@ impl<R: RawMutex, const N: usize> ByteQueue<R, N> {
     }
 }
 
+/// A queue of records on the heap, bounded in bytes, for what has to hold more than a static ring can afford: the relay's egress (a window of TCP segments waits while
+/// the link writes at the relay's pace). A record is a heap block taken above the elastic floor like every elastic consumer ([`ElasticQueue::push_admit`]); a push that
+/// does not fit or cannot be admitted is refused and counted, as in [`ByteQueue`]. One consumer.
+pub struct ElasticQueue<R: RawMutex, const CAP: usize> {
+    inner: Mutex<R, RefCell<ElasticInner>>,
+    ready: Signal<R, ()>,
+    room: Signal<R, ()>,
+}
+
+struct ElasticInner {
+    /// `[kind][meta][payload]` per record.
+    q: alloc::collections::VecDeque<alloc::vec::Vec<u8>>,
+    used: usize,
+    stats: QueueStats,
+}
+
+impl<R: RawMutex, const CAP: usize> core::fmt::Debug for ElasticQueue<R, CAP> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "ElasticQueue<{CAP}>({} used)", self.len_bytes())
+    }
+}
+
+impl<R: RawMutex, const CAP: usize> Default for ElasticQueue<R, CAP> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<R: RawMutex, const CAP: usize> ElasticQueue<R, CAP> {
+    /// An empty queue (no heap taken).
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self {
+            inner: Mutex::new(RefCell::new(ElasticInner {
+                q: alloc::collections::VecDeque::new(),
+                used: 0,
+                stats: QueueStats { pushed: 0, refused: 0, popped: 0, high_water: 0 },
+            })),
+            ready: Signal::new(),
+            room: Signal::new(),
+        }
+    }
+    /// Bytes the queue may hold (headers included).
+    pub const CAPACITY: usize = CAP;
+    /// Append a record (`meta` then `payload`) if it fits the byte bound and `heap_free` (the free heap now) admits a block of its size above the floor; `false`
+    /// (counted) otherwise. Never waits.
+    pub fn push_admit(&self, kind: u8, meta: &[u8], payload: &[u8], heap_free: usize) -> bool {
+        let body = 1 + meta.len() + payload.len();
+        let ok = self.inner.lock(|i| {
+            let mut i = i.borrow_mut();
+            if i.used + body + 8 > CAP || !tdongle_tailnet_admission::heap::hb_ok(heap_free, body + 32) {
+                i.stats.refused += 1;
+                return false;
+            }
+            let mut v = alloc::vec::Vec::new();
+            if v.try_reserve_exact(body).is_err() {
+                i.stats.refused += 1;
+                return false;
+            }
+            v.push(kind);
+            v.extend_from_slice(meta);
+            v.extend_from_slice(payload);
+            i.used += body + 8;
+            i.q.push_back(v);
+            i.stats.pushed += 1;
+            i.stats.high_water = i.stats.high_water.max(i.used as u32);
+            true
+        });
+        if ok {
+            self.ready.signal(());
+        }
+        ok
+    }
+    /// Copy the oldest record into `out` without taking it. One consumer.
+    pub fn try_peek(&self, out: &mut [u8]) -> Option<(u8, usize)> {
+        self.inner.lock(|i| {
+            let i = i.borrow();
+            let v = i.q.front()?;
+            let n = (v.len() - 1).min(out.len());
+            out[..n].copy_from_slice(&v[1..1 + n]);
+            Some((v[0], n))
+        })
+    }
+    /// Take the oldest record away (after [`ElasticQueue::try_peek`] showed it).
+    pub fn discard_front(&self) {
+        self.inner.lock(|i| {
+            let mut i = i.borrow_mut();
+            if let Some(v) = i.q.pop_front() {
+                i.used -= v.len() + 8;
+                i.stats.popped += 1;
+            }
+        });
+        self.room.signal(());
+    }
+    /// Wait until the queue is not empty. Cancel-safe.
+    pub async fn wait_nonempty(&self) {
+        loop {
+            if self.len_bytes() != 0 {
+                return;
+            }
+            self.ready.wait().await;
+        }
+    }
+    /// Bytes free under the byte bound now.
+    pub fn free_bytes(&self) -> usize {
+        CAP.saturating_sub(self.len_bytes())
+    }
+    /// Would a record of `n` bytes be accepted now, in the byte bound and for the heap (`heap_free`)?
+    pub fn has_room(&self, n: usize, heap_free: usize) -> bool {
+        self.free_bytes() >= n + 8 && tdongle_tailnet_admission::heap::hb_ok(heap_free, n + 32)
+    }
+    /// Bytes queued now.
+    pub fn len_bytes(&self) -> usize {
+        self.inner.lock(|i| i.borrow().used)
+    }
+    /// Drop everything queued; returns the number of bytes dropped.
+    pub fn clear(&self) -> usize {
+        self.inner.lock(|i| {
+            let mut i = i.borrow_mut();
+            let n = i.used;
+            i.q.clear();
+            i.used = 0;
+            n
+        })
+    }
+    /// The counters.
+    pub fn stats(&self) -> QueueStats {
+        self.inner.lock(|i| i.borrow().stats)
+    }
+    /// Wake the consumer without a record.
+    pub fn kick(&self) {
+        self.ready.signal(());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
