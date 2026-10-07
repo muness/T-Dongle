@@ -39,6 +39,8 @@ jobs:
           python3 tools/test_check_stack.py
       - name: Web UI transport contracts
         run: node webui/test.mjs
+      - name: Vendored TLS cancellation regressions
+        run: cargo test --manifest-path vendor/embedded-tls/Cargo.toml --lib --no-default-features -- --test-threads=1
       - run: cargo test --workspace -- --test-threads=1
       - name: Boot order of the no_std images (rule 13)
         run: python3 tools/check_boot_order.py firmware/src/main.rs spikes/s1-wifi-l2/src/main.rs
