@@ -163,6 +163,8 @@ static DOWN_FRAMES: AtomicU32 = AtomicU32::new(0);
 static RX_DATAGRAMS: AtomicU32 = AtomicU32::new(0);
 static UP_BYTES: AtomicU32 = AtomicU32::new(0);
 static UP_FRAMES: AtomicU32 = AtomicU32::new(0);
+/// Rates of the last complete traffic window, for `status` (sampled by `ring_housekeeping_task`, independent of the panel).
+static TRAFFIC_RATES: tdongle_traffic::Rates = tdongle_traffic::Rates::new();
 static HOLDS: AtomicU32 = AtomicU32::new(0);
 static HOLD_US_SUM: AtomicU32 = AtomicU32::new(0);
 static HOLD_US_MAX: AtomicU32 = AtomicU32::new(0);
@@ -1373,8 +1375,11 @@ unsafe impl Send for SendTx {}
 #[embassy_executor::task]
 async fn ring_housekeeping_task() -> ! {
     use tdongle_usb_out::elastic::{self, Step};
+    let mut traffic = tdongle_traffic::Sampler::new();
     loop {
         let _ = with_timeout(Duration::from_millis(100), HOUSEKEEP_SIG.wait()).await;
+        traffic.sample(&tdongle_traffic_reading(), Instant::now().as_millis() as u32);
+        TRAFFIC_RATES.publish(&traffic);
         l2::HEAP_MIN.fetch_min(esp_alloc::HEAP.free() as u32, Ordering::Relaxed);
         let (used, cap) = critical_section::with(|cs| {
             let r = RING.borrow_ref(cs);
@@ -1612,8 +1617,8 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         setup_seconds_left: if setup::ACTIVE.load(Ordering::Relaxed) { setup::session().seconds_left(Instant::now().as_millis() as u32) } else { 0 },
         traffic: Traffic {
             counters: tdongle_traffic_reading(),
-            down_kbps: 0,
-            up_kbps: 0,
+            down_kbps: TRAFFIC_RATES.read().0,
+            up_kbps: TRAFFIC_RATES.read().1,
             usb_resets: RESETS.load(Ordering::Relaxed),
             control_stack_free_bytes: 0,
         },
