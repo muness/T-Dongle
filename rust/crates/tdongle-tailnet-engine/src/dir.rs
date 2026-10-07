@@ -49,6 +49,12 @@ pub trait PeerDirectory {
     fn commit(&mut self, member: usize, authoritative: bool) -> Result<(), DirError>;
     /// Discard the staged updates.
     fn abort(&mut self, member: usize);
+    /// Bind a slot to a node public key. Persistent directories may restore only
+    /// records belonging to this key; other directories start empty.
+    fn attach(&mut self, member: usize, _owner: &PubKey) -> bool {
+        self.clear(member);
+        true
+    }
     /// Forget everything of a membership.
     fn clear(&mut self, member: usize);
     /// Live records.

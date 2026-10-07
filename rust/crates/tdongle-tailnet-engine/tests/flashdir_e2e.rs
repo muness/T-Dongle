@@ -149,3 +149,37 @@ fn a_map_of_300_peers_applies_end_to_end_on_the_flash_directory() {
     assert_eq!(s.eng.dir().pinned(0), resident.min(8));
     s.eng.check_identities().unwrap();
 }
+
+#[test]
+fn boot_restores_only_the_same_membership_directory_before_any_map() {
+    let cfg = |id: u32, who: u8| {
+        let me = keys(who);
+        MemberConfig { id, node_private: me.node_priv, disco_private: me.disco_priv,
+            label: FixedStr::new(), priority_peer_ip: 0, persistent_keepalive_s: 0, enabled: true }
+    };
+    let mut first = FSolo::with_dir(41, FlashDirectory::new(MemFlash::new(PEERSTORE_BYTES)));
+    first.input(Input::MemberAdded(&cfg(1, 1)));
+    apply(&mut first, &full_map());
+    while first.eng.dir().queued(0) > 0 {
+        first.now += 10;
+        first.input(Input::Tick);
+    }
+    let image = first.eng.dir_mut().flash().d.clone();
+    let boot = |who| {
+        let mut flash = MemFlash::new(PEERSTORE_BYTES);
+        flash.d = image.clone();
+        let mut s = FSolo::with_dir(41, FlashDirectory::new(flash));
+        s.input(Input::MemberAdded(&cfg(1, who)));
+        s
+    };
+    let mut restored = boot(1);
+    assert_eq!(restored.eng.dir().count(0), PEERS as usize, "before any control map");
+    assert_eq!(restored.eng.dir_mut().find_by_ip(0, ip(150)).unwrap().public_key, peer_key(150));
+    assert!(!restored.eng.member(1).unwrap().mship.session_valid, "cache alone cannot authorize traffic");
+    let mut changed = boot(3);
+    assert_eq!(changed.eng.dir().count(0), 0, "another node key cannot inherit peers");
+    assert!(changed.eng.dir_mut().find_by_ip(0, ip(150)).is_none());
+    restored.input(Input::MemberRemoved { member: 1 });
+    restored.input(Input::MemberAdded(&cfg(1, 1)));
+    assert_eq!(restored.eng.dir().count(0), 0, "explicit removal still clears the directory");
+}

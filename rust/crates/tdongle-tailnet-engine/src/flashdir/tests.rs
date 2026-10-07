@@ -254,7 +254,8 @@ fn the_ram_footprint_is_fixed_and_small() {
         core::mem::size_of::<DirRecord>()
     );
     assert!(total <= 3 * 1024, "{total} B");
-    assert!(empty <= 512, "{empty} B");
+    // Three persisted owner keys add 96 fixed bytes, independent of peer count.
+    assert!(empty <= 512 + 3 * 32, "{empty} B");
 }
 
 #[test]
@@ -938,4 +939,31 @@ fn failed_clear_keeps_the_active_generation_until_retry() {
     assert_eq!(d.count(0), 1);
     erases_at_most(&mut d, 0, "retried clear", |d| d.clear(0));
     assert_eq!(reboot(d).count(0), 0);
+}
+
+#[test]
+fn ownership_survives_compaction_and_rejects_legacy_or_failed_rebind() {
+    let owner = [1; 32];
+    let mut d: D<2> = FlashDirectory::new(MemFlash::new(SMALL));
+    assert!(d.attach(0, &owner));
+    d.stage(0, &add(1, "cached")).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
+    settle(&mut d);
+    let g = d.geometry().unwrap();
+    d.m[0].copy = Some((1, 1));
+    while d.m[0].copy.is_some() {
+        assert!(d.copy_step(&g, 0).is_ok());
+    }
+    let mut d = reboot(d);
+    assert!(d.attach(0, &owner));
+    assert_eq!(d.count(0), 1);
+    d.flash().cut_after(0, 0);
+    assert!(!d.attach(0, &[2; 32]), "failed invalidation cannot admit another owner");
+    let mut d = reboot(d);
+    assert!(d.attach(0, &owner));
+    assert_eq!(d.count(0), 1);
+    // The old header format's unused payload was zero-filled, hence unbound.
+    d.m[0].owner = [0; 32];
+    assert!(d.attach(0, &owner));
+    assert_eq!(d.count(0), 0, "unbound legacy records must be discarded");
 }

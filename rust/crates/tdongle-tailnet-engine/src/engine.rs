@@ -505,7 +505,10 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
             self.sh.stats.netmap_refused.bump();
             return;
         };
-        self.sh.dir.clear(slot);
+        if !self.sh.dir.attach(slot, &m.rt.node_pub.0) {
+            self.sh.stats.netmap_refused.bump();
+            return;
+        }
         self.members[slot] = Some(m);
         self.sh.stats.members_added.bump();
         if cfg.enabled {

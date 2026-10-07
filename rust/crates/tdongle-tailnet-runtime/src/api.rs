@@ -454,6 +454,7 @@ where
         }
         for slot in 0..snap.members.len() {
             self.with_engine(|e, _| {
+                let _ = write!(out, "tn_dir_state member_slot={} count={} generation={}\r\n", slot, e.dir().count(slot), e.dir().generation(slot));
                 e.directory_lines(slot, |l| {
                     let (ip, al) = (l.info.ip.to_be_bytes(), l.alias.to_be_bytes());
                     let _ = write!(

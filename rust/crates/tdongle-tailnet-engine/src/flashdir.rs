@@ -7,7 +7,7 @@
 //! * `tx`: the staging log of the map being received, one [`SLOT_BYTES`] slot per update (`action, group, record`). It is not crash-safe and need not be: a map
 //!   cut by a reset is fetched again.
 //! * Two **areas**, one active and one spare. An area is `slots | 5 hash tables`. Slots are appended, never rewritten: a `PUT` (a record version), a `TOMB`
-//!   (an identity removed), a `COMMIT` (a map applied: generation, live count) and, in slot 0, the `HEADER` (epoch, written last when an area takes over).
+//!   (an identity removed), a `COMMIT` (a map applied: generation, live count) and, in slot 0, the `HEADER` (epoch and owning node public key, written last when an area takes over).
 //!   Every slot carries the transaction that wrote it and a CRC over its bytes.
 //! * The hash tables index the slots by node id, WireGuard key, address, DISCO key and the first label of the hostname: open addressing over 4-byte buckets
 //!   `[tag:16 | slot:16]` (erased = `FFFF_FFFF`), at most half full, written once like the slots. A lookup probes one table, reads the candidate slots whose
@@ -37,7 +37,7 @@
 //!
 //! # RAM
 //!
-//! `size_of::<FlashDirectory<_, M, C>>()`: about 100 bytes a membership and `C` cached records (the `C` most recently used peers, the WireGuard-resident ones
+//! `size_of::<FlashDirectory<_, M, C>>()`: about 180 bytes a membership and `C` cached records (the `C` most recently used peers, the WireGuard-resident ones
 //! pinned; see [`PeerDirectory::pin`]). A commit takes a transient bitmap of one bit per slot (about 200 bytes) and a few records on the stack.
 
 extern crate alloc;
@@ -234,6 +234,13 @@ fn seal(kind: u8, txn: u32, payload: &[u8]) -> Raw {
     b[CRC_AT..].copy_from_slice(&crc.to_le_bytes());
     b
 }
+fn header(epoch: u32, generation: u32, count: u32, txn: u32, owner: &PubKey) -> Raw {
+    let mut payload = [0u8; 48];
+    payload[..16].copy_from_slice(&words(&[epoch, generation, count, txn]));
+    payload[16..].copy_from_slice(owner);
+    seal(K_HEADER, 0, &payload)
+}
+
 fn sealed(b: &Raw) -> bool {
     let crc = !dirfmt::crc32_update(!0, &b[..CRC_AT]);
     b[CRC_AT..] == crc.to_le_bytes()
@@ -310,6 +317,8 @@ enum View<'a> {
 #[derive(Clone, Copy, Debug)]
 struct Member {
     active: Option<u8>,
+    /// WireGuard public key owning the persisted directory. Zero means legacy/unbound.
+    owner: PubKey,
     epoch: u32,
     /// Next free slot of the active area.
     end: u32,
@@ -362,6 +371,7 @@ impl Member {
     const fn new() -> Self {
         Self {
             active: None,
+            owner: [0; 32],
             epoch: 0,
             end: 0,
             generation: 0,
@@ -786,6 +796,61 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         }
     }
 
+    fn clear_member(&mut self, member: usize, owner: PubKey) {
+        self.ensure_mounted();
+        let Some(g) = self.geo else { return };
+        if member >= M {
+            return;
+        }
+        // what was queued goes too
+        let st = &mut self.m[member];
+        st.n_queued = 0;
+        st.want_copy = false;
+        self.consume_staging(member);
+        let s = self.m[member];
+        let generation = s.generation.wrapping_add(1);
+        // a cleared membership must not come back at the next boot: an empty area takes over, or the headers go
+        let swapped = s.active.is_some()
+            && s.copy.is_none()
+            && s.spare_clean as usize == g.area
+            && self.write(g.slot_off(member, s.spare(), 0), &header(s.epoch + 1, generation, 0, s.txn, &owner));
+        let st = &mut self.m[member];
+        if swapped {
+            st.active = Some(st.spare());
+            st.epoch += 1;
+            st.end = 1;
+        } else if let Some(a) = s.active {
+            // Invalidate the older header first, then the active one: clearing the
+            // kind word only programs bits from 1 to 0 and needs no sector erase.
+            // Bulk cleanup stays in maintain(), one sector per executor tick.
+            // If a write fails, retain the active state rather than claim success.
+            if s.spare_clean == 0 && !self.write(g.slot_off(member, 1 - a, 0), &[0; 4]) {
+                return;
+            }
+            if !self.write(g.slot_off(member, a, 0), &[0; 4]) {
+                return;
+            }
+            let st = &mut self.m[member];
+            if a == 0 || s.spare_clean == 0 || s.copy.is_some() {
+                st.spare_clean = 0;
+            }
+            st.active = None;
+            st.end = 0;
+        }
+        let st = &mut self.m[member];
+        st.copy = None;
+        st.count = 0;
+        st.n_aborted = 0;
+        st.abort_over = false;
+        st.generation = generation;
+        st.owner = owner;
+        if swapped {
+            st.spare_clean = 0;
+        }
+        st.retry_at = 0;
+        self.revalidate(member);
+    }
+
     // ---- mount ------------------------------------------------------------------------------------------------------------------------------
 
     /// Read every membership's areas: take the valid one with the higher epoch and replay its commits. Runs once, on first use. Returns the live peers.
@@ -820,6 +885,9 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         };
         if let Some((a, (epoch, generation, count, txn))) = pick {
             s.active = Some(a);
+            if let Some(b) = self.slot(g, m, a, 0) {
+                s.owner.copy_from_slice(&b[PAYLOAD + 16..PAYLOAD + 48]);
+            }
             s.epoch = epoch;
             s.generation = generation;
             s.count = count;
@@ -890,7 +958,7 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         }
         let s = self.m[m];
         let epoch = s.epoch + 1;
-        if !self.write(g.slot_off(m, 0, 0), &seal(K_HEADER, 0, &words(&[epoch, s.generation, 0, s.txn]))) {
+        if !self.write(g.slot_off(m, 0, 0), &header(epoch, s.generation, 0, s.txn, &s.owner)) {
             return Err(DirError);
         }
         let s = &mut self.m[m];
@@ -947,7 +1015,7 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         }
         // caught up: the header is the switch
         let epoch = s.epoch + 1;
-        if !self.write(g.slot_off(m, d, 0), &seal(K_HEADER, 0, &words(&[epoch, s.generation, s.count, s.txn]))) {
+        if !self.write(g.slot_off(m, d, 0), &header(epoch, s.generation, s.count, s.txn, &s.owner)) {
             let s = &mut self.m[m];
             s.copy = None;
             s.spare_clean = 0;
@@ -1355,58 +1423,17 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
             self.drop_open(member);
         }
     }
-    fn clear(&mut self, member: usize) {
+    fn attach(&mut self, member: usize, owner: &PubKey) -> bool {
         self.ensure_mounted();
-        let Some(g) = self.geo else { return };
-        if member >= M {
-            return;
+        if member < M && (self.m[member].owner == [0; 32] || self.m[member].owner != *owner) {
+            self.clear_member(member, *owner);
         }
-        // what was queued goes too
-        let st = &mut self.m[member];
-        st.n_queued = 0;
-        st.want_copy = false;
-        self.consume_staging(member);
-        let s = self.m[member];
-        let generation = s.generation.wrapping_add(1);
-        // a cleared membership must not come back at the next boot: an empty area takes over, or the headers go
-        let swapped = s.active.is_some()
-            && s.copy.is_none()
-            && s.spare_clean as usize == g.area
-            && self.write(g.slot_off(member, s.spare(), 0), &seal(K_HEADER, 0, &words(&[s.epoch + 1, generation, 0, s.txn])));
-        let st = &mut self.m[member];
-        if swapped {
-            st.active = Some(st.spare());
-            st.epoch += 1;
-            st.end = 1;
-        } else if let Some(a) = s.active {
-            // Invalidate the older header first, then the active one: clearing the
-            // kind word only programs bits from 1 to 0 and needs no sector erase.
-            // Bulk cleanup stays in maintain(), one sector per executor tick.
-            // If a write fails, retain the active state rather than claim success.
-            if s.spare_clean == 0 && !self.write(g.slot_off(member, 1 - a, 0), &[0; 4]) {
-                return;
-            }
-            if !self.write(g.slot_off(member, a, 0), &[0; 4]) {
-                return;
-            }
-            let st = &mut self.m[member];
-            if a == 0 || s.spare_clean == 0 || s.copy.is_some() {
-                st.spare_clean = 0;
-            }
-            st.active = None;
-            st.end = 0;
+        member < M && *owner != [0; 32] && self.m[member].owner == *owner
+    }
+    fn clear(&mut self, member: usize) {
+        if member < M {
+            self.clear_member(member, self.m[member].owner);
         }
-        let st = &mut self.m[member];
-        st.copy = None;
-        st.count = 0;
-        st.n_aborted = 0;
-        st.abort_over = false;
-        st.generation = generation;
-        if swapped {
-            st.spare_clean = 0;
-        }
-        st.retry_at = 0;
-        self.revalidate(member);
     }
     fn count(&self, member: usize) -> usize {
         self.m.get(member).map_or(0, |s| s.count as usize)
