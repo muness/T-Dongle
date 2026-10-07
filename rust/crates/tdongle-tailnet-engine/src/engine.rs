@@ -57,6 +57,9 @@ impl<D, const M: usize, const P: usize, const K: usize, const A: usize, const F:
     }
 }
 
+/// While the directory has flash upkeep pending, the engine ticks this often and does one step a tick.
+pub const DIR_MAINTENANCE_MS: Millis = 10;
+
 /// Memberships the firmware configuration runs at once: 3, or 2 / 1 with the `slots-2` / `slots-1` features (every static of the runtime scales with it).
 pub const GATEWAY_M: usize = if cfg!(feature = "slots-1") {
     1
@@ -788,6 +791,22 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
                 continue;
             }
             self.tick_member(cx, slot);
+            // the directory keeps the records of the WireGuard-resident peers cached
+            if let Some(m) = self.members[slot].as_ref() {
+                let mut keys = [[0u8; 32]; P];
+                let mut n = 0;
+                for idx in 0..P {
+                    if let Some(p) = m.mship.table.get(idx) {
+                        keys[n] = p.public_key;
+                        n += 1;
+                    }
+                }
+                self.sh.dir.pin(slot, &keys[..n]);
+            }
+        }
+        // one bounded step of the directory's flash upkeep (one sector erase at most): the executor runs between two
+        if self.sh.dir.wants_maintenance() {
+            self.sh.dir.maintain();
         }
         self.service_router(cx);
         if let Some(d) = self.sh.dns_deadline
@@ -926,6 +945,9 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
         if let Some(d) = self.sh.dns_deadline {
             f("dns", d);
         }
+        if self.sh.dir.wants_maintenance() {
+            f("directory", now + DIR_MAINTENANCE_MS);
+        }
     }
 
     // ---- invariants ----------------------------------------------------------------------------------------------------------------------------
@@ -1036,6 +1058,9 @@ impl<D: PeerDirectory, const P: usize, const M: usize> Directory for DnsView<'_,
     }
     fn peer(&self, member: usize, j: usize) -> Option<PeerView<'_>> {
         self.dir.peer_view(member, j).map(|(hostname, vpn_ip)| PeerView { hostname, vpn_ip })
+    }
+    fn peers_named(&self, member: usize, label: &[u8], f: &mut dyn FnMut(PeerView<'_>)) -> bool {
+        self.dir.for_each_named(member, label, &mut |hostname, vpn_ip| f(PeerView { hostname, vpn_ip }))
     }
     fn generation(&self, member: usize) -> u32 {
         self.dir.generation(member)

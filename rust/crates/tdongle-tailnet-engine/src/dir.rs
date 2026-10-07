@@ -59,6 +59,39 @@ pub trait PeerDirectory {
     fn peer_info(&self, _member: usize, _j: usize) -> Option<PeerInfo> {
         None
     }
+    /// Call `f` with the hostname and summary of every live record, until it returns false (status page, diagnostics).
+    fn for_each_peer(&self, member: usize, f: &mut dyn FnMut(&str, PeerInfo) -> bool) {
+        for j in 0..self.count(member) {
+            if let (Some((name, _)), Some(info)) = (self.peer_view(member, j), self.peer_info(member, j))
+                && !f(name, info)
+            {
+                return;
+            }
+        }
+    }
+    /// Call `f` with the hostname and address of the live records whose hostname's first label (of its first 63 bytes) is `label`, ignoring ASCII case; it
+    /// may be called for others too (DNS checks the full name). `false`: a record could not be read (the lookup is temporary).
+    fn for_each_named(&self, member: usize, label: &[u8], f: &mut dyn FnMut(&str, u32)) -> bool {
+        let mut ok = true;
+        for j in 0..self.count(member) {
+            match self.peer_view(member, j) {
+                Some((name, ip)) => f(name, ip),
+                None => ok = false,
+            }
+        }
+        let _ = label;
+        ok
+    }
+    /// The WireGuard-resident peers of `member` (their records are kept cached, never evicted): the whole set, replacing the previous one.
+    fn pin(&mut self, _member: usize, _keys: &[PubKey]) {}
+    /// One bounded step of background work (at most one flash sector erase); true while there is more. The engine calls it once a tick.
+    fn maintain(&mut self) -> bool {
+        false
+    }
+    /// [`PeerDirectory::maintain`] has work.
+    fn wants_maintenance(&self) -> bool {
+        false
+    }
     /// Generation counter of the live records (bumped by every commit).
     fn generation(&self, member: usize) -> u32;
     /// Peers the last commit had no room for, and updates dropped because staging was full (both counted overflow, never a failed map).

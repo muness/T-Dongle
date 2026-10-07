@@ -112,20 +112,18 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> 
                 if m.is_none() {
                     continue;
                 }
-                let total = e.dir().count(slot);
                 let mut k = 0;
-                for i in 0..total {
+                e.dir().for_each_peer(slot, &mut |name, info| {
                     if k == ML_MAX_PEERS {
-                        break;
+                        return false;
                     }
-                    if let Some((name, addr)) = e.dir().peer_view(slot, i) {
-                        let b = name.as_bytes();
-                        let n = b.len().min(63);
-                        names[slot][k][..n].copy_from_slice(&b[..n]);
-                        addrs[slot][k] = addr;
-                        k += 1;
-                    }
-                }
+                    let b = name.as_bytes();
+                    let n = b.len().min(63);
+                    names[slot][k][..n].copy_from_slice(&b[..n]);
+                    addrs[slot][k] = info.ip;
+                    k += 1;
+                    true
+                });
                 counts[slot] = k;
             }
         });

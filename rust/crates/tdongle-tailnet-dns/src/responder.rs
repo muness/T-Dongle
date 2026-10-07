@@ -390,11 +390,9 @@ impl Responder {
             }
         }
         let suffix = if form == Form::Magic { domain_of(m.self_dns_name) } else { "" };
-        for j in 0..m.peer_count {
-            let Some(p) = dir.peer(index, j) else {
-                r.temporary = true;
-                continue;
-            };
+        // every form of a peer's name starts with the first label of its stored hostname
+        let label = &name[..name.iter().position(|&c| c == b'.').unwrap_or(name.len())];
+        let all = dir.peers_named(index, label, &mut |p| {
             // the C copies the hostname into a 64-byte buffer
             let host = &p.hostname.as_bytes()[..p.hostname.len().min(63)];
             let dot = host.iter().position(|&c| c == b'.');
@@ -408,9 +406,9 @@ impl Responder {
                 (_, None) => join(&mut buf, &[host, b".", suffix.as_bytes()]), // peers restored from the NVS cache keep only their first label
             };
             // the C's buffer is 128 bytes with a terminator: a candidate of 128 or more bytes never matches
-            let Some(l) = cand else { continue };
+            let Some(l) = cand else { return };
             if !eq_ci(name, &buf[..l]) || p.vpn_ip == 0 {
-                continue;
+                return;
             }
             r.matches += 1;
             match dir.alias(m.id, p.vpn_ip) {
@@ -421,6 +419,9 @@ impl Responder {
                 }
                 _ => r.temporary = true,
             }
+        });
+        if !all {
+            r.temporary = true;
         }
         if generation != dir.generation(index) {
             r.temporary = true;

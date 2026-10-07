@@ -21,7 +21,7 @@ use tdongle_tailnet_runtime::shared::{Config, Shared};
 use tdongle_tailnet_runtime::wifi::WifiRaw;
 
 /// The directory of the harness's engines.
-pub type Dir = FlashDirectory<MemFlash, 3, 32>;
+pub type Dir = FlashDirectory<MemFlash, 3, 8>;
 /// The shared state of the harness's runtime.
 pub type Sh = Shared<CriticalSectionRawMutex, MemPlatform, MemStorage, Dir>;
 

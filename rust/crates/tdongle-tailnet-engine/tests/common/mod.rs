@@ -547,8 +547,8 @@ impl Sim {
 // ---- a single engine without a network -------------------------------------------------------------------------------------------------------
 
 /// One engine with several memberships and a directory of fake peers, fed directly.
-pub struct SoloA<const A: usize> {
-    pub eng: Box<Engine<Dir, 3, 8, 12, A, 64, 24>>,
+pub struct SoloA<const A: usize, D: tdongle_tailnet_engine::PeerDirectory = Dir> {
+    pub eng: Box<Engine<D, 3, 8, 12, A, 64, 24>>,
     pub rng: TestRng,
     pub now: u64,
     pub outs: Vec<Owned>,
@@ -561,7 +561,13 @@ pub type Solo = SoloA<64>;
 
 impl<const A: usize> SoloA<A> {
     pub fn new(seed: u64) -> Self {
-        SoloA { eng: Box::new(Engine::new(Dir::new())), rng: TestRng(seed | 1), now: 1_000, outs: Vec::new(), host_rx: Vec::new(), wake: None }
+        Self::with_dir(seed, Dir::new())
+    }
+}
+
+impl<const A: usize, D: tdongle_tailnet_engine::PeerDirectory> SoloA<A, D> {
+    pub fn with_dir(seed: u64, dir: D) -> Self {
+        SoloA { eng: Box::new(Engine::new(dir)), rng: TestRng(seed | 1), now: 1_000, outs: Vec::new(), host_rx: Vec::new(), wake: None }
     }
 
     pub fn input(&mut self, input: Input<'_>) -> Handled {

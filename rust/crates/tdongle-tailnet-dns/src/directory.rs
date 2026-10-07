@@ -40,6 +40,21 @@ pub trait Directory {
     fn member(&self, i: usize) -> Option<MemberView<'_>>;
     /// Peer `j` of membership `i`; `None` when the record cannot be read right now (counts as a temporary failure).
     fn peer(&self, member: usize, j: usize) -> Option<PeerView<'_>>;
+    /// Call `f` with the peers of membership `member` whose stored hostname's first label (of its first 63 bytes) is `label`, ignoring ASCII case; it may
+    /// be called for others too (the responder checks the whole name). `false`: some peer could not be read (counts as a temporary failure). The default
+    /// visits every peer; a directory with a name index visits only the candidates.
+    fn peers_named(&self, member: usize, label: &[u8], f: &mut dyn FnMut(PeerView<'_>)) -> bool {
+        let _ = label;
+        let n = self.member(member).map_or(0, |m| m.peer_count);
+        let mut ok = true;
+        for j in 0..n {
+            match self.peer(member, j) {
+                Some(p) => f(p),
+                None => ok = false,
+            }
+        }
+        ok
+    }
     /// Current directory generation of membership `i` (re-read after a scan to detect a concurrent change).
     fn generation(&self, member: usize) -> u32;
     /// The USB alias address (198.18.x.y) for a peer of a membership, allocating it if needed; `None` when none can be had (store failure).
@@ -59,6 +74,9 @@ impl<D: Directory + ?Sized> Directory for &D {
     }
     fn peer(&self, member: usize, j: usize) -> Option<PeerView<'_>> {
         (**self).peer(member, j)
+    }
+    fn peers_named(&self, member: usize, label: &[u8], f: &mut dyn FnMut(PeerView<'_>)) -> bool {
+        (**self).peers_named(member, label, f)
     }
     fn generation(&self, member: usize) -> u32 {
         (**self).generation(member)
