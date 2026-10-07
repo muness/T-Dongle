@@ -107,9 +107,6 @@ pub trait UsbFrames {
     /// A frame from the host that the dongle's own TCP stack should see: an ARP reply, or TCP to the dongle's own address (192.168.77.1: the `/status` page the
     /// Android app reads). The runtime still handles the frame as before; an image without such a stack ignores this (the default).
     fn local_frame(&mut self, _frame: &[u8]) {}
-    /// The runtime has queued a run of frames with [`UsbFrames::send`] and will queue no more until it next has something: the image may start sending them now, as
-    /// one transfer (the bridge's IN aggregation). The default does nothing (an image whose `send` transmits at once).
-    fn batch_end(&mut self) {}
 }
 
 /// **Documentation of the Wi-Fi contract; the runtime does not bound on it.** The runtime consumes the radio through its own `net_embassy::LinkGen` (the
