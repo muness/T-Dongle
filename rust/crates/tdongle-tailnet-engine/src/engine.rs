@@ -742,7 +742,24 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
             m.rt.key_expired = true;
         }
         m.mship.session_valid = true;
-        // resident peers follow the new directory: revoked ones leave, the others take the new endpoints, DISCO key and region
+        self.follow_directory(cx, slot);
+        let Some(m) = self.members[slot].as_mut() else { return false };
+        m.rt.generation = m.rt.generation.wrapping_add(1);
+        let first_map = !m.rt.stun_started && !m.rt.netcheck_wanted;
+        // the home region vanished from the map: reconnect elsewhere
+        let home_gone = m.rt.derp_map.count != 0 && !m.rt.derp_map.region_list().iter().any(|r| r.region_id == m.rt.home_derp);
+        self.recompute_ready(cx, slot);
+        if first_map || home_gone {
+            self.start_network(cx, slot);
+        }
+        true
+    }
+
+    /// The resident peers follow the directory: revoked ones leave, the others take the new endpoints, DISCO key and region.
+    fn follow_directory(&mut self, cx: &mut Cx<'_>, slot: usize) {
+        let dir_generation = self.sh.dir.generation(slot);
+        let Some(m) = self.members[slot].as_mut() else { return };
+        m.rt.dir_generation = dir_generation;
         for idx in 0..P {
             let Some(key) = m.mship.table.get(idx).map(|p| p.public_key) else { continue };
             match self.sh.dir.find_by_key(slot, &key) {
@@ -772,15 +789,6 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
                 }
             }
         }
-        m.rt.generation = m.rt.generation.wrapping_add(1);
-        let first_map = !m.rt.stun_started && !m.rt.netcheck_wanted;
-        // the home region vanished from the map: reconnect elsewhere
-        let home_gone = m.rt.derp_map.count != 0 && !m.rt.derp_map.region_list().iter().any(|r| r.region_id == m.rt.home_derp);
-        self.recompute_ready(cx, slot);
-        if first_map || home_gone {
-            self.start_network(cx, slot);
-        }
-        true
     }
 
     // ---- time ----------------------------------------------------------------------------------------------------------------------------------
@@ -807,6 +815,15 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
         // one bounded step of the directory's flash upkeep (one sector erase at most): the executor runs between two
         if self.sh.dir.wants_maintenance() {
             self.sh.dir.maintain();
+            // a commit the directory finished in its upkeep: the resident peers follow it
+            for slot in 0..M {
+                if self.members[slot].as_ref().is_some_and(|m| m.rt.phase == Phase::Running && m.rt.dir_generation != self.sh.dir.generation(slot)) {
+                    self.follow_directory(cx, slot);
+                    if let Some(m) = self.members[slot].as_mut() {
+                        m.rt.generation = m.rt.generation.wrapping_add(1);
+                    }
+                }
+            }
         }
         self.service_router(cx);
         if let Some(d) = self.sh.dns_deadline

@@ -61,8 +61,8 @@ extern crate std;
 pub mod alias;
 pub mod derp_glue;
 pub mod dir;
-pub mod flashdir;
 pub mod engine;
+pub mod flashdir;
 #[cfg(feature = "fuzzing")]
 #[doc(hidden)]
 pub mod fuzz;
@@ -80,7 +80,7 @@ pub mod status_map;
 mod tx;
 
 pub use alias::AliasBook;
-pub use dir::{DirError, PeerInfo, PeerDirectory, RamDirectory};
+pub use dir::{DirError, PeerDirectory, PeerInfo, RamDirectory};
 pub use engine::{ActFail, Engine, GATEWAY_M, GatewayEngine, Handled};
 pub use io::{DerpNote, Input, MemberConfig, MemberId, NetmapEvent, NullOutput, Out, Output, TokenPhase};
 pub use netmap::{EngineNetmap, NetmapSink, NetmapTarget};

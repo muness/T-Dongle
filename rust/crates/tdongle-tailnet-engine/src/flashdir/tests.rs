@@ -189,6 +189,31 @@ fn stage_both<const M: usize, const C: usize>(d: &mut FlashDirectory<MemFlash, M
     }
 }
 
+/// Background maintenance until there is none left (or the flash lost power).
+fn settle<const M: usize, const C: usize>(d: &mut FlashDirectory<MemFlash, M, C>) {
+    let mut n = 0;
+    while !d.flash().dead && d.maintain() {
+        n += 1;
+        assert!(n < 1_000_000, "maintenance never settles");
+    }
+}
+
+/// Commit and run maintenance until the map is applied: `Err` when it was refused, failed later, or power went first.
+fn commit_now<const M: usize, const C: usize>(d: &mut FlashDirectory<MemFlash, M, C>, m: usize, auth: bool) -> Result<(), DirError> {
+    let failed = d.stats().commits_failed;
+    d.commit(m, auth)?;
+    let mut n = 0;
+    while d.queued(m) > 0 {
+        if d.flash().dead {
+            return Err(DirError);
+        }
+        d.maintain();
+        n += 1;
+        assert!(n < 1_000_000, "a queued commit never applies");
+    }
+    if d.stats().commits_failed > failed { Err(DirError) } else { Ok(()) }
+}
+
 // ---- tests -----------------------------------------------------------------------------------------------------------------------------------------
 
 #[test]
@@ -224,7 +249,10 @@ fn the_ram_footprint_is_fixed_and_small() {
     let total = FlashDirectory::<Unit, 3, 8>::RAM_BYTES;
     let empty = FlashDirectory::<Unit, 3, 0>::RAM_BYTES;
     let per_entry = (total - empty) / 8;
-    std::println!("flash directory RAM: {total} B for 3 memberships and a cache of 8 ({empty} B without the cache, {per_entry} B a cached record; DirRecord is {} B)", core::mem::size_of::<DirRecord>());
+    std::println!(
+        "flash directory RAM: {total} B for 3 memberships and a cache of 8 ({empty} B without the cache, {per_entry} B a cached record; DirRecord is {} B)",
+        core::mem::size_of::<DirRecord>()
+    );
     assert!(total <= 3 * 1024, "{total} B");
     assert!(empty <= 512, "{empty} B");
 }
@@ -235,7 +263,7 @@ fn stage_commit_find_remove_patch() {
     d.stage(0, &add(2, "alpha.tail.ts.net")).unwrap();
     d.stage(0, &add(3, "beta.tail.ts.net")).unwrap();
     assert!(d.find_by_ip(0, ip_of(2)).is_none(), "not visible before commit");
-    d.commit(0, true).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
     assert_eq!(d.count(0), 2);
     assert!(d.find_by_key(0, &key_of(3)).is_some());
     assert!(d.find_by_ip(1, ip_of(2)).is_none(), "per membership");
@@ -243,17 +271,17 @@ fn stage_commit_find_remove_patch() {
     assert!(d.for_each_named(0, b"BETA", &mut |n, ip| named.push((n.to_string(), ip))));
     assert_eq!(named, vec![("beta.tail.ts.net".to_string(), ip_of(3))]);
     d.stage(0, &add(2, "alpha.tail.ts.net")).unwrap();
-    d.commit(0, true).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
     assert_eq!(d.count(0), 1, "an authoritative map that omits a peer removes it");
     assert!(d.find_by_ip(0, ip_of(3)).is_none());
     d.stage(0, &add(4, "gamma.tail.ts.net")).unwrap();
-    d.commit(0, false).unwrap();
+    commit_now(&mut d, 0, false).unwrap();
     assert_eq!(d.count(0), 2);
     d.stage(0, &remove(2)).unwrap();
-    d.commit(0, false).unwrap();
+    commit_now(&mut d, 0, false).unwrap();
     assert_eq!(d.count(0), 1);
     d.stage(0, &patch_of(4, 9, true)).unwrap();
-    d.commit(0, false).unwrap();
+    commit_now(&mut d, 0, false).unwrap();
     assert_eq!(d.find_by_ip(0, ip_of(4)).unwrap().derp_region, 9);
     assert_eq!(d.generation(0), 5);
     // an unchanged full map writes one slot: its commit
@@ -262,7 +290,7 @@ fn stage_commit_find_remove_patch() {
     same.home_derp = 9;
     same.online = Some(true);
     d.stage(0, &same).unwrap();
-    d.commit(0, true).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
     assert_eq!(d.slots_used(0), used + 1);
     assert_eq!(d.count(0), 1);
 }
@@ -273,9 +301,9 @@ fn a_directory_survives_a_restart_and_a_cleared_one_does_not() {
     for i in 1..=12 {
         d.stage(1, &add(i, "peer")).unwrap();
     }
-    d.commit(1, true).unwrap();
+    commit_now(&mut d, 1, true).unwrap();
     d.stage(1, &patch_of(5, 3, true)).unwrap();
-    d.commit(1, false).unwrap();
+    commit_now(&mut d, 1, false).unwrap();
     let generation = d.generation(1);
     let mut d = reboot(d);
     assert_eq!((d.count(1), d.generation(1)), (12, generation));
@@ -287,32 +315,63 @@ fn a_directory_survives_a_restart_and_a_cleared_one_does_not() {
     assert!(d.find_by_ip(1, ip_of(5)).is_none());
     // and it works again
     d.stage(1, &add(7, "again")).unwrap();
-    d.commit(1, true).unwrap();
+    commit_now(&mut d, 1, true).unwrap();
     assert_eq!(reboot(d).count(1), 1);
 }
 
-/// Random streams of maps into the directory and into the model, with aborts, background maintenance (so compactions run and switch areas) and reboots.
+/// Erases `f` made: at most `max`.
+fn erases_at_most<const M: usize, const C: usize, T>(
+    d: &mut FlashDirectory<MemFlash, M, C>,
+    max: usize,
+    what: &str,
+    f: impl FnOnce(&mut FlashDirectory<MemFlash, M, C>) -> T,
+) -> T {
+    let before = d.flash().erases;
+    let r = f(d);
+    let n = d.flash().erases - before;
+    assert!(n <= max, "{n} erases in one {what}");
+    r
+}
+
+/// Random streams of maps into the directory and into the model, on flash an earlier life left dirty, with aborts, bounded background maintenance (so
+/// commits queue, compactions run and switch areas) and reboots. While maps are queued, lookups answer from the last applied one; no single `stage`,
+/// `commit` or `maintain` erases more than one sector.
 #[test]
 fn it_agrees_with_a_hashmap_model_on_random_maps() {
+    use std::collections::VecDeque;
     let ids = 40;
     let mut rng = Rng(0x1234_5678_9abc_def1);
-    let mut d: D<2> = FlashDirectory::new(MemFlash::new(SMALL));
+    let mut f = MemFlash::new(SMALL);
+    f.d.iter_mut().enumerate().for_each(|(i, b)| *b = (i as u8).wrapping_mul(37));
+    let mut d: D<2> = FlashDirectory::new(f);
+    // applied: what lookups answer; queued: the model after each queued map, oldest first
     let mut model = [Model::default(), Model::default()];
-    let mut compactions = 0;
-    for round in 0..600 {
+    let mut queued: [VecDeque<Model>; 2] = [VecDeque::new(), VecDeque::new()];
+    let (mut compactions, mut deferred, mut max_queued, mut refused) = (0, 0, 0, 0);
+    let follow = |d: &D<2>, model: &mut [Model; 2], queued: &mut [VecDeque<Model>; 2]| {
+        for m in 0..2 {
+            while queued[m].len() > d.queued(m) {
+                model[m] = queued[m].pop_front().unwrap();
+            }
+            assert_eq!(queued[m].len(), d.queued(m));
+        }
+    };
+    for round in 0..800 {
         let m = rng.next(2) as usize;
         let auth = rng.next(4) == 0;
         let mut staged = Vec::new();
+        let stage = |d: &mut D<2>, staged: &mut Vec<_>, u: &PeerRecord| erases_at_most(d, 1, "stage", |d| stage_both(d, staged, m, u));
         for _ in 0..rng.next(14) {
             let u = random_update(&mut rng, ids);
-            stage_both(&mut d, &mut staged, m, &u);
+            stage(&mut d, &mut staged, &u);
         }
+        let base = queued[m].back().unwrap_or(&model[m]).clone();
         if auth {
             // a full map carries most of the peers
             for id in 1..=ids {
                 if rng.next(5) != 0 {
                     let mut u = add(id, &std::format!("h{id}-{}.tail.ts.net", rng.next(2)));
-                    if let Some(r) = model[m].recs.get(&if id <= KEYED { Canon::Id(id) } else { Canon::Key(key_of(id)) })
+                    if let Some(r) = base.recs.get(&if id <= KEYED { Canon::Id(id) } else { Canon::Key(key_of(id)) })
                         && rng.next(2) == 0
                     {
                         // unchanged
@@ -320,35 +379,57 @@ fn it_agrees_with_a_hashmap_model_on_random_maps() {
                         u.home_derp = r.derp_region;
                         u.online = r.has_online.then_some(r.online);
                     }
-                    stage_both(&mut d, &mut staged, m, &u);
+                    stage(&mut d, &mut staged, &u);
                 }
             }
         }
         if rng.next(12) == 0 {
             d.abort(m);
         } else {
-            d.commit(m, auth).unwrap();
-            model[m].commit(&staged, auth);
+            let full = d.queued(m) == QUEUED;
+            let before = d.stats().deferred_commits;
+            match erases_at_most(&mut d, 1, "commit", |d| d.commit(m, auth)) {
+                Ok(()) => {
+                    let mut next = base;
+                    next.commit(&staged, auth);
+                    queued[m].push_back(next);
+                    deferred += (d.stats().deferred_commits - before) as usize;
+                }
+                Err(_) => {
+                    assert!(full, "only a full queue refuses a commit, round {round}");
+                    refused += 1;
+                }
+            }
         }
-        for _ in 0..rng.next(30) {
-            d.maintain();
+        follow(&d, &mut model, &mut queued);
+        max_queued = max_queued.max(d.queued(m));
+        // sometimes the background falls behind, so maps queue (and the queue fills)
+        let steps = if rng.next(3) == 0 { 0 } else { rng.next(30) };
+        for _ in 0..steps {
+            erases_at_most(&mut d, 1, "maintain", |d| d.maintain());
         }
+        follow(&d, &mut model, &mut queued);
         if rng.next(25) == 0 {
             compactions += d.stats().compactions;
             d = reboot(d);
+            // queued maps are lost: the previous generation stays, the maps are fetched again
+            queued.iter_mut().for_each(VecDeque::clear);
         }
         if rng.next(150) == 0 {
-            d.clear(m);
+            erases_at_most(&mut d, 2, "clear", |d| d.clear(m));
             model[m].recs.clear();
+            queued[m].clear();
         }
-        if round % 10 == 0 || round > 590 {
+        if round % 10 == 0 || round > 790 {
             for (k, model) in model.iter().enumerate() {
-                check(&mut d, k, model, ids, &std::format!("round {round} member {k}"));
+                check(&mut d, k, model, ids, &std::format!("round {round} member {k}, {} queued", queued[k].len()));
             }
         }
     }
     let s = d.stats();
     assert!(compactions + s.compactions >= 10, "compactions ran: {compactions} + {s:?}");
+    std::println!("{deferred} commits deferred, at most {max_queued} queued, {refused} refused by a full queue; {s:?}");
+    assert!(deferred >= 5 && max_queued == QUEUED && refused >= 1, "maps queued: {deferred} deferred, at most {max_queued} at once");
     assert_eq!((s.compactions_failed, s.commits_failed, s.flash_errors), (0, 0, 0), "{s:?}");
 }
 
@@ -358,7 +439,7 @@ fn the_cache_keeps_the_hot_peers_and_never_evicts_the_pinned_ones() {
     for id in 1..=50 {
         d.stage(0, &add(id, "p")).unwrap();
     }
-    d.commit(0, true).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
     d.pin(0, &[key_of(7), key_of(9)]);
     assert_eq!(d.pinned(0), 2);
     let mut rng = Rng(77);
@@ -388,7 +469,7 @@ fn the_cache_keeps_the_hot_peers_and_never_evicts_the_pinned_ones() {
     // a commit refreshes a cached record and drops a removed one; the pins follow the key set
     d.stage(0, &patch_of(7, 11, true)).unwrap();
     d.stage(0, &remove(9)).unwrap();
-    d.commit(0, false).unwrap();
+    commit_now(&mut d, 0, false).unwrap();
     assert_eq!(d.find_by_key(0, &key_of(7)).unwrap().derp_region, 11);
     assert!(d.find_by_key(0, &key_of(9)).is_none());
     assert_eq!(d.pinned(0), 1);
@@ -417,7 +498,7 @@ fn a_thousand_peers_without_a_scan() {
         d.stage(0, &peer(id)).unwrap();
     }
     assert_eq!(d.overflow(0), (0, 0));
-    d.commit(0, true).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
     assert_eq!(d.count(0), n as usize);
     // every peer is found, by each key, in a handful of reads (the tables), with a cold cache
     let mut worst = 0;
@@ -449,17 +530,17 @@ fn a_thousand_peers_without_a_scan() {
     for id in 1..=n {
         d.stage(0, &peer(id)).unwrap();
     }
-    d.commit(0, true).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
     assert_eq!(d.slots_used(0), used + 1);
     d.stage(0, &patch_of(500, 7, true)).unwrap();
-    d.commit(0, false).unwrap();
+    commit_now(&mut d, 0, false).unwrap();
     assert_eq!(d.slots_used(0), used + 3);
     assert_eq!(d.find_by_ip(0, ip_of(500)).unwrap().derp_region, 7);
     // half of them leave; the background compacts, one bounded step at a time
     for id in (2..=n).step_by(2) {
         d.stage(0, &remove(id)).unwrap();
     }
-    d.commit(0, false).unwrap();
+    commit_now(&mut d, 0, false).unwrap();
     assert_eq!(d.count(0), 500);
     let mut steps = 0;
     while d.maintain() {
@@ -502,7 +583,7 @@ fn maintenance_erases_one_sector_a_step() {
     for id in 1..=20 {
         d.stage(0, &add(id, "x")).unwrap();
     }
-    d.commit(0, true).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
     assert_eq!(d.flash().erases, erases, "no erase inside stage or commit");
     assert_eq!(d.count(0), 20);
 }
@@ -518,7 +599,7 @@ fn power_loss_at_any_write_of_a_commit_keeps_the_previous_generation() {
     for id in 1..=16 {
         stage_both(&mut base, &mut staged, 0, &add(id, "old.tail.ts.net"));
     }
-    base.commit(0, true).unwrap();
+    commit_now(&mut base, 0, true).unwrap();
     model.commit(&staged, true);
     let image = base.into_flash().d;
     // the map that is cut: an authoritative one with changes, removals by omission and patches
@@ -541,7 +622,7 @@ fn power_loss_at_any_write_of_a_commit_keeps_the_previous_generation() {
             let mut st = Vec::new();
             map(&mut d, &mut st);
             d.flash().cut_after(cut, torn);
-            let ok = d.commit(0, true).is_ok();
+            let ok = commit_now(&mut d, 0, true).is_ok();
             torn_commits += usize::from(!ok);
             let mut next = model.clone();
             next.commit(&st, true);
@@ -555,7 +636,7 @@ fn power_loss_at_any_write_of_a_commit_keeps_the_previous_generation() {
             // the map is fetched again after the reboot
             let mut st = Vec::new();
             map(&mut d, &mut st);
-            d.commit(0, true).unwrap();
+            commit_now(&mut d, 0, true).unwrap();
             check(&mut d, 0, &next, ids, &std::format!("retry after cut {cut}, torn {torn}"));
             let mut d = reboot(d);
             check(&mut d, 0, &next, ids, &std::format!("reboot after retry, cut {cut}"));
@@ -579,7 +660,7 @@ fn power_loss_during_compaction_loses_nothing() {
         for _ in 0..8 {
             stage_both(&mut d, &mut staged, 0, &random_update(&mut rng, ids));
         }
-        d.commit(0, false).unwrap();
+        commit_now(&mut d, 0, false).unwrap();
         model.commit(&staged, false);
     }
     // the spare area is erased first (no cut there matters: it holds nothing)
@@ -606,7 +687,7 @@ fn power_loss_during_compaction_loses_nothing() {
         // and the directory goes on
         let mut staged = Vec::new();
         stage_both(&mut d, &mut staged, 0, &add(3, "after.tail.ts.net"));
-        d.commit(0, false).unwrap();
+        commit_now(&mut d, 0, false).unwrap();
         let mut after = model.clone();
         after.commit(&staged, false);
         while d.maintain() {}
@@ -645,4 +726,176 @@ fn a_flash_error_fails_the_map_and_nothing_else() {
     let mut d = reboot(d);
     check(&mut d, 0, &model, ids, "after reboot");
     assert!(d.stats().commits_failed == 0);
+}
+
+/// Power fails at every write while `maintain` finishes a commit that `commit` queued (over `image`, whose directory is `model`): after the reboot the
+/// directory is the previous generation or, when the map was applied before the power went, the new one; and the map applies when it is fetched again.
+fn power_loss_while_a_queued_commit_finishes(image: &[u8], model: &Model, map: &[PeerRecord], auth: bool, ids: u64, ctx: &str) -> usize {
+    let mut next = model.clone();
+    let mut cut = 0;
+    let mut erases = 0;
+    loop {
+        let mut f = MemFlash::new(0);
+        f.d = image.to_vec();
+        let mut d: D<2> = FlashDirectory::new(f);
+        d.mount();
+        let mut st = Vec::new();
+        for u in map {
+            stage_both(&mut d, &mut st, 0, u);
+        }
+        let before = d.flash().erases;
+        d.commit(0, auth).unwrap();
+        assert_eq!(d.flash().erases, before, "{ctx}: commit erases nothing");
+        assert_eq!(d.queued(0), 1, "{ctx}: the commit is deferred");
+        if cut == 0 {
+            next = model.clone();
+            next.commit(&st, auth);
+        }
+        // the previous generation serves while it is queued
+        check(&mut d, 0, model, ids, &std::format!("{ctx}: queued"));
+        d.flash().cut_after(cut, 7);
+        let mut applied = false;
+        let mut steps = 0;
+        while !d.flash().dead {
+            let e = d.flash().erases;
+            let more = d.maintain();
+            erases = erases.max(d.flash().erases - e);
+            if d.queued(0) == 0 && !d.flash().dead {
+                applied = true;
+                assert_eq!(d.stats().commits_failed, 0, "{ctx}: cut {cut}");
+            }
+            if !more {
+                break;
+            }
+            steps += 1;
+            assert!(steps < 100_000);
+        }
+        let dead = d.flash().dead;
+        let mut d = reboot(d);
+        check(&mut d, 0, if applied { &next } else { model }, ids, &std::format!("{ctx}: cut at write {cut}, applied {applied}"));
+        // fetched again
+        for u in map {
+            d.stage(0, u).unwrap();
+        }
+        commit_now(&mut d, 0, auth).unwrap();
+        check(&mut d, 0, &next, ids, &std::format!("{ctx}: again after cut {cut}"));
+        let mut d = reboot(d);
+        check(&mut d, 0, &next, ids, &std::format!("{ctx}: reboot after cut {cut}"));
+        if !dead {
+            break;
+        }
+        cut += 1;
+    }
+    assert!(erases <= 1, "{ctx}: {erases} erases in one maintenance step");
+    cut
+}
+
+/// A commit after a clear waits for the area to be erased: power loss at any write of that.
+#[test]
+fn power_loss_while_a_commit_queued_after_a_clear_finishes() {
+    let ids = 20;
+    let mut d: D<2> = FlashDirectory::new(MemFlash::new(SMALL));
+    for id in 1..=12 {
+        d.stage(0, &add(id, "old.tail.ts.net")).unwrap();
+    }
+    commit_now(&mut d, 0, true).unwrap();
+    d.clear(0);
+    // both areas are dirty now: the first commit waits for one to be erased
+    let image = d.into_flash().d;
+    let map: Vec<_> = (3..=ids).map(|id| add(id, "new.tail.ts.net")).collect();
+    let cuts = power_loss_while_a_queued_commit_finishes(&image, &Model::default(), &map, true, ids, "after a clear");
+    assert!(cuts > 10, "{cuts} writes");
+}
+
+/// A commit with no room left waits for a compaction: power loss at any write of the compaction and of the commit after it.
+#[test]
+fn power_loss_while_a_commit_queued_for_a_compaction_finishes() {
+    let ids = 30;
+    let mut d: D<2> = FlashDirectory::new(MemFlash::new(SMALL));
+    let mut model = Model::default();
+    let mut rng = Rng(4242);
+    let mut first = Vec::new();
+    for id in 1..=ids {
+        stage_both(&mut d, &mut first, 0, &add(id, "base.tail.ts.net"));
+    }
+    commit_now(&mut d, 0, true).unwrap();
+    model.commit(&first, true);
+    // churn without background maintenance until a commit has to wait for room
+    let (image, map) = loop {
+        let image = d.flash().d.clone();
+        let map: Vec<_> = (0..10).map(|_| random_update(&mut rng, ids)).collect();
+        let mut staged = Vec::new();
+        for u in &map {
+            stage_both(&mut d, &mut staged, 0, u);
+        }
+        d.commit(0, false).unwrap();
+        if d.queued(0) > 0 {
+            settle(&mut d);
+            assert!(d.stats().sync_compactions >= 1 && d.stats().compactions >= 1, "it waited for a compaction: {:?}", d.stats());
+            break (image, map);
+        }
+        model.commit(&staged, false);
+    };
+    let cuts = power_loss_while_a_queued_commit_finishes(&image, &model, &map, false, ids, "waiting for a compaction");
+    assert!(cuts > 20, "{cuts} writes");
+}
+
+/// The in-memory list of torn transactions overflows: nothing is forgotten, commits wait for a compaction, which leaves the torn ones behind.
+#[test]
+fn an_overflowing_aborted_list_blocks_commits_until_a_compaction() {
+    let mut s = Member::new();
+    s.txn = 10;
+    for t in 11..=11 + ABORTED as u32 {
+        s.abort(t);
+    }
+    assert!(s.abort_over && s.n_aborted as usize == ABORTED);
+    assert!((11..=11 + ABORTED as u32).all(|t| !s.committed(t)), "a torn transaction above the last commit stays invisible");
+    assert!(s.committed(10));
+    let g = Geometry::of(SMALL, 2).unwrap();
+    assert!(s.short(&g), "no commit raises `txn` over the forgotten one");
+}
+
+/// A mount over flash with more torn transactions than the aborted list holds: the committed state is the last commit before the overflow, and the
+/// directory goes on (the first commit compacts).
+#[test]
+fn a_mount_over_more_torn_transactions_than_it_can_list() {
+    let ids = 30;
+    let mut d: D<2> = FlashDirectory::new(MemFlash::new(SMALL));
+    let mut model = Model::default();
+    let mut staged = Vec::new();
+    for id in 1..=10 {
+        stage_both(&mut d, &mut staged, 0, &add(id, "base.tail.ts.net"));
+    }
+    commit_now(&mut d, 0, true).unwrap();
+    model.commit(&staged, true);
+    // craft what no live directory writes: ABORTED + 2 torn transactions, then a complete one after them
+    let g = d.geometry().unwrap();
+    let a = d.m[0].active.unwrap();
+    let mut end = d.m[0].end;
+    let mut txn = d.m[0].next_txn;
+    for i in 0..ABORTED as u64 + 2 {
+        let r = to_dir_record(&add(11 + i, "torn.tail.ts.net"));
+        d.append(&g, 0, a, &mut end, &seal(K_PUT, txn, &dirfmt::encode_record(&r))).unwrap();
+        txn += 1;
+    }
+    let r = to_dir_record(&add(25, "late.tail.ts.net"));
+    d.append(&g, 0, a, &mut end, &seal(K_PUT, txn, &dirfmt::encode_record(&r))).unwrap();
+    d.append(&g, 0, a, &mut end, &seal(K_COMMIT, txn, &words(&[d.m[0].generation + 1, 11]))).unwrap();
+    let mut d = reboot(d);
+    assert!(d.m[0].abort_over, "the list overflowed");
+    check(&mut d, 0, &model, ids, "frozen at the last commit before the overflow");
+    let mut d = reboot(d);
+    check(&mut d, 0, &model, ids, "frozen, again");
+    // a commit waits for the compaction that leaves the torn transactions behind
+    let mut staged = Vec::new();
+    stage_both(&mut d, &mut staged, 0, &add(3, "after.tail.ts.net"));
+    d.commit(0, false).unwrap();
+    assert_eq!(d.queued(0), 1, "the commit waits");
+    check(&mut d, 0, &model, ids, "while it waits");
+    settle(&mut d);
+    model.commit(&staged, false);
+    assert!(d.stats().compactions >= 1 && !d.m[0].abort_over, "{:?}", d.stats());
+    check(&mut d, 0, &model, ids, "after the compaction");
+    let mut d = reboot(d);
+    check(&mut d, 0, &model, ids, "after the compaction and a reboot");
 }
