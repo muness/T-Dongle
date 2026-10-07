@@ -321,11 +321,27 @@ fn relay_down(now: u64) {
 /// only the box is (a future moved into an `async fn` or held across a check stays in the state machine).
 #[inline(never)]
 pub fn admit_box<F: core::future::Future>(heap: &dyn tdongle_tailnet_admission::probe::HeapProbe, f: F) -> Option<core::pin::Pin<alloc::boxed::Box<F>>> {
-    if !tdongle_tailnet_admission::heap::hb_ok(heap.free(), core::mem::size_of::<F>() + 64) {
+    // the reserve check: the floor above the free heap, **and** one block big enough (free bytes in pieces do not make a handshake's state); then a box that reports
+    // failure rather than reaching the out-of-memory handler (the heap can change between the check and the allocation)
+    let need = core::mem::size_of::<F>() + 64;
+    if !reserve_ok(heap.free(), heap.largest_block(), need) {
         HANDSHAKE_NOMEM.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         return None;
     }
-    Some(alloc::boxed::Box::pin(f))
+    match crate::fallible::try_box_pin(f) {
+        Ok(b) => Some(b),
+        Err(_) => {
+            HANDSHAKE_NOMEM.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            None
+        }
+    }
+}
+
+/// The reserve check before a large allocation (a TLS handshake's state, a netmap workspace): after taking `need` bytes the free heap stays above the elastic floor, and the
+/// largest free block can serve them.
+#[must_use]
+pub const fn reserve_ok(free: usize, largest: usize, need: usize) -> bool {
+    tdongle_tailnet_admission::heap::hb_ok(free, need) && largest >= need
 }
 
 /// The relay's receive side: `[TLS records read, bytes of them, times the reader held a record back for want of host-queue room, milliseconds held in all (2 ms steps)]`.

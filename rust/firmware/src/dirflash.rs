@@ -23,8 +23,12 @@ static LAST_OP: AtomicU32 = AtomicU32::new(0);
 static LAST_RC: AtomicU32 = AtomicU32::new(0);
 static LAST_ADDR: AtomicU32 = AtomicU32::new(0);
 static UNLOCKED: AtomicU32 = AtomicU32::new(0);
+/// Erase, write and unlock calls made (each masks interrupts while the ROM runs it): the supervisor's USB liveness check excuses a pending interrupt in a tick in which
+/// this moved (`usb_watch::Sample::excused`).
+pub static MASKED_OPS: AtomicU32 = AtomicU32::new(0);
 
 fn note(op: u32, addr: u32, r: Result<(), i32>) -> bool {
+    MASKED_OPS.fetch_add(1, Ordering::Relaxed);
     match r {
         Ok(()) => {
             OKS.fetch_add(1, Ordering::Relaxed);

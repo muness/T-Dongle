@@ -633,6 +633,12 @@ impl Drop for BulkGuard<'_> {
     }
 }
 
+/// A fresh workspace on the heap, or `None` (a plain function, so the value is never part of the caller's future).
+#[inline(never)]
+fn box_bulk() -> Option<alloc::boxed::Box<Bulk>> {
+    crate::fallible::try_box_with(Bulk::new)
+}
+
 impl<'a> BulkLease for BulkSource<'a> {
     type Guard<'g>
         = BulkGuard<'a>
@@ -654,8 +660,17 @@ impl<'a> BulkLease for BulkSource<'a> {
         }
         // admitted and counted first (this waits for memory), and proven servable by the allocator with a block of exactly this size, which is freed again
         // just before the box takes its place: `Box::new` then does not reach the allocator's out-of-memory handler
-        let charge = self.mem.alloc_wait(Class::Negotiation, core::mem::size_of::<Bulk>()).await.into_charge();
-        let bulk = alloc::boxed::Box::new(Bulk::new());
+        // ... and boxed fallibly: an allocation from the interrupt executor (the console) or the radio between the proof and the box may take the block, and then
+        // this waits and tries again rather than reaching the out-of-memory handler
+        let (charge, bulk) = loop {
+            let charge = self.mem.alloc_wait(Class::Negotiation, core::mem::size_of::<Bulk>()).await.into_charge();
+            // the refused value (17 KB) is dropped here, never held across the wait below: it would become part of this future's state
+            if let Some(b) = box_bulk() {
+                break (charge, b);
+            }
+            drop(charge);
+            embassy_time::Timer::after_millis(200).await;
+        };
         NEG_HOLDERS.fetch_add(1, Ordering::Relaxed);
         let n = self.stats.holders.fetch_add(1, Ordering::Relaxed) + 1;
         self.stats.max_holders.fetch_max(n, Ordering::Relaxed);

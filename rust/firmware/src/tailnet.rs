@@ -1388,7 +1388,12 @@ pub async fn console(line: &str) -> Option<String> {
     }
     let _one = CON_CALL.lock().await;
     CON_RESP.reset();
-    CON_REQ.send(String::from(line)).await;
+    let mut req = String::new();
+    if req.try_reserve_exact(line.len()).is_err() {
+        return Some(String::new()); // the caller's low-memory reply
+    }
+    req.push_str(line);
+    CON_REQ.send(req).await;
     // the console must never wedge on the gateway: a worker that does not answer in 3 s is reported
     match with_timeout(Duration::from_secs(3), CON_RESP.wait()).await {
         Ok(r) => r,
@@ -1406,6 +1411,11 @@ async fn console_worker() -> ! {
     loop {
         let line = CON_REQ.receive().await;
         let mut out = String::new();
+        if out.try_reserve_exact(crate::CONSOLE_REPLY_BYTES).is_err() {
+            // no block for the reply: an empty one, which the console turns into its static low-memory line
+            CON_RESP.signal(Some(String::new()));
+            continue;
+        }
         let handled = match SHARED_REF.try_get() {
             Some(sh) => handle(sh, &line, &mut out),
             None => false,
