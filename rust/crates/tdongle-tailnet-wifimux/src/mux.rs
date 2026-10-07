@@ -81,6 +81,12 @@ impl<D: Driver, T: RxTap, const TXQ: usize, const RXQ: usize> WifiMux<D, T, TXQ,
         }
     }
 
+    /// Let the queues respect the heap's elastic floor: a packet is queued only if the free heap would still be at `ML_HB_FLOOR` afterwards (otherwise it is a
+    /// counted drop). Without a probe the queues take whatever the allocator gives.
+    pub fn set_heap(&self, heap: &'static dyn tdongle_tailnet_admission::probe::HeapProbe) {
+        self.shared.with(|c| c.set_heap(heap));
+    }
+
     /// Set the station's Ethernet address (what `new` reads from the driver).
     pub fn set_mac(&self, mac: [u8; 6]) {
         self.shared.with(|c| c.set_mac(mac));

@@ -2825,6 +2825,7 @@ dependencies = [
  "embassy-sync 0.8.0",
  "embassy-time",
  "proptest",
+ "tdongle-tailnet-admission",
  "tdongle-tailnet-types",
  "tdongle-tailnet-usbnet",
  "tdongle-tailnet-wifimux",

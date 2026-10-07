@@ -157,19 +157,29 @@ impl SetupHost for FwHost {
     }
 }
 
+/// The setup boot's tasks (the access point's stack runner, captive DNS, DHCP, two HTTP servers, the control check) run as boxed futures on this one small task. Their
+/// states are about 18 KB (DHCP 6.8, DNS 3.2, HTTP 5.2, the stack's socket table 4.5, ...): as `#[task]` statics every boot would carry them, tailnet mode's included
+/// (ADR 0002, "RAM fit"); boxed, only a setup boot has them, on the heap.
+#[embassy_executor::task(pool_size = 6)]
+async fn boxed(f: core::pin::Pin<Box<dyn core::future::Future<Output = ()>>>) {
+    f.await
+}
+
+fn spawn_boxed(spawner: embassy_executor::Spawner, f: impl core::future::Future<Output = ()> + 'static) {
+    spawner.spawn(boxed(Box::pin(f)).unwrap());
+}
+
 fn endpoint_v4(e: Option<IpEndpoint>) -> Option<u32> {
     match e?.addr {
         embassy_net::IpAddress::Ipv4(a) => Some(u32::from_be_bytes(a.octets())),
     }
 }
 
-#[embassy_executor::task]
 async fn net_task(mut runner: Runner<'static, Interface>) -> ! {
     runner.run().await
 }
 
 /// Captive DNS (`setup_dns_task`): every name is the dongle.
-#[embassy_executor::task]
 async fn dns_task(stack: Stack<'static>) -> ! {
     let mut rx_meta = [PacketMetadata::EMPTY; 4];
     let mut tx_meta = [PacketMetadata::EMPTY; 4];
@@ -193,7 +203,6 @@ async fn dns_task(stack: Stack<'static>) -> ! {
 }
 
 /// One HTTP connection at a time per task; the request reader, the router and the response writer are `tdongle-setup`.
-#[embassy_executor::task(pool_size = 2)]
 async fn http_task(stack: Stack<'static>, portal: &'static Portal) -> ! {
     let mut rx = Box::new([0u8; 1536]);
     let mut tx = Box::new([0u8; 2048]);
@@ -277,7 +286,6 @@ async fn send(socket: &mut TcpSocket<'_>, response: &Response<'_>) -> bool {
 }
 
 /// The control check (`gateway_display_tick`'s setup part and the failsafe): the session is over, or the access point never came up, or the page said Done.
-#[embassy_executor::task]
 async fn control_task(portal: &'static Portal) -> ! {
     loop {
         match with_timeout(Duration::from_millis(20), LEAVE.wait()).await {
@@ -322,7 +330,9 @@ pub async fn run(
         AP_NAME.borrow(cs).set(*portal.ap_name());
         PORTAL_REF.borrow(cs).set(Some(portal));
     });
-    spawner.spawn(control_task(portal).unwrap());
+    spawn_boxed(spawner, async move {
+        control_task(portal).await;
+    });
     if !random_ok {
         crate::init_note("setup token not generated; leaving setup");
         loop {
@@ -361,15 +371,23 @@ pub async fn run(
 
     let device = Interface::access_point();
     let ap_mac = device.mac_address();
-    static RESOURCES: StaticCell<StackResources<8>> = StaticCell::new();
+    let resources: &'static mut StackResources<8> = Box::leak(Box::new(StackResources::new()));
     let config = embassy_net::Config::ipv4_static(StaticConfigV4 { address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 4, 1), 24), gateway: None, dns_servers: Default::default() });
     let seed = u64::from(esp_hal::rng::Rng::new().random()) << 32 | u64::from(esp_hal::rng::Rng::new().random());
-    let (stack, runner) = embassy_net::new(device, config, RESOURCES.init(StackResources::new()), seed);
-    spawner.spawn(net_task(runner).unwrap());
-    spawner.spawn(dns_task(stack).unwrap());
-    spawner.spawn(crate::dhcp::task(stack, ap_mac).unwrap());
+    let (stack, runner) = embassy_net::new(device, config, resources, seed);
+    spawn_boxed(spawner, async move {
+        net_task(runner).await;
+    });
+    spawn_boxed(spawner, async move {
+        dns_task(stack).await;
+    });
+    spawn_boxed(spawner, async move {
+        crate::dhcp::task(stack, ap_mac).await;
+    });
     for _ in 0..2 {
-        spawner.spawn(http_task(stack, portal).unwrap());
+        spawn_boxed(spawner, async move {
+            http_task(stack, portal).await;
+        });
     }
     AP_UP.store(true, Ordering::Relaxed);
 

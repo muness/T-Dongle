@@ -14,7 +14,8 @@
 //!
 //! # Memory
 //!
-//! The runtime has no heap: its statics are in `.bss` ([`SHARED`], [`NET_BUFFERS`], [`NAPT`], [`MUX`], [`STACK_RES`] and the one task future of [`runtime_task`]).
+//! The runtime's big state is on the heap, and only when tailnet mode starts ([`SHARED_INIT`] copied from flash, the receive ring); the NAT, the mux, the stack's
+//! socket table and the tasks' futures are statics; the socket windows, TLS records and the control workspace come from the pool while they are used.
 //! `tn-mem` on the console prints the linker's view (`.data`, `.bss`, the stack) and the heap.
 
 use alloc::string::String;
@@ -36,6 +37,7 @@ use tdongle_bridge::{Env, RingSend};
 use tdongle_tailnet_engine::RamDirectory;
 use tdongle_tailnet_fw::{HeapProbe, MemberCounts, Platform, Storage, StorageError, TailnetApi, UsbFrames};
 use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, LinkGen, Windows};
+use tdongle_tailnet_admission::heap::{ML_HB_FLOOR, hb_ok};
 use tdongle_tailnet_sockmem::HeapSockMem;
 use tdongle_tailnet_runtime::shared::{Config as RtConfig, MAX_RUN, PlatformRng, SlotState};
 use tdongle_tailnet_runtime::wifi_mux::MuxWifi;
@@ -95,6 +97,39 @@ unsafe impl RawMutex for TaskLock {
         let _release = Release(&self.0);
         f()
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// The DRAM budget
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+/// What the image's DRAM is divided into, and the inequalities that must hold (each a build error, like the C's `_Static_assert`s on the heap budget).
+pub mod budget {
+    use super::{RxRing, Sh, TAILNET_HEAP_BYTES};
+    use tdongle_tailnet_admission::heap::{ML_HB_FLOOR, hb_ok};
+
+    /// All of dram2, given to the heap (the bridge image uses 64 KB of it).
+    pub const HEAP_RECLAIMED: usize = 73_728;
+    /// The data cache the build gives back (`ESP_HAL_CONFIG_DATA_CACHE_SIZE=32KB`: `0x3FCF0000..0x3FCF8000`); without that setting the section does not fit and the link fails.
+    pub const HEAP_DCACHE: usize = 32 * 1024;
+    /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
+    /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
+    pub const HEAP_REGULAR: usize = 120 * 1024;
+    /// Heap in all.
+    pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
+    /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
+    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 4 KB of margin. `tn-mem` on the board settles it.
+    pub const WIFI_AND_USB: usize = 52 * 1024;
+    /// The bridge's permanent ring slots (8 x 1,514 + header), allocated at boot.
+    pub const RING_BASE: usize = 8 * 1_536;
+
+    const _: () = assert!(
+        HEAP_TOTAL >= WIFI_AND_USB + RING_BASE + TAILNET_HEAP_BYTES + ML_HB_FLOOR,
+        "the heap cannot hold the Wi-Fi driver, the USB side, tailnet mode's own state and the elastic floor (ADR 0022)"
+    );
+    const _: () = assert!(core::mem::size_of::<Sh>() < HEAP_REGULAR, "the shared state is one block and only the regular region can hold it");
+    /// The heap's share of the total that is left for the tailnet's own steady use, for `tn-mem`.
+    pub const HEADROOM: usize = HEAP_TOTAL - (WIFI_AND_USB + RING_BASE + TAILNET_HEAP_BYTES + ML_HB_FLOOR);
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -254,30 +289,35 @@ impl Storage for FwStorage {
 // USB frames (the NCM data interface)
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-/// One Ethernet frame from the host.
-#[derive(Clone, Copy)]
-pub struct Frame {
-    len: u16,
-    data: [u8; crate::MTU],
-}
-
-static USB_RX: Channel<CriticalSectionRawMutex, Frame, USB_RX_FRAMES> = Channel::new();
+/// Frames from the host waiting for the runtime: each a heap block of its own length, taken above the elastic floor ("USB receive frames", ADR 0022). Full or
+/// short of heap, [`usb_rx`] waits, which leaves the OUT endpoint un-armed: the host's driver sees NAKs.
+static USB_RX: Channel<CriticalSectionRawMutex, alloc::vec::Vec<u8>, USB_RX_FRAMES> = Channel::new();
 static CARRIER: AtomicBool = AtomicBool::new(false);
 
 /// Called by the NCM receiver task for every datagram while tailnet mode owns the data path: hand it to the runtime, waiting (and so not re-arming the OUT
 /// endpoint: the host's driver sees NAKs) while the runtime cannot take it. `false`: the host left the data interface while we waited.
 pub async fn usb_rx(datagram: &[u8]) -> bool {
     let n = datagram.len().min(crate::MTU);
-    let mut f = Frame { len: n as u16, data: [0; crate::MTU] };
-    f.data[..n].copy_from_slice(&datagram[..n]);
     loop {
-        match with_timeout(Duration::from_millis(250), USB_RX.send(f)).await {
-            Ok(()) => return true,
-            Err(_) if ALT.load(Ordering::Relaxed) == 0 => return false,
-            Err(_) => {}
+        if ALT.load(Ordering::Relaxed) == 0 {
+            return false;
         }
+        let mut block: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        if hb_ok(FwHeap.free(), n + 16) && block.try_reserve_exact(n).is_ok() {
+            block.extend_from_slice(&datagram[..n]);
+            match USB_RX.try_send(block) {
+                Ok(()) => return true,
+                Err(embassy_sync::channel::TrySendError::Full(_)) => {}
+            }
+        } else {
+            USB_RX_WAITS.fetch_add(1, Ordering::Relaxed);
+        }
+        let _ = with_timeout(Duration::from_millis(20), core::future::poll_fn(|cx| USB_RX.poll_ready_to_send(cx))).await;
     }
 }
+
+/// Times a host frame had to wait for heap above the floor.
+pub static USB_RX_WAITS: AtomicU32 = AtomicU32::new(0);
 
 /// The runtime's USB side. Frames to the host go through the bridge's Wi-Fi to host ring (`usb_tx_task` drains it into NTBs), frames from it come from [`usb_rx`].
 #[derive(Debug)]
@@ -286,8 +326,8 @@ pub struct FwUsb;
 impl UsbFrames for FwUsb {
     async fn recv(&mut self, buf: &mut [u8]) -> usize {
         let f = USB_RX.receive().await;
-        let n = usize::from(f.len).min(buf.len());
-        buf[..n].copy_from_slice(&f.data[..n]);
+        let n = f.len().min(buf.len());
+        buf[..n].copy_from_slice(&f[..n]);
         n
     }
     fn send(&mut self, frame: &[u8]) -> bool {
@@ -322,20 +362,20 @@ pub static TX_REFUSED: AtomicU32 = AtomicU32::new(0);
 /// Frames handed to the stack.
 pub static RX_FRAMES: AtomicU32 = AtomicU32::new(0);
 
-struct RxSlot {
-    len: u16,
-    data: [u8; crate::MTU],
-}
+/// The radio's received frames waiting for the stack: each is a heap block of exactly its length (an ACK is 66 bytes, not 1,514), taken only above the elastic
+/// floor like every consumer of ADR 0022 (the C pins the driver's buffer in a pbuf under the same budget). The ring itself is ten words.
 struct RxRing {
-    slots: [RxSlot; RX_RING],
+    slots: [Option<alloc::vec::Vec<u8>>; RX_RING],
     head: usize,
     count: usize,
 }
-static RING: critical_section::Mutex<RefCell<RxRing>> = critical_section::Mutex::new(RefCell::new(RxRing {
-    slots: [const { RxSlot { len: 0, data: [0; crate::MTU] } }; RX_RING],
-    head: 0,
-    count: 0,
-}));
+impl RxRing {
+    const EMPTY: RxRing = RxRing { slots: [const { None }; RX_RING], head: 0, count: 0 };
+}
+/// The receive ring exists only in tailnet mode (`start` fills it before the callback is enabled).
+static RING: critical_section::Mutex<RefCell<Option<alloc::boxed::Box<RxRing>>>> = critical_section::Mutex::new(RefCell::new(None));
+/// Frames the callback refused because the free heap was at the elastic floor (or the allocator had no block).
+pub static RX_HEAP_REFUSED: AtomicU32 = AtomicU32::new(0);
 
 /// The radio's receive callback (Wi-Fi task): copy the frame and return. `true`: tailnet mode took it (the bridge must not see it).
 pub fn wifi_rx(frame: &[u8]) -> bool {
@@ -346,38 +386,50 @@ pub fn wifi_rx(frame: &[u8]) -> bool {
         RX_DROPPED.fetch_add(1, Ordering::Relaxed);
         return true;
     }
+    // admitted like an elastic consumer (the frame and its allocator header must leave the floor free), then copied into a block of its own length
+    let mut block: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    if !hb_ok(FwHeap.free(), frame.len() + 16) || block.try_reserve_exact(frame.len()).is_err() {
+        RX_HEAP_REFUSED.fetch_add(1, Ordering::Relaxed);
+        return true;
+    }
+    block.extend_from_slice(frame);
     let pushed = critical_section::with(|cs| {
-        let mut r = RING.borrow_ref_mut(cs);
+        let mut guard = RING.borrow_ref_mut(cs);
+        let Some(r) = guard.as_mut() else { return Err(block) };
         if r.count == RX_RING {
-            return false;
+            return Err(block);
         }
         let at = (r.head + r.count) % RX_RING;
-        r.slots[at].data[..frame.len()].copy_from_slice(frame);
-        r.slots[at].len = frame.len() as u16;
+        r.slots[at] = Some(block);
         r.count += 1;
-        true
+        Ok(())
     });
-    if pushed {
-        RX_WAKER.wake();
-    } else {
-        RX_DROPPED.fetch_add(1, Ordering::Relaxed);
+    match pushed {
+        Ok(()) => RX_WAKER.wake(),
+        Err(block) => {
+            // dropped outside the critical section (the free takes the allocator's lock)
+            drop(block);
+            RX_DROPPED.fetch_add(1, Ordering::Relaxed);
+        }
     }
     true
 }
 
 fn pop_rx(out: &mut [u8; crate::MTU]) -> Option<usize> {
-    critical_section::with(|cs| {
-        let mut r = RING.borrow_ref_mut(cs);
+    let block = critical_section::with(|cs| {
+        let mut guard = RING.borrow_ref_mut(cs);
+        let r = guard.as_mut()?;
         if r.count == 0 {
             return None;
         }
         let h = r.head;
-        let n = usize::from(r.slots[h].len);
-        out[..n].copy_from_slice(&r.slots[h].data[..n]);
         r.head = (h + 1) % RX_RING;
         r.count -= 1;
-        Some(n)
-    })
+        r.slots[h].take()
+    })?;
+    let n = block.len().min(out.len());
+    out[..n].copy_from_slice(&block[..n]);
+    Some(n)
 }
 
 /// The station as an Ethernet `embassy-net` driver. Receive does not need a TX credit (the S1 wedge of esp-radio's tokens): a reply the budget refuses is a
@@ -476,8 +528,10 @@ type Mux = WifiMux<L2Driver, Tap, MUX_TXQ, MUX_RXQ>;
 type MuxDrv = StackDriver<'static, L2Driver, Tap, MUX_TXQ, MUX_RXQ>;
 type Wifi = MuxWifi<'static, Stack<'static>, NAPT_FLOWS, MUX_TXQ, MUX_RXQ>;
 
-/// The runtime's shared state, built at compile time (every constructor under it is `const`): there is no 88 KB value on any stack, now or at start.
-static SHARED: Sh = Shared::new(RtConfig { firmware: FIRMWARE, ..RtConfig::tailscale() }, FwPlatform, FwStorage, Dir::new());
+/// The runtime's shared state, evaluated at compile time (every constructor under it is `const`), so there is no 88 KB value on any stack: `start` copies the
+/// constant from flash into a heap block, and only when tailnet mode actually starts (a bridge-mode boot of this image keeps the 88 KB for the ring).
+#[allow(clippy::declare_interior_mutable_const)]
+const SHARED_INIT: Sh = Shared::new(RtConfig { firmware: FIRMWARE, ..RtConfig::tailscale() }, FwPlatform, FwStorage, Dir::new());
 static NET: StaticCell<EmbassyNet> = StaticCell::new();
 static WIFI: StaticCell<Wifi> = StaticCell::new();
 static SOCKMEM: StaticCell<HeapSockMem> = StaticCell::new();
@@ -509,9 +563,26 @@ pub fn api() -> Option<&'static dyn TailnetApi> {
 
 /// Start tailnet mode: the embassy-net stack over the mux over the radio, the runtime, SNTP and the workers. Called by the init task once the radio is up (never
 /// from safe mode: the init task returns before that).
-pub fn start(spawner: Spawner) {
+pub fn start(spawner: Spawner) -> Result<(), StartError> {
     let platform = FwPlatform;
-    let sh: &'static Sh = &SHARED;
+    // Admission, as the C's `ml_admission` does for a membership: the heap must hold what tailnet mode keeps on it (the shared state, the receive ring, the
+    // pool's steady use) and still leave the elastic floor. Refusing here is an answer, a panic in an allocator would be a reboot loop.
+    let need = TAILNET_HEAP_BYTES;
+    let free = FwHeap.free();
+    if free < need + ML_HB_FLOOR {
+        START_REFUSED.store(((need + ML_HB_FLOOR - free) as u32).max(1), Ordering::Relaxed);
+        return Err(StartError::HeapShort { need: need + ML_HB_FLOOR, free });
+    }
+    // prove the allocator has the two big blocks (they are freed again at once): `Box::new` below then cannot reach the out-of-memory handler
+    for len in [core::mem::size_of::<Sh>(), core::mem::size_of::<RxRing>()] {
+        let mut probe: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        if probe.try_reserve_exact(len).is_err() {
+            START_REFUSED.store(1, Ordering::Relaxed);
+            return Err(StartError::NoBlock { len });
+        }
+    }
+    let sh: &'static Sh = alloc::boxed::Box::leak(alloc::boxed::Box::new(SHARED_INIT));
+    critical_section::with(|cs| *RING.borrow_ref_mut(cs) = Some(alloc::boxed::Box::new(RxRing::EMPTY)));
     let _ = SHARED_REF.init(sh);
 
     let mut rng = PlatformRng(&platform);
@@ -521,6 +592,7 @@ pub fn start(spawner: Spawner) {
     let mac = platform.sta_mac();
     critical_section::with(|cs| STA_MAC.borrow(cs).set(mac));
     mux.set_mac(mac);
+    mux.set_heap(&FwHeap); // the NAT queues take their frames from the heap above the elastic floor
     let (driver, port) = mux.split();
     let mut seed = [0u8; 8];
     platform.fill_random(&mut seed);
@@ -576,7 +648,37 @@ pub fn start(spawner: Spawner) {
     if let Ok(t) = lines_task() {
         spawner.spawn(t);
     }
+    Ok(())
 }
+
+/// Why tailnet mode did not start.
+#[derive(Clone, Copy, Debug)]
+pub enum StartError {
+    /// The free heap is below what tailnet mode keeps on it plus the elastic floor.
+    HeapShort {
+        /// Bytes needed (state, ring, pool steady use, floor).
+        need: usize,
+        /// Free heap at the time.
+        free: usize,
+    },
+    /// The allocator has no free block of `len` bytes.
+    NoBlock {
+        /// The block.
+        len: usize,
+    },
+}
+
+/// Non-zero: bytes tailnet mode was short of at its start (0: it started). Shown by `tn-mem`.
+pub static START_REFUSED: AtomicU32 = AtomicU32::new(0);
+
+/// What tailnet mode keeps on the heap once it runs, besides the Wi-Fi driver: the shared state, the receive ring, the pool's steady use (one membership's socket
+/// windows, the DNS forwarder's rings, a record in flight). The elastic floor comes on top ([`ML_HB_FLOOR`]), and the control workspace of a join is inside it.
+pub const TAILNET_HEAP_BYTES: usize =
+    core::mem::size_of::<Sh>() + core::mem::size_of::<RxRing>() + Windows::PER_MEMBER + Windows::GATEWAY.gateway() + 4_096 + ELASTIC_TYPICAL;
+
+/// What the elastic frames hold in ordinary use (a few radio frames waiting for the stack, a few host frames, the mux's NAT queues): a tuning figure; each consumer is
+/// refused at the floor, so the peak is bounded by the heap, not by this.
+pub const ELASTIC_TYPICAL: usize = 6 * 1024;
 
 #[embassy_executor::task]
 async fn net_task(mut runner: Runner<'static, MuxDrv>) -> ! {

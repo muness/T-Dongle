@@ -156,8 +156,9 @@ fn report_sizes() {
         M::<8, 16>::STATE_BYTES,
         base - per_tx - per_rx
     );
-    assert_eq!(per_tx, 1504);
-    assert_eq!(per_rx, 1504);
+    // the slots are `Option<Vec<u8>>` now (a packet is a heap block of its own length): the queue memory is what is queued, at most (TXQ + RXQ) x 1500 B
+    assert_eq!(per_tx, core::mem::size_of::<Option<Vec<u8>>>());
+    assert_eq!(per_rx, core::mem::size_of::<Option<Vec<u8>>>());
     assert_eq!(M::<8, 16>::QUEUE_BYTES, 24 * 1500);
 }
 

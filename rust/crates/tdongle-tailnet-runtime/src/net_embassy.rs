@@ -72,7 +72,7 @@ pub struct Windows {
 
 impl Windows {
     /// The sizes the firmware starts with.
-    pub const GATEWAY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 5760, derp_tx: 2048, udp_rx: 6400, udp_tx: 3200, dns: 2048 };
+    pub const GATEWAY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 5760, derp_tx: 2048, udp_rx: 6400, udp_tx: 3200, dns: 1536 };
     /// Bytes one membership's sockets hold (windows only: the packet metadata is static).
     pub const fn per_member(&self) -> usize {
         self.ctl_rx + self.ctl_tx + self.derp_rx + self.derp_tx + self.udp_rx + self.udp_tx

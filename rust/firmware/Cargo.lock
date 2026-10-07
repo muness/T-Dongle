@@ -2368,6 +2368,7 @@ dependencies = [
  "tdongle-serial",
  "tdongle-setup",
  "tdongle-spsc",
+ "tdongle-tailnet-admission",
  "tdongle-tailnet-engine",
  "tdongle-tailnet-fw",
  "tdongle-tailnet-members",
@@ -2686,6 +2687,7 @@ dependencies = [
  "embassy-net-driver",
  "embassy-sync 0.8.0",
  "embassy-time",
+ "tdongle-tailnet-admission",
  "tdongle-tailnet-types",
  "tdongle-tailnet-usbnet",
 ]

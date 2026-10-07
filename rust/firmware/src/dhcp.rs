@@ -8,7 +8,6 @@ use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::Stack;
 use embassy_time::{Instant, Timer};
 
-#[embassy_executor::task]
 pub async fn task(stack: Stack<'static>, ap_mac: [u8; 6]) -> ! {
     let mut rx_meta = [PacketMetadata::EMPTY; 4];
     let mut tx_meta = [PacketMetadata::EMPTY; 4];

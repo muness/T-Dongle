@@ -82,8 +82,16 @@ const EP_OUT_BYTES: usize = 64 + 64 + ncm::NTB_OUT_MAX;
 const WIFI_TX_QUEUE: usize = 6;
 const WIFI_RX_QUEUE: usize = 8;
 /// Heap: 64 KiB reclaimed (post-bootloader DRAM) + this regular region.
+#[cfg(not(feature = "tailnet"))]
 const HEAP_RECLAIMED: usize = 64 * 1024;
+#[cfg(not(feature = "tailnet"))]
 const HEAP_REGULAR: usize = 128 * 1024; // DRAM has ~210 KB free beyond .data/.bss: the ring (28 slots = 42 KB) and the TX budget's heap floor (29,884 B) both live in this heap
+/// The tailnet image's heap is three regions (see `tailnet::budget`): all of dram2 (`0x3FCDB700..0x3FCED710`, 73,744 bytes), the 32 KB of data cache the build gives
+/// back (`ESP_HAL_CONFIG_DATA_CACHE_SIZE=32KB`, the C's own setting), and what is left of DRAM after the statics and the 40 KB stack.
+#[cfg(feature = "tailnet")]
+const HEAP_RECLAIMED: usize = tailnet::budget::HEAP_RECLAIMED;
+#[cfg(feature = "tailnet")]
+const HEAP_REGULAR: usize = tailnet::budget::HEAP_REGULAR;
 
 type Drv = UsbDriver<'static>;
 type AcmWriter = acm::AcmWriter<'static, Drv>;
@@ -638,6 +646,8 @@ async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     tdongle_rescue::arm();
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: HEAP_RECLAIMED);
+    #[cfg(feature = "tailnet")]
+    esp_alloc::heap_allocator!(#[esp_hal::ram(unstable(dcache_reclaimed))] size: tailnet::budget::HEAP_DCACHE);
     esp_alloc::heap_allocator!(size: HEAP_REGULAR);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
@@ -842,9 +852,18 @@ async fn init_task(
         init_note("set_max_tx_power failed");
     }
     if tailnet_mode {
+        // the bridge's host to Wi-Fi worker is not used when tailnet mode runs: the runtime's USB task is the data path. If tailnet mode cannot start (the heap is
+        // short), this boot is a bridge boot, and `running=` in `status` says so.
         #[cfg(feature = "tailnet")]
-        tailnet::start(spawner);
-        drop(worker); // the bridge's host to Wi-Fi worker is not used: the runtime's USB task is the data path
+        if let Err(e) = tailnet::start(spawner) {
+            println!("tailnet gateway not started: {:?}", e);
+            init_note("tailnet not started: heap short");
+            spawner.spawn(worker_task(worker).unwrap());
+        } else {
+            drop(worker);
+        }
+        #[cfg(not(feature = "tailnet"))]
+        drop(worker);
     } else {
         spawner.spawn(worker_task(worker).unwrap());
     }

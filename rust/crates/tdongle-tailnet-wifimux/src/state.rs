@@ -145,6 +145,7 @@ pub(crate) struct Core<const TXQ: usize, const RXQ: usize> {
     neigh: Neighbors<NEIGHBORS>,
     tx: Ring<TXQ>,
     host: Ring<RXQ>,
+    heap: Option<&'static dyn tdongle_tailnet_admission::probe::HeapProbe>,
     pending_arp: Option<[u8; ARP_FRAME]>,
     pub(crate) stats: MuxStats,
     pub(crate) stack_waker: WakerRegistration,
@@ -194,12 +195,22 @@ impl<const TXQ: usize, const RXQ: usize> Core<TXQ, RXQ> {
             neigh: Neighbors::new(ArpConfig { mac, ip: 0, mask: 0 }),
             tx: Ring::new(),
             host: Ring::new(),
+            heap: None,
             pending_arp: None,
             stats: ZERO_STATS,
             stack_waker: WakerRegistration::new(),
             host_waker: WakerRegistration::new(),
             space_wakers: MultiWakerRegistration::new(),
         }
+    }
+
+    /// May the heap take a queued packet of `len` bytes (with its allocator header) and still leave the elastic floor? Always, when no probe was given.
+    fn room(&self, len: usize) -> bool {
+        self.heap.is_none_or(|h| tdongle_tailnet_admission::heap::hb_ok(h.free(), len + 16))
+    }
+
+    pub(crate) fn set_heap(&mut self, heap: &'static dyn tdongle_tailnet_admission::probe::HeapProbe) {
+        self.heap = Some(heap);
     }
 
     pub(crate) fn set_mac(&mut self, mac: Mac) {
@@ -342,7 +353,7 @@ impl<const TXQ: usize, const RXQ: usize> Core<TXQ, RXQ> {
 
     /// Queue a packet for the USB side; false (counted) when full.
     pub(crate) fn host_push(&mut self, pkt: &[u8]) -> bool {
-        if pkt.len() > L3_MAX || !self.host.push(pkt) {
+        if pkt.len() > L3_MAX || !self.host.push(pkt, self.room(pkt.len())) {
             self.count_rx_drop(RxDrop::HostQueueFull);
             return false;
         }
@@ -396,7 +407,8 @@ impl<const TXQ: usize, const RXQ: usize> Core<TXQ, RXQ> {
             }
             return Err(TxDrop::QueueFull);
         }
-        let _ = self.tx.push(&l3[..total]);
+        let room = self.room(total);
+        let _ = self.tx.push(&l3[..total], room);
         self.stats.tx_queued.bump();
         self.stack_waker.wake();
         Ok(())

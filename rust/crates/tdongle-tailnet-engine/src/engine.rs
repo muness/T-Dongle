@@ -65,8 +65,17 @@ pub const GATEWAY_M: usize = if cfg!(feature = "slots-1") {
     3
 };
 
-/// The firmware's configuration: [`GATEWAY_M`] (three by default) memberships, eight resident peers each, a twelve-slot WireGuard pool, 64 aliases, 64 flows, 24 arena blocks.
-pub type GatewayEngine<D> = Engine<D, GATEWAY_M, 8, 12, 64, 64, 24>;
+/// WireGuard pool slots of the firmware's engine: twelve, shared by the memberships (the C's pool); with one membership at most its eight resident peers can hold a
+/// slot, so the extra four could never be used and the `slots-1` build leaves them out (3.8 KB).
+pub const GATEWAY_K: usize = if GATEWAY_M == 1 { 8 } else { 12 };
+
+/// Arena blocks for packets parked until a peer's handshake completes: 24, or 16 with one membership (still more than the two full packets the C guarantees,
+/// ADR 0013; the rest of the C's pending packets are elastic heap).
+pub const GATEWAY_JB: usize = if GATEWAY_M == 1 { 16 } else { 24 };
+
+/// The firmware's configuration: [`GATEWAY_M`] (three by default) memberships, eight resident peers each, a [`GATEWAY_K`]-slot WireGuard pool, 64 aliases, 64 flows,
+/// [`GATEWAY_JB`] arena blocks.
+pub type GatewayEngine<D> = Engine<D, GATEWAY_M, 8, GATEWAY_K, 64, 64, GATEWAY_JB>;
 
 impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: usize, const F: usize, const JB: usize> Engine<D, M, P, K, A, F, JB> {
     /// Bytes of the engine (host size) without its directory; see also [`Self::per_member_bytes`].

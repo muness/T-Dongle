@@ -17,6 +17,7 @@ embassy-net = ["dep:embassy-net"]
 [dependencies]
 tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
 tdongle-tailnet-usbnet = { path = "../tdongle-tailnet-usbnet" }
+tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }
 embassy-net-driver = "0.2"
 embassy-sync = "0.8"
 embassy-time = "0.5"
