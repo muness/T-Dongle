@@ -6,10 +6,10 @@
 //! address) closes and rebinds it, because the address the control plane knows is the old one.
 
 use crate::net::{Net, NetV4, UdpConn, UdpRole};
+use crate::shared::SCRATCH;
 use crate::shared::{ALIVE_UDP, LinkView, Shared, ep_from_meta};
 use crate::taskutil::{Alive, wait_active, wait_changed, wait_link_change, wait_link_up};
 use embassy_futures::select::{Either3, select3};
-use crate::shared::SCRATCH;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_time::Timer;
 use tdongle_tailnet_disco::Ep;

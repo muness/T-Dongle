@@ -117,9 +117,25 @@ fn absent_commands_are_unknown_everywhere() {
 fn every_allowlisted_prefix_has_a_contract_entry() {
     // the allowlist's shapes, each must be covered by at least one `both` exemplar
     let both: Vec<String> = contract().into_iter().filter(|e| e.kind == "both").map(|e| e.exemplar).collect();
-    for shape in
-        ["status", "list", "scan", "tailnet-status", "help", "capabilities", "display", "reboot", "display-settings", "preference", "display ", "use ", "del ", "profile {", "mode ", "member ", "metadata {"]
-    {
+    for shape in [
+        "status",
+        "list",
+        "scan",
+        "tailnet-status",
+        "help",
+        "capabilities",
+        "display",
+        "reboot",
+        "display-settings",
+        "preference",
+        "display ",
+        "use ",
+        "del ",
+        "profile {",
+        "mode ",
+        "member ",
+        "metadata {",
+    ] {
         assert!(
             both.iter().any(|b| b == shape || (shape.ends_with([' ', '{']) && b.starts_with(shape))),
             "allowlisted `{shape}` has no `both` entry in the contract"

@@ -269,7 +269,15 @@ impl<'a> State {
             }
             other => {
                 other
-                    .process(transport, handshake, record_reader, tx_buf, key_schedule, config, crypto_provider)
+                    .process(
+                        transport,
+                        handshake,
+                        record_reader,
+                        tx_buf,
+                        key_schedule,
+                        config,
+                        crypto_provider,
+                    )
                     .await
             }
         }

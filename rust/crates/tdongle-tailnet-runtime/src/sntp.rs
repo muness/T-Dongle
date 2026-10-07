@@ -3,8 +3,8 @@
 //! there and not first on a board that cannot join.
 
 use core::sync::atomic::{AtomicU32, Ordering};
-use embassy_net::udp::UdpSocket;
 use embassy_net::Ipv4Address;
+use embassy_net::udp::UdpSocket;
 use embassy_time::{Duration, with_timeout};
 
 /// Seconds between the NTP epoch (1900) and the Unix epoch.

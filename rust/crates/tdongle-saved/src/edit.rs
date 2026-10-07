@@ -19,7 +19,16 @@ fn copy_trunc(dst: &mut [u8], src: &[u8]) {
 /// C `wifi_save_with`. `name` empty or `None` and `priority < 0` keep what the slot has (or the defaults for a new or replaced network); `slot >= 0` targets that
 /// slot (one past the end appends), `-1` finds the network by SSID. Returns the new list and metadata, or `None` where the C returns false.
 #[must_use]
-pub fn save_with(list: &SavedNetworks, meta: &MetaSet, ssid: &[u8], password: &[u8], name: Option<&[u8]>, priority: i32, remove: bool, slot: i32) -> Option<(SavedNetworks, MetaSet)> {
+pub fn save_with(
+    list: &SavedNetworks,
+    meta: &MetaSet,
+    ssid: &[u8],
+    password: &[u8],
+    name: Option<&[u8]>,
+    priority: i32,
+    remove: bool,
+    slot: i32,
+) -> Option<(SavedNetworks, MetaSet)> {
     let ssid = c_str(ssid);
     let name = name.map(c_str).filter(|n| !n.is_empty());
     let mut i = list.list().iter().position(|p| p.ssid_bytes() == ssid).unwrap_or(list.count);

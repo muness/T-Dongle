@@ -29,9 +29,9 @@ use tdongle_tailnet_admission::negotiation::{Grant, Phase, Prio};
 use tdongle_tailnet_derp::{Action, Event, Link, LinkEvent, MAX_FRAME, MAX_PACKET, MAX_SEND_FRAME, Sink, State, Target, Timing};
 use tdongle_tailnet_engine::{DerpNote, Input, PeerDirectory};
 use tdongle_tailnet_fw::{Platform, Storage};
+use tdongle_tailnet_pool::{Class, PoolBuf};
 use tdongle_tailnet_tls::lease::{LeasedTlsDerp, ReadError};
 use tdongle_tailnet_tls::transport::{ConnectError, TlsParams};
-use tdongle_tailnet_pool::{Class, PoolBuf};
 use tdongle_tailnet_tls::{DEFAULT_ANCHORS, WRITE_RECORD_BYTES};
 use tdongle_tailnet_types::{FixedStr, Key32};
 
@@ -78,15 +78,15 @@ pub const END_LINK: u32 = 5;
 impl DerpDiag {
     const fn new() -> DerpDiag {
         DerpDiag {
-    region: core::sync::atomic::AtomicU32::new(0),
-    port: core::sync::atomic::AtomicU32::new(0),
-    ip: core::sync::atomic::AtomicU32::new(0),
-    stage: core::sync::atomic::AtomicU32::new(0),
-    ready_at_ms: core::sync::atomic::AtomicU32::new(0),
-    end: core::sync::atomic::AtomicU32::new(0),
-    end_after_ms: core::sync::atomic::AtomicU32::new(0),
-    ends: [const { core::sync::atomic::AtomicU32::new(0) }; 6],
-    text: embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(([0; 64], [0; 64]))),
+            region: core::sync::atomic::AtomicU32::new(0),
+            port: core::sync::atomic::AtomicU32::new(0),
+            ip: core::sync::atomic::AtomicU32::new(0),
+            stage: core::sync::atomic::AtomicU32::new(0),
+            ready_at_ms: core::sync::atomic::AtomicU32::new(0),
+            end: core::sync::atomic::AtomicU32::new(0),
+            end_after_ms: core::sync::atomic::AtomicU32::new(0),
+            ends: [const { core::sync::atomic::AtomicU32::new(0) }; 6],
+            text: embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(([0; 64], [0; 64]))),
         }
     }
 }
@@ -128,7 +128,6 @@ impl core::fmt::Write for Cursor<'_> {
     }
 }
 
-
 /// Relay packets for peers homed on a region other than the one the member's link is on, waiting for the link to visit that region (see [`derp_extra`]): heap blocks (a packet is
 /// up to 1.5 KB), at most [`XQ_MAX`], admitted above the elastic floor like every other consumer.
 struct XPacket {
@@ -154,7 +153,8 @@ pub const X_EXPIRE_MS: u32 = 10_000;
 /// Visit timing in ms, `[idle, minimum, hold-off]`: the link leaves a region it visited after `idle` without a packet for it, never before `minimum` (control has to push the
 /// new home to the peer, and the peer's answers must find us), and starts no new visit for `hold-off` after leaving (the real home is advertised again, and settles). Tests
 /// shorten them.
-pub static VISIT_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomic::AtomicU32::new(30_000), core::sync::atomic::AtomicU32::new(15_000), core::sync::atomic::AtomicU32::new(10_000)];
+pub static VISIT_TIMING: [core::sync::atomic::AtomicU32; 3] =
+    [core::sync::atomic::AtomicU32::new(30_000), core::sync::atomic::AtomicU32::new(15_000), core::sync::atomic::AtomicU32::new(10_000)];
 /// The link starts a visit only when no packet for its own home region went out in this long: a visit takes the link away from the home region.
 pub const X_HOME_QUIET_MS: u32 = 10_000;
 /// A visit ends when packets for the home region (or another region) have waited this long: the visit is not worth starving them.
@@ -352,7 +352,8 @@ pub static RELAY_RX: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::a
 pub static HANDSHAKE_NOMEM: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// Relay window mode, `[window ms, frames per window that make it big, quiet windows that make it small again]`. Tests shorten them.
-pub static WIN_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomic::AtomicU32::new(2000), core::sync::atomic::AtomicU32::new(50), core::sync::atomic::AtomicU32::new(15)];
+pub static WIN_TIMING: [core::sync::atomic::AtomicU32; 3] =
+    [core::sync::atomic::AtomicU32::new(2000), core::sync::atomic::AtomicU32::new(50), core::sync::atomic::AtomicU32::new(15)];
 /// Switches to the big windows, switches back, falls back because the pool refused the big ones, whether the connection has them now, and windows in which big ones were wanted
 /// but the relay was busy (no lull).
 pub static WIN_STATS: [core::sync::atomic::AtomicU32; 6] = [const { core::sync::atomic::AtomicU32::new(0) }; 6];
@@ -435,7 +436,6 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
         true
     }
 }
-
 
 /// The member's relay link visits the region a peer is homed on when that is not the one the link is on. A relay server forwards only to clients connected to it, so a packet
 /// for a peer homed on region 27 is lost on a link to region 12; and a second link costs about 17 KB of heap (a 10 KB future, the TLS write record and the windows), which
@@ -941,15 +941,8 @@ where
 }
 
 /// The membership's relay for as long as it runs: one connect cycle after another, as the link decides.
-async fn relay<'p, R, P, S, D, T>(
-    sh: &Shared<R, P, S, D>,
-    idx: usize,
-    member: u32,
-    key: Key32,
-    tcp: &mut T,
-    stage: &RefCell<PoolBuf<'p>>,
-    wbuf: &mut [u8],
-) where
+async fn relay<'p, R, P, S, D, T>(sh: &Shared<R, P, S, D>, idx: usize, member: u32, key: Key32, tcp: &mut T, stage: &RefCell<PoolBuf<'p>>, wbuf: &mut [u8])
+where
     R: RawMutex,
     P: Platform,
     S: Storage,
@@ -1087,7 +1080,7 @@ where
             match drive(d, false, pin!(write)).await {
                 Some(Ok(())) => d.call(Event::TxDone),
                 Some(Err(e)) => {
-                    diag_end(d.dg(),sh.now(), END_WRITE, Some(&e));
+                    diag_end(d.dg(), sh.now(), END_WRITE, Some(&e));
                     DERP_RECONNECT[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                     d.call(Event::Reconnect);
                     return;
@@ -1096,7 +1089,7 @@ where
             }
         }
         if d.acts.close {
-            diag_end(d.dg(),sh.now(), END_LINK, None);
+            diag_end(d.dg(), sh.now(), END_LINK, None);
             return;
         }
         d.pump_egress();
@@ -1142,7 +1135,7 @@ where
                 match r {
                     Ok(_) => {}
                     Err(e) => {
-                        diag_end(d.dg(),sh.now(), if matches!(e, ReadError::Tls(_)) { END_TLS_READ } else { END_LEASE }, Some(&e));
+                        diag_end(d.dg(), sh.now(), if matches!(e, ReadError::Tls(_)) { END_TLS_READ } else { END_LEASE }, Some(&e));
                         DERP_RECONNECT[usize::from(matches!(e, ReadError::Tls(_)))].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                         d.call(Event::Reconnect);
                         return;
@@ -1150,7 +1143,7 @@ where
                 }
             }
             Either::First(Err(e)) => {
-                diag_end(d.dg(),sh.now(), END_WAIT, Some(&e));
+                diag_end(d.dg(), sh.now(), END_WAIT, Some(&e));
                 DERP_RECONNECT[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 d.call(Event::Reconnect);
                 return;

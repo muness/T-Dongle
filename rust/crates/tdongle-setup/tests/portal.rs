@@ -3,7 +3,7 @@
 mod common;
 use common::*;
 use tdongle_setup::boot::{Boot, SetupBoot};
-use tdongle_setup::http::{HttpError, Reader, Step, MAX_BODY, MAX_HEAD, MAX_URI, RECV_TIMEOUT_MS};
+use tdongle_setup::http::{HttpError, MAX_BODY, MAX_HEAD, MAX_URI, RECV_TIMEOUT_MS, Reader, Step};
 use tdongle_setup::page;
 use tdongle_setup::response::{ErrCode, Response};
 use tdongle_setup::router::Conn;
@@ -42,11 +42,24 @@ fn forbidden_bytes() {
 
 #[test]
 fn captive_redirect_bytes() {
-    for path in ["/generate_204", "/hotspot-detect.html", "/connecttest.txt", "/ncsi.txt", "/redirect", "/fwlink/", "/library/test/success.html", "/favicon.ico", "/canonical.html", "/success.txt", "/wifi-scan/", "/Command", "//"] {
+    for path in [
+        "/generate_204",
+        "/hotspot-detect.html",
+        "/connecttest.txt",
+        "/ncsi.txt",
+        "/redirect",
+        "/fwlink/",
+        "/library/test/success.html",
+        "/favicon.ico",
+        "/canonical.html",
+        "/success.txt",
+        "/wifi-scan/",
+        "/Command",
+        "//",
+    ] {
         let (r, _) = run(&get(path, "connectivitycheck.gstatic.com", ""));
         assert_eq!(
-            r,
-            "HTTP/1.1 302 Found\r\nContent-Type: text/html\r\nContent-Length: 0\r\nLocation: http://192.168.4.1/\r\nCache-Control: no-store\r\n\r\n",
+            r, "HTTP/1.1 302 Found\r\nContent-Type: text/html\r\nContent-Length: 0\r\nLocation: http://192.168.4.1/\r\nCache-Control: no-store\r\n\r\n",
             "{path}"
         );
     }
@@ -54,7 +67,12 @@ fn captive_redirect_bytes() {
 
 #[test]
 fn probes_for_the_known_os_checks_redirect_even_with_a_query_and_any_host() {
-    for (path, host) in [("/generate_204?x=1", "clients3.google.com"), ("/hotspot-detect.html", "captive.apple.com"), ("/connecttest.txt", "www.msftconnecttest.com"), ("/", "captive.apple.com")] {
+    for (path, host) in [
+        ("/generate_204?x=1", "clients3.google.com"),
+        ("/hotspot-detect.html", "captive.apple.com"),
+        ("/connecttest.txt", "www.msftconnecttest.com"),
+        ("/", "captive.apple.com"),
+    ] {
         let (r, _) = run(&get(path, host, ""));
         assert!(r.starts_with("HTTP/1.1 302 Found\r\n") && r.contains("Location: http://192.168.4.1/\r\n"), "{path} {host}: {r}");
     }
@@ -143,7 +161,10 @@ fn json_failure_bytes() {
     let mut h = FakeHost::new();
     let (r, _) = exchange(&p, &ap_conn(), &mut h, &post("/command", H, &tok_hdr(&p), "{\"action\":\"mode\"}"));
     let body = r#"{"ok":false,"error":"That is not available from the setup network"}"#;
-    assert_eq!(text(&r), format!("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\r\n{body}", body.len()));
+    assert_eq!(
+        text(&r),
+        format!("HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\n\r\n{body}", body.len())
+    );
 }
 
 #[test]
@@ -216,7 +237,9 @@ impl TestPortal {
 fn rule_host_must_be_the_canonical_name() {
     let p = portal();
     let mut h = FakeHost::new();
-    for host in ["captive.apple.com", "evil.example", "192.168.4.2", "192.168.4.1:8080", "192.168.4.1.evil.example", "192.168.77.1", "", "localhost", "192.168.4.1 "] {
+    for host in
+        ["captive.apple.com", "evil.example", "192.168.4.2", "192.168.4.1:8080", "192.168.4.1.evil.example", "192.168.77.1", "", "localhost", "192.168.4.1 "]
+    {
         for path in ["/wifi-scan", "/wifi-saved"] {
             let (r, _) = exchange(&p, &ap_conn(), &mut h, &get(path, host, &tok_hdr(&p)));
             let r = text(&r);
@@ -408,7 +431,11 @@ fn usb_origin_validates_name_and_priority() {
     let p = portal();
     let usb = Conn { peer: Some(USB_PEER), local: Some(USB_LOCAL) };
     let mut h = FakeHost::new();
-    for body in [r#"{"action":"wifi","ssid":"a","password":"","name":"bad\u0001"}"#, r#"{"action":"wifi","ssid":"a","password":"","priority":101}"#, r#"{"action":"wifi","ssid":"a","password":"","priority":-1}"#] {
+    for body in [
+        r#"{"action":"wifi","ssid":"a","password":"","name":"bad\u0001"}"#,
+        r#"{"action":"wifi","ssid":"a","password":"","priority":101}"#,
+        r#"{"action":"wifi","ssid":"a","password":"","priority":-1}"#,
+    ] {
         let (r, _) = exchange(&p, &usb, &mut h, &post("/command", "192.168.77.1", "", body));
         assert!(text(&r).contains("Use a name of up to 24 plain characters"), "{body}");
     }
@@ -488,10 +515,24 @@ fn rule_cross_origin_is_refused_and_no_cors_header_exists() {
 fn preflight_and_other_methods_are_405_and_close() {
     let p = portal();
     let mut h = FakeHost::new();
-    for (method, path) in [("OPTIONS", "/command"), ("GET", "/command"), ("POST", "/wifi-scan"), ("POST", "/"), ("HEAD", "/"), ("PUT", "/wifi-saved"), ("DELETE", "/command"), ("PATCH", "/"), ("TRACE", "/")] {
+    for (method, path) in [
+        ("OPTIONS", "/command"),
+        ("GET", "/command"),
+        ("POST", "/wifi-scan"),
+        ("POST", "/"),
+        ("HEAD", "/"),
+        ("PUT", "/wifi-saved"),
+        ("DELETE", "/command"),
+        ("PATCH", "/"),
+        ("TRACE", "/"),
+    ] {
         let raw = format!("{method} {path} HTTP/1.1\r\nHost: {H}\r\nOrigin: http://evil.example\r\nAccess-Control-Request-Method: POST\r\n\r\n");
         let (r, close) = exchange(&p, &ap_conn(), &mut h, raw.as_bytes());
-        assert_eq!(text(&r), "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/html\r\nContent-Length: 45\r\n\r\nSpecified method is invalid for this resource", "{method} {path}");
+        assert_eq!(
+            text(&r),
+            "HTTP/1.1 405 Method Not Allowed\r\nContent-Type: text/html\r\nContent-Length: 45\r\n\r\nSpecified method is invalid for this resource",
+            "{method} {path}"
+        );
         assert!(close);
     }
     // an unknown method token is a 400
@@ -561,12 +602,26 @@ fn rule_request_size_limits() {
     let (r, _) = exchange(&p, &ap_conn(), &mut h, b"GET / HTTP/1.0\r\n\r\n");
     assert!(text(&r).starts_with("HTTP/1.1 302"), "HTTP/1.0 without Host is parsed, then judged by the rules");
     // malformed
-    for bad in [&b"GET /\r\n\r\n"[..], b"GET  / HTTP/1.1\r\n\r\n", b"GET / HTTP/1.1\r\nBad Header: x\r\n\r\n", b"GET / HTTP/1.1\r\n folded\r\n\r\n", b"GET / HTTP/1.1\r\nNoColon\r\n\r\n", b"GET\x00/ HTTP/1.1\r\n\r\n", b"get / HTTP/1.1\r\n\r\n"] {
+    for bad in [
+        &b"GET /\r\n\r\n"[..],
+        b"GET  / HTTP/1.1\r\n\r\n",
+        b"GET / HTTP/1.1\r\nBad Header: x\r\n\r\n",
+        b"GET / HTTP/1.1\r\n folded\r\n\r\n",
+        b"GET / HTTP/1.1\r\nNoColon\r\n\r\n",
+        b"GET\x00/ HTTP/1.1\r\n\r\n",
+        b"get / HTTP/1.1\r\n\r\n",
+    ] {
         let (r, close) = exchange(&p, &ap_conn(), &mut h, bad);
         assert!(text(&r).starts_with("HTTP/1.1 400 Bad Request") && close, "{:?}", text(bad));
     }
     // duplicate or bad Content-Length, upgrade
-    for bad in ["Content-Length: 1\r\nContent-Length: 1\r\n", "Content-Length: abc\r\n", "Content-Length: -1\r\n", "Content-Length: 99999999999999999999999\r\n", "Connection: Upgrade\r\nUpgrade: websocket\r\n"] {
+    for bad in [
+        "Content-Length: 1\r\nContent-Length: 1\r\n",
+        "Content-Length: abc\r\n",
+        "Content-Length: -1\r\n",
+        "Content-Length: 99999999999999999999999\r\n",
+        "Connection: Upgrade\r\nUpgrade: websocket\r\n",
+    ] {
         let (r, _) = exchange(&p, &ap_conn(), &mut h, &get("/", H, bad));
         assert!(text(&r).starts_with("HTTP/1.1 400"), "{bad:?}");
     }

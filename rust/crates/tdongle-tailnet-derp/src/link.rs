@@ -360,7 +360,6 @@ impl Stats {
     }
 }
 
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum TxOut {
     None,

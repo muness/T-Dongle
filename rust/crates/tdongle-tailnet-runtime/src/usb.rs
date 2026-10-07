@@ -401,7 +401,9 @@ where
         }
         if let Some(n) = dispatch {
             sh.with_scratch(|s| {
-                if let UsbAction::Reply(len) | UsbAction::Echo(len) | UsbAction::Icmp(len) = host_frame(sh, &mut un, wifi, sh.now(), &mut rx[..n], &mut s[REPLY]) {
+                if let UsbAction::Reply(len) | UsbAction::Echo(len) | UsbAction::Icmp(len) =
+                    host_frame(sh, &mut un, wifi, sh.now(), &mut rx[..n], &mut s[REPLY])
+                {
                     send_frame(sh, usb, &s[REPLY][..len]);
                 }
             });

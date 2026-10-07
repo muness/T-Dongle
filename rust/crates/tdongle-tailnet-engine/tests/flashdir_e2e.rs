@@ -154,8 +154,15 @@ fn a_map_of_300_peers_applies_end_to_end_on_the_flash_directory() {
 fn boot_restores_only_the_same_membership_directory_before_any_map() {
     let cfg = |id: u32, who: u8| {
         let me = keys(who);
-        MemberConfig { id, node_private: me.node_priv, disco_private: me.disco_priv,
-            label: FixedStr::new(), priority_peer_ip: 0, persistent_keepalive_s: 0, enabled: true }
+        MemberConfig {
+            id,
+            node_private: me.node_priv,
+            disco_private: me.disco_priv,
+            label: FixedStr::new(),
+            priority_peer_ip: 0,
+            persistent_keepalive_s: 0,
+            enabled: true,
+        }
     };
     let mut first = FSolo::with_dir(41, FlashDirectory::new(MemFlash::new(PEERSTORE_BYTES)));
     first.input(Input::MemberAdded(&cfg(1, 1)));

@@ -1,10 +1,10 @@
 #![allow(dead_code)]
+use tdongle_setup::boot::SetupBoot;
 use tdongle_setup::host::SetupHost;
 use tdongle_setup::http::{Reader, Step};
+use tdongle_setup::response::Response;
 use tdongle_setup::router::{BodyIn, Conn, Portal};
 use tdongle_setup::scan::ScanList;
-use tdongle_setup::boot::SetupBoot;
-use tdongle_setup::response::Response;
 
 pub fn unhex(s: &str) -> Vec<u8> {
     if s == "-" || s == "~" {
@@ -55,23 +55,48 @@ impl FakeHost {
 }
 
 impl SetupHost for FakeHost {
-    fn wifi_ready(&self) -> bool { self.ready }
-    fn recovery(&self) -> bool { self.recovery }
-    fn lock_settings(&mut self, _w: u32) -> bool { self.locked = self.lock_ok; self.lock_ok }
-    fn unlock_settings(&mut self) { self.locked = false; }
-    fn scan_kick(&mut self, again: bool) { self.kicks.push(again); }
+    fn wifi_ready(&self) -> bool {
+        self.ready
+    }
+    fn recovery(&self) -> bool {
+        self.recovery
+    }
+    fn lock_settings(&mut self, _w: u32) -> bool {
+        self.locked = self.lock_ok;
+        self.lock_ok
+    }
+    fn unlock_settings(&mut self) {
+        self.locked = false;
+    }
+    fn scan_kick(&mut self, again: bool) {
+        self.kicks.push(again);
+    }
     fn scan_result(&mut self, out: &mut ScanList) -> bool {
-        if let Some(s) = &self.scan { *out = *s; }
+        if let Some(s) = &self.scan {
+            *out = *s;
+        }
         self.busy
     }
-    fn saved_count(&self) -> usize { self.saved.len() }
-    fn saved_ssid(&self, i: usize) -> &[u8] { &self.saved[i].0 }
-    fn saved_name(&self, i: usize) -> &[u8] { &self.saved[i].1 }
-    fn saved_priority(&self, i: usize) -> u8 { self.saved[i].2 }
-    fn saved_preferred(&self) -> Option<usize> { self.preferred }
+    fn saved_count(&self) -> usize {
+        self.saved.len()
+    }
+    fn saved_ssid(&self, i: usize) -> &[u8] {
+        &self.saved[i].0
+    }
+    fn saved_name(&self, i: usize) -> &[u8] {
+        &self.saved[i].1
+    }
+    fn saved_priority(&self, i: usize) -> u8 {
+        self.saved[i].2
+    }
+    fn saved_preferred(&self) -> Option<usize> {
+        self.preferred
+    }
     fn save_wifi(&mut self, ssid: &[u8], password: &[u8], name: Option<&[u8]>, priority: i32, slot: i32) -> bool {
         self.saves.push((ssid.to_vec(), password.to_vec(), name.map(<[u8]>::to_vec), priority, slot));
-        if self.save_ok { self.saved.push((ssid.to_vec(), ssid.to_vec(), 50)); }
+        if self.save_ok {
+            self.saved.push((ssid.to_vec(), ssid.to_vec(), 50));
+        }
         self.save_ok
     }
     fn remove_wifi(&mut self, ssid: &[u8]) -> bool {
@@ -80,7 +105,10 @@ impl SetupHost for FakeHost {
         self.saved.retain(|s| s.0 != ssid);
         self.saved.len() != before
     }
-    fn request_leave(&mut self) -> bool { self.leave_requests += 1; self.leave_ok }
+    fn request_leave(&mut self) -> bool {
+        self.leave_requests += 1;
+        self.leave_ok
+    }
 }
 
 pub fn portal() -> Portal {

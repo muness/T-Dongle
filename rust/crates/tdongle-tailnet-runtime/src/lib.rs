@@ -125,18 +125,18 @@ pub mod fallible;
 pub mod identity;
 pub mod members;
 pub mod net;
-pub mod optag;
-pub mod resolver;
 #[cfg(feature = "embassy-net")]
 pub mod net_embassy;
-#[cfg(feature = "embassy-net")]
-pub mod sntp;
+pub mod optag;
 #[cfg(feature = "size-probe")]
 pub mod probe;
 pub mod queue;
+pub mod resolver;
 pub mod runner;
 pub mod shared;
 pub mod sizes;
+#[cfg(feature = "embassy-net")]
+pub mod sntp;
 pub mod tasks;
 pub mod taskutil;
 #[cfg(test)]

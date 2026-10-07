@@ -718,7 +718,8 @@ fn host_dns_through_nat_and_the_devices_own_lookups_do_not_take_each_others_repl
         let got = got.clone();
         lan.tasks.push(Box::pin(async move {
             for _ in 0..8 {
-                let r = embassy_time::with_timeout(embassy_time::Duration::from_secs(5), stack.dns_query("pool.ntp.org", embassy_net::dns::DnsQueryType::A)).await;
+                let r =
+                    embassy_time::with_timeout(embassy_time::Duration::from_secs(5), stack.dns_query("pool.ntp.org", embassy_net::dns::DnsQueryType::A)).await;
                 got.borrow_mut().push(r.ok().and_then(Result::ok).and_then(|v| v.first().copied()));
             }
         }));

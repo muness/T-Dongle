@@ -4,7 +4,9 @@
 
 use tdongle_setup::json::Json;
 use tdongle_setup::router::Conn;
-use tdongle_setup::usb::{self, Answer, LineKind, Outcome, Plan, Text, WifiPlan, command_plan, line_outcome, parse_head, route, text, write_command_body, write_wifi_scan};
+use tdongle_setup::usb::{
+    self, Answer, LineKind, Outcome, Plan, Text, WifiPlan, command_plan, line_outcome, parse_head, route, text, write_command_body, write_wifi_scan,
+};
 
 const USB: Conn = Conn { peer: Some(0xc0a8_4d02), local: Some(0xc0a8_4d01) };
 const AP: Conn = Conn { peer: Some(0xc0a8_0402), local: Some(0xc0a8_0401) };
@@ -174,7 +176,10 @@ fn wifi_scan_body_has_the_c_shape() {
     let mut buf = [0u8; 256];
     let mut j = Json::new(&mut buf);
     write_wifi_scan(&mut j, [(&b"Q\"uote"[..], -70, true)].into_iter());
-    assert_eq!(std::str::from_utf8(j.bytes()).unwrap(), "{\"networks\":[{\"ssid\":\"Q\\\"uote\",\"rssi\":-70,\"secure\":true}],\"ok\":true,\"count\":1,\"truncated\":false}");
+    assert_eq!(
+        std::str::from_utf8(j.bytes()).unwrap(),
+        "{\"networks\":[{\"ssid\":\"Q\\\"uote\",\"rssi\":-70,\"secure\":true}],\"ok\":true,\"count\":1,\"truncated\":false}"
+    );
     let mut buf = [0u8; 256];
     let mut j = Json::new(&mut buf);
     write_wifi_scan(&mut j, core::iter::empty());

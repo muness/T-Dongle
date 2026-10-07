@@ -23,7 +23,6 @@ use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use tdongle_tailnet_control::requests::AUTH_URL_BYTES;
 use tdongle_tailnet_ctl::{Bulk, BulkLease, SessionBuf, SessionStats};
-use tdongle_tailnet_pool::{Charge, Class, Mem, Pool};
 use tdongle_tailnet_derp::link::{State as LinkState, Stats as LinkStats};
 use tdongle_tailnet_disco::Ep;
 use tdongle_tailnet_engine::{GatewayEngine, Handled, Input, NetmapEvent, Out, Output, PeerDirectory};
@@ -31,6 +30,7 @@ use tdongle_tailnet_fw::{Platform, Storage};
 use tdongle_tailnet_map::DerpCert as MapCert;
 use tdongle_tailnet_map::types::DerpMap;
 use tdongle_tailnet_members::{CText, MemberRegistry};
+use tdongle_tailnet_pool::{Charge, Class, Mem, Pool};
 use tdongle_tailnet_tls::DerpCert;
 use tdongle_tailnet_tls::lease::LeasePool;
 use tdongle_tailnet_types::{Entropy, FixedStr, Key32, Millis};
@@ -258,7 +258,18 @@ impl SlotStatus {
             key_expired: false,
             last_error: FixedStr::new(),
             last_end: crate::util::Buf::new(),
-            map: MapSummary { maps: 0, authoritative: false, peers_add: 0, peers_removed: 0, peers_patch: 0, derp_regions: 0, dns: 0, dir_peers: 0, dir_overflow: 0, stage_dropped: 0 },
+            map: MapSummary {
+                maps: 0,
+                authoritative: false,
+                peers_add: 0,
+                peers_removed: 0,
+                peers_patch: 0,
+                derp_regions: 0,
+                dns: 0,
+                dir_peers: 0,
+                dir_overflow: 0,
+                stage_dropped: 0,
+            },
             derp_state: LinkState::Idle,
             derp: LinkStats::new(),
             tls_untrusted: 0,

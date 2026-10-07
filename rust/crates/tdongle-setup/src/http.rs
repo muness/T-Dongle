@@ -466,10 +466,13 @@ impl Reader {
             while used < data.len() && self.parsed.is_none() {
                 if self.head_len == HEAD_CAP {
                     // 1025 bytes without an end of head: report what the stream did first.
-                    return (used, Step::Reject(match parse_head(&self.head[..self.head_len]) {
-                        Parse::Err(e) => e,
-                        _ => HttpError::HeadTooLarge,
-                    }));
+                    return (
+                        used,
+                        Step::Reject(match parse_head(&self.head[..self.head_len]) {
+                            Parse::Err(e) => e,
+                            _ => HttpError::HeadTooLarge,
+                        }),
+                    );
                 }
                 self.head[self.head_len] = data[used];
                 self.head_len += 1;

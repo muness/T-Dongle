@@ -125,17 +125,8 @@ pub const IDENTITY_COMMAND_FORMS: &[&str] = &[
 pub const EXTENSIONS: &str = "capabilities, preference, metadata JSON, display-settings, display, pm, boot-status, retry-startup, help";
 
 /// [`EXTENSIONS`] as a list (a test keeps the two equal and every entry parsing).
-pub const FIRMWARE_EXTENSIONS: &[&str] = &[
-    "capabilities",
-    "preference",
-    "metadata JSON",
-    "display-settings",
-    "display",
-    "pm",
-    "boot-status",
-    "retry-startup",
-    "help",
-];
+pub const FIRMWARE_EXTENSIONS: &[&str] =
+    &["capabilities", "preference", "metadata JSON", "display-settings", "display", "pm", "boot-status", "retry-startup", "help"];
 
 /// `help` of the Rust firmware: the product line of the unified C (`T-Dongle Wi-Fi bridge protocol=1` or `T-Dongle tailnet gateway
 /// protocol=1`), then [`IDENTITY_COMMANDS`], [`EXTENSIONS`], `more` (the image's own further commands, `, `-separated, each with its leading

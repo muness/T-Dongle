@@ -92,7 +92,10 @@ impl MetadataEdit {
             return None;
         }
         let current = &meta.slot[self.slot];
-        if current.name_bytes() != self.expected_name() || list.profiles[self.slot].ssid_bytes() != self.expected_ssid() || current.priority != self.expected_priority {
+        if current.name_bytes() != self.expected_name()
+            || list.profiles[self.slot].ssid_bytes() != self.expected_ssid()
+            || current.priority != self.expected_priority
+        {
             return None;
         }
         let mut m = *meta;

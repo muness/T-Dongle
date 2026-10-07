@@ -542,7 +542,6 @@ impl Counters {
     }
 }
 
-
 /// The connection.
 #[derive(Clone, Debug)]
 pub struct Session {

@@ -60,8 +60,13 @@ impl<'a> RecordReader<'a> {
     pub async fn wait_header(&mut self, transport: &mut impl AsyncRead) -> Result<(), TlsError> {
         if self.header.is_none() {
             while self.header_read < RecordHeader::LEN {
-                let n = transport.read(&mut self.header_bytes[self.header_read..]).await.map_err(|e| TlsError::Io(e.kind()))?;
-                if n == 0 { return Err(TlsError::IoError); }
+                let n = transport
+                    .read(&mut self.header_bytes[self.header_read..])
+                    .await
+                    .map_err(|e| TlsError::Io(e.kind()))?;
+                if n == 0 {
+                    return Err(TlsError::IoError);
+                }
                 self.header_read += n;
             }
             let h = RecordHeader::decode(self.header_bytes)?;
@@ -91,10 +96,27 @@ impl<'a> RecordReader<'a> {
         key_schedule: &mut ReadKeySchedule<CipherSuite>,
     ) -> Result<ServerRecord<'m, CipherSuite>, TlsError> {
         self.wait_header(transport).await?;
-        let amount = self.header.as_ref().ok_or(TlsError::InternalError)?.content_length();
-        advance(lease, &mut self.decoded, &mut self.pending, transport, amount).await?;
+        let amount = self
+            .header
+            .as_ref()
+            .ok_or(TlsError::InternalError)?
+            .content_length();
+        advance(
+            lease,
+            &mut self.decoded,
+            &mut self.pending,
+            transport,
+            amount,
+        )
+        .await?;
         let header = self.header.take().ok_or(TlsError::InternalError)?;
-        consume(lease, &mut self.decoded, &mut self.pending, header, key_schedule.transcript_hash())
+        consume(
+            lease,
+            &mut self.decoded,
+            &mut self.pending,
+            header,
+            key_schedule.transcript_hash(),
+        )
     }
 
     pub fn reborrow_mut(&mut self) -> RecordReaderBorrowMut<'_> {

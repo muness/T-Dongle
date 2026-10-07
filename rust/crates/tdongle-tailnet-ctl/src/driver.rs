@@ -2,9 +2,9 @@
 
 use crate::end::{IoFail, MapEnd, RegisterFailure, SessionEnd, SessionStats, Stage};
 use crate::traits::{Clock, Connect, EndpointSource, Gate};
-use embedded_io_async::{Error as _, Read, Write};
 use core::cell::RefCell;
 use core::ops::DerefMut;
+use embedded_io_async::{Error as _, Read, Write};
 use tdongle_tailnet_control::early::{EarlyParser, EarlyStatus};
 use tdongle_tailnet_control::h2::{self, Config as H2Config, Event, Session as H2Session};
 use tdongle_tailnet_control::http::{self, CAPABILITY_VERSION, KEY_REQUEST_MAX, KEY_RESPONSE_MAX, KeyResponse, UpgradeReader, UpgradeStatus};
@@ -259,19 +259,9 @@ impl<S: Read + Write, K: Clock> Wire<'_, S, K> {
     }
 
     /// Write one HTTP/2 request (HEADERS + DATA) as a single record.
-    async fn request(
-        &mut self,
-        h2: &mut H2Session,
-        tx: &mut [u8],
-        stream: u32,
-        path: &str,
-        authority: &str,
-        body: &[u8],
-    ) -> Result<(), SessionEnd> {
+    async fn request(&mut self, h2: &mut H2Session, tx: &mut [u8], stream: u32, path: &str, authority: &str, body: &[u8]) -> Result<(), SessionEnd> {
         self.flush(h2, tx).await?;
-        let n = h2
-            .write_request(plain_window(tx), stream, "POST", path, authority, "application/json", body)
-            .map_err(|_| SessionEnd::RequestTooLarge)?;
+        let n = h2.write_request(plain_window(tx), stream, "POST", path, authority, "application/json", body).map_err(|_| SessionEnd::RequestTooLarge)?;
         self.send_sealed(tx, n).await
     }
 }

@@ -204,7 +204,15 @@ fn access_the_open_network_may_add_but_not_rewrite() {
 
 #[test]
 fn access_actions_parse() {
-    for (n, a) in [("mode", Action::Mode), ("wifi", Action::Wifi), ("wifi_remove", Action::WifiRemove), ("add", Action::Add), ("remove", Action::Remove), ("enable", Action::Enable), ("setup_done", Action::SetupDone)] {
+    for (n, a) in [
+        ("mode", Action::Mode),
+        ("wifi", Action::Wifi),
+        ("wifi_remove", Action::WifiRemove),
+        ("add", Action::Add),
+        ("remove", Action::Remove),
+        ("enable", Action::Enable),
+        ("setup_done", Action::SetupDone),
+    ] {
         assert_eq!(parse_action(Some(n.as_bytes())), a);
     }
     for n in ["", "WIFI", "wifi "] {

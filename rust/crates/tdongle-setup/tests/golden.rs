@@ -25,7 +25,13 @@ fn dns_matches_c() {
 }
 
 fn opt(s: &str) -> Option<Vec<u8>> {
-    if s == "~" { None } else if s == "-" { Some(Vec::new()) } else { Some(unhex(s)) }
+    if s == "~" {
+        None
+    } else if s == "-" {
+        Some(Vec::new())
+    } else {
+        Some(unhex(s))
+    }
 }
 
 fn origin_of(n: i32) -> Origin {
@@ -34,8 +40,7 @@ fn origin_of(n: i32) -> Origin {
 
 const ENDPOINTS: [Endpoint; 7] =
     [Endpoint::Home, Endpoint::Status, Endpoint::Diagnostics, Endpoint::WifiScan, Endpoint::WifiSaved, Endpoint::Command, Endpoint::BootStatus];
-const ACTIONS: [Action; 8] =
-    [Action::Mode, Action::Wifi, Action::WifiRemove, Action::Add, Action::Remove, Action::Enable, Action::SetupDone, Action::Unknown];
+const ACTIONS: [Action; 8] = [Action::Mode, Action::Wifi, Action::WifiRemove, Action::Add, Action::Remove, Action::Enable, Action::SetupDone, Action::Unknown];
 
 #[test]
 fn access_matches_c() {
@@ -57,16 +62,8 @@ fn access_matches_c() {
                 assert_eq!(access::classify(&facts), origin_of(f[8].parse().unwrap()), "{line}");
             }
             "S" => assert_eq!(access::in_setup_subnet(f[1].parse().unwrap()), f[2] == "1"),
-            "E" => assert_eq!(
-                access::endpoint_allowed(origin_of(f[1].parse().unwrap()), ENDPOINTS[f[2].parse::<usize>().unwrap()]),
-                f[3] == "1",
-                "{line}"
-            ),
-            "A" => assert_eq!(
-                access::action_allowed(origin_of(f[1].parse().unwrap()), ACTIONS[f[2].parse::<usize>().unwrap()]),
-                f[3] == "1",
-                "{line}"
-            ),
+            "E" => assert_eq!(access::endpoint_allowed(origin_of(f[1].parse().unwrap()), ENDPOINTS[f[2].parse::<usize>().unwrap()]), f[3] == "1", "{line}"),
+            "A" => assert_eq!(access::action_allowed(origin_of(f[1].parse().unwrap()), ACTIONS[f[2].parse::<usize>().unwrap()]), f[3] == "1", "{line}"),
             "M" => {
                 let o = origin_of(f[1].parse().unwrap());
                 assert_eq!((access::may_set_metadata(o), access::may_replace(o)), (f[2] == "1", f[3] == "1"));

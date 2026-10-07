@@ -739,7 +739,11 @@ mod tests {
         let with = admission_params(&sh).budget(false);
         assert_eq!(with.required, none + 22_528);
         let guaranteed_slots = tdongle_tailnet_admission::adm::ML_ADM_PEER_SLOTS as usize * tdongle_tailnet_engine::slot::WgSlot::BYTES;
-        assert_eq!(with.member_steady, 22_528 + guaranteed_slots, "the windows and the two guaranteed WireGuard slots; the runtime's own state is a block the firmware admitted before any membership");
+        assert_eq!(
+            with.member_steady,
+            22_528 + guaranteed_slots,
+            "the windows and the two guaranteed WireGuard slots; the runtime's own state is a block the firmware admitted before any membership"
+        );
         // so a heap that holds the C's dynamic part but not the windows refuses
         use tdongle_tailnet_admission::adm::Verdict;
         assert_eq!(with.decide(none + 22_527, 24_576), Verdict::RefusedBudget);

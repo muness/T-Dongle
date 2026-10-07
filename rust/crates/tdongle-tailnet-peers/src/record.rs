@@ -26,14 +26,9 @@ pub struct Endpoint {
 impl Endpoint {
     /// All zero (`const`, so state built from it can live in a `static`).
     pub const fn new() -> Self {
-        Self {
-            ip: 0,
-            port: 0,
-            is_ipv6: false,
-        }
+        Self { ip: 0, port: 0, is_ipv6: false }
     }
 }
-
 
 /// A subnet route a peer advertises (`microlink_route_t`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -47,13 +42,9 @@ pub struct Route {
 impl Route {
     /// All zero (`const`, so state built from it can live in a `static`).
     pub const fn new() -> Self {
-        Self {
-            network: 0,
-            prefix_len: 0,
-        }
+        Self { network: 0, prefix_len: 0 }
     }
 }
-
 
 /// What the directory says about one peer (`ml_peer_update_t` without the action).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -109,7 +100,6 @@ impl DirRecord {
         }
     }
 }
-
 
 impl DirRecord {
     /// `sizeof` of the in-RAM record.

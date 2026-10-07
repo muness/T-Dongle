@@ -89,7 +89,12 @@ impl Portal {
     /// boot time the ten minute clock starts from, `mac` the station MAC (the access point is `TDongle-XXXXXX`).
     #[must_use]
     pub fn new(boot: &SetupBoot, random: &[u8; 16], mac: &[u8; 6], now_ms: u32) -> Self {
-        Self { token: access::token_format(random), preselect: core::sync::atomic::AtomicU8::new(boot.preselect()), session: boot.session(now_ms), ap_name: crate::boot::ap_ssid(mac) }
+        Self {
+            token: access::token_format(random),
+            preselect: core::sync::atomic::AtomicU8::new(boot.preselect()),
+            session: boot.session(now_ms),
+            ap_name: crate::boot::ap_ssid(mac),
+        }
     }
 
     /// The per-boot token the page carries.
@@ -142,9 +147,7 @@ impl Portal {
     /// `setup_redirect`: any other name or path asked of the setup network goes to the one canonical address.
     fn redirect(conn: &Conn, error: ErrCode) -> Response<'static> {
         match conn.peer {
-            Some(p) if access::in_setup_subnet(p) => {
-                Response::ok(b"").status("302 Found").header("Location", LOCATION).header("Cache-Control", "no-store")
-            }
+            Some(p) if access::in_setup_subnet(p) => Response::ok(b"").status("302 Found").header("Location", LOCATION).header("Cache-Control", "no-store"),
             _ => Response::error(error, Some(if error == ErrCode::NotFound { "Not found" } else { "Not available" }), false),
         }
     }
@@ -344,7 +347,13 @@ fn cstr(b: &[u8]) -> &[u8] {
 fn int_in(v: Val, min: i32, max: i32) -> Option<i32> {
     let Val::Num(d) = v else { return None };
     // cJSON's valueint saturates; the comparison is against the truncating cast.
-    let int = if d >= f64::from(i32::MAX) { i32::MAX } else if d <= f64::from(i32::MIN) { i32::MIN } else { d as i32 };
+    let int = if d >= f64::from(i32::MAX) {
+        i32::MAX
+    } else if d <= f64::from(i32::MIN) {
+        i32::MIN
+    } else {
+        d as i32
+    };
     (d == f64::from(int) && (min..=max).contains(&int)).then_some(int)
 }
 
@@ -356,11 +365,7 @@ fn wifi_action<H: SetupHost>(origin: Origin, f: &Fields, host: &mut H) -> Result
         let count = host.saved_count();
         (0..count).any(|i| cstr(host.saved_ssid(i)) == ssid) || (slot >= 0 && (slot as usize) < count)
     })?;
-    if host.save_wifi(w.ssid, w.password, w.name, w.priority, w.slot) {
-        Ok(())
-    } else {
-        Err(WIFI_NOT_SAVED)
-    }
+    if host.save_wifi(w.ssid, w.password, w.name, w.priority, w.slot) { Ok(()) } else { Err(WIFI_NOT_SAVED) }
 }
 
 /// The `wifi` action's failure when `wifi_save_with` returns false.

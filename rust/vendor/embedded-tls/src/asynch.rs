@@ -145,7 +145,9 @@ where
             return Err(TlsError::MissingHandshake);
         }
         self.record_reader.wait_header(&mut self.delegate).await?;
-        self.record_reader.header_len().ok_or(TlsError::InternalError)
+        self.record_reader
+            .header_len()
+            .ok_or(TlsError::InternalError)
     }
 
     /// PATCH(lease): read the record announced by `wait_record` into `lease`, decrypt it in place and return its plaintext (possibly empty:
@@ -162,7 +164,11 @@ where
         {
             let record = self
                 .record_reader
-                .read_with_lease(&mut *lease, &mut self.delegate, self.key_schedule.read_state())
+                .read_with_lease(
+                    &mut *lease,
+                    &mut self.delegate,
+                    self.key_schedule.read_state(),
+                )
                 .await?;
             let mut handler = DecryptedReadHandler {
                 source_buffer: range,

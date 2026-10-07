@@ -27,7 +27,10 @@ fn whole(re: &str) -> Regex {
 /// `ManagementClient.identify`.
 fn identifies(help: &str) -> bool {
     let tailnet = help.contains("T-Dongle tailnet gateway protocol=1\r\n") && help.contains("Commands: status, list, capabilities, reboot, bootloader.");
-    tailnet || (help.contains("Commands: status, list, scan, use N, del N, profile ") && help.contains("Profiles validate by association") && help.contains("bootloader"))
+    tailnet
+        || (help.contains("Commands: status, list, scan, use N, del N, profile ")
+            && help.contains("Profiles validate by association")
+            && help.contains("bootloader"))
 }
 
 /// `Capabilities.parse`: the feature set, or why it is refused.
@@ -201,7 +204,9 @@ fn saved(networks: &[(&[u8], &[u8], u8)]) -> (SavedNetworks, MetaSet) {
 fn list_text(l: &SavedNetworks, m: &MetaSet, current: Option<usize>) -> String {
     let mut s = String::new();
     for (i, p) in l.list().iter().enumerate() {
-        s.push_str(std::str::from_utf8(ListLine::new(i as u32, current == Some(i), m.slot[i].name_bytes(), p.ssid_bytes(), m.slot[i].priority).as_bytes()).unwrap());
+        s.push_str(
+            std::str::from_utf8(ListLine::new(i as u32, current == Some(i), m.slot[i].name_bytes(), p.ssid_bytes(), m.slot[i].priority).as_bytes()).unwrap(),
+        );
     }
     s
 }
@@ -273,7 +278,8 @@ fn temperature(current: i32, peak: i32) -> Temperature {
 
 /// The app's `DongleStatus` temperature pattern, before and after the fix that accepts a reading below zero.
 const TEMPERATURE_APP: &str = r"(?m)^chip_temperature valid=1 current_tenths=([0-9]{1,4}) peak_tenths=([0-9]{1,4}) sampled_uptime_ms=[0-9]+ errors=[0-9]+\r?$";
-const TEMPERATURE_APP_FIXED: &str = r"(?m)^chip_temperature valid=1 current_tenths=(-?[0-9]{1,4}) peak_tenths=(-?[0-9]{1,4}) sampled_uptime_ms=[0-9]+ errors=[0-9]+\r?$";
+const TEMPERATURE_APP_FIXED: &str =
+    r"(?m)^chip_temperature valid=1 current_tenths=(-?[0-9]{1,4}) peak_tenths=(-?[0-9]{1,4}) sampled_uptime_ms=[0-9]+ errors=[0-9]+\r?$";
 
 #[test]
 fn status_first_line_and_chip_temperature() {

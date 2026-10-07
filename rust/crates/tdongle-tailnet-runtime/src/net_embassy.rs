@@ -22,12 +22,12 @@
 
 use crate::net::{Net, NetError, NetV4, TcpConn, TcpRole, UdpConn, UdpRole, parse_ipv4};
 use crate::shared::MAX_RUN;
+use core::sync::atomic::{AtomicU32, Ordering};
 use embassy_net::tcp::{self, TcpSocket};
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Stack};
 use embassy_time::{Duration, Timer, with_timeout};
 use embedded_io_async::{ErrorType, Read, Write};
-use core::sync::atomic::{AtomicU32, Ordering};
 use tdongle_tailnet_disco::Ep;
 
 /// Where the association generation comes from: the firmware's `WifiLink::association_generation()` (or anything that changes on re-association).
@@ -179,7 +179,14 @@ struct LookupBufs {
     ib: [u8; 384],
 }
 static LOOKUP: embassy_sync::mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, LookupBufs> =
-    embassy_sync::mutex::Mutex::new(LookupBufs { rm: [PacketMetadata::EMPTY; 2], tm: [PacketMetadata::EMPTY; 2], rb: [0; 384], tb: [0; 272], q: [0; 272], ib: [0; 384] });
+    embassy_sync::mutex::Mutex::new(LookupBufs {
+        rm: [PacketMetadata::EMPTY; 2],
+        tm: [PacketMetadata::EMPTY; 2],
+        rb: [0; 384],
+        tb: [0; 272],
+        q: [0; 272],
+        ib: [0; 384],
+    });
 
 /// One DNS query round trip to `server`: send, wait half the budget, resend once, wait the other half. `None` on silence or a reply that is not an answer for this query.
 async fn ask(stack: Stack<'static>, bufs: &mut LookupBufs, server: u32, id: u16, qn: usize) -> Option<[u8; 4]> {
@@ -272,7 +279,18 @@ impl Net for EmbassyNet {
         };
         // the relay's big windows (see `TcpConn::set_big_windows`): a round trip's worth of bytes at about 1 Mbit/s, only while it carries data
         let big = if matches!(role, TcpRole::Derp) && slot == 0 { (DERP_RX_BIG, DERP_TX_BIG) } else { (rx, tx) };
-        Some(EmbTcp { stack: self.stack, mem: self.mem, rx_len: rx, tx_len: tx, big, base: (rx, tx), connected_at: 0, role: u8::from(matches!(role, TcpRole::Derp)), sock: None, held: [(0, 0); 2] })
+        Some(EmbTcp {
+            stack: self.stack,
+            mem: self.mem,
+            rx_len: rx,
+            tx_len: tx,
+            big,
+            base: (rx, tx),
+            connected_at: 0,
+            role: u8::from(matches!(role, TcpRole::Derp)),
+            sock: None,
+            held: [(0, 0); 2],
+        })
     }
 
     fn udp(&self, role: UdpRole, slot: usize) -> Option<EmbUdp> {

@@ -10,11 +10,11 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::Duration;
-use tdongle_tailnet_disco::Ep;
-use tdongle_tailnet_runtime::net::{Net, TcpConn, TcpRole, UdpConn, UdpRole};
 use tdongle_tailnet_admission::heap::ML_HB_FLOOR;
 use tdongle_tailnet_admission::probe::{FixedProbe, HeapSnapshot};
+use tdongle_tailnet_disco::Ep;
 use tdongle_tailnet_pool::{Mem, Pool};
+use tdongle_tailnet_runtime::net::{Net, TcpConn, TcpRole, UdpConn, UdpRole};
 use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, LinkGen, Windows};
 use tdongle_tailnet_sockmem::HeapSockMem;
 
@@ -180,7 +180,10 @@ fn the_handle_life_cycle_over_a_real_embassy_stack() {
 
         // a handle is a few words; a slot the runtime does not have gets none
         let mut tcp = net.tcp(TcpRole::Control, 0).expect("control handle of slot 0");
-        assert!(net.tcp(TcpRole::Control, tdongle_tailnet_runtime::shared::MAX_RUN).is_none() && net.udp(UdpRole::Member, tdongle_tailnet_runtime::shared::MAX_RUN).is_none());
+        assert!(
+            net.tcp(TcpRole::Control, tdongle_tailnet_runtime::shared::MAX_RUN).is_none()
+                && net.udp(UdpRole::Member, tdongle_tailnet_runtime::shared::MAX_RUN).is_none()
+        );
         assert!(net.tcp(TcpRole::Derp, 0).is_some() && net.udp(UdpRole::DnsUpstream, 0).is_some());
         assert_eq!(pool.in_use(), 0, "handles hold no memory");
 

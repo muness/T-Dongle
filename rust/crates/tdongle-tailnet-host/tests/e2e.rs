@@ -876,7 +876,13 @@ fn derp_survives_idle_then_carries_traffic() {
     }
     let after = gw.sh.slots[0].status().derp;
     assert_eq!(after.connects.get(), connects0, "the relay reconnected during the idle period\n{}", gw.dump());
-    eprintln!("idle {idle} s: frames in {} -> {}, keepalives {}, pings answered {}", frames0, after.frames_rx.get(), after.keepalives.get(), after.pings_answered.get());
+    eprintln!(
+        "idle {idle} s: frames in {} -> {}, keepalives {}, pings answered {}",
+        frames0,
+        after.frames_rx.get(),
+        after.keepalives.get(),
+        after.pings_answered.get()
+    );
     assert_eq!(gw.host.echo(alias, 7, b"after idle", Duration::from_secs(30)).unwrap(), b"after idle");
     let (n, d) = gw.host.get_bytes(alias, 80, 512 * 1024, Duration::from_secs(60)).expect("download over derp after idle");
     assert_eq!(n, 512 * 1024);
@@ -934,11 +940,7 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
         let mut extra = String::new();
         TailnetApi::serial_status_extra(&*gw.sh, &mut extra);
         eprintln!("{extra}");
-        eprintln!(
-            "home {home}; visit counts {:?}; peers {:?}",
-            X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect::<Vec<_>>(),
-            go.ids()
-        );
+        eprintln!("home {home}; visit counts {:?}; peers {:?}", X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect::<Vec<_>>(), go.ids());
     }
     assert_eq!(echoed.expect("echo to a peer homed on the other region"), b"across regions");
     // the visit is on (it lasts at least 8 s): control has our visited region as home
@@ -964,7 +966,10 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
     println!("home region {home}; visit: queued {queued} sent {sent} visits {starts}; down {:.1} up {:.1} Mbit/s", mbit(n, d), mbit(n2, d2));
     // only the packets that arrived before the link reached the peer's region wait in the queue (the first of the handshake); the rest go straight out on the link
     // one visit, then it stays: the probes of the peer and idle time do not move the link back and forth
-    assert!(queued >= 1 && sent == queued && starts == 1, "the packets that waited for the visit were sent, and the link went there once: queued {queued} sent {sent} visits {starts}");
+    assert!(
+        queued >= 1 && sent == queued && starts == 1,
+        "the packets that waited for the visit were sent, and the link went there once: queued {queued} sent {sent} visits {starts}"
+    );
     let indexed = gw.sh.with_engine(|e, _| e.member(id).map_or(0, |m| m.rt.derp_index.count));
     assert_eq!(indexed, expect_index, "every region of the map is in the compact index");
     gw.check_engine();
@@ -978,11 +983,7 @@ fn a_peer_homed_on_another_derp_region_is_reached_through_a_second_link() {
 /// The map has five regions, the gateway keeps four of them in full (the netcheck's, the C's bound), and the peer is homed on the fifth: its address comes from the compact index.
 #[test]
 fn a_peer_homed_on_the_fifth_region_of_the_map_is_reached_through_the_index() {
-    peer_on_another_region(
-        &[("INTEROP_DERP2", "1".to_string()), ("INTEROP_DERP2_ID", "905".to_string()), ("INTEROP_DERP_FILLERS", "3".to_string())],
-        905,
-        5,
-    );
+    peer_on_another_region(&[("INTEROP_DERP2", "1".to_string()), ("INTEROP_DERP2_ID", "905".to_string()), ("INTEROP_DERP_FILLERS", "3".to_string())], 905, 5);
 }
 
 /// A relay that writes at about 1.4 Mbit/s (8 ms per 1.4 KB frame): a bulk transfer over DERP only, one relay link, runs at the relay's pace with nothing refused or dropped
@@ -994,10 +995,8 @@ fn derp_only_bulk_is_paced_by_the_relay_not_dropped() {
     gw.net.udp_blocked.store(true, Ordering::SeqCst);
     assert_eq!(gw.host.echo(alias, 7, b"warm", Duration::from_secs(30)).unwrap(), b"warm");
     gw.net.derp_write_delay_ms.store(8, Ordering::Relaxed);
-    let refused = |gw: &Gateway| {
-        gw.sh.with_engine(|e, _| e.stats().tx_count(tdongle_tailnet_engine::TxFate::TxRefused))
-            + gw.sh.slots[0].derp_q.stats().refused
-    };
+    let refused =
+        |gw: &Gateway| gw.sh.with_engine(|e, _| e.stats().tx_count(tdongle_tailnet_engine::TxFate::TxRefused)) + gw.sh.slots[0].derp_q.stats().refused;
     let before = refused(&gw);
     let (n, d) = gw.host.upload(alias, 9, 192 * 1024, Duration::from_secs(90)).expect("upload over a slow relay");
     assert_eq!(n, 192 * 1024);

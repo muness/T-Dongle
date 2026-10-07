@@ -714,7 +714,8 @@ impl State {
         };
         let first = self.derp_index_n == 0;
         self.derp_index_n = self.derp_index_n.saturating_add(1);
-        sink.event(MapEvent::DerpRegion { first, region_id: r.region_id, port: n.derp_port, host: n.hostname.as_str(), cert: &cert }).map_err(|_| MapError::SinkRefused)
+        sink.event(MapEvent::DerpRegion { first, region_id: r.region_id, port: n.derp_port, host: n.hostname.as_str(), cert: &cert })
+            .map_err(|_| MapError::SinkRefused)
     }
 
     fn on_key(&mut self, t: Text<'_>) -> Result<(), MapError> {

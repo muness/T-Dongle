@@ -111,7 +111,14 @@ impl Net for TokioNet {
             TcpRole::Control => 0,
             TcpRole::Derp => 1,
         };
-        self.take(0, r, slot).then(|| TokioTcp { ctl: self.ctl.clone(), stream: None, epoch: 0, gen_: 0, route: (role == TcpRole::Control).then_some(slot), extra: role == TcpRole::Derp })
+        self.take(0, r, slot).then(|| TokioTcp {
+            ctl: self.ctl.clone(),
+            stream: None,
+            epoch: 0,
+            gen_: 0,
+            route: (role == TcpRole::Control).then_some(slot),
+            extra: role == TcpRole::Derp,
+        })
     }
     fn udp(&self, role: UdpRole, slot: usize) -> Option<TokioUdp> {
         let r = match role {

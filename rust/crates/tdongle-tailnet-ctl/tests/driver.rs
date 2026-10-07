@@ -11,8 +11,8 @@ use tdongle_tailnet_control::h2::{FrameHeader, flag, kind};
 use tdongle_tailnet_control::requests::{ENDPOINT_LOCAL, Endpoint, EndpointAddr, Hostinfo};
 use tdongle_tailnet_crypto::x25519;
 use tdongle_tailnet_ctl::{
-    Bulk, BulkLease, Clock, Connect, EndpointSource, Gate, IoFail, MapEnd, NoEndpoints, RegisterFailure, SessionBuf, SessionConfig, SessionEnd, SessionStats, Stage,
-    Timeouts, Workspace, run_session, run_session_leased,
+    Bulk, BulkLease, Clock, Connect, EndpointSource, Gate, IoFail, MapEnd, NoEndpoints, RegisterFailure, SessionBuf, SessionConfig, SessionEnd, SessionStats,
+    Stage, Timeouts, Workspace, run_session, run_session_leased,
 };
 use tdongle_tailnet_map::{MapEvent, MapSink, SinkError};
 use tdongle_tailnet_noise::responder::accept;
@@ -742,7 +742,6 @@ fn sizes_are_reported() {
     println!("Workspace {WORKSPACE} B (projector {PROJECTOR}), noise session {NOISE_SESSION}, h2 session {H2_SESSION}, stats {STATS}");
     const { assert!(WORKSPACE < 24 * 1024) };
 }
-
 
 // ---- the leased buffers ---------------------------------------------------------------------------------------------------------------------------
 

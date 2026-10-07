@@ -114,7 +114,6 @@ impl Stats {
     }
 }
 
-
 /// An established transport: two cipher states and their counters. 8-byte aligned, about 160 bytes.
 #[derive(Debug)]
 pub struct Session {

@@ -5,7 +5,11 @@ use tdongle_serial::reply::{FIRMWARE_EXTENSIONS, IDENTITY_COMMAND_FORMS, SPIKE_S
 
 /// A concrete line for a help entry: `use N` -> `use 1`, `heap [on|off]` -> `heap`.
 fn example(entry: &str) -> String {
-    let e = entry.replace(" N", " 1").replace("BRIGHTNESS ROTATION DIM_SECONDS", "60 0 60").replace(" JSON", " {}").replace("wifi_bridge|tailnet_gateway", "wifi_bridge");
+    let e = entry
+        .replace(" N", " 1")
+        .replace("BRIGHTNESS ROTATION DIM_SECONDS", "60 0 60")
+        .replace(" JSON", " {}")
+        .replace("wifi_bridge|tailnet_gateway", "wifi_bridge");
     e.split(" [").next().unwrap().split(" RATE").next().unwrap().replace(" bridge|sink|source", "").to_string()
 }
 

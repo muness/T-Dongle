@@ -305,9 +305,19 @@ where
                 let mut ml = [0u32; 23];
                 ml[0] = c.rx_in.saturating_sub(c.rx_in_derp);
                 ml[2] = rx(R::Garbage);
-                ml[5] = [R::WgInitiation, R::WgResponse, R::WgCookie, R::WgHandshakeDropped, R::WgKeepalive, R::WgDelivered, R::WgRouterDrop, R::WgNotAllowed, R::WgDataDropped]
-                    .iter()
-                    .fold(0u32, |a, f| a.saturating_add(rx(*f)));
+                ml[5] = [
+                    R::WgInitiation,
+                    R::WgResponse,
+                    R::WgCookie,
+                    R::WgHandshakeDropped,
+                    R::WgKeepalive,
+                    R::WgDelivered,
+                    R::WgRouterDrop,
+                    R::WgNotAllowed,
+                    R::WgDataDropped,
+                ]
+                .iter()
+                .fold(0u32, |a, f| a.saturating_add(rx(*f)));
                 ml[6] = rx(R::DiscoOk).saturating_add(rx(R::DiscoDropped));
                 ml[7] = rx(R::StunMatched).saturating_add(rx(R::StunUnmatched));
                 ml[11] = c.rx_in_derp;
@@ -423,13 +433,29 @@ where
             use core::sync::atomic::Ordering::Relaxed;
             let h = self.host_q.stats();
             let d: u32 = self.slots.iter().map(|s| s.derp_q.stats().refused).sum();
-            let u = self.slots.iter().map(|s| s.udp_q.stats()).fold((0, 0, 0, 0), |a, q| (a.0 + q.pushed, a.1 + q.refused, a.2 + q.popped, a.3.max(q.high_water)));
+            let u =
+                self.slots.iter().map(|s| s.udp_q.stats()).fold((0, 0, 0, 0), |a, q| (a.0 + q.pushed, a.1 + q.refused, a.2 + q.popped, a.3.max(q.high_water)));
             let g = crate::shared::RtStats::get;
             let _ = write!(
                 out,
                 "tn_rx host_q={{pushed:{} refused:{} popped:{} high:{}/{}}} udp_q={{pushed:{} refused:{} popped:{} high:{}/{}}} derp_q_refused={} backpressure_waits={} usb_tx={} usb_tx_refused={} to_engine={} rx_budget_refused={} rx_heap_refused={}\r\n",
-                h.pushed, h.refused, h.popped, h.high_water, crate::shared::HOST_Q, u.0, u.1, u.2, u.3, crate::shared::UDP_Q, d,
-                crate::udp::BACKPRESSURE.load(Relaxed), g(&self.stats.usb_tx), g(&self.stats.usb_tx_refused), g(&self.stats.to_engine), g(&self.stats.rx_budget_refused), g(&self.stats.rx_heap_refused)
+                h.pushed,
+                h.refused,
+                h.popped,
+                h.high_water,
+                crate::shared::HOST_Q,
+                u.0,
+                u.1,
+                u.2,
+                u.3,
+                crate::shared::UDP_Q,
+                d,
+                crate::udp::BACKPRESSURE.load(Relaxed),
+                g(&self.stats.usb_tx),
+                g(&self.stats.usb_tx_refused),
+                g(&self.stats.to_engine),
+                g(&self.stats.rx_budget_refused),
+                g(&self.stats.rx_heap_refused)
             );
         }
         {
@@ -473,7 +499,18 @@ where
                     let _ = write!(
                         out,
                         "tn_wg member_slot={} peer={}.{}.{}.{} session={} attempts={} hs_ms={:?} rx_ms={:?} tx_ms={:?} tx_bytes={} rx_bytes={} path={}",
-                        slot, ip[0], ip[1], ip[2], ip[3], p.session, p.attempts, p.last_handshake, p.last_rx, p.last_tx, p.tx_bytes, p.rx_bytes,
+                        slot,
+                        ip[0],
+                        ip[1],
+                        ip[2],
+                        ip[3],
+                        p.session,
+                        p.attempts,
+                        p.last_handshake,
+                        p.last_rx,
+                        p.last_tx,
+                        p.tx_bytes,
+                        p.rx_bytes,
                         if p.direct { "direct" } else { "derp" }
                     );
                     if let Some((ep, port)) = p.endpoint {

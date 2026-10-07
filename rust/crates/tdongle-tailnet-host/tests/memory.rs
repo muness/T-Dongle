@@ -33,17 +33,8 @@ fn ram_per_membership_to_the_byte() {
     let net_per_member = tdongle_tailnet_runtime::net_embassy::Windows::PER_MEMBER;
     // what a membership pins statically; its socket windows come from the pool while it runs (`net_per_member`)
     let total = futures_per_member + statics_per_member + engine_per_member;
-    let gateway_shared = f(FUT_USB)
-        + f(FUT_SUPERVISOR)
-        + f(FUT_TIMER)
-        + f(FUT_LINK)
-        + f(FUT_DNS)
-        + HOST_Q
-        + DNS_Q
-        + SCRATCH
-        + st.token
-        + st.registry
-        + st.usb_side;
+    let gateway_shared =
+        f(FUT_USB) + f(FUT_SUPERVISOR) + f(FUT_TIMER) + f(FUT_LINK) + f(FUT_DNS) + HOST_Q + DNS_Q + SCRATCH + st.token + st.registry + st.usb_side;
 
     println!("MEMORY TABLE, host 64-bit (M-host); sizes of types are exact, this host's pointer width inflates the futures against the device (M-elf)");
     println!("  per membership slot (x{MAX_RUN} in this configuration):");
