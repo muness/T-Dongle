@@ -98,6 +98,17 @@ impl Drop for Lease<'_> {
     }
 }
 
+/// Plaintext retained in its original record lease, with no second allocation.
+pub struct OwnedRecord<'a> {
+    lease: Lease<'a>,
+    start: usize,
+    len: usize,
+}
+impl Deref for OwnedRecord<'_> {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] { &self.lease[self.start..self.start + self.len] }
+}
+
 /// The [`RecordBufProvider`] over the pool: every lease is a buffer of the announced record's length.
 #[derive(Debug)]
 pub struct PoolLease<'a> {
@@ -149,6 +160,8 @@ pub struct LeasedTlsDerp<'a, IO: Read + Write> {
     mem: Mem<'a>,
     trusted_by: TrustedBy,
     signature_verifies: u8,
+    pending_record: Option<Lease<'a>>,
+    read_failed: bool,
 }
 
 impl<IO: Read + Write> core::fmt::Debug for LeasedTlsDerp<'_, IO> {
@@ -181,7 +194,7 @@ impl<'a, IO: Read + Write> LeasedTlsDerp<'a, IO> {
         match conn.open_leased(TlsContext::new(&config, &mut provider), &mut PoolLease { stats: pool, mem, class: Class::Negotiation }).await {
             Ok(()) => {
                 let acc = provider.verifier().accepted().ok_or(ConnectError::Untrusted(Reject::NotTrusted))?;
-                Ok(Self { trusted_by: acc.trusted_by, signature_verifies: acc.signature_verifies, conn, pool, mem })
+                Ok(Self { trusted_by: acc.trusted_by, signature_verifies: acc.signature_verifies, conn, pool, mem, pending_record: None, read_failed: false })
             }
             Err(e) => Err(match why.get() {
                 Some(r) => ConnectError::Untrusted(r),
@@ -214,35 +227,49 @@ impl<'a, IO: Read + Write> LeasedTlsDerp<'a, IO> {
     }
 
     /// Receive one TLS record's plaintext and pass it to `f` (in one or more slices, in order). Returns the plaintext length (0 for a
-    /// post-handshake message such as a session ticket: call again). Cancel-safe only while waiting for the header.
+    /// post-handshake message such as a session ticket: call again). Header and body progress survive cancellation;
+    /// callers must preserve the body timeout deadline when retrying. A timeout makes the connection unusable.
     ///
     /// `stall_timeout` is called once, right after the lease is taken, and its future bounds how long the record body may take; if it completes first the
     /// read fails with [`ReadError::LeaseTimeout`] and the lease is released.
     /// `f` runs while the lease is held: copy what you need into your carry buffer (a partial DERP frame, about 2 KB) and return.
     pub async fn read_with<T: Future<Output = ()>>(&mut self, stall_timeout: impl FnOnce() -> T, mut f: impl FnMut(&[u8])) -> Result<usize, ReadError> {
-        // 1. No lease while waiting for the server; the header says how long the record is.
-        let len = self.conn.wait_record().await.map_err(ReadError::Tls)?;
-        // 2. The lease, for this one record: exactly that many bytes.
-        let mut provider = PoolLease { stats: self.pool, mem: self.mem, class: Class::Record };
-        let mut lease = provider.lease(len).await;
-        let timer = stall_timeout();
-        let outcome = select(self.conn.read_record_leased(&mut lease), timer).await;
-        match outcome {
-            Either::First(Ok(mut rb)) => {
-                let mut n = 0;
-                while !rb.is_empty() {
-                    let chunk = rb.pop(rb.len());
-                    f(chunk);
-                    n += chunk.len();
-                }
-                Ok(n)
-            }
-            Either::First(Err(e)) => Err(ReadError::Tls(e)),
-            Either::Second(()) => {
-                self.pool.timeouts.fetch_add(1, Ordering::Relaxed);
-                Err(ReadError::LeaseTimeout)
-            }
+        let record = self.read_owned(stall_timeout).await?;
+        f(&record);
+        Ok(record.len())
+    }
+
+    /// Read plaintext in its original lease. Header and body progress survive cancellation.
+    /// The timeout factory must preserve its deadline when a cancelled body read is resumed.
+    pub async fn read_owned<T: Future<Output = ()>>(&mut self, stall_timeout: impl FnOnce() -> T) -> Result<OwnedRecord<'a>, ReadError> {
+        if self.read_failed { return Err(ReadError::LeaseTimeout); }
+        if self.pending_record.is_none() {
+            let len = self.conn.wait_record().await.map_err(ReadError::Tls)?;
+            let mut provider = PoolLease { stats: self.pool, mem: self.mem, class: Class::Record };
+            self.pending_record = Some(provider.lease(len).await);
         }
+        let result = {
+            let lease = self.pending_record.as_mut().unwrap();
+            let base = lease.as_ptr() as usize;
+            match select(self.conn.read_record_leased(lease), stall_timeout()).await {
+                Either::First(Ok(mut rb)) => {
+                    let bytes = rb.pop_all();
+                    Ok((if bytes.is_empty() { 0 } else { bytes.as_ptr() as usize - base }, bytes.len()))
+                }
+                Either::First(Err(e)) => Err(ReadError::Tls(e)),
+                Either::Second(()) => Err(ReadError::LeaseTimeout),
+            }
+        };
+        let (start, len) = match result {
+            Ok(range) => range,
+            Err(e) => {
+                if matches!(e, ReadError::LeaseTimeout) { self.pool.timeouts.fetch_add(1, Ordering::Relaxed); }
+                self.read_failed = true;
+                self.pending_record = None;
+                return Err(e);
+            }
+        };
+        Ok(OwnedRecord { lease: self.pending_record.take().unwrap(), start, len })
     }
 
     /// Write everything (buffered until `flush`); the write buffer is pinned, not leased.

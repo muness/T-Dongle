@@ -115,8 +115,8 @@ impl<T: TcpConn> Write for CtlTcp<'_, T> {
 /// TLS as a byte stream: reads hand out a record's plaintext and keep the rest (a pool block) for the next read; the peer's close is end of stream.
 struct TlsStream<'a, T: TcpConn> {
     conn: tdongle_tailnet_tls::lease::LeasedTlsDerp<'a, CtlTcp<'a, T>>,
-    mem: tdongle_tailnet_pool::Mem<'a>,
-    carry: Option<(tdongle_tailnet_pool::PoolBuf<'a>, usize)>,
+    carry: Option<(tdongle_tailnet_tls::lease::OwnedRecord<'a>, usize)>,
+    record_deadline: Option<Instant>,
 }
 
 enum CtlStream<'a, T: TcpConn> {
@@ -167,43 +167,14 @@ impl<T: TcpConn> TlsStream<'_, T> {
                 }
                 return Ok(n);
             }
-            let mut got = 0usize;
-            let mut over: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
-            let mut oom = false;
-            let r = self
-                .conn
-                .read_with(
-                    || Timer::after_secs(10),
-                    |chunk| {
-                        let take = chunk.len().min(buf.len() - got);
-                        buf[got..got + take].copy_from_slice(&chunk[..take]);
-                        got += take;
-                        if take < chunk.len() && !oom {
-                            oom = over.try_reserve(chunk.len() - take).is_err();
-                            if !oom {
-                                over.extend_from_slice(&chunk[take..]);
-                            }
-                        }
-                    },
-                )
-                .await;
+            let deadline = &mut self.record_deadline;
+            let r = self.conn.read_owned(|| Timer::at(*deadline.get_or_insert_with(|| Instant::now() + Duration::from_secs(10)))).await;
+            self.record_deadline = None;
             match r {
-                Ok(_) if oom => return Err(NetError::NoMem),
-                Ok(_) => {}
+                Ok(record) if !record.is_empty() => self.carry = Some((record, 0)),
+                Ok(_) => {},
                 Err(e) if e.is_closed() => return Ok(0),
                 Err(_) => return Err(NetError::Io),
-            }
-            if !over.is_empty() {
-                let mut pb = self.mem.alloc_wait(tdongle_tailnet_pool::Class::Record, over.len()).await;
-                pb.copy_from_slice(&over);
-                self.carry = Some((pb, 0));
-            }
-            if got > 0 {
-                return Ok(got);
-            }
-            // a record with no plaintext (a session ticket): the next one
-            if self.carry.is_none() {
-                continue;
             }
         }
     }
@@ -265,7 +236,7 @@ impl<'a, T: TcpConn, P: Platform> Connect for CtlConnect<'a, T, P> {
         };
         let r = with_timeout(io, handshake).await;
         match r {
-            Ok(Ok(conn)) => match crate::fallible::try_box(TlsStream { conn, mem: t.mem, carry: None }) {
+            Ok(Ok(conn)) => match crate::fallible::try_box(TlsStream { conn, carry: None, record_deadline: None }) {
                 Ok(b) => Ok(CtlStream::Tls(b)),
                 Err(s) => {
                     drop(s);
@@ -774,6 +745,67 @@ mod tests {
             let r = futures::executor::block_on(fetch_control_key(&mut connect, &mut clock, HOST, &mut buf, 5_000));
             assert_eq!((sh.pool.in_use(), sh.lease.holders()), (0, 0), "every pool byte of the TLS stream went back");
             r
+        }
+
+        #[test]
+        fn large_tls_records_drain_without_copy_allocation_and_refund_on_drop() {
+            use core::sync::atomic::Ordering;
+            let reply: &'static str = std::boxed::Box::leak("x".repeat(32_768).into_boxed_str());
+            let sh = shared();
+            let tcp = AsyncMutex::<NoopRawMutex, _>::new(StdTcp { port: serve(reply), s: None });
+            let (subject, spki) = anchor();
+            let anchors = [TrustAnchor { subject: &subject, spki: &spki }];
+            let mut wb = std::vec![0u8; 2 * TLS_WRITE_RECORD];
+            let (x, y) = wb.split_at_mut(TLS_WRITE_RECORD);
+            let tls = TlsSide { platform: &sh.platform, lease: &sh.lease, mem: sh.mem(), anchors: &anchors, wbufs: [Some(x), Some(y)] };
+            let mut connect = CtlConnect { tcp: &tcp, host: HOST, port: 443, io_ms: 5_000, tls: Some(tls) };
+            futures::executor::block_on(async {
+                let mut stream = connect.connect().await.unwrap();
+                stream.write(b"GET /key?v=131 HTTP/1.1\r\nHost: derp1.test.example\r\n\r\n").await.unwrap();
+                stream.flush().await.unwrap();
+                sh.platform.heap.free.store(54_000, Ordering::Relaxed);
+                let before = sh.pool.stats().takes[1];
+                let mut buf = [0u8; 128];
+                let n = with_timeout(Duration::from_secs(2), stream.read(&mut buf)).await.unwrap().unwrap();
+                assert_eq!(n, 128);
+                assert_eq!(&buf, &[b'x'; 128]);
+                let after_first = sh.pool.stats().takes[1];
+                assert!(after_first > before); // rustls may send a session ticket before application data.
+                assert_eq!(sh.lease.holders(), 1);
+                assert!(sh.pool.in_use() <= 16_640);
+                sh.platform.heap.free.store(39_000, Ordering::Relaxed);
+                // No fresh admission is needed while the retained record drains below floor+record.
+                let n = with_timeout(Duration::from_secs(2), stream.read(&mut buf)).await.unwrap().unwrap();
+                assert_eq!(n, 128);
+                assert_eq!(sh.pool.stats().takes[1], after_first);
+                sh.platform.heap.free.store(54_000, Ordering::Relaxed);
+                let mut total = 256;
+                while total < reply.len() {
+                    let n = stream.read(&mut buf).await.unwrap();
+                    assert!(n > 0);
+                    assert!(buf[..n].iter().all(|&b| b == b'x'));
+                    total += n;
+                }
+                assert_eq!(total, reply.len());
+                assert_eq!(sh.pool.stats().takes[1] - after_first, 1);
+                drop(stream);
+                assert_eq!((sh.pool.in_use(), sh.lease.holders()), (0, 0));
+            });
+            // Dropping with a partial plaintext carry also refunds its original lease.
+            let tcp = AsyncMutex::<NoopRawMutex, _>::new(StdTcp { port: serve(reply), s: None });
+            let mut wb = std::vec![0u8; 2 * TLS_WRITE_RECORD];
+            let (x, y) = wb.split_at_mut(TLS_WRITE_RECORD);
+            let tls = TlsSide { platform: &sh.platform, lease: &sh.lease, mem: sh.mem(), anchors: &anchors, wbufs: [Some(x), Some(y)] };
+            let mut connect = CtlConnect { tcp: &tcp, host: HOST, port: 443, io_ms: 5_000, tls: Some(tls) };
+            futures::executor::block_on(async {
+                let mut stream = connect.connect().await.unwrap();
+                stream.write(b"GET /key?v=131 HTTP/1.1\r\nHost: derp1.test.example\r\n\r\n").await.unwrap();
+                stream.flush().await.unwrap();
+                stream.read(&mut [0u8; 128]).await.unwrap();
+                assert_eq!(sh.lease.holders(), 1);
+                drop(stream);
+                assert_eq!((sh.pool.in_use(), sh.lease.holders()), (0, 0));
+            });
         }
 
         #[test]

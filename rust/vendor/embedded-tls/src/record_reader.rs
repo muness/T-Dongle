@@ -12,6 +12,8 @@ pub struct RecordReader<'a> {
     pub(crate) buf: &'a mut [u8],
     /// PATCH(lease): the record header of the next record, once read by `wait_header`.
     header: Option<RecordHeader>,
+    header_bytes: [u8; 5],
+    header_read: usize,
     /// The number of decoded bytes in the buffer
     decoded: usize,
     /// The number of read but not yet decoded bytes in the buffer
@@ -34,6 +36,8 @@ impl<'a> RecordReader<'a> {
         Self {
             buf,
             header: None,
+            header_bytes: [0; 5],
+            header_read: 0,
             decoded: 0,
             pending: 0,
         }
@@ -45,6 +49,8 @@ impl<'a> RecordReader<'a> {
         RecordReader {
             buf: &mut [],
             header: None,
+            header_bytes: [0; 5],
+            header_read: 0,
             decoded: 0,
             pending: 0,
         }
@@ -53,12 +59,20 @@ impl<'a> RecordReader<'a> {
     /// PATCH(lease): read the 5 byte header of the next record (no buffer needed) and keep it. Idempotent until the record is read.
     pub async fn wait_header(&mut self, transport: &mut impl AsyncRead) -> Result<(), TlsError> {
         if self.header.is_none() {
-            let h = next_record_header(transport).await?;
+            while self.header_read < RecordHeader::LEN {
+                let n = transport.read(&mut self.header_bytes[self.header_read..]).await.map_err(|e| TlsError::Io(e.kind()))?;
+                if n == 0 { return Err(TlsError::IoError); }
+                self.header_read += n;
+            }
+            let h = RecordHeader::decode(self.header_bytes)?;
             // RFC 8446 5.2: a ciphertext longer than 2^14 + 256 is a record_overflow; refusing it here keeps a lease from being asked for more than that
             if h.content_length() > 16_384 + 256 {
                 return Err(TlsError::InvalidRecord);
             }
             self.header = Some(h);
+            self.header_read = 0;
+            self.decoded = 0;
+            self.pending = 0;
         }
         Ok(())
     }
@@ -77,10 +91,9 @@ impl<'a> RecordReader<'a> {
         key_schedule: &mut ReadKeySchedule<CipherSuite>,
     ) -> Result<ServerRecord<'m, CipherSuite>, TlsError> {
         self.wait_header(transport).await?;
+        let amount = self.header.as_ref().ok_or(TlsError::InternalError)?.content_length();
+        advance(lease, &mut self.decoded, &mut self.pending, transport, amount).await?;
         let header = self.header.take().ok_or(TlsError::InternalError)?;
-        self.decoded = 0;
-        self.pending = 0;
-        advance(lease, &mut self.decoded, &mut self.pending, transport, header.content_length()).await?;
         consume(lease, &mut self.decoded, &mut self.pending, header, key_schedule.transcript_hash())
     }
 
@@ -233,7 +246,7 @@ async fn advance(
 ) -> Result<(), TlsError> {
     ensure_contiguous(buf, decoded, pending, amount)?;
 
-    let mut remain: usize = amount;
+    let mut remain: usize = amount.saturating_sub(*pending);
     while *pending < amount {
         let read = transport
             .read(&mut buf[*decoded + *pending..][..remain])
@@ -258,7 +271,7 @@ fn advance_blocking(
 ) -> Result<(), TlsError> {
     ensure_contiguous(buf, decoded, pending, amount)?;
 
-    let mut remain: usize = amount;
+    let mut remain: usize = amount.saturating_sub(*pending);
     while *pending < amount {
         let read = transport
             .read(&mut buf[*decoded + *pending..][..remain])
