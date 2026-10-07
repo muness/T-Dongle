@@ -1005,8 +1005,10 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Output for OutSink<
             }
             Out::HomeDerp { member, region } => {
                 if let Some((_, s)) = sh.slot_of(member) {
+                    // while the link visits a region the home we tell the control plane is that region (see `derp::derp_extra`); the engine's own is restored when the visit ends
+                    let visiting = crate::derp::VISITING.load(core::sync::atomic::Ordering::Relaxed) != 0;
                     s.update(|st| {
-                        if st.home_derp != region {
+                        if !visiting && st.home_derp != region {
                             st.home_derp = region;
                             st.eps_gen = st.eps_gen.wrapping_add(1);
                         }

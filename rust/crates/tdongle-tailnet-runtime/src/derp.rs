@@ -145,12 +145,14 @@ static XQ: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw
 /// A packet was queued: wakes the visit manager, and (second signal: a signal has one waiter) the link's loop, which pumps what waits for its region.
 static X_SIG: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
 static X_PUMP: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
-/// Packets that may wait for a visit.
-pub const XQ_MAX: usize = 8;
+/// Packets that may wait for a visit (TCP sends a window of them while the link switches).
+pub const XQ_MAX: usize = 16;
 /// How long a packet waits for the link to reach its region before it is dropped (TCP in the tunnel retransmits).
 pub const X_EXPIRE_MS: u32 = 10_000;
-/// The link leaves a region it visited after this long without a packet for it.
-pub const X_VISIT_IDLE_MS: u32 = 30_000;
+/// Visit timing in ms, `[idle, minimum, hold-off]`: the link leaves a region it visited after `idle` without a packet for it, never before `minimum` (control has to push the
+/// new home to the peer, and the peer's answers must find us), and starts no new visit for `hold-off` after leaving (the real home is advertised again, and settles). Tests
+/// shorten them.
+pub static VISIT_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomic::AtomicU32::new(30_000), core::sync::atomic::AtomicU32::new(15_000), core::sync::atomic::AtomicU32::new(10_000)];
 /// The link starts a visit only when no packet for its own home region went out in this long: a visit takes the link away from the home region.
 pub const X_HOME_QUIET_MS: u32 = 10_000;
 /// A visit ends when packets for the home region (or another region) have waited this long: the visit is not worth starving them.
@@ -358,23 +360,31 @@ where
         VISIT_LAST_MS.store(now(), Relaxed);
         HOME_WAITING_SINCE.store(0, Relaxed);
         VISITING.store(u32::from(region), Relaxed);
+        // a node sends to the destination's home relay, so for the peer to answer us while we are on `region` our home has to be `region`: advertised to the control plane
+        // (`PreferredDERP` of the next endpoint update), which pushes it to the peers
+        advertise_home(slot, region);
+        let started = now();
         VISIT.signal(Visit::Region { region, host, port });
         // stay while the region is used
         let why = loop {
             Timer::after_secs(2).await;
             let t = now();
-            let idle = t.wrapping_sub(VISIT_LAST_MS.load(Relaxed)) > X_VISIT_IDLE_MS;
+            let since_start = t.wrapping_sub(started);
+            let idle = t.wrapping_sub(VISIT_LAST_MS.load(Relaxed)) > VISIT_TIMING[0].load(Relaxed) && since_start >= VISIT_TIMING[1].load(Relaxed);
             let waiting = HOME_WAITING_SINCE.load(Relaxed);
             let starved = waiting != 0 && t.wrapping_sub(waiting) > X_STARVE_MS;
             let other_waiting = XQ.lock(|q| q.borrow().iter().any(|p| p.slot == idx as u8 && p.region != region && t.wrapping_sub(p.at_ms) > X_STARVE_MS));
             if idle {
                 break 6;
             }
-            if starved || other_waiting {
+            // starving packets end a visit, but not before the minimum: a visit that is cut at once settles nothing
+            if (starved || other_waiting) && since_start >= VISIT_TIMING[1].load(Relaxed) {
                 break 8;
             }
         };
         VISITING.store(0, Relaxed);
+        // the real home again, in the control plane and on the link
+        advertise_home(slot, HOME_REGION.load(Relaxed) as u16);
         VISIT.signal(Visit::Home);
         // what the visit did not send is gone with it (the region's packets would only go stale)
         let n = XQ.lock(|q| {
@@ -385,9 +395,22 @@ where
         });
         X_COUNTS[7].fetch_add(n as u32, Relaxed);
         X_LAST_END.store(why, Relaxed);
-        // the home region gets a turn before the next visit
-        Timer::after_secs(3).await;
+        // the home region gets a turn before the next visit (and its advertisement time to settle)
+        Timer::after_millis(u64::from(VISIT_TIMING[2].load(Relaxed))).await;
     }
+}
+/// Make `region` the home the member tells the control plane (the next endpoint update carries it as `PreferredDERP`).
+fn advertise_home<R: RawMutex>(slot: &crate::shared::Slot<R>, region: u16) {
+    if region == 0 {
+        return;
+    }
+    slot.update(|st| {
+        if st.home_derp != region {
+            st.home_derp = region;
+            st.eps_gen = st.eps_gen.wrapping_add(1);
+        }
+    });
+    slot.ctl_kick.signal(());
 }
 /// Why the last visit ended: 6 the region went idle, 8 other packets were starving.
 pub static X_LAST_END: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);

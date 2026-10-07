@@ -541,6 +541,8 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
             && let Some(n) = r.node_list().first()
         {
             m.rt.home_derp = r.region_id;
+            // the control plane has to know it (peers send to a node's home relay): not only after a netcheck moved it
+            cx.out.emit(Out::HomeDerp { member: id, region: r.region_id });
             cx.out.emit(Out::DerpConnect {
                 member: id,
                 region: r.region_id,

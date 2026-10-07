@@ -918,6 +918,13 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
         return;
     }
     let (_, _) = go.peer("gopeer").expect("peer");
+    // shorter visits for the test: idle 6 s, at least 8 s, 2 s before the next
+    use tdongle_tailnet_runtime::derp::VISIT_TIMING;
+    VISIT_TIMING[0].store(6000, Ordering::Relaxed);
+    VISIT_TIMING[1].store(8000, Ordering::Relaxed);
+    VISIT_TIMING[2].store(2000, Ordering::Relaxed);
+    let gw_key = go.ids().into_iter().find(|(n, _, _)| n.starts_with("tdongle")).map(|(_, _, k)| k).expect("the gateway's node key");
+    assert_eq!(go.home_derp(&gw_key), Some(home), "before the visit the control plane has our real home");
     gw.host.wait_dhcp(Duration::from_secs(10)).expect("dhcp");
     let alias = gw.host.resolve("gopeer.lab.tailnet", Duration::from_secs(30)).expect("dns");
     let echoed = gw.host.echo(alias, 7, b"across regions", Duration::from_secs(40));
@@ -934,10 +941,19 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
         );
     }
     assert_eq!(echoed.expect("echo to a peer homed on the other region"), b"across regions");
+    // the visit is on (it lasts at least 8 s): control has our visited region as home
+    wait_until("control to have our visited home", 6, || go.home_derp(&gw_key) == Some(peer_region));
     let (n, d) = gw.host.get_bytes(alias, 80, 256 * 1024, Duration::from_secs(60)).expect("download from a peer on the other region");
     assert_eq!(n, 256 * 1024);
     let (n2, d2) = gw.host.upload(alias, 9, 128 * 1024, Duration::from_secs(60)).expect("upload to a peer on the other region");
     assert_eq!(n2, 128 * 1024);
+    // while the link is on the peer's region our advertised home is that region: a node sends to the destination's home relay (tsnet also answers on the region a packet came
+    // in by, so this test alone would pass without it; the control plane's view of our home is what a peer that does not do that depends on)
+    let visiting = tdongle_tailnet_runtime::derp::VISITING.load(Ordering::Relaxed);
+    let _ = visiting;
+    // idle: the link comes home and the real home is advertised again
+    wait_until("the visit to end", 40, || tdongle_tailnet_runtime::derp::VISITING.load(Ordering::Relaxed) == 0);
+    wait_until("control to have our real home again", 15, || go.home_derp(&gw_key) == Some(home));
     use tdongle_tailnet_runtime::derp::X_COUNTS;
     let c: Vec<u32> = X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect();
     let (queued, sent, starts) = (c[0], c[1], c[5]);

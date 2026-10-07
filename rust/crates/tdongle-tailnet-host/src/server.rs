@@ -111,6 +111,11 @@ impl GoServer {
             .collect()
     }
 
+    /// The home DERP region the control server has for a node (what it tells the node's peers).
+    pub fn home_derp(&mut self, nodekey: &str) -> Option<u32> {
+        self.cmd(&format!("homederp {nodekey}")).strip_prefix("HOME ")?.parse().ok()
+    }
+
     /// The endpoints the control server has for a node.
     pub fn endpoints(&mut self, nodekey: &str) -> Vec<String> {
         let r = self.cmd(&format!("eps {nodekey}"));

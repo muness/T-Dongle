@@ -150,6 +150,17 @@ func main() {
 			} else {
 				fmt.Fprintln(out, "ERR no region")
 			}
+		case "homederp":
+			var nk key.NodePublic
+			if len(f) < 2 || nk.UnmarshalText([]byte(f[1])) != nil {
+				fmt.Fprintln(out, "ERR bad key")
+				break
+			}
+			if n := ctl.Node(nk); n != nil {
+				fmt.Fprintf(out, "HOME %d\n", n.HomeDERP)
+			} else {
+				fmt.Fprintln(out, "ERR no node")
+			}
 		case "inmap":
 			fmt.Fprintf(out, "INMAP %d\n", ctl.InServeMap())
 		case "await":
