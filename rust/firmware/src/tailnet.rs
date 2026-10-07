@@ -457,7 +457,7 @@ async fn refuse(sock: &mut embassy_net::tcp::TcpSocket<'_>, status: &str, messag
 async fn serve_one(sock: &mut embassy_net::tcp::TcpSocket<'_>, conn: &tdongle_setup::router::Conn) {
     use tdongle_setup::usb::{self, Answer, HeadError, Kind};
     // the request (head and body) lives in one heap buffer for the length of the request
-    const BUF: usize = usb::HEAD_MAX + usb::BODY_MAX;
+    const BUF: usize = usb::HEAD_MAX + usb::COMMAND_BODY_MAX;
     let mut buf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     if buf.try_reserve_exact(BUF).is_err() {
         refuse(sock, "503 Service Unavailable", "Out of memory").await;
@@ -466,7 +466,7 @@ async fn serve_one(sock: &mut embassy_net::tcp::TcpSocket<'_>, conn: &tdongle_se
     buf.resize(BUF, 0);
     let mut n = 0;
     let (head_len, ready) = loop {
-        match usb::parse_head(&buf[..n]).map(|(h, used)| (used, h.content_len.unwrap_or(0).min(usb::BODY_MAX))) {
+        match usb::parse_head(&buf[..n]).map(|(h, used)| (used, h.content_len.unwrap_or(0).min(usb::body_limit(&h)))) {
             Ok((used, body)) if n >= used + body => break (used, true),
             Ok(_) | Err(HeadError::Incomplete) => {}
             Err(HeadError::TooLarge) => return refuse(sock, "431 Request Header Fields Too Large", "Header fields are too long").await,
@@ -488,12 +488,23 @@ async fn serve_one(sock: &mut embassy_net::tcp::TcpSocket<'_>, conn: &tdongle_se
         Page,
         Status,
         Serial(String),
+        WifiScan,
+        // boxed: the future of this task is a static (two of them), the plan only lives on the heap for the request
+        Command(alloc::boxed::Box<usb::Plan>),
     }
-    let job = match usb::route(conn, &head, &buf[head_len..n]) {
-        Answer::Refuse(r) => return refuse(sock, r.status, r.message).await,
-        Answer::Page => Job::Page,
-        Answer::Status => Job::Status,
-        Answer::Serial(line) => Job::Serial(String::from(line)),
+    // decided in a plain function: the `Answer` (a `/command` plan is a few hundred bytes) must not be alive across the refusal's await, or it would
+    // live in this task's static future
+    let decide = || match usb::route(conn, &head, &buf[head_len..n]) {
+        Answer::Refuse(r) => Err(r),
+        Answer::Page => Ok(Job::Page),
+        Answer::Status => Ok(Job::Status),
+        Answer::Serial(line) => Ok(Job::Serial(String::from(line))),
+        Answer::WifiScan => Ok(Job::WifiScan),
+        Answer::Command(plan) => Ok(Job::Command(alloc::boxed::Box::new(plan))),
+    };
+    let job = match decide() {
+        Ok(job) => job,
+        Err(r) => return refuse(sock, r.status, r.message).await,
     };
     drop(buf); // the buffer (and the auth key or Wi-Fi password in it) is not kept while the reply is produced
     let mut h = String::new();
@@ -519,6 +530,9 @@ async fn serve_one(sock: &mut embassy_net::tcp::TcpSocket<'_>, conn: &tdongle_se
             send_all(sock, h.as_bytes()).await && send_all(sock, &body).await
         }
         Job::Serial(line) => serial_call(sock, line).await,
+        // boxed: their states (the dispatcher round trip, the JSON) live on the heap for the request, not in this task's static future
+        Job::WifiScan => alloc::boxed::Box::pin(wifi_scan_call(sock)).await,
+        Job::Command(plan) => alloc::boxed::Box::pin(command_call(sock, *plan)).await,
     };
     HTTP_SERVED.fetch_add(u32::from(ok), Ordering::Relaxed);
     let _ = sock.flush().await;
@@ -561,6 +575,105 @@ async fn serial_call(sock: &mut embassy_net::tcp::TcpSocket<'_>, line: String) -
             return false;
         }
         wait = Duration::from_millis(1500);
+    }
+}
+
+/// Run one console line through the dispatcher (as `POST /serial` does) and collect its whole reply: up to the end marker, or up to the `done>` that a
+/// restarting command's answer carries (the chip resets 300 ms after it, before any end marker). `None` when the console did not answer.
+async fn dispatch(line: &str) -> Option<String> {
+    let _one = with_timeout(Duration::from_secs(30), SERIAL_CALL.lock()).await.ok()?;
+    while crate::HTTP_OUT.try_receive().is_ok() {}
+    with_timeout(Duration::from_secs(3), crate::HTTP_LINE.send(String::from(line))).await.ok()?;
+    let mut reply = String::new();
+    let mut wait = Duration::from_secs(25); // `scan` is the slowest command
+    loop {
+        match with_timeout(wait, crate::HTTP_OUT.receive()).await {
+            Ok(piece) if piece.is_empty() => return Some(reply),
+            Ok(piece) => {
+                reply.push_str(&piece);
+                if reply.ends_with(tdongle_serial::reply::DONE) {
+                    return Some(reply);
+                }
+            }
+            Err(_) => return (!reply.is_empty()).then_some(reply),
+        }
+        wait = Duration::from_millis(1500);
+    }
+}
+
+async fn send_json(sock: &mut embassy_net::tcp::TcpSocket<'_>, status: &str, body: &[u8]) -> bool {
+    use tdongle_setup::usb::{self, Kind};
+    let mut h = String::new();
+    let _ = usb::write_head(&mut h, status, usb::JSON, Some(body.len()), Kind::Text);
+    send_all(sock, h.as_bytes()).await && send_all(sock, body).await
+}
+
+async fn send_outcome(sock: &mut embassy_net::tcp::TcpSocket<'_>, outcome: tdongle_setup::usb::Outcome<'_>) -> bool {
+    let mut body = String::new();
+    let status = tdongle_setup::usb::write_command_body(&mut body, outcome).unwrap_or("500 Internal Server Error");
+    send_json(sock, status, body.as_bytes()).await
+}
+
+/// `GET /wifi-scan` (C `wifi_scan`, USB origin): the console's `scan` through the dispatcher, then the C JSON of the table it filled.
+async fn wifi_scan_call(sock: &mut embassy_net::tcp::TcpSocket<'_>) -> bool {
+    use tdongle_setup::usb::{Outcome, text};
+    match dispatch("scan").await {
+        Some(r) if !r.starts_with("ERR") => {}
+        _ => return send_outcome(sock, Outcome::Fail(text::SCAN_FAILED)).await,
+    }
+    let mut rows: alloc::vec::Vec<([u8; 32], i32, bool)> = alloc::vec::Vec::new();
+    crate::scan_rows(|ssid, rssi, auth| {
+        // hidden networks are not listed (the C scans with show_hidden = false)
+        if ssid[0] != 0 && rows.try_reserve(1).is_ok() {
+            rows.push((*ssid, rssi, auth != 0));
+        }
+    });
+    let mut out: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    if out.try_reserve_exact(3200).is_err() {
+        return send_outcome(sock, Outcome::Fail("Out of memory returning Wi-Fi scan")).await;
+    }
+    out.resize(3200, 0);
+    let mut j = tdongle_setup::json::Json::new(&mut out);
+    tdongle_setup::usb::write_wifi_scan(&mut j, rows.iter().map(|(s, r, sec)| (&s[..s.iter().position(|&b| b == 0).unwrap_or(32)], *r, *sec)));
+    if j.overflowed() {
+        return send_outcome(sock, Outcome::Fail("Out of memory returning Wi-Fi scan")).await;
+    }
+    let len = j.bytes().len();
+    send_json(sock, "200 OK", &out[..len]).await
+}
+
+/// `POST /command` (C `command`, USB origin), as [`tdongle_setup::usb::command_plan`] decided it: `mode` and the membership actions run as their console lines
+/// through the dispatcher, `wifi` and `wifi_remove` through the settings worker that serves the console's `profile` and `del`.
+async fn command_call(sock: &mut embassy_net::tcp::TcpSocket<'_>, plan: tdongle_setup::usb::Plan) -> bool {
+    use tdongle_setup::usb::{Outcome, Plan, line_outcome, text};
+    if let Plan::Refuse(m) = plan {
+        return send_outcome(sock, Outcome::Fail(m)).await;
+    }
+    if crate::settings::STORE.lock().await.is_none() || crate::guard::safe_mode_now() {
+        return send_outcome(sock, Outcome::Fail(text::RECOVERY)).await;
+    }
+    match plan {
+        Plan::Refuse(m) | Plan::Fail(m) => send_outcome(sock, Outcome::Fail(m)).await,
+        Plan::Line(line, kind) => match dispatch(line.as_str()).await {
+            Some(reply) => send_outcome(sock, line_outcome(kind, &reply)).await,
+            None => send_outcome(sock, Outcome::Fail(text::BUSY)).await,
+        },
+        Plan::Wifi(w) => {
+            let save = crate::settings::WifiSave {
+                ssid: w.ssid.as_bytes().to_vec(),
+                password: w.password.as_bytes().to_vec(),
+                name: w.name.as_ref().map(|n| n.as_bytes().to_vec()),
+                priority: w.priority,
+                slot: w.slot,
+            };
+            drop(w);
+            let saved = crate::settings::call(crate::settings::Req::Wifi(alloc::boxed::Box::new(save))).await.0 == "OK";
+            send_outcome(sock, if saved { Outcome::Ok } else { Outcome::Fail(text::WIFI_NOT_SAVED) }).await
+        }
+        Plan::WifiRemove(ssid) => {
+            let removed = crate::settings::call(crate::settings::Req::WifiRemove(ssid.as_bytes().to_vec())).await.0 == "OK";
+            send_outcome(sock, if removed { Outcome::Ok } else { Outcome::Fail(text::WIFI_REMOVE_FAILED) }).await
+        }
     }
 }
 

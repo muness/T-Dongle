@@ -396,7 +396,7 @@ pub async fn run(
         embassy_futures::select::select(SCAN_REQ.wait(), crate::SCAN_REQ.wait()).await;
         let _ = crate::scan_all(&mut controller).await;
         let mut list = ScanList::new();
-        crate::scan_rows(|ssid, rssi, secure| list.offer(ssid, rssi, secure));
+        crate::scan_rows(|ssid, rssi, auth| list.offer(ssid, rssi, auth != 0));
         critical_section::with(|cs| *SCAN_LIST.borrow_ref_mut(cs) = list);
         SCANNED.store(true, Ordering::Relaxed);
         SCANNING.store(false, Ordering::Relaxed);

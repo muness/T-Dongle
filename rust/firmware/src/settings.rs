@@ -146,6 +146,77 @@ pub async fn make_preferred(slot0: i32) -> bool {
     true
 }
 
+/// `metadata JSON` (companion `control.c`): compare-and-set of one saved network's name and priority, and optionally the preference. SSID and password are not
+/// touched and nothing reassociates (the list is not republished: the link task keeps its network); a failed write leaves everything as it was.
+pub async fn metadata(json: &str) -> &'static str {
+    let Some(cur) = current() else { return reply::METADATA_INVALID };
+    let Some(meta) = tdongle_nvs_format::metadata_json::metadata_parse_json(json.as_bytes()).ok().and_then(|e| e.apply(&cur.saved, &cur.meta)) else {
+        return reply::METADATA_INVALID;
+    };
+    let mut g = STORE.lock().await;
+    let Some(store) = g.as_mut() else { return reply::METADATA_NOT_SAVED };
+    crate::guard::op("nvs_write");
+    let r = store.save_meta(&cur.saved, &meta);
+    crate::guard::op("");
+    if r.is_err() {
+        let _ = store.remount();
+        return reply::METADATA_NOT_SAVED;
+    }
+    crate::SAVED.lock(|c| *c.borrow_mut() = Some(Loaded { saved: cur.saved, meta }));
+    reply::METADATA_SAVED
+}
+
+#[cfg(feature = "tailnet")]
+/// `POST /command` `{"action":"wifi",...}` (tailnet mode's USB page): C `wifi_save_with(ssid, password, name, priority, false, slot)`, the same edit the setup
+/// page makes. False where the C returns false (list full, the SSID in another slot, a bad name or priority, or the write failed).
+pub async fn save_wifi(w: &WifiSave) -> bool {
+    let Some(cur) = current() else { return false };
+    let Some((list, meta)) = tdongle_saved::edit::save_with(&cur.saved, &cur.meta, &w.ssid, &w.password, w.name.as_deref(), w.priority, false, w.slot) else {
+        return false;
+    };
+    if save_networks(&list, &meta).await {
+        publish(Loaded { saved: list, meta });
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(feature = "tailnet")]
+/// `POST /command` `{"action":"wifi_remove","ssid":...}`: C `wifi_save_profile(ssid, "", true)`, by SSID (not by a slot number that could have moved).
+pub async fn remove_wifi(ssid: &[u8]) -> bool {
+    let Some(cur) = current() else { return false };
+    let Some((list, meta)) = tdongle_saved::edit::save_with(&cur.saved, &cur.meta, ssid, b"", None, -1, true, -1) else { return false };
+    if save_networks(&list, &meta).await {
+        publish(Loaded { saved: list, meta });
+        true
+    } else {
+        false
+    }
+}
+
+#[cfg(feature = "tailnet")]
+/// A Wi-Fi network to save from `POST /command`. The password is wiped when it is dropped.
+pub struct WifiSave {
+    /// SSID bytes (1 to 32).
+    pub ssid: alloc::vec::Vec<u8>,
+    /// Password bytes (0 to 63).
+    pub password: alloc::vec::Vec<u8>,
+    /// Display name, `None` for the default (or the slot's current one).
+    pub name: Option<alloc::vec::Vec<u8>>,
+    /// Priority 0 to 100, or -1 to keep the current or default one.
+    pub priority: i32,
+    /// 0-based slot, or -1 for the network's own slot or the next free one.
+    pub slot: i32,
+}
+
+#[cfg(feature = "tailnet")]
+impl Drop for WifiSave {
+    fn drop(&mut self) {
+        self.password.iter_mut().for_each(|b| *b = 0);
+    }
+}
+
 /// `display B R D` (already parsed).
 pub async fn display(settings: UiSettings) -> &'static str {
     let mut g = STORE.lock().await;
@@ -227,6 +298,14 @@ pub enum Req {
     ConfirmReset,
     /// `tn force-derp on|off`, kept in flash.
     ForceDerp(bool),
+    /// `metadata JSON`
+    Metadata(String),
+    #[cfg(feature = "tailnet")]
+    /// `POST /command` `wifi` (reply text `OK` or empty for a failure).
+    Wifi(alloc::boxed::Box<WifiSave>),
+    #[cfg(feature = "tailnet")]
+    /// `POST /command` `wifi_remove`: the SSID (reply text `OK` or empty).
+    WifiRemove(alloc::vec::Vec<u8>),
 }
 
 /// The reply text and whether to restart after sending it.
@@ -272,6 +351,11 @@ pub async fn task() -> ! {
                 (String::new(), false)
             }
             Req::Reset => (String::from(reset()), false),
+            Req::Metadata(j) => (String::from(metadata(&j).await), false),
+            #[cfg(feature = "tailnet")]
+            Req::Wifi(w) => (String::from(if save_wifi(&w).await { "OK" } else { "" }), false),
+            #[cfg(feature = "tailnet")]
+            Req::WifiRemove(ssid) => (String::from(if remove_wifi(&ssid).await { "OK" } else { "" }), false),
             Req::ConfirmReset => {
                 let (t, restart) = confirm_reset().await;
                 (String::from(t), restart)

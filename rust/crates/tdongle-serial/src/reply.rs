@@ -89,29 +89,118 @@ pub fn write_help<W: fmt::Write>(w: &mut W, tailnet: bool, memory_commands: &str
     }
 }
 
-/// The commands the phase 1 firmware implements, in the form `help` prints them. Every one parses (`Command::parse`) to something other than `Unknown`; a test keeps
-/// that true. The C `help` lists commands phase 1 answers with "not available yet", which a client reads as a promise.
-pub const PHASE1_FIRMWARE_COMMANDS: &[&str] = &[
+/// The `Commands:` line of the companion C firmware's `help` (`main/control.c`, branch `codex/test-firmware`), up to its extension list.
+///
+/// The Android app identifies supported firmware by `help` (`ManagementClient.identify`): it must contain
+/// `Commands: status, list, scan, use N, del N, profile `, `Profiles validate by association` and `bootloader`. Every command named here
+/// is implemented by the Rust firmware. One clause differs from the C text on purpose: the Rust `profile` saves at once (the unified 0.3 C
+/// semantics, reply `OK saved to slot N; setup stays open`) and the profile is then validated by the next association, with no 45 s trial
+/// reboot, and the sentence says so.
+pub const IDENTITY_COMMANDS: &str = "Commands: status, list, scan, use N, del N, profile \
+    {\"slot\":1,\"name\":\"Home\",\"ssid\":\"SSID\",\"password\":\"password\",\"priority\":50}, display BRIGHTNESS ROTATION DIM_SECONDS, \
+    setup, cancel, reset, confirm-reset, reboot, bootloader, setup N (preselect slot N). Profiles validate by association at the next join \
+    (no trial reboot). No console echo. Extensions: ";
+
+/// The commands of [`IDENTITY_COMMANDS`] in the form a client types them (a test keeps every one parsing to a real command).
+pub const IDENTITY_COMMAND_FORMS: &[&str] = &[
     "status",
     "list",
+    "scan",
     "use N",
     "del N",
     "profile JSON",
-    "scan",
-    "display [B R D]",
-    "setup [N]",
+    "display BRIGHTNESS ROTATION DIM_SECONDS",
+    "setup",
     "cancel",
     "reset",
     "confirm-reset",
-    "mode wifi_bridge",
-    "capabilities",
-    "pm",
-    "boot-status",
     "reboot",
     "bootloader",
-    "selftest spin|irqoff|panic|console|usb",
+    "setup N",
+];
+
+/// The extensions every Rust image implements: the companion's own four (`capabilities, preference, metadata JSON, display-settings`),
+/// then the unified 0.3 C commands the identity line does not name. One string, not a table of strings: a table of `&str` is relocated data,
+/// which this target keeps in DRAM ([`FIRMWARE_EXTENSIONS`] is the same list for tests).
+pub const EXTENSIONS: &str = "capabilities, preference, metadata JSON, display-settings, display, pm, boot-status, retry-startup, help";
+
+/// [`EXTENSIONS`] as a list (a test keeps the two equal and every entry parsing).
+pub const FIRMWARE_EXTENSIONS: &[&str] = &[
+    "capabilities",
+    "preference",
+    "metadata JSON",
+    "display-settings",
+    "display",
+    "pm",
+    "boot-status",
+    "retry-startup",
     "help",
 ];
+
+/// `help` of the Rust firmware: the product line of the unified C (`T-Dongle Wi-Fi bridge protocol=1` or `T-Dongle tailnet gateway
+/// protocol=1`), then [`IDENTITY_COMMANDS`], [`EXTENSIONS`], `more` (the image's own further commands, `, `-separated, each with its leading
+/// `, `) and a final `.`.
+///
+/// # Errors
+/// Whatever the sink returns.
+pub fn write_help_firmware<W: fmt::Write>(w: &mut W, tailnet: bool, more: &str) -> fmt::Result {
+    w.write_str(if tailnet { "T-Dongle tailnet gateway protocol=1\r\n" } else { "T-Dongle Wi-Fi bridge protocol=1\r\n" })?;
+    w.write_str(IDENTITY_COMMANDS)?;
+    w.write_str(EXTENSIONS)?;
+    w.write_str(more)?;
+    w.write_str(".\r\n")
+}
+
+/// `capabilities` of the Rust firmware, in the unified C's order, then the companion's (`metadata`, `display_readback`). `tailnet_running`
+/// adds `tailnet_gateway` first and drops `roaming_assist` (a bridge-mode feature), as the C does; `mode_switch` is advertised only by an
+/// image that can run both modes (a bridge-only build refuses `mode tailnet_gateway`).
+///
+/// # Errors
+/// Whatever the sink returns.
+pub fn write_capabilities_firmware<W: fmt::Write>(w: &mut W, tailnet_running: bool, mode_switch: bool) -> fmt::Result {
+    w.write_str("capabilities schema=1 features=")?;
+    if tailnet_running {
+        w.write_str("tailnet_gateway,")?;
+    }
+    w.write_str("boot_diagnostics,")?;
+    if mode_switch {
+        w.write_str("mode_switch,")?;
+    }
+    w.write_str("chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings,")?;
+    if !tailnet_running {
+        w.write_str("roaming_assist,")?;
+    }
+    w.write_str("metadata,display_readback\r\n")
+}
+
+/// `display-settings` (companion `control.c`): `display-settings brightness=%u rotation=%u dim_seconds=%u`.
+///
+/// # Errors
+/// Whatever the sink returns.
+pub fn write_display_settings<W: fmt::Write>(w: &mut W, brightness: u8, rotation: u8, dim_seconds: u16) -> fmt::Result {
+    emit(w, &mut [0; 96], format_args!("display-settings brightness={brightness} rotation={rotation} dim_seconds={dim_seconds}\r\n"))
+}
+
+/// `preference` (companion `control.c`): `preferred=%d`, the 1-based preferred slot, 0 when none is set or it names no saved network.
+///
+/// # Errors
+/// Whatever the sink returns.
+pub fn write_preference<W: fmt::Write>(w: &mut W, preferred_zero_based: Option<usize>, saved_count: usize) -> fmt::Result {
+    let n = preferred_zero_based.filter(|&p| p < saved_count).map_or(0, |p| p + 1);
+    emit(w, &mut [0; 32], format_args!("preferred={n}\r\n"))
+}
+
+/// `metadata` during setup (C: also during a trial).
+pub const METADATA_UNAVAILABLE: &str = "ERR metadata unavailable during setup/trial\r\n";
+/// `metadata` that does not parse, or whose expected identity no longer matches.
+pub const METADATA_INVALID: &str = "ERR metadata invalid or profile changed; refresh\r\n";
+/// `metadata` valid but not stored (the in-memory copy is unchanged).
+pub const METADATA_NOT_SAVED: &str = "ERR metadata not saved\r\n";
+/// `metadata` stored.
+pub const METADATA_SAVED: &str = "OK metadata saved; association unchanged\r\n";
+
+/// The fixed replies of the companion C firmware (`main/control.c`, branch `codex/test-firmware`); not part of [`ALL_FIXED`], which is the unified C.
+pub const COMPANION_FIXED: &[&str] = &[METADATA_UNAVAILABLE, METADATA_INVALID, METADATA_NOT_SAVED, METADATA_SAVED];
 
 /// The commands of the S3 spike (`status` and `list` are the C replies; the rest are spike tools).
 pub const SPIKE_S3_COMMANDS: &[&str] =

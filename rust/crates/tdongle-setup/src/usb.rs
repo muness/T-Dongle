@@ -10,6 +10,11 @@
 //! an answer or preflight a request. `POST /serial` additionally needs an `Origin` header (a browser always sends one on a POST), the
 //! non-safelisted `Content-Type: application/x-tdongle-command` (a cross-site form cannot send it, a cross-site `fetch` needs a preflight
 //! this server refuses) and a command from the [`command_allowed`] list.
+//!
+//! The C USB page's own endpoints are served too, because the Android app's tailnet setup view proxies exactly those (`GET /status`,
+//! `GET /wifi-scan`, `POST /command`): [`command_plan`] decides a `/command` body with the C handler's checks and texts, in its order, and
+//! turns every action that has a console form (`mode`, `add`, `enable`, `remove`) into that console line, so it runs through the same dispatcher
+//! as `/serial` and the serial console; `wifi` and `wifi_remove` go to the settings worker the console's `profile` and `del` use.
 
 use crate::access::{self, Facts, Origin};
 use crate::router::Conn;
@@ -23,6 +28,16 @@ pub const COMMAND_TYPE: &[u8] = b"application/x-tdongle-command";
 pub const HEAD_MAX: usize = 1536;
 /// The largest command line (a `profile` line is at most 511 bytes).
 pub const BODY_MAX: usize = 640;
+/// The largest `/command` body (the C refuses `content_len > 1024`).
+pub const COMMAND_BODY_MAX: usize = 1024;
+/// The most networks `/wifi-scan` lists (C `WIFI_SCAN_RESULT_LIMIT`).
+pub const SCAN_RESULT_LIMIT: usize = 12;
+
+/// How many body bytes to read for a request with this head.
+#[must_use]
+pub fn body_limit(head: &Head<'_>) -> usize {
+    if head.path == b"/command" { COMMAND_BODY_MAX } else { BODY_MAX }
+}
 /// The page's Content-Security-Policy.
 pub const CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; frame-ancestors 'none'";
 
@@ -140,7 +155,7 @@ pub fn parse_head(buf: &[u8]) -> Result<(Head<'_>, usize), HeadError> {
 }
 
 /// What a request resolved to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer<'a> {
     /// `GET /`: the page.
     Page,
@@ -148,6 +163,10 @@ pub enum Answer<'a> {
     Status,
     /// `POST /serial`: run this line through the console dispatcher and send its reply as is.
     Serial(&'a str),
+    /// `GET /wifi-scan`: run `scan` through the dispatcher, then answer [`write_wifi_scan`] from the scan table.
+    WifiScan,
+    /// `POST /command`: what [`command_plan`] decided.
+    Command(Plan),
     /// Refused.
     Refuse(Refusal),
 }
@@ -175,8 +194,8 @@ pub fn command_allowed(line: &str) -> bool {
     if line.is_empty() || line.len() > tdongle_serial::console::LINE_CHARS_MAX || !line.bytes().all(|b| (32..=126).contains(&b)) {
         return false;
     }
-    matches!(line, "status" | "list" | "scan" | "tailnet-status" | "help" | "capabilities" | "display" | "reboot")
-        || ["display ", "use ", "del ", "profile {", "mode ", "member "].iter().any(|p| line.starts_with(p))
+    matches!(line, "status" | "list" | "scan" | "tailnet-status" | "help" | "capabilities" | "display" | "reboot" | "display-settings" | "preference")
+        || ["display ", "use ", "del ", "profile {", "mode ", "member ", "metadata {"].iter().any(|p| line.starts_with(p))
 }
 
 /// Decide what a request gets. `body` is what was read after the head.
@@ -190,7 +209,9 @@ pub fn route<'a>(conn: &Conn, head: &Head<'_>, body: &'a [u8]) -> Answer<'a> {
         (b"/", Method::Get) => Answer::Page,
         (b"/status", Method::Get) => Answer::Status,
         (b"/serial", Method::Post) => serial(head, body),
-        (b"/" | b"/status" | b"/serial", _) => refuse("405 Method Not Allowed", "Method not allowed"),
+        (b"/wifi-scan", Method::Get) => Answer::WifiScan,
+        (b"/command", Method::Post) => Answer::Command(command_plan(head, body)),
+        (b"/" | b"/status" | b"/serial" | b"/wifi-scan" | b"/command", _) => refuse("405 Method Not Allowed", "Method not allowed"),
         _ => refuse("404 Not Found", "Not found"),
     }
 }
@@ -242,6 +263,280 @@ pub fn write_head(out: &mut dyn fmt::Write, status: &str, content_type: &str, le
         _ => write!(out, "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'\r\n")?,
     }
     write!(out, "Connection: close\r\n\r\n")
+}
+
+/// Up to `N` bytes held by value (a [`Plan`] outlives the request buffer it was decided from).
+#[derive(Clone, PartialEq, Eq)]
+pub struct Text<const N: usize> {
+    bytes: [u8; N],
+    len: usize,
+}
+
+impl<const N: usize> Text<N> {
+    fn new() -> Self {
+        Self { bytes: [0; N], len: 0 }
+    }
+    /// `None` if `b` does not fit.
+    #[must_use]
+    pub fn from(b: &[u8]) -> Option<Self> {
+        let mut t = Self::new();
+        t.push(b).then_some(t)
+    }
+    fn push(&mut self, b: &[u8]) -> bool {
+        if self.len + b.len() > N {
+            return false;
+        }
+        self.bytes[self.len..self.len + b.len()].copy_from_slice(b);
+        self.len += b.len();
+        true
+    }
+    /// The bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.bytes[..self.len]
+    }
+    /// The bytes as text (lines built here are ASCII).
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        core::str::from_utf8(self.as_bytes()).unwrap_or("")
+    }
+}
+
+impl<const N: usize> fmt::Debug for Text<N> {
+    // a Wi-Fi password or an auth key may be in here: never print the bytes
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Text({} bytes)", self.len)
+    }
+}
+
+impl<const N: usize> Drop for Text<N> {
+    fn drop(&mut self) {
+        self.bytes.iter_mut().for_each(|b| *b = 0);
+    }
+}
+
+/// The texts of the C `command()` handler (`alternative/tailnet/main/gateway_main.c`) that this module answers itself.
+pub mod text {
+    /// `Content-Type` is not exactly `application/json`.
+    pub const JSON_REQUIRED: &str = "JSON required";
+    /// No body, or more than 1024 bytes.
+    pub const TOO_LARGE: &str = "Request is too large";
+    /// Fewer bytes than `Content-Length`.
+    pub const INCOMPLETE: &str = "Incomplete request";
+    /// `cJSON_Parse` refused the body.
+    pub const INVALID_JSON: &str = "Invalid JSON";
+    /// No such action.
+    pub const UNKNOWN_ACTION: &str = "Unknown action";
+    /// Settings unusable, or a crash-loop recovery boot.
+    pub const RECOVERY: &str = "Recovery mode: settings are preserved. Use Restart services in the app after saving diagnostics.";
+    /// `mode` with a value that is not a mode name.
+    pub const MODE_CHOOSE: &str = "Choose Wi-Fi bridge or tailnet gateway";
+    /// `mode` that could not be stored.
+    pub const MODE_NOT_SAVED: &str = "Mode could not be saved; current mode remains active";
+    /// `setup_done` outside setup (always, here: this server does not run in a setup boot).
+    pub const SETUP_NOT_RUNNING: &str = "Setup is not running";
+    /// `wifi_remove` that found nothing to remove or could not store the list.
+    pub const WIFI_REMOVE_FAILED: &str = "Could not remove that saved network";
+    /// `wifi` whose save failed.
+    pub const WIFI_NOT_SAVED: &str = crate::router::WIFI_NOT_SAVED;
+    /// `add`: label missing, empty or over 20 bytes, or a key of 160 bytes or more.
+    pub const ADD_INPUT: &str = "Use a short label and valid auth key";
+    /// `add`: a label character that is not a letter, digit or hyphen.
+    pub const LABEL_CHARS: &str = "Labels use letters, numbers and hyphens";
+    /// `enable` / `remove` with an id no membership has.
+    pub const NOT_FOUND: &str = "Membership not found";
+    /// The member worker did not answer.
+    pub const BUSY: &str = "Memberships are busy; retry shortly";
+    /// `/wifi-scan` whose scan did not complete.
+    pub const SCAN_FAILED: &str = "The dongle could not scan for Wi-Fi. Try again.";
+}
+
+/// Which console command a [`Plan::Line`] runs, for reading its reply ([`line_outcome`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineKind {
+    /// `mode NAME`
+    Mode,
+    /// `member ...` (its reply is already the C `/command` JSON)
+    Member,
+}
+
+/// A `wifi` action, validated ([`crate::router::wifi_fields`] for the USB origin).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WifiPlan {
+    /// SSID.
+    pub ssid: Text<32>,
+    /// Password.
+    pub password: Text<63>,
+    /// Name, `None` for the default.
+    pub name: Option<Text<24>>,
+    /// Priority, -1 for the default.
+    pub priority: i32,
+    /// 0-based slot, -1 for the network's own or the next free one.
+    pub slot: i32,
+}
+
+/// What a `/command` body asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Plan {
+    /// Refused before the C takes its lock (content type, size, JSON, action name): answer this, whatever the settings state.
+    Refuse(&'static str),
+    /// Refused by the action's own checks (the C answers [`text::RECOVERY`] first when the settings are unusable).
+    Fail(&'static str),
+    /// Run this console line through the dispatcher, then [`line_outcome`].
+    Line(Text<200>, LineKind),
+    /// `wifi`: `wifi_save_with(...)`.
+    Wifi(WifiPlan),
+    /// `wifi_remove`: delete the saved network with this SSID.
+    WifiRemove(Text<32>),
+}
+
+/// The membership id of an `enable` / `remove`: C compares `m->id == id->valuedouble`, so only a number equal to a possible id names one.
+fn member_id(v: crate::json::Val) -> Option<u32> {
+    let crate::json::Val::Num(d) = v else { return None };
+    (d >= 1.0 && d <= f64::from(u32::MAX) && d == f64::from(d as u32)).then_some(d as u32)
+}
+
+/// Decide a `POST /command` (USB origin) with the C `command()` handler's checks, in its order.
+#[must_use]
+pub fn command_plan(head: &Head<'_>, body: &[u8]) -> Plan {
+    use crate::access::Action;
+    if head.content_type != Some(b"application/json") {
+        return Plan::Refuse(text::JSON_REQUIRED);
+    }
+    let Some(len) = head.content_len.filter(|n| (1..=COMMAND_BODY_MAX).contains(n)) else { return Plan::Refuse(text::TOO_LARGE) };
+    if body.len() < len {
+        return Plan::Refuse(text::INCOMPLETE);
+    }
+    let Some(f) = crate::json::parse(&body[..len]) else { return Plan::Refuse(text::INVALID_JSON) };
+    let line = |parts: &[&[u8]], kind| {
+        let mut t = Text::<200>::new();
+        for p in parts {
+            if !t.push(p) {
+                return Plan::Fail(text::ADD_INPUT);
+            }
+        }
+        Plan::Line(t, kind)
+    };
+    match access::parse_action(f.string(f.action)) {
+        Action::Unknown => Plan::Refuse(text::UNKNOWN_ACTION),
+        Action::SetupDone => Plan::Fail(text::SETUP_NOT_RUNNING),
+        Action::Mode => match f.string(f.mode) {
+            Some(m @ (b"wifi_bridge" | b"tailnet_gateway")) => line(&[b"mode ", m], LineKind::Mode),
+            _ => Plan::Fail(text::MODE_CHOOSE),
+        },
+        Action::Wifi => match crate::router::wifi_fields(Origin::Usb, &f, |_, _| false) {
+            Err(m) => Plan::Fail(m),
+            Ok(w) => match (Text::from(w.ssid), Text::from(w.password), w.name.map(Text::from)) {
+                (Some(ssid), Some(password), None) => Plan::Wifi(WifiPlan { ssid, password, name: None, priority: w.priority, slot: w.slot }),
+                (Some(ssid), Some(password), Some(Some(n))) => Plan::Wifi(WifiPlan { ssid, password, name: Some(n), priority: w.priority, slot: w.slot }),
+                _ => Plan::Fail(text::WIFI_NOT_SAVED),
+            },
+        },
+        Action::WifiRemove => match f.string(f.ssid).and_then(Text::from) {
+            Some(ssid) if !ssid.as_bytes().is_empty() => Plan::WifiRemove(ssid),
+            _ => Plan::Fail(text::WIFI_REMOVE_FAILED),
+        },
+        Action::Add => {
+            let label = f.string(f.label).unwrap_or(b"");
+            let key = f.string(f.key).unwrap_or(b"");
+            if label.is_empty() || label.len() > 20 || key.len() >= 160 {
+                return Plan::Fail(text::ADD_INPUT);
+            }
+            if !label.iter().all(|b| b.is_ascii_alphanumeric() || *b == b'-') {
+                return Plan::Fail(text::LABEL_CHARS);
+            }
+            // the console line cannot carry a key with a space or a control byte (no auth key has one)
+            if !key.iter().all(|b| (33..=126).contains(b)) {
+                return Plan::Fail(text::ADD_INPUT);
+            }
+            if key.is_empty() { line(&[b"member add ", label], LineKind::Member) } else { line(&[b"member add ", label, b" ", key], LineKind::Member) }
+        }
+        Action::Remove | Action::Enable => {
+            let Some(id) = member_id(f.id) else { return Plan::Fail(text::NOT_FOUND) };
+            let mut digits = Text::<10>::new();
+            let _ = fmt::Write::write_fmt(&mut TextWriter(&mut digits), format_args!("{id}"));
+            let verb: &[u8] = match (access::parse_action(f.string(f.action)), f.enabled) {
+                (Action::Remove, _) => b"member remove ",
+                (_, crate::json::Val::True) => b"member enable ",
+                _ => b"member disable ",
+            };
+            line(&[verb, digits.as_bytes()], LineKind::Member)
+        }
+    }
+}
+
+struct TextWriter<'t, const N: usize>(&'t mut Text<N>);
+
+impl<const N: usize> fmt::Write for TextWriter<'_, N> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        if self.0.push(s.as_bytes()) { Ok(()) } else { Err(fmt::Error) }
+    }
+}
+
+/// How a [`Plan::Line`]'s console reply reads as a `/command` answer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome<'r> {
+    /// `{"ok":true}`.
+    Ok,
+    /// `{"ok":false,"error":...}` with this text.
+    Fail(&'static str),
+    /// The reply already is the C body (a `member` command): send it, 200 if it is `{"ok":true}`, 400 otherwise.
+    Body(&'r str),
+}
+
+/// Read a console reply as the C `/command` answer.
+#[must_use]
+pub fn line_outcome(kind: LineKind, reply: &str) -> Outcome<'_> {
+    match kind {
+        LineKind::Mode if reply.starts_with("OK mode saved") => Outcome::Ok,
+        LineKind::Mode if reply == tdongle_serial::reply::MODE_INVALID => Outcome::Fail(text::MODE_CHOOSE),
+        LineKind::Mode => Outcome::Fail(text::MODE_NOT_SAVED),
+        LineKind::Member => match reply.trim_end() {
+            b if b.starts_with("{\"ok\":") => Outcome::Body(b),
+            _ => Outcome::Fail(text::BUSY),
+        },
+    }
+}
+
+/// A reply body: `{"ok":true}` (200) or `{"ok":false,"error":"..."}` (400), as `cJSON_PrintUnformatted` writes them. Returns the status line.
+///
+/// # Errors
+/// Only the writer's.
+pub fn write_command_body(out: &mut dyn fmt::Write, outcome: Outcome<'_>) -> Result<&'static str, fmt::Error> {
+    match outcome {
+        Outcome::Ok => out.write_str("{\"ok\":true}").map(|()| "200 OK"),
+        Outcome::Fail(m) => {
+            out.write_str("{\"ok\":false,\"error\":\"")?;
+            for c in m.chars() {
+                match c {
+                    '"' => out.write_str("\\\"")?,
+                    '\\' => out.write_str("\\\\")?,
+                    c => out.write_char(c)?,
+                }
+            }
+            out.write_str("\"}").map(|()| "400 Bad Request")
+        }
+        Outcome::Body(b) => out.write_str(b).map(|()| if b == "{\"ok\":true}" { "200 OK" } else { "400 Bad Request" }),
+    }
+}
+
+/// The `/wifi-scan` body of the C USB page (`wifi_scan` in `gateway_main.c`): `{"networks":[{"ssid":..,"rssi":..,"secure":..},...],"ok":true,
+/// "count":N,"truncated":B}` with at most [`SCAN_RESULT_LIMIT`] networks in the order given (strongest first) and `truncated` when the scan found
+/// more. `rows` are (SSID, RSSI, not open); hidden networks are the caller's to leave out (the C scans with `show_hidden = false`).
+pub fn write_wifi_scan<'s>(j: &mut crate::json::Json<'_>, rows: impl Iterator<Item = (&'s [u8], i32, bool)>) {
+    j.raw(b"{\"networks\":[");
+    let mut total = 0usize;
+    for (ssid, rssi, secure) in rows {
+        if total < SCAN_RESULT_LIMIT {
+            if total > 0 {
+                j.raw(b",");
+            }
+            j.raw(b"{\"ssid\":").string(ssid).raw(b",\"rssi\":").int(i64::from(rssi)).raw(b",\"secure\":").boolean(secure).raw(b"}");
+        }
+        total += 1;
+    }
+    let count = total.min(SCAN_RESULT_LIMIT);
+    j.raw(b"],\"ok\":true,\"count\":").int(count as i64).raw(b",\"truncated\":").boolean(total > count).raw(b"}");
 }
 
 /// The content type of a serial reply and of `/status`.

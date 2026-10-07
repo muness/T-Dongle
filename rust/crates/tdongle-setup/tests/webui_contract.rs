@@ -71,7 +71,7 @@ fn http_line(line: &str) -> Result<String, String> {
 
 /// Lines the dispatcher handles before `Command::parse` (firmware `handle`, and the tailnet gateway's `tailnet::console`).
 fn dispatcher_special(line: &str) -> bool {
-    matches!(line, "heap" | "heap on" | "heap off" | "boot-status" | "init" | "normal" | "bootloader" | "tailnet-status" | "selftest flash")
+    matches!(line, "heap" | "heap on" | "heap off" | "boot-status" | "init" | "normal" | "bootloader" | "tailnet-status" | "selftest flash" | "scan-detail")
         || ["selftest ", "member ", "usbwatch enforce "].iter().any(|p| line.starts_with(p))
 }
 
@@ -118,7 +118,7 @@ fn every_allowlisted_prefix_has_a_contract_entry() {
     // the allowlist's shapes, each must be covered by at least one `both` exemplar
     let both: Vec<String> = contract().into_iter().filter(|e| e.kind == "both").map(|e| e.exemplar).collect();
     for shape in
-        ["status", "list", "scan", "tailnet-status", "help", "capabilities", "display", "reboot", "display ", "use ", "del ", "profile {", "mode ", "member "]
+        ["status", "list", "scan", "tailnet-status", "help", "capabilities", "display", "reboot", "display-settings", "preference", "display ", "use ", "del ", "profile {", "mode ", "member ", "metadata {"]
     {
         assert!(
             both.iter().any(|b| b == shape || (shape.ends_with([' ', '{']) && b.starts_with(shape))),

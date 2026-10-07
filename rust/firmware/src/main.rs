@@ -1468,7 +1468,21 @@ async fn out(w: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, s: &str, tim
     let _ = with_timeout(Duration::from_millis(timeout_ms), g.write_all(s.as_bytes())).await;
 }
 
-/// `scan`: every access point of the last scan, strongest first (C `scan` prints `ssid= rssi= auth=`; the BSSID and channel are added), then a summary.
+/// `scan`: the C reply (`serial_scan` of the unified C): at most 12 access points of the last scan, strongest first, one `ssid=%s rssi=%d auth=%d` line each
+/// (the Android app's `ScanNetwork.parse` takes nothing else on a line). Hidden networks are left out (the C scans with `show_hidden = false`), and so is
+/// a row whose security the driver did not report (the app refuses an `auth` it does not know).
+fn scan_text_c(out: &mut String) {
+    let mut listed = 0;
+    scan_rows(|ssid, rssi, auth| {
+        if listed == 12 || ssid[0] == 0 || auth == 0xff {
+            return;
+        }
+        listed += 1;
+        let _ = reply::write_scan_line(out, ssid, rssi as i8, i32::from(auth));
+    });
+}
+
+/// `scan-detail`: every access point of the last scan, strongest first, with BSSID, channel and whether it is usable, then a summary.
 fn scan_text(out: &mut String) {
     // One row is copied out of the table at a time: formatting (which allocates) happens outside any critical section.
     let (count, seen, seq, joined) = critical_section::with(|cs| {
@@ -1503,15 +1517,15 @@ fn scan_text(out: &mut String) {
     let _ = write!(out, "scan_done seen={} listed={} seq={}\r\n", seen, count, seq);
 }
 
-/// The rows of the last scan as the setup page lists them: SSID (32 byte field), signal, not open.
-fn scan_rows(mut f: impl FnMut(&[u8; 32], i32, bool)) {
+/// The rows of the last scan, strongest first: SSID (32 byte field), signal, the driver's auth mode (`wifi_auth_mode_t` numbering, 0 open, 0xff unknown).
+pub(crate) fn scan_rows(mut f: impl FnMut(&[u8; 32], i32, u8)) {
     let n = critical_section::with(|cs| SCAN_TABLE.borrow_ref(cs).count);
     for i in 0..n {
         let row = critical_section::with(|cs| SCAN_TABLE.borrow_ref(cs).rows[i]);
         let mut ssid = [0u8; 32];
         let len = usize::from(row.ssid_len).min(32);
         ssid[..len].copy_from_slice(&row.ssid[..len]);
-        f(&ssid, i32::from(row.bss.rssi), row.auth != 0);
+        f(&ssid, i32::from(row.bss.rssi), row.auth);
     }
 }
 
@@ -1873,11 +1887,13 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
                 None => s.push_str("usage: usb bridge|sink|source RATE_KBPS|max\r\n"),
             }
         }
-        "scan" => {
+        "scan" | "scan-detail" => {
             SCAN_DONE.reset();
             SCAN_REQ.signal(());
             if with_timeout(Duration::from_secs(20), SCAN_DONE.wait()).await.is_err() {
                 s.push_str("ERR scan did not finish (radio not started?)\r\n");
+            } else if line == "scan" {
+                scan_text_c(&mut s);
             } else {
                 scan_text(&mut s);
             }
@@ -1953,10 +1969,39 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
                 }
             }
             Command::Help => {
-                let _ = reply::write_help_implemented(&mut s, "T-Dongle Wi-Fi bridge", reply::PHASE1_FIRMWARE_COMMANDS);
+                // the identity line the Android app checks, then every other command this image implements
+                let more = match (cfg!(feature = "tailnet"), tailnet_active()) {
+                    (_, true) => ", mode wifi_bridge|tailnet_gateway, tailnet-status, member add LABEL [KEY]|enable ID|disable ID|remove ID",
+                    (true, false) => ", mode wifi_bridge|tailnet_gateway",
+                    (false, _) => ", mode wifi_bridge",
+                };
+                let _ = reply::write_help_firmware(&mut s, tailnet_active(), more);
             }
             Command::Capabilities => {
-                let _ = reply::write_capabilities_implemented(&mut s, &["boot_diagnostics", "power_report"]);
+                // what this image implements: the unified C's list, `mode_switch` only where both modes exist, and the companion's metadata and display read-back
+                let _ = reply::write_capabilities_firmware(&mut s, tailnet_active(), cfg!(feature = "tailnet"));
+            }
+            Command::DisplaySettings => {
+                let d = critical_section::with(|cs| STORED.borrow(cs).get()).map(|x| x.display).unwrap_or_default();
+                let _ = reply::write_display_settings(&mut s, d.brightness, d.rotation, d.dim_seconds);
+            }
+            Command::Preference => {
+                let (preferred, count) = SAVED.lock(|c| c.borrow().as_ref().map_or((None, 0), |l| (l.meta.preferred, l.saved.count)));
+                let _ = reply::write_preference(&mut s, preferred, count);
+            }
+            Command::Metadata(_) if setup::ACTIVE.load(Ordering::Relaxed) => s.push_str(reply::METADATA_UNAVAILABLE),
+            Command::Metadata(json) => s.push_str(&settings::call(settings::Req::Metadata(String::from(json))).await.0),
+            Command::RetryStartup => {
+                // C `gateway_boot_retry`: keep the crash evidence, reset the recovery guard, restart. The evidence of the previous failure is already in flash
+                // (`settings::persist_diagnosis` at boot, printed by `status` as `last_diag`); without a mounted store it could not have been kept.
+                if settings::STORE.lock().await.is_none() {
+                    s.push_str(reply::RETRY_STARTUP_FAILED);
+                } else {
+                    guard::leave_safe_mode();
+                    emit(wr, reply::RETRY_STARTUP_OK, 500).await;
+                    Timer::after(Duration::from_millis(300)).await;
+                    crate::guard::planned_reset()
+                }
             }
             Command::List => {
                 SAVED.lock(|c| {
@@ -2052,7 +2097,7 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
                 crate::guard::planned_reset()
             }
             _ => {
-                let _ = reply::write_unknown(&mut s, false);
+                let _ = reply::write_unknown(&mut s, tailnet_active());
             }
         },
     }

@@ -12,6 +12,11 @@
 # EXEMPLAR is one concrete line; the Rust test (tdongle-setup/tests/webui_contract.rs) and rust/webui/test.mjs both run it.
 #
 # Checked by: cargo test -p tdongle-setup --test webui_contract, and node rust/webui/test.mjs.
+#
+# The C USB page's endpoints are served beside /serial (the Android app's tailnet setup view proxies only GET /status, GET /wifi-scan
+# and POST /command): GET /wifi-scan runs `scan` through the same dispatcher and answers the C JSON from the table it filled; POST /command
+# (application/json, the C actions) runs `mode NAME` and `member ...` as those console lines through the same dispatcher, and `wifi` /
+# `wifi_remove` through the settings worker the console's `profile` / `del` use (tdongle_setup::usb::command_plan; tests/usb_command.rs).
 
 both   | status                                     | status                     | web UI poll; the Android app; carries chip_temperature (the temperature reading)
 both   | list                                       | list                       | web UI poll; the Android app
@@ -32,6 +37,9 @@ both   | member (enable|disable|remove) [1-9]\d*    | member enable 3           
 both   | member (enable|disable|remove) [1-9]\d*    | member disable 3           | web UI Disconnect
 both   | member (enable|disable|remove) [1-9]\d*    | member remove 3            | web UI Remove
 both   | reboot                                     | reboot                     | web UI Restart
+both   | display-settings                           | display-settings           | the Android app (capability display_readback)
+both   | preference                                 | preference                 | the Android app (capability metadata)
+both   | metadata \{.*\}                            | metadata {"slot":1,"expectedName":"Home","expectedSsid":"Home","expectedPriority":50,"name":"Home 2","priority":60,"preferred":true} | the Android app: name, priority, preference of a saved network
 
 serial | -                                          | selftest flash             | erases and programs the last sector of the peerstore partition (bench diagnostic, rust/port)
 serial | -                                          | selftest panic             | breaks the image on purpose (rescue proof)
@@ -42,6 +50,8 @@ serial | -                                          | selftest usb              
 serial | -                                          | bootloader                 | ROM download mode (the Android app's flasher, over USB serial)
 serial | -                                          | normal                     | leaves safe mode with a reset
 serial | -                                          | boot-status                | the Android app's boot diagnostics (USB serial)
+serial | -                                          | retry-startup              | the Android app's "Restart services" (USB serial): resets the recovery guard and restarts
+serial | -                                          | scan-detail                | scan with BSSID, channel and usability per access point (bench diagnostic)
 serial | -                                          | reset                      | factory reset, step one
 serial | -                                          | confirm-reset              | factory reset, step two
 serial | -                                          | setup                      | restarts into the setup access point

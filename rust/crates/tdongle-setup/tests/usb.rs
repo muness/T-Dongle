@@ -44,6 +44,8 @@ fn answer(conn: &Conn, raw: &[u8]) -> String {
         Answer::Status => "status".into(),
         Answer::Serial(l) => format!("serial:{l}"),
         Answer::Refuse(r) => r.status[..3].to_string(),
+        Answer::WifiScan => "wifi-scan".into(),
+        Answer::Command(_) => "command".into(),
     }
 }
 
@@ -124,6 +126,9 @@ fn allowlist() {
         "member remove 2",
         "reboot",
         "profile {\"slot\":2}",
+        "display-settings",
+        "preference",
+        "metadata {\"slot\":1}",
     ] {
         assert!(usb::command_allowed(ok), "{ok}");
     }
@@ -147,6 +152,10 @@ fn allowlist() {
         "Status",
         " status",
         "reboot now",
+        "retry-startup",
+        "boot-status",
+        "metadata",
+        "preference ",
     ] {
         assert!(!usb::command_allowed(no), "{no:?}");
     }
