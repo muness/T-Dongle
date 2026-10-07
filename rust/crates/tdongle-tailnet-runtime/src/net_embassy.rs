@@ -77,6 +77,13 @@ impl Windows {
     pub const fn per_member(&self) -> usize {
         self.ctl_rx + self.ctl_tx + self.derp_rx + self.derp_tx + self.udp_rx + self.udp_tx
     }
+    /// The windows of every membership after the first: the second tailnet's relay idles on 8 KB instead of 18 KB and its UDP rings hold four datagrams
+    /// instead of eight (members-2 diet, step 1). The first membership keeps [`Windows::GATEWAY`], and with one membership nothing changes.
+    pub const SECONDARY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 6144, derp_tx: 2048, udp_rx: 4800, udp_tx: 1600, dns: 1536 };
+    /// The windows of membership slot `slot`.
+    pub const fn for_slot(slot: usize) -> Windows {
+        if slot == 0 { Self::GATEWAY } else { Self::SECONDARY }
+    }
     /// Bytes the gateway's DNS forwarder holds while it is bound.
     pub const fn gateway(&self) -> usize {
         2 * self.dns
@@ -258,12 +265,13 @@ impl Net for EmbassyNet {
         if slot >= MAX_RUN {
             return None;
         }
+        let win = if self.win == Windows::GATEWAY { Windows::for_slot(slot) } else { self.win };
         let (rx, tx) = match role {
-            TcpRole::Control => (self.win.ctl_rx, self.win.ctl_tx),
-            TcpRole::Derp => (self.win.derp_rx, self.win.derp_tx),
+            TcpRole::Control => (win.ctl_rx, win.ctl_tx),
+            TcpRole::Derp => (win.derp_rx, win.derp_tx),
         };
         // the relay's big windows (see `TcpConn::set_big_windows`): a round trip's worth of bytes at about 1 Mbit/s, only while it carries data
-        let big = if matches!(role, TcpRole::Derp) { (DERP_RX_BIG, DERP_TX_BIG) } else { (rx, tx) };
+        let big = if matches!(role, TcpRole::Derp) && slot == 0 { (DERP_RX_BIG, DERP_TX_BIG) } else { (rx, tx) };
         Some(EmbTcp { stack: self.stack, mem: self.mem, rx_len: rx, tx_len: tx, big, base: (rx, tx), connected_at: 0, role: u8::from(matches!(role, TcpRole::Derp)), sock: None, held: [(0, 0); 2] })
     }
 
@@ -271,9 +279,10 @@ impl Net for EmbassyNet {
         if matches!(role, UdpRole::Member) && slot >= MAX_RUN {
             return None;
         }
+        let win = if self.win == Windows::GATEWAY { Windows::for_slot(slot) } else { self.win };
         let (rx_len, tx_len) = match role {
-            UdpRole::Member => (self.win.udp_rx, self.win.udp_tx),
-            UdpRole::DnsUpstream => (self.win.dns, self.win.dns),
+            UdpRole::Member => (win.udp_rx, win.udp_tx),
+            UdpRole::DnsUpstream => (win.dns, win.dns),
         };
         Some(EmbUdp { stack: self.stack, mem: self.mem, rx_len, tx_len, sock: None, held: [(0, 0); 2], held_meta: [(0, 0); 2] })
     }

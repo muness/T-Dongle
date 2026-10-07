@@ -127,8 +127,8 @@ pub mod budget {
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
-    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 12 KB of margin (a 62 KB try measured heap_min 29,284 B, 600 B under the floor, with the UDP receive ring at 9,600 B; the 4 KB came back from the NAT table: 384 flows, 4.8 KB less static, given to the regular heap). `tn_in heap_min_over_floor` on the board settles it.
-    pub const WIFI_AND_USB: usize = 64 * 1024;
+    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 6 KB of margin (since the members-2 diet, step 1: the board's `tn_in heap_min_over_floor` was +10 to +18 KB over the floor with 12 KB of margin; the elastic admission, not this figure, keeps the heap above the floor; it was 12 KB before. The figures that follow are the earlier margin's) (a 62 KB try measured heap_min 29,284 B, 600 B under the floor, with the UDP receive ring at 9,600 B; the 4 KB came back from the NAT table: 384 flows, 4.8 KB less static, given to the regular heap). `tn_in heap_min_over_floor` on the board settles it.
+    pub const WIFI_AND_USB: usize = 58 * 1024;
     /// The bridge's permanent ring slots (8 x 1,514 + header), allocated at boot.
     pub const RING_BASE: usize = 8 * 1_536;
 
@@ -934,15 +934,16 @@ pub static START_REFUSED: AtomicU32 = AtomicU32::new(0);
 /// windows, the DNS forwarder's rings, a record in flight). The elastic floor comes on top ([`ML_HB_FLOOR`]), and the control workspace of a join is inside it.
 pub const TAILNET_HEAP_BYTES: usize = core::mem::size_of::<Sh>()
     + core::mem::size_of::<RxRing>()
-    + MEMBERS * Windows::PER_MEMBER
+    + Windows::PER_MEMBER
+    + (MEMBERS - 1) * Windows::SECONDARY.per_member()
     + Windows::GATEWAY.gateway()
     + POOL_TRANSIENT
     + DIR_LIVE_FULL
     + ELASTIC_TYPICAL;
 
-/// What the pool holds besides windows while a membership runs: the DERP relay's write record and staging frame (3,584 per membership) and a TLS record or a control
+/// What the pool holds besides windows while a membership runs: the DERP relay's write record and staging frame (3,584, counted once: a second membership's relay takes its own from the pool above the floor and waits for it) and a TLS record or a control
 /// workspace in flight (the workspace is inside the floor).
-pub const POOL_TRANSIENT: usize = MEMBERS * 3_584 + 4_096 + USB_HTTP_BYTES;
+pub const POOL_TRANSIENT: usize = 3_584 + 4_096 + USB_HTTP_BYTES;
 
 /// The USB-side stack's socket table and the two `/status` servers' windows (1 KB + 2 KB each), all taken once at start.
 pub const USB_HTTP_BYTES: usize = 3 * 640 + 2 * (1024 + 2048) + 512;
@@ -953,7 +954,7 @@ pub const DIR_LIVE_FULL: usize = MEMBERS * 24 * 36;
 
 /// What the elastic frames hold in ordinary use (a few radio frames waiting for the stack, a few host frames, the mux's NAT queues, a map being applied): a tuning
 /// figure; each consumer is refused at the floor, so the peak is bounded by the heap, not by this.
-pub const ELASTIC_TYPICAL: usize = 10 * 1024;
+pub const ELASTIC_TYPICAL: usize = 6 * 1024;
 
 #[embassy_executor::task]
 async fn net_task(mut runner: Runner<'static, MuxDrv>) -> ! {
