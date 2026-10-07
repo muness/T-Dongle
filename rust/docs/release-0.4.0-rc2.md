@@ -14,7 +14,7 @@ The firmware built from `c7fbe28` boots and reaches tailnet state 4. Later commi
 | 4 | Direct TCP | Pass | 15 s iperf3 received rates: up 1.2396, down 1.2579 Mbit/s; rc1 1.3 / 1.1–1.2 |
 | 5 | Relay TCP | Pass | Forced DERP, 15 s iperf3 received rates: up 0.4623, down 0.6291 Mbit/s; rc1 0.4 / 0.5; force-DERP restored off |
 | 6 | Traffic rate | Pass | Sample under load: down 210, up 926 kbit/s; byte counters advance |
-| 7 | Temperature | **Fail: owner decision pending** | Valid 1, peak 74.9°C under traffic, approximately 69.9°C idle; exceeds the specified 70°C ceiling |
+| 7 | Temperature | Owner accepted | Valid 1, peak 74.9°C under traffic, approximately 69.9°C idle; exceeds the original 70°C ceiling; owner accepted the measured peak on 2026-10-07 |
 | 8 | Mode switch | Pass | HTTP `/command` to `wifi_bridge`, healthy boot, then serial return to `tailnet_gateway` and healthy boot |
 | 9 | HTTP | Pass | `/status` JSON reports 0.4.0-rc2; `/serial` replies; `/wifi-scan` returns 11 networks; `/command` successfully switches mode |
 | 10 | Heap admission floor | Pass | Under throughput load, minimum excluding control negotiation 32,688 B versus floor 29,884 B: margin 2,804 B |
@@ -41,7 +41,7 @@ The final serial workspace run passed 1,601 tests, with zero failures and 8 igno
 
 ## Owner qualification
 
-The strict temperature gate still blocks declaring all 12 board gates passed. The owner also needs to test the setup AP from a phone, the Android app, and [the web UI checklist](../../docs/webui-checklist.md). Package Android hardware qualification remains false pending that review. Tag 0.4.0 only after the owner explicitly says go.
+The owner accepted the measured temperature peak on 2026-10-07. Join-time repeatability is under investigation before release qualification is finalized. The owner also needs to test the setup AP from a phone, the Android app, and [the web UI checklist](../../docs/webui-checklist.md). Package Android hardware qualification remains false pending that review. Tag 0.4.0 only after the owner explicitly says go.
 
 ## Setup-AP handoff
 

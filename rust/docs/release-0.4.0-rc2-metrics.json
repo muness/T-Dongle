@@ -26,7 +26,11 @@
     "traffic_peak_c": 74.9,
     "gate_max_c": 70,
     "gate_pass": false,
-    "owner_acceptance": null
+    "owner_acceptance": {
+      "accepted": true,
+      "date": "2026-10-07",
+      "statement": "temp is fine, not something we control."
+    }
   },
   "heap": {
     "floor_bytes": 29884,
