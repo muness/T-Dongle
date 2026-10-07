@@ -124,8 +124,8 @@ pub mod budget {
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
-    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 12 KB of margin. `tn-mem` on the board settles it.
-    pub const WIFI_AND_USB: usize = 66 * 1024;
+    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 8 KB of margin (4 KB of the 12 went to the UDP receive ring: six datagrams instead of four, ADR 0002 "Download cap"). `tn-mem` and `heap_min` on the board settle it.
+    pub const WIFI_AND_USB: usize = 62 * 1024;
     /// The bridge's permanent ring slots (8 x 1,514 + header), allocated at boot.
     pub const RING_BASE: usize = 8 * 1_536;
 
@@ -1179,6 +1179,38 @@ fn sta_report(sh: &Sh, out: &mut String) {
             m.rx_dropped[7].get(),
             m.rx_dropped[8].get(),
             m.snooped.get()
+        );
+    }
+    {
+        // the host-bound path end to end: engine -> host_q -> pump -> ring -> IN NTBs (the bridge's own aggregation and interrupt-executor sender), and the UDP side that feeds it
+        use tdongle_tailnet_runtime::{udp as rt_udp, usb as rt_usb};
+        let ntbs = ld(&crate::NTB_IN_COUNT);
+        let frames = ld(&crate::NTB_IN_FRAMES);
+        let _ = write!(
+            out,
+            "tn_in ntb={} frames={} frames_per_ntb_x100={} frames_max={} hist_1_2_4_8={}/{}/{}/{} in_wait_us_avg={} in_wait_us_max={} in_wakes={} in_idle_timeouts={} ring_enq={} ring_full={} ring_high={} pump_wakes={} pump_moved={} pump_pass_max={} udp_wakes={} udp_datagrams={} udp_batch_max={} udp_pkts={}\r\n",
+            ntbs,
+            frames,
+            if ntbs == 0 { 0 } else { frames * 100 / ntbs },
+            ld(&crate::NTB_IN_FRAMES_MAX),
+            ld(&crate::NTB_IN_HIST[0]),
+            ld(&crate::NTB_IN_HIST[1]),
+            ld(&crate::NTB_IN_HIST[2]),
+            ld(&crate::NTB_IN_HIST[3]),
+            if ntbs == 0 { 0 } else { ld(&crate::NTB_IN_US_SUM) / ntbs },
+            ld(&crate::NTB_IN_US_MAX),
+            ld(&crate::IN_WAKES),
+            ld(&crate::IN_TIMEOUTS),
+            ld(&crate::RING_ENQ),
+            ld(&crate::RING_FULL),
+            ld(&crate::RING_HIGH),
+            ld(&rt_usb::PUMP_WAKES),
+            ld(&rt_usb::PUMP_MOVED),
+            ld(&rt_usb::PUMP_PASS_MAX),
+            ld(&rt_udp::UDP_WAKES),
+            ld(&rt_udp::UDP_DATAGRAMS),
+            ld(&rt_udp::UDP_BATCH_MAX),
+            tdongle_tailnet_runtime::net_embassy::UDP_PKTS
         );
     }
     for (i, sl) in sh.slots.iter().enumerate() {

@@ -259,6 +259,13 @@ const REPLY: core::ops::Range<usize> = 0..FRAME_MAX;
 /// The host-queue record sits behind it (`FRAME_MAX + 16` bytes).
 const _: () = assert!(2 * FRAME_MAX + 16 <= crate::shared::SCRATCH);
 
+/// Pump wakeups out of the wait, host-queue records and Wi-Fi frames moved to USB, and the most one drain pass moved (`tn_in` line).
+pub static PUMP_WAKES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// See [`PUMP_WAKES`].
+pub static PUMP_MOVED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// See [`PUMP_WAKES`].
+pub static PUMP_PASS_MAX: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 /// The USB task. Never returns.
 pub async fn usb_pump<R, P, S, D, U, W>(sh: &Shared<R, P, S, D>, usb: &mut U, wifi: &W)
 where
@@ -281,6 +288,8 @@ where
     let mut next_tick = sh.now() + 1000;
     loop {
         // ---- everything that is ready for the host, bounded
+        PUMP_WAKES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        let mut pass = 0u32;
         for _ in 0..16 {
             let more = sh.with_scratch(|s| {
                 let (reply, rec) = s.split_at_mut(FRAME_MAX);
@@ -294,7 +303,10 @@ where
             if !more {
                 break;
             }
+            pass += 1;
         }
+        PUMP_MOVED.fetch_add(pass, core::sync::atomic::Ordering::Relaxed);
+        PUMP_PASS_MAX.fetch_max(pass, core::sync::atomic::Ordering::Relaxed);
         for _ in 0..16 {
             let Some(n) = wifi.try_next_to_host(&mut wbuf) else { break };
             sh.with_scratch(|s| {

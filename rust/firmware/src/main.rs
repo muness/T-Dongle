@@ -143,6 +143,11 @@ static RX_BURST_MAX: AtomicU32 = AtomicU32::new(0);
 /// Gap between consecutive Wi-Fi frames: under 100 us, 100-299, 300-999, 1-3 ms, over 3 ms.
 static RX_GAP_HIST: [AtomicU32; 5] = [const { AtomicU32::new(0) }; 5];
 static RX_BURSTS_GE4: AtomicU32 = AtomicU32::new(0);
+/// Time `send_ntb` spent waiting for the host to take an NTB (sum and max, microseconds), and the waits for the ring to have something (wakeups of the IN task).
+static NTB_IN_US_SUM: AtomicU32 = AtomicU32::new(0);
+static NTB_IN_US_MAX: AtomicU32 = AtomicU32::new(0);
+static IN_WAKES: AtomicU32 = AtomicU32::new(0);
+static IN_TIMEOUTS: AtomicU32 = AtomicU32::new(0);
 static NTB_IN_COUNT: AtomicU32 = AtomicU32::new(0);
 static NTB_IN_FRAMES: AtomicU32 = AtomicU32::new(0);
 static NTB_IN_FRAMES_MAX: AtomicU32 = AtomicU32::new(0);
@@ -1315,13 +1320,21 @@ async fn usb_tx_task(tx: SendTx) -> ! {
             if moved != 0 {
                 break moved;
             }
-            let _ = with_timeout(Duration::from_millis(50), RING_SIG.wait()).await; // wake regularly to notice a mode change
+            if with_timeout(Duration::from_millis(50), RING_SIG.wait()).await.is_err() { // wake regularly to notice a mode change
+                IN_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
+            } else {
+                IN_WAKES.fetch_add(1, Ordering::Relaxed);
+            }
         };
         if moved == 0 {
             continue;
         }
         pm::usb_tx_begin();
+        let t0 = Instant::now();
         let sent = tx.send_ntb().await;
+        let us = t0.elapsed().as_micros() as u32;
+        NTB_IN_US_SUM.fetch_add(us, Ordering::Relaxed);
+        NTB_IN_US_MAX.fetch_max(us, Ordering::Relaxed);
         pm::usb_tx_end();
         match sent {
             Ok((frames, bytes)) => {

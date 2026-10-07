@@ -20,6 +20,14 @@ use tdongle_tailnet_fw::{Platform, Storage};
 pub const DATAGRAM_MAX: usize = 1600;
 /// Room the host queue must have before a datagram is read: one tunnel packet and its record header.
 pub const HOST_ROOM: usize = 1600;
+/// Datagrams one wake of the member socket's task takes from the stack (the socket holds [`crate::net_embassy::UDP_PKTS`]).
+pub const UDP_BATCH: u32 = 16;
+/// Wakes of the member socket task that found data, datagrams taken, and the most taken in one wake (a value at the socket's packet count means the ring was full).
+pub static UDP_WAKES: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// See [`UDP_WAKES`].
+pub static UDP_DATAGRAMS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// See [`UDP_WAKES`].
+pub static UDP_BATCH_MAX: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// Times the UDP task had to wait for the host queue to drain before reading the next datagram (the socket's own buffer is what absorbs the burst).
 pub static BACKPRESSURE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// Bytes of the egress staging buffer (a record is `ep meta (18) + datagram`).
@@ -194,19 +202,39 @@ where
         };
         match select3(recv, slot.udp_q.wait_nonempty(), wait_link_change(link_rx, view)).await {
             Either3::First(Ok(())) => {
-                let got = sh.with_scratch(|buf| match sock.try_recv_from(&mut buf[..DATAGRAM_MAX]) {
-                    Ok(Some((n, src))) => {
-                        slot.update(|st| st.udp_rx = st.udp_rx.wrapping_add(1));
-                        if sh.rx_admit(n) {
-                            let _ = sh.feed(Input::Udp { member, src, data: &mut buf[..n] });
-                            sh.rx_done(n);
-                        }
-                        Ok(())
+                // everything the stack has queued, not one datagram per wake: a Wi-Fi burst arrives back to back and the socket holds only so many
+                // (smoltcp drops the rest silently, which TCP inside the tunnel reads as loss). Each datagram is still admitted on host-queue room.
+                UDP_WAKES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                let mut batch = 0u32;
+                let mut failed = false;
+                while batch < UDP_BATCH {
+                    if batch != 0 && sh.host_q.free_bytes() < HOST_ROOM {
+                        break;
                     }
-                    Ok(None) => Ok(()),
-                    Err(e) => Err(e),
-                });
-                if got.is_err() {
+                    let got = sh.with_scratch(|buf| match sock.try_recv_from(&mut buf[..DATAGRAM_MAX]) {
+                        Ok(Some((n, src))) => {
+                            slot.update(|st| st.udp_rx = st.udp_rx.wrapping_add(1));
+                            if sh.rx_admit(n) {
+                                let _ = sh.feed(Input::Udp { member, src, data: &mut buf[..n] });
+                                sh.rx_done(n);
+                            }
+                            Ok(true)
+                        }
+                        Ok(None) => Ok(false),
+                        Err(e) => Err(e),
+                    });
+                    match got {
+                        Ok(true) => batch += 1,
+                        Ok(false) => break,
+                        Err(_) => {
+                            failed = true;
+                            break;
+                        }
+                    }
+                }
+                UDP_BATCH_MAX.fetch_max(batch, core::sync::atomic::Ordering::Relaxed);
+                UDP_DATAGRAMS.fetch_add(batch, core::sync::atomic::Ordering::Relaxed);
+                if failed {
                     return Exit::Rebind;
                 }
             }

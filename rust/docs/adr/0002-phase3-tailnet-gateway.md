@@ -206,3 +206,7 @@ The host's network is tokio, so the embassy-net path (windows from the pool) is 
 * One membership. Two would need the directory and the WireGuard pool in flash, the NAT table in chunks, and about 50 KB more than the image has.
 * The NAT table (19,136 B at the C's 512 entries) is still a static.
 
+
+## Download cap (branch `rust/tailnet-fit`, hypothesis, not yet measured on a board)
+
+The host-bound path already is the bridge's: `FwUsb::send` pushes into the bridge ring and `usb_tx_task` (interrupt executor, woken by `RING_SIG`) packs up to 8 datagrams / 3,200 B per NTB; the pump drains `host_q` event-driven (no tick, no per-frame wait). So nothing in the USB send path can hold 70 frames/s, and `usb_tx_refused=0`, `backpressure_waits=4` agree. The suspect is the ingress side of the same flow: the member UDP socket held **4 datagrams** (6,400 B) and its task took **one datagram per wake**; the radio delivers A-MPDU bursts of 8, and smoltcp drops UDP that does not fit silently (no counter), which TCP inside the tunnel reads as loss. Changes: UDP receive ring 9,600 B / 8 packets, task drains up to 16 datagrams per wake (still admitted on `host_q` room), `WIFI_AND_USB` margin 12 -> 8 KB to pay for it (the heap assert had 292 B of headroom). New board line `tn_in` (IN NTBs, frames per NTB, IN wait us avg/max, IN task wakes, ring, pump wakes/moved/pass max, `udp_batch_max`): `udp_batch_max` at or above 6 before the change would confirm the overflow; `in_wait_us_avg` x NTBs near the run time would mean the host side of IN is the cap instead.
