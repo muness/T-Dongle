@@ -87,7 +87,7 @@ pub trait DirFlash {
     fn read(&mut self, offset: usize, buf: &mut [u8]) -> bool;
     /// Erase sector number `sector` (`SECTOR` bytes at `sector * SECTOR`).
     fn erase_sector(&mut self, sector: usize) -> bool;
-    /// Program `data` at `offset` (any alignment; the bytes are erased).
+    /// Program `data` at `offset` (any alignment); only clear bits, never set them.
     fn write(&mut self, offset: usize, data: &[u8]) -> bool;
     /// Bytes of the partition.
     fn size(&self) -> usize;
@@ -1379,9 +1379,15 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
             st.epoch += 1;
             st.end = 1;
         } else if let Some(a) = s.active {
-            let _ = self.clean(g.area_sector(member, a, 0));
-            if s.spare_clean == 0 {
-                let _ = self.clean(g.area_sector(member, 1 - a, 0));
+            // Invalidate the older header first, then the active one: clearing the
+            // kind word only programs bits from 1 to 0 and needs no sector erase.
+            // Bulk cleanup stays in maintain(), one sector per executor tick.
+            // If a write fails, retain the active state rather than claim success.
+            if s.spare_clean == 0 && !self.write(g.slot_off(member, 1 - a, 0), &[0; 4]) {
+                return;
+            }
+            if !self.write(g.slot_off(member, a, 0), &[0; 4]) {
+                return;
             }
             let st = &mut self.m[member];
             if a == 0 || s.spare_clean == 0 || s.copy.is_some() {
@@ -1471,7 +1477,7 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
 
 // ---- the in-memory flash ------------------------------------------------------------------------------------------------------------------------------
 
-/// A flash in memory that enforces the rules of the real one: erase to 0xFF a sector at a time, programming only clears bits, never over programmed bytes.
+/// A flash in memory that enforces the rules of the real one: erase to 0xFF a sector at a time, programming only clears bits.
 /// It can lose power: at the n-th write from now, which is then programmed only in part (torn), and every operation after it fails until `power_on`.
 pub struct MemFlash {
     /// The bytes.
@@ -1539,7 +1545,7 @@ impl DirFlash for MemFlash {
             data.len()
         };
         for (i, &x) in data[..n].iter().enumerate() {
-            assert!(self.d[o + i] == 0xFF || self.d[o + i] == x, "write over live flash at {}", o + i);
+            assert!(self.d[o + i] & x == x, "write sets programmed flash bits at {}", o + i);
             self.d[o + i] = x;
         }
         !self.dead
