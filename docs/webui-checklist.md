@@ -64,7 +64,7 @@ done
 
 - [ ] `selftest flash`, `bootloader`, `reset`, `boot-status` and `temperature` return **403**, and `status` returns **200**.
 - [ ] Without the `Origin` header, `status` returns **403**. With `Content-Type: text/plain`, it returns **415**.
-- [ ] Over Web Serial (a serial terminal, not the page), `selftest flash` prints `selftest flash: ... PASS`. This command is console-only on purpose. It erases and programs a flash sector, so run it only on a bench unit, and only on rust/port firmware.
+- [ ] Over Web Serial (a serial terminal, not the page), `selftest flash` prints `selftest flash: ... PASS`. This command is console-only on purpose. It erases and programs a flash sector, so run it only on a bench unit, and only on the qualified Rust firmware for this dongle.
 
 ## 6. Restart
 

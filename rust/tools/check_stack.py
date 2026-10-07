@@ -5,7 +5,7 @@ Usage: check_stack.py ELF [--limit BYTES] [--top N] [--objdump PATH] [--depth BY
 
 `--depth BYTES` adds the call-graph check: the longest chain of *direct* calls (a function's own frame plus its deepest callee, recursively) from every function, which
 must stay under BYTES (pass the stack's size minus a margin). Indirect calls (`callx*`: vtables, function pointers, the executor's poll) are not followed, so the
-chains it reports are lower bounds for code that calls through them; the per-frame check and this one together bound what a task's poll can use.
+chains it reports are lower bounds for code that calls through them. Neither check proves the maximum stack used by a task poll; hardware observations remain required.
 
 An Xtensa prologue is `entry a1, N` (N up to 32 KB in the instruction) and, for a larger frame, a further `sub aX, a1, aK` + `movsp a1, aX` (K loaded by
 `movi` / `l32r`) or `addmi a1, a1, -N`. This reads those, so the figure is the whole frame (locals plus spills plus the outgoing-call area), not a guess. The async tasks' poll
