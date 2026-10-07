@@ -189,11 +189,23 @@ fn run(flapper: bool, frames: u32) -> Totals {
     } else {
         assert!(st.flushed_link_down == 0 && delivered == acc && gaps == 0);
     }
-    assert!(acc > 10_000.min(u64::from(frames) / 30) && st.grow_events > 0 && st.reclaim_events > 0);
     assert_eq!(rig.w().pm_acquires.load(SeqCst), rig.w().pm_releases.load(SeqCst));
     assert!(rig.w().pm_held.load(SeqCst) == 0 && rig.w().pm_acquires.load(SeqCst) > 0);
     assert!(rig.w().heap_live_blocks.load(SeqCst) == 1 + i64::from(rig.chunks_present()) && st.chunks <= 10);
     rig.check_invariants();
+    assert!(
+        acc > 10_000.min(u64::from(frames) / 30),
+        "frames={frames} accepted={acc} delivered={delivered} grow={} reclaim={} admissions={} flaps={}",
+        st.grow_events,
+        st.reclaim_events,
+        admissions.load(SeqCst),
+        flaps.load(SeqCst)
+    );
+    // Elastic growth depends on interpreter scheduling: a fast consumer can stay within base slabs.
+    // Native stress must exercise growth/reclaim; deterministic cases_b tests retain that coverage in Miri.
+    if !cfg!(miri) {
+        assert!(st.grow_events > 0 && st.reclaim_events > 0);
+    }
     Totals { accepted: acc, admissions: admissions.load(SeqCst), flaps: flaps.load(SeqCst) }
 }
 
