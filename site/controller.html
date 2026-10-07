@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:">
+<title>T-Dongle controller</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafd;--ink:#191c22;--mute:#4a4e57;--line:#c4c7d0;--pri:#285da8;--onpri:#fff;--box:#eef1f8;--bad:#ac2a1e;--ok:#1d6b3a}
+@media(prefers-color-scheme:dark){:root{--bg:#111318;--ink:#e2e2e9;--mute:#b3b6c0;--line:#3d4048;--pri:#adc7ff;--onpri:#003062;--box:#1b1e26;--bad:#ffb4a8;--ok:#8fd9a8}}
+*{box-sizing:border-box}body{font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink);max-width:760px;margin:0 auto;padding:20px}
+h1{font-size:26px;margin:4px 0 12px}h2{font-size:20px;margin:0 0 10px}h3{font-size:17px;margin:0}p{margin:6px 0}
+section{border-top:1px solid var(--line);padding:18px 0}.box{background:var(--box);border-radius:14px;padding:14px;margin:10px 0}
+button,input,select{font:inherit;min-height:44px;border-radius:10px;padding:8px 14px;color:var(--ink)}
+input,select{background:var(--bg);border:1px solid var(--mute);width:100%;margin:4px 0 10px}
+button{background:var(--pri);color:var(--onpri);border:1px solid transparent;cursor:pointer}button.s{background:transparent;color:var(--pri);border-color:var(--line)}button.d{color:var(--bad)}
+button:disabled{opacity:.5;cursor:wait}:focus-visible{outline:3px solid var(--pri);outline-offset:2px}
+label{display:block;font-size:14px;color:var(--mute)}small,.m{color:var(--mute);font-size:14px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.row>*{flex:0 0 auto}.sp{flex:1 1 auto!important}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}.grid div{background:var(--box);border-radius:10px;padding:8px 10px}.grid b{display:block;font-size:12px;font-weight:600;color:var(--mute)}
+.peer{display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.ok{color:var(--ok)}.bad{color:var(--bad)}#msg{min-height:1.5em}[hidden]{display:none!important}a.b{display:inline-block;background:var(--pri);color:var(--onpri);padding:10px 14px;border-radius:10px;text-decoration:none}
+</style>
+<h1>T-Dongle controller</h1>
+<div class="box" id="conn"><div class="row"><strong id="cs" class="sp">Connecting…</strong><button id="connect" hidden>Connect dongle (Web Serial)</button></div><p class="m" id="cd"></p></div>
+<p id="msg" role="status"></p>
+<div id="app" hidden>
+<section><h2>Status</h2><div class="grid" id="live"></div></section>
+<section id="tn" hidden><h2>Tailnets</h2><div id="members"></div>
+<div class="box"><h3>Add a tailnet</h3><form id="addm"><label>Name (letters, numbers, hyphens)<input name="label" maxlength="20" pattern="[A-Za-z0-9\-]+" required autocomplete="off"></label><label>Auth key (optional; empty = sign in with Tailscale in your browser)<input name="key" type="password" maxlength="159" autocomplete="off"></label><button>Add tailnet</button></form></div></section>
+<section><h2>Wi-Fi networks</h2><div id="saved"></div>
+<div class="box"><h3>Save a network</h3><div class="row"><button class="s" id="scan" type="button">Scan nearby</button><span class="m" id="scanmsg"></span></div><select id="found" hidden aria-label="Nearby networks"></select>
+<form id="addw"><label>Network name (SSID)<input name="ssid" maxlength="32" required autocomplete="off"></label><label>Password (empty for open)<input name="password" type="password" maxlength="63" autocomplete="new-password"></label>
+<div class="row"><label class="sp">Slot<select name="slot" id="slot"></select></label><label class="sp">Name<input name="name" maxlength="24" autocomplete="off"></label><label class="sp">Priority 0-100<input name="priority" type="number" min="0" max="100" value="50"></label></div>
+<small>2.4 GHz, printable ASCII. Saving into a used slot replaces it.</small><br><button>Save network</button></form></div></section>
+<section><h2>Mode</h2><div class="row"><select id="mode" class="sp" aria-label="Mode"><option value="wifi_bridge">Wi-Fi bridge</option><option value="tailnet_gateway">Tailnet gateway</option></select><button id="setmode" class="s">Save and restart</button></div></section>
+<section><h2>Display</h2><form id="disp"><div class="row"><label class="sp">Brightness 5-100<input name="b" type="number" min="5" max="100"></label><label class="sp">Rotation<select name="r"><option value="0">Normal</option><option value="1">Flipped</option></select></label><label class="sp">Dim after (s) 10-3600<input name="d" type="number" min="10" max="3600"></label></div><button>Apply</button></form></section>
+<section><h2>Restart</h2><button id="reboot" class="s d">Reboot dongle</button></section>
+</div>
+<script>
+const TD=(()=>{
+const KV=/([A-Za-z_][\w]*)=(\S*)/g;
+function kvs(s){const o={};let m;KV.lastIndex=0;while((m=KV.exec(s)))o[m[1]]=m[2];return o}
+// ---- parsers: the same text the Android app reads over the console ----
+function parseStatus(t){
+ const r={rows:{},flat:{},sections:{}};
+ const first=/^mode=(\w+) trial=(\d+) active=(\d+) wifi=(up|joining|AP not found|auth failed) rssi=(unknown|-?\d+) usb_enumerated=([01]) usb_transport_ready=([01])/m.exec(t);
+ if(!first)throw new Error('Status is incomplete or from unsupported firmware.');
+ r.mode=first[1];r.trial=+first[2];r.active=+first[3];r.wifi=first[4];r.rssi=first[5]==='unknown'?null:+first[5];r.usbEnumerated=first[6]==='1';r.usbReady=first[7]==='1';
+ for(const line of t.split(/\r?\n/).slice(1)){
+  const l=line.trim();if(!l||l==='done>')continue;
+  const sp=l.indexOf(' ');const head=sp<0?l:l.slice(0,sp);
+  if(head.includes('=')){Object.assign(r.flat,kvs(l));continue}
+  const o=kvs(l);(r.rows[head]=r.rows[head]||[]).push(o);r.sections[head]=o}
+ return r}
+function parseList(t){
+ const out=[];
+ for(const line of t.split(/\r?\n/)){
+  if(!line.trim()||line==='done>'||line==='tdongle>')continue;
+  const m=/^([1-8])(\*)? name=(.{0,24}) ssid=(.{0,32}) priority=(\d{1,3})$/.exec(line);
+  if(!m)throw new Error('Saved networks reply is incomplete or unsupported.');
+  out.push({slot:+m[1],current:!!m[2],name:m[3],ssid:m[4],priority:+m[5]})}
+ return out}
+function parseScan(t){
+ const out=[];
+ for(const line of t.split(/\r?\n/)){
+  const m=/^ssid=(.*?) (?:bssid=\S+ channel=\S+ )?rssi=(-?\d+) auth=(\d+)/.exec(line);
+  if(m)out.push({ssid:m[1],rssi:+m[2],secure:m[3]!=='0'})}
+ return out}
+const ok=t=>!/^ERR/m.test(t);
+function quote(v){return '"'+v.replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"'}
+function ascii(v,min,max,name){if(v.length<min||v.length>max)throw new Error(name+' must be '+min+'-'+max+' characters.');if(/[^\x20-\x7e]/.test(v))throw new Error(name+' supports printable ASCII only.')}
+function profileLine(p){
+ ascii(p.name,1,24,'Name');ascii(p.ssid,1,32,'Network name');ascii(p.password,0,63,'Password');
+ if(p.password&&p.password.length<8)throw new Error('Password must be 8-63 characters, or empty for an open network.');
+ if(!(p.slot>=1&&p.slot<=8)||!(p.priority>=0&&p.priority<=100))throw new Error('Choose slot 1-8 and priority 0-100.');
+ const l='profile {"slot":'+p.slot+',"name":'+quote(p.name)+',"ssid":'+quote(p.ssid)+',"password":'+quote(p.password)+',"priority":'+p.priority+'}';
+ if(l.length>511)throw new Error('Profile is too long.');return l}
+function memberLine(a){
+ const id=n=>{if(!Number.isInteger(n)||n<1)throw new Error('Bad membership id.');return n};
+ if(a.verb==='add'){if(!/^[A-Za-z0-9-]{1,20}$/.test(a.label))throw new Error('Names use letters, numbers and hyphens (up to 20).');
+  if(a.key&&!/^\S{1,159}$/.test(a.key))throw new Error('Auth keys have no spaces and fit 159 characters.');return 'member add '+a.label+(a.key?' '+a.key:'')}
+ return 'member '+a.verb+' '+id(a.id)}
+function displayLine(b,r,d){
+ if(!(b>=5&&b<=100)||!(r===0||r===1)||!(d>=10&&d<=3600))throw new Error('Brightness 5-100, rotation 0 or 1, dim 10-3600 seconds.');
+ return 'display '+b+' '+r+' '+d}
+const MSTATE=['Saved','Waiting for Wi-Fi','Connecting','Requesting sign-in','Preparing routing','Reconnecting','Needs attention'];
+function memberState(m){if(!m.enabled)return 'Disconnected (saved)';if(m.login_url)return 'Sign-in required';if(m.routing_ready===true)return 'Ready to route';if(m.error||m.protocol_error)return 'Reconnecting';return MSTATE[m.state]||'Connecting'}
+function loginUrl(m){try{const u=new URL(m.login_url);return u.protocol==='https:'&&u.hostname==='login.tailscale.com'?u.href:''}catch{return ''}}
+// ---- transports: one command in, the console's reply text out ----
+function httpTransport(base){return{kind:'http',label:'USB network',async send(line){
+ const r=await fetch((base||'')+'/serial',{method:'POST',headers:{'Content-Type':'application/x-tdongle-command'},body:line,cache:'no-store',credentials:'omit',redirect:'error'});
+ const t=await r.text();if(!r.ok)throw new Error(t.trim()||('HTTP '+r.status));return t}}}
+async function serialTransport(port){
+ await port.open({baudRate:115200});try{await port.setSignals({dataTerminalReady:true})}catch{}
+ const dec=new TextDecoder(),enc=new TextEncoder(),w=port.writable.getWriter(),rd=port.readable.getReader();
+ let buf='',wake=null,dead=false;
+ (async()=>{try{for(;;){const{value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});if(wake)wake()}}catch{}dead=true;if(wake)wake()})();
+ const nap=ms=>new Promise(res=>{const t=setTimeout(res,ms);wake=()=>{clearTimeout(t);res()}});
+ let chain=Promise.resolve();
+ const once=async(line,wait)=>{
+  buf='';await w.write(enc.encode(line+'\n'));
+  const end=Date.now()+wait;let last=Date.now(),seen=0;
+  for(;;){
+   if(dead&&!buf)throw new Error('The dongle disconnected.');
+   if(buf&&/(^|\n)done>\r?\n?$/.test(buf))break;
+   if(buf.length!==seen){seen=buf.length;last=Date.now()}else if(buf&&Date.now()-last>=350)break;
+   if(Date.now()>=end)break;
+   await nap(buf?100:Math.min(500,end-Date.now()))}
+  if(!buf)throw new Error('The dongle did not reply. Reconnect and refresh.');return buf};
+ return{kind:'serial',label:'Web Serial',send(line,wait){const p=chain.then(()=>once(line,wait||(line==='scan'?25000:5000)));chain=p.catch(()=>{});return p},
+  async close(){try{rd.cancel()}catch{}try{w.releaseLock()}catch{}try{await port.close()}catch{}}}}
+// ---- the command layer: both transports go through here ----
+const RESTARTS=/^(reboot|mode )/;
+function layer(t){
+ let q=Promise.resolve();
+ const raw=(line,o)=>{const p=q.then(async()=>{try{return await t.send(line,o&&o.wait)}catch(e){
+   // a command that restarts the dongle may drop the connection after (or while) answering
+   if(RESTARTS.test(line)&&(e instanceof TypeError||/disconnected|did not reply/.test(e.message)))return 'OK restarting\r\n';throw e}});q=p.catch(()=>{});return p};
+ return{kind:t.kind,label:t.label,raw,
+  async status(){return parseStatus(await raw('status'))},
+  async list(){return parseList(await raw('list'))},
+  async scan(){return parseScan(await raw('scan',{wait:25000}))},
+  async tailnet(){const x=await raw('tailnet-status');const i=x.indexOf('{');if(i<0)throw new Error('No tailnet status.');return JSON.parse(x.slice(i).trim())},
+  async act(line){const x=await raw(line);if(!ok(x))throw new Error(x.replace(/^ERR\s*/m,'').trim());return x}}}
+return{parseStatus,parseList,parseScan,profileLine,memberLine,displayLine,memberState,loginUrl,httpTransport,serialTransport,layer,ok}})();
+if(typeof document!=='undefined')(()=>{
+const $=s=>document.querySelector(s);
+function h(tag,a,...kids){const n=document.createElement(tag);for(const k in a||{}){if(k==='class')n.className=a[k];else if(k.startsWith('on'))n[k]=a[k];else n.setAttribute(k,a[k])}for(const c of kids)n.append(c);return n}
+const msg=$('#msg');let L=null,busy=false,saved=[],st=null,tn=null,openKeys=new Set(),scanRows=[];
+const say=(t,bad)=>{msg.textContent=t||'';msg.className=bad?'bad':''};
+async function run(label,fn){if(busy)return false;busy=true;say(label+'…');document.querySelectorAll('button').forEach(b=>b.disabled=true);
+ try{await fn();say('');return true}catch(e){say(e.message,true);return false}finally{busy=false;document.querySelectorAll('button').forEach(b=>b.disabled=false);poll(true)}}
+function fmtUp(ms){const s=Math.floor(ms/1000),d=Math.floor(s/86400),hh=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+'d ':'')+hh+'h '+m+'m'}
+const kb=n=>n==null?'-':(+n>=1000?(n/1000).toFixed(1)+' Mb/s':n+' kb/s');
+function cell(k,v){return h('div',{},h('b',{},k),String(v))}
+function renderLive(){
+ if(!st){return}
+ const f=st.flat,s=st.sections,wl=s.wifi_link||{},tr=s.traffic||{},ct=s.chip_temperature||{},dp=s.display||{};
+ const g=$('#live');g.replaceChildren(
+  cell('Mode',st.mode==='tailnet'?'Tailnet gateway':st.mode==='adapter'?'Wi-Fi bridge':st.mode),
+  cell('Wi-Fi',st.wifi+(st.rssi!=null?' · '+st.rssi+' dBm':'')),
+  cell('Channel / PHY',(wl.channel||'-')+' / '+(wl.phy||'-')),
+  cell('Active network',st.active?'Slot '+st.active:'none'),
+  cell('USB',st.usbEnumerated?(st.usbReady?'ready':'enumerated'):'not enumerated'),
+  cell('Down',kb(tr.down_kbps)),cell('Up',kb(tr.up_kbps)),
+  cell('Free heap',f.free_heap?Number(f.free_heap).toLocaleString()+' B':'-'),
+  cell('Temperature',ct.valid==='1'?(ct.current_tenths/10).toFixed(1)+' °C (peak '+(ct.peak_tenths/10).toFixed(1)+')':'-'),
+  cell('Uptime',f.uptime_ms?fmtUp(+f.uptime_ms):'-'),
+  cell('Clock',f.clock||'-'),cell('Firmware',f.firmware||'-'));
+ if(!$('#mode').matches(':focus'))$('#mode').value=st.mode==='tailnet'?'tailnet_gateway':'wifi_bridge';
+ if(dp.brightness&&!$('#disp').contains(document.activeElement)){const e=$('#disp').elements;e.b.value=dp.brightness;e.r.value=dp.rotation;e.d.value=dp.dim_seconds}
+ $('#tn').hidden=st.mode!=='tailnet'}
+function renderSaved(){
+ const pref=st&&st.sections.wifi_prefs?+st.sections.wifi_prefs.preferred:0;
+ const box=$('#saved');box.replaceChildren();
+ if(!saved.length)box.append(h('p',{class:'m'},'No saved networks.'));
+ for(const n of saved){
+  box.append(h('div',{class:'box'},h('div',{class:'row'},h('div',{class:'sp'},h('strong',{},n.name||n.ssid),' ',h('span',{class:'m'},n.ssid+' · priority '+n.priority+(n.slot===pref?' · preferred':'')+(n.current?' · connected':''))),
+   h('button',{class:'s',onclick:()=>run('Switching',()=>L.act('use '+n.slot).then(()=>say('Switching to '+n.name)))},'Use & prefer'),
+   h('button',{class:'s d',onclick:()=>{if(confirm('Delete '+n.ssid+'?'))run('Deleting',()=>L.act('del '+n.slot))}},'Delete'))))}
+ const sel=$('#slot'),cur=sel.value;sel.replaceChildren();
+ for(let i=1;i<=8;i++){const used=saved.find(n=>n.slot===i);sel.append(h('option',{value:i},i+(used?' (replace '+used.ssid+')':' (free)')))}
+ sel.value=cur||String((saved.length<8?saved.length+1:1))}
+function renderMembers(){
+ const root=$('#members');
+ if(!tn||root.contains(document.activeElement)&&document.activeElement.tagName==='INPUT')return;
+ root.replaceChildren();
+ const wg=(st&&st.rows.tn_wg)||[];
+ if(!(tn.members||[]).length)root.append(h('p',{class:'m'},'No tailnets yet. Add one below.'));
+ for(const m of tn.members||[]){
+  const url=m.login_url&&m.enabled?TD.loginUrl(m):'';
+  const peers=(m.peers||[]).filter(p=>p.address!=='0.0.0.0');
+  const det=h('details',{});det.open=openKeys.has('p'+m.id);det.ontoggle=()=>det.open?openKeys.add('p'+m.id):openKeys.delete('p'+m.id);
+  det.append(h('summary',{},'Devices · '+(m.directory_records||peers.length)));
+  for(const p of peers){const w=wg.find(x=>x.peer===p.address);
+   det.append(h('div',{class:'peer'},h('span',{},h('strong',{},p.name||'Device'),' ',h('small',{},p.address)),h('small',{},w?(w.path==='direct'?'direct':'relay (DERP)')+' · ↓'+w.rx_bytes+' ↑'+w.tx_bytes+' B':'no session')))}
+  const dl=m.derp_link||{};
+  root.append(h('div',{class:'box'},
+   h('div',{class:'row'},h('h3',{class:'sp'},m.tailnet_name||m.label),h('span',{class:m.routing_ready?'ok':'m'},TD.memberState(m))),
+   h('p',{class:'m'},(m.tailnet_ip?m.tailnet_ip+' · ':'')+(m.tailnet_dns_name||'')),
+   h('p',{class:'m'},'DERP relay: '+(dl.state||'-')+(m.error?' · '+m.error:'')+(m.protocol_error?' · '+m.protocol_error:'')),
+   url?h('p',{},h('a',{class:'b',href:url,target:'_blank',rel:'noopener noreferrer'},'Continue sign-in')):'',
+   peers.length&&m.enabled?det:'',
+   h('div',{class:'row'},
+    h('button',{class:'s',onclick:()=>run(m.enabled?'Disconnecting':'Connecting',()=>L.act(TD.memberLine({verb:m.enabled?'disable':'enable',id:m.id})))},m.enabled?'Disconnect':'Reconnect'),
+    h('button',{class:'s d',onclick:()=>{if(confirm('Remove '+m.label+' and its saved identity?'))run('Removing',()=>L.act(TD.memberLine({verb:'remove',id:m.id})))}},'Remove'))))}}
+async function poll(force){
+ if(!L||(busy&&!force)||document.hidden&&!force)return;
+ try{
+  st=await L.status();renderLive();
+  if(st.mode==='tailnet'){try{tn=await L.tailnet()}catch{}}
+  saved=await L.list();renderSaved();renderMembers();
+  $('#cs').textContent='Connected · '+L.label;$('#cs').className='sp ok';$('#cd').textContent=''
+ }catch(e){$('#cs').textContent='Dongle not responding';$('#cs').className='sp bad';$('#cd').textContent=e.message}}
+function start(layer){L=layer;$('#app').hidden=false;$('#connect').hidden=true;poll(true);setInterval(poll,3000)}
+$('#addw').onsubmit=e=>{e.preventDefault();const f=e.target.elements;
+ run('Saving network',async()=>{const p={slot:+f.slot.value,name:f.name.value.trim()||f.ssid.value,ssid:f.ssid.value,password:f.password.value,priority:+f.priority.value};
+  const r=await L.act(TD.profileLine(p));say(r.trim().split(/\r?\n/)[0]);e.target.reset();$('#scanmsg').textContent=''})};
+$('#scan').onclick=()=>run('Scanning',async()=>{scanRows=await L.scan();const s=$('#found');s.replaceChildren(h('option',{value:''},scanRows.length?'Choose a network…':'No networks found'));
+ for(const r of scanRows.sort((a,b)=>b.rssi-a.rssi))s.append(h('option',{value:r.ssid},r.ssid+' · '+r.rssi+' dBm · '+(r.secure?'password':'open')));s.hidden=false});
+$('#found').onchange=e=>{if(e.target.value)$('#addw').elements.ssid.value=e.target.value};
+$('#addm').onsubmit=e=>{e.preventDefault();const f=e.target.elements;
+ run('Adding tailnet',async()=>{await L.act(TD.memberLine({verb:'add',label:f.label.value.trim(),key:f.key.value.trim()}));e.target.reset();say(f.key.value?'Added.':'Added. Continue sign-in appears on the tailnet when ready.')})};
+$('#setmode').onclick=()=>{const v=$('#mode').value;if(confirm('Switch mode and restart the dongle? USB networking restarts with it.'))run('Saving mode',async()=>{await L.act('mode '+v);say('Mode saved. The dongle is restarting; reconnect in a few seconds.')})};
+$('#disp').onsubmit=e=>{e.preventDefault();const f=e.target.elements;run('Applying display',()=>L.act(TD.displayLine(+f.b.value,+f.r.value,+f.d.value)))};
+$('#reboot').onclick=()=>{if(confirm('Reboot the dongle?'))run('Rebooting',async()=>{await L.act('reboot');say('Rebooting; reconnect in a few seconds.')})};
+$('#connect').onclick=async()=>{try{const port=await navigator.serial.requestPort();start(TD.layer(await TD.serialTransport(port)))}catch(e){$('#cd').textContent=e.message}};
+if(location.protocol==='http:'&&/^192\.168\.77\.1(:80)?$/.test(location.host)){$('#cd').textContent='Served by the dongle over USB. Mutating commands are accepted from this address only.';start(TD.layer(TD.httpTransport('')))}
+else if('serial' in navigator){$('#cs').textContent='Not connected';$('#cd').textContent='Plug in the dongle, then connect. Works in bridge and tailnet modes (Chrome or Edge).';$('#connect').hidden=false}
+else{$('#cs').textContent='Unsupported browser';$('#cs').className='bad';$('#cd').textContent='Use Chrome or Edge for Web Serial, or open http://192.168.77.1/ with the dongle in tailnet mode.'}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll()});
+})();
+if(typeof module!=='undefined')module.exports=TD;
+</script></html>

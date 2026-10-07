@@ -394,57 +394,157 @@ async fn usb_net_task(mut runner: Runner<'static, UsbStackDriver>) -> ! {
     runner.run().await
 }
 
-/// `GET /status` on port 80: the gateway's status JSON; anything else is a 404. One connection at a time per task, small windows (heap, once).
+/// The USB side's HTTP server on port 80 (tailnet mode only; nothing of it exists in a setup boot, and the setup access point has no route to it). `tdongle_setup::usb`
+/// decides every request (peer and local address, `Host`, `Origin`, method, content type, command allowlist): `GET /` the controller page, `GET /status` the gateway JSON,
+/// `POST /serial` one console command, run by the **same dispatcher** as the serial console, answered with its reply bytes unchanged. One connection at a time per task,
+/// small windows (heap, once); a request's own buffer is heap that lives only for the request.
 #[embassy_executor::task(pool_size = 2)]
 async fn http_status_task(stack: Stack<'static>) -> ! {
     use embassy_net::tcp::TcpSocket;
-    use embedded_io_async::Write as _;
+    use tdongle_setup::router::Conn;
     let rx: &'static mut [u8] = alloc::boxed::Box::leak(alloc::vec![0u8; 1024].into_boxed_slice());
     let tx: &'static mut [u8] = alloc::boxed::Box::leak(alloc::vec![0u8; 2048].into_boxed_slice());
     let mut sock = TcpSocket::new(stack, rx, tx);
     sock.set_timeout(Some(Duration::from_secs(10)));
-    let mut req = [0u8; 256];
     loop {
         if sock.accept(80).await.is_err() {
             sock.abort();
             Timer::after_millis(50).await;
             continue;
         }
-        // the request line is all that is read (the page and the app send small GETs); the rest of the headers are not needed
-        let mut n = 0;
-        while n < req.len() {
-            match with_timeout(Duration::from_secs(3), sock.read(&mut req[n..])).await {
-                Ok(Ok(k)) if k > 0 => {
-                    n += k;
-                    if req[..n].windows(2).any(|w| w == b"\r\n") {
-                        break;
-                    }
-                }
-                _ => break,
-            }
-        }
-        let line = core::str::from_utf8(&req[..n]).unwrap_or("").lines().next().unwrap_or("");
-        let path = line.strip_prefix("GET ").and_then(|r| r.split(' ').next()).unwrap_or("");
-        let (head, body): (&str, alloc::vec::Vec<u8>) = match (path.split('?').next().unwrap_or(""), api()) {
-            ("/status", Some(api)) => {
-                let mut body = alloc::vec::Vec::new();
-                let mut sink = |chunk: &[u8]| body.try_reserve(chunk.len()).is_ok() && {
-                    body.extend_from_slice(chunk);
-                    true
-                };
-                let _ = api.render_status(&mut sink);
-                ("200 OK", body)
-            }
-            ("/status", None) => ("503 Service Unavailable", alloc::vec::Vec::new()),
-            _ => ("404 Not Found", alloc::vec::Vec::new()),
+        let v4 = |e: Option<embassy_net::IpEndpoint>| match e?.addr {
+            embassy_net::IpAddress::Ipv4(a) => Some(u32::from_be_bytes(a.octets())),
         };
-        let mut h = String::new();
-        let _ = write!(h, "HTTP/1.1 {head}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
-        let ok = sock.write_all(h.as_bytes()).await.is_ok() && sock.write_all(&body).await.is_ok() && sock.flush().await.is_ok();
-        HTTP_SERVED.fetch_add(u32::from(ok), Ordering::Relaxed);
+        let conn = Conn { peer: v4(sock.remote_endpoint()), local: v4(sock.local_endpoint()) };
+        serve_one(&mut sock, &conn).await;
         sock.close();
         let _ = with_timeout(Duration::from_secs(2), sock.flush()).await;
         sock.abort();
+    }
+}
+
+/// Serialises `POST /serial`: the console task runs one command at a time and its reply pieces are not tagged.
+static SERIAL_CALL: embassy_sync::mutex::Mutex<CriticalSectionRawMutex, ()> = embassy_sync::mutex::Mutex::new(());
+
+async fn send_all(sock: &mut embassy_net::tcp::TcpSocket<'_>, bytes: &[u8]) -> bool {
+    use embedded_io_async::Write as _;
+    sock.write_all(bytes).await.is_ok()
+}
+
+async fn refuse(sock: &mut embassy_net::tcp::TcpSocket<'_>, status: &str, message: &str) {
+    use tdongle_setup::usb;
+    let mut h = String::new();
+    let _ = usb::write_head(&mut h, status, usb::TEXT, Some(message.len() + 1), usb::Kind::Refusal);
+    let _ = send_all(sock, h.as_bytes()).await && send_all(sock, message.as_bytes()).await && send_all(sock, b"\n").await;
+}
+
+async fn serve_one(sock: &mut embassy_net::tcp::TcpSocket<'_>, conn: &tdongle_setup::router::Conn) {
+    use tdongle_setup::usb::{self, Answer, HeadError, Kind};
+    // the request (head and body) lives in one heap buffer for the length of the request
+    const BUF: usize = usb::HEAD_MAX + usb::BODY_MAX;
+    let mut buf: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+    if buf.try_reserve_exact(BUF).is_err() {
+        refuse(sock, "503 Service Unavailable", "Out of memory").await;
+        return;
+    }
+    buf.resize(BUF, 0);
+    let mut n = 0;
+    let (head_len, ready) = loop {
+        match usb::parse_head(&buf[..n]).map(|(h, used)| (used, h.content_len.unwrap_or(0).min(usb::BODY_MAX))) {
+            Ok((used, body)) if n >= used + body => break (used, true),
+            Ok(_) | Err(HeadError::Incomplete) => {}
+            Err(HeadError::TooLarge) => return refuse(sock, "431 Request Header Fields Too Large", "Header fields are too long").await,
+            Err(HeadError::Bad) => return refuse(sock, "400 Bad Request", "Bad request").await,
+        }
+        if n == buf.len() {
+            break (0, false);
+        }
+        match with_timeout(Duration::from_secs(3), sock.read(&mut buf[n..])).await {
+            Ok(Ok(k)) if k > 0 => n += k,
+            _ => break (0, false), // closed or too slow: nothing to answer
+        }
+    };
+    if !ready {
+        return;
+    }
+    let Ok((head, _)) = usb::parse_head(&buf[..n]) else { return };
+    enum Job {
+        Page,
+        Status,
+        Serial(String),
+    }
+    let job = match usb::route(conn, &head, &buf[head_len..n]) {
+        Answer::Refuse(r) => return refuse(sock, r.status, r.message).await,
+        Answer::Page => Job::Page,
+        Answer::Status => Job::Status,
+        Answer::Serial(line) => Job::Serial(String::from(line)),
+    };
+    drop(buf); // the buffer (and the auth key or Wi-Fi password in it) is not kept while the reply is produced
+    let mut h = String::new();
+    let ok = match job {
+        Job::Page => {
+            let _ = usb::write_head(&mut h, "200 OK", "text/html; charset=utf-8", Some(usb::PAGE.len()), Kind::Page);
+            send_all(sock, h.as_bytes()).await && send_all(sock, usb::PAGE).await
+        }
+        Job::Status => {
+            let mut body = alloc::vec::Vec::new();
+            let status = match api() {
+                Some(api) => {
+                    let mut sink = |chunk: &[u8]| body.try_reserve(chunk.len()).is_ok() && {
+                        body.extend_from_slice(chunk);
+                        true
+                    };
+                    let _ = api.render_status(&mut sink);
+                    "200 OK"
+                }
+                None => "503 Service Unavailable",
+            };
+            let _ = usb::write_head(&mut h, status, usb::JSON, Some(body.len()), Kind::Text);
+            send_all(sock, h.as_bytes()).await && send_all(sock, &body).await
+        }
+        Job::Serial(line) => serial_call(sock, line).await,
+    };
+    HTTP_SERVED.fetch_add(u32::from(ok), Ordering::Relaxed);
+    let _ = sock.flush().await;
+}
+
+/// `POST /serial`: hand the line to the console task and stream what its dispatcher emits. A command that restarts the chip emits its answer, waits 300 ms and resets: the
+/// answer is on the wire by then and the connection ends with the reset (the page treats that as success for those commands).
+async fn serial_call(sock: &mut embassy_net::tcp::TcpSocket<'_>, line: String) -> bool {
+    use tdongle_setup::usb::{self, Kind};
+    let Ok(_one) = with_timeout(Duration::from_secs(30), SERIAL_CALL.lock()).await else {
+        refuse(sock, "503 Service Unavailable", "Busy").await;
+        return false;
+    };
+    while crate::HTTP_OUT.try_receive().is_ok() {} // stale pieces of an abandoned call
+    if with_timeout(Duration::from_secs(3), crate::HTTP_LINE.send(line)).await.is_err() {
+        refuse(sock, "503 Service Unavailable", "Console busy").await;
+        return false;
+    }
+    let mut started = false;
+    let mut wait = Duration::from_secs(25); // `scan` is the slowest command
+    loop {
+        let Ok(piece) = with_timeout(wait, crate::HTTP_OUT.receive()).await else {
+            if !started {
+                refuse(sock, "504 Gateway Timeout", "ERR The dongle did not answer").await;
+            }
+            return started;
+        };
+        if piece.is_empty() {
+            return true;
+        }
+        if !started {
+            started = true;
+            let mut h = String::new();
+            let _ = usb::write_head(&mut h, "200 OK", usb::TEXT, None, Kind::Text);
+            if !send_all(sock, h.as_bytes()).await {
+                return false;
+            }
+        }
+        if !send_all(sock, piece.as_bytes()).await {
+            return false;
+        }
+        wait = Duration::from_millis(1500);
     }
 }
 
@@ -1652,7 +1752,7 @@ fn member_command(api: &dyn TailnetApi, rest: &str, out: &mut String) {
     let a = it.next().unwrap_or("");
     let b = it.next().unwrap_or("");
     let action = match verb {
-        "add" if !a.is_empty() && !b.is_empty() => MemberAction::add(a.as_bytes(), b.as_bytes()),
+        "add" if !a.is_empty() => MemberAction::add(a.as_bytes(), b.as_bytes()), // no key: browser sign-in (the login URL appears in /status)
         "enable" | "disable" | "remove" => match a.parse::<u32>() {
             Ok(id) => match verb {
                 "enable" => MemberAction::Enable(id),
@@ -1660,12 +1760,12 @@ fn member_command(api: &dyn TailnetApi, rest: &str, out: &mut String) {
                 _ => MemberAction::Remove(id),
             },
             Err(_) => {
-                out.push_str("usage: member add LABEL KEY | enable ID | disable ID | remove ID\r\n");
+                out.push_str("usage: member add LABEL [KEY] | enable ID | disable ID | remove ID\r\n");
                 return;
             }
         },
         _ => {
-            out.push_str("usage: member add LABEL KEY | enable ID | disable ID | remove ID\r\n");
+            out.push_str("usage: member add LABEL [KEY] | enable ID | disable ID | remove ID\r\n");
             return;
         }
     };
