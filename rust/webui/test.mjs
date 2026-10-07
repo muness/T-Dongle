@@ -55,12 +55,12 @@ globalThis.fetch = async (url, o) => {
   return { ok: true, status: 200, text: async () => dongle(o.body) };
 };
 // transport 2: Web Serial. A fake port: the console echoes nothing, answers a line when it gets its newline.
-function fakePort() {
+function fakePort(answer = dongle) {
   let push; let closed = false;
   const readable = new ReadableStream({ start(c) { push = (s) => c.enqueue(new TextEncoder().encode(s)); } });
   const writable = new WritableStream({ write(chunk) {
     const line = new TextDecoder().decode(chunk).replace(/\n$/, '');
-    setTimeout(() => push(dongle(line)), 5);
+    setTimeout(() => push(answer(line)), 5);
   } });
   return { readable, writable, async open() {}, async close() { closed = true; }, async setSignals() {}, get closed() { return closed; } };
 }
@@ -122,6 +122,46 @@ await assert.rejects(() => TD.layer(TD.httpTransport('')).raw('status'), TypeErr
 // the firmware's refusal text reaches the user
 globalThis.fetch = async () => ({ ok: false, status: 403, text: async () => 'USB access required\n' });
 await assert.rejects(() => TD.layer(TD.httpTransport('')).raw('status'), /USB access required/);
+
+// ---- the transport contract (rust/webui/contract.txt; the Rust side is tdongle-setup/tests/webui_contract.rs) ----
+const contract = fs.readFileSync(path.join(here, 'contract.txt'), 'utf8').split('\n')
+  .filter(l => l.trim() && !l.startsWith('#'))
+  .map(l => { const [kind, pattern, exemplar, note] = l.split(' | ').map(s => s.trim()); return { kind, re: pattern === '-' ? null : new RegExp('^(?:' + pattern + ')$'), exemplar, note }; });
+const both = contract.filter(e => e.kind === 'both');
+assert.ok(both.length > 10 && contract.some(e => e.exemplar === 'selftest flash' && e.kind === 'serial') && contract.some(e => e.exemplar === 'temperature' && e.kind === 'absent'));
+for (const e of both) assert.ok(e.re.test(e.exemplar), 'contract exemplar matches its own pattern: ' + e.exemplar);
+const inContract = line => both.some(e => e.re.test(line));
+// every line sent above over HTTP is a `both` command (except 'del 9', the test's own refused probe)
+for (const c of calls.filter(c => c.o.body !== 'del 9')) assert.ok(inContract(c.o.body), 'the page sent a command outside the contract over HTTP: ' + c.o.body);
+// every line the page's builders produce is a `both` command
+for (const l of [TD.profileLine({ slot: 3, name: 'n', ssid: 's', password: '', priority: 1 }), TD.memberLine({ verb: 'add', label: 'w', key: '' }), TD.memberLine({ verb: 'add', label: 'w', key: 'k' }),
+  TD.memberLine({ verb: 'enable', id: 1 }), TD.memberLine({ verb: 'disable', id: 1 }), TD.memberLine({ verb: 'remove', id: 1 }), TD.displayLine(5, 0, 10), TD.displayLine(100, 1, 3600),
+  'use 8', 'del 1', 'mode wifi_bridge', 'mode tailnet_gateway', 'reboot', 'status', 'list', 'scan', 'tailnet-status']) assert.ok(inContract(l), l);
+// every command literal in the page's script is a `both` command (a new button that sends 'boot-status' fails here)
+const heads = new Set(contract.map(e => e.exemplar.split(' ')[0]));
+for (const m of script.matchAll(/'([a-z][a-z-]*)( [^']*)?'/g)) if (heads.has(m[1]) && !both.some(e => e.exemplar.split(' ')[0] === m[1])) assert.fail('the page names a console-only command: ' + m[0]);
+// same bytes on both transports, for every `both` exemplar, through the page's own command layer
+{
+  const reply = l => l === 'status' ? statusG.temp_valid : l === 'list' ? repliesG['list/two_second_current'] : l === 'tailnet-status' ? TAILNET_JSON + '\r\n' : 'OK ' + l + '\r\n';
+  globalThis.fetch = async (url, o) => ({ ok: true, status: 200, text: async () => reply(o.body) });
+  const ser2 = TD.layer(await TD.serialTransport(fakePort(reply)));
+  const http2 = TD.layer(TD.httpTransport(''));
+  for (const e of both) {
+    if (/^(reboot|mode )/.test(e.exemplar)) continue; // restart: covered above (a dropped connection is success)
+    assert.equal(await ser2.raw(e.exemplar), await http2.raw(e.exemplar), 'same reply bytes for ' + e.exemplar);
+  }
+  // temperature: the chip_temperature line of `status`, the same on both transports, read the way the Android app reads it
+  for (const g of ['temp_valid', 'temp_negative', 'temp_invalid']) {
+    const fix = statusG[g];
+    globalThis.fetch = async () => ({ ok: true, status: 200, text: async () => fix });
+    const viaHttp = await TD.layer(TD.httpTransport('')).status();
+    const ct = viaHttp.sections.chip_temperature;
+    const android = /^chip_temperature valid=1 current_tenths=([0-9]{1,4}) peak_tenths=([0-9]{1,4}) sampled_uptime_ms=[0-9]+ errors=[0-9]+\r?$/m.exec(fix);
+    if (g === 'temp_valid') { assert.equal(ct.valid, '1'); assert.ok(android); assert.equal(ct.current_tenths, android[1]); assert.equal(ct.peak_tenths, android[2]); }
+    if (g === 'temp_invalid') { assert.equal(ct.valid, '0'); assert.equal(android, null); }
+    if (g === 'temp_negative') { assert.equal(ct.valid, '1'); assert.ok(+ct.current_tenths < 0); } // the web UI shows it; the Android regex has no minus sign (reported gap)
+  }
+}
 
 // the page has no external resources
 for (const bad of ['cdn.', 'unpkg', 'googleapis', '<link ']) assert.ok(!html.includes(bad), bad);

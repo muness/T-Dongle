@@ -166,9 +166,13 @@ const fn refuse<'a>(status: &'static str, message: &'static str) -> Answer<'a> {
 }
 
 /// The commands `/serial` hands to the dispatcher: what the controller page uses, nothing that restarts into download mode, wipes or runs a test.
+///
+/// A line passes only if the serial console would also take it as one line, byte for byte (1 to
+/// [`tdongle_serial::console::LINE_CHARS_MAX`] printable ASCII characters, what `LineReader` stores): the HTTP transport never reaches the
+/// dispatcher with a line the console would have discarded. `rust/webui/contract.txt` lists every command form and which transports serve it.
 #[must_use]
 pub fn command_allowed(line: &str) -> bool {
-    if line.is_empty() || line.len() > BODY_MAX || line.chars().any(|c| c.is_control()) {
+    if line.is_empty() || line.len() > tdongle_serial::console::LINE_CHARS_MAX || !line.bytes().all(|b| (32..=126).contains(&b)) {
         return false;
     }
     matches!(line, "status" | "list" | "scan" | "tailnet-status" | "help" | "capabilities" | "display" | "reboot")
