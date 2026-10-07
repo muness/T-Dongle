@@ -75,7 +75,12 @@
     "ssid": "TDongle-D788BC",
     "portal": "http://192.168.4.1/",
     "session_seconds": 600,
-    "status": "pending final handoff"
+    "status": "verified healthy",
+    "stage": "running",
+    "rescue": "healthy",
+    "safe_mode": false,
+    "setup_active": true,
+    "verified_utc": "2026-10-07T21:23:56.323604+00:00"
   },
   "original_slow_join_cause_proven": false
 }

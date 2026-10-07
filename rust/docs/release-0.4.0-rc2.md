@@ -41,10 +41,10 @@ The stack guard and static initialization fixes remain verified. Directory resto
 
 All five requested follow-ups are integrated: Android embedded page uses `/command`; JSON nesting property range starts at 1; queue feature conflict is resolved; web UI tests run in CI; and directory clear invalidates the NOR header without two immediate erases. CI also runs vendor TLS cancellation tests. Existing formatting and lint failures were corrected separately.
 
-Final native workspace and doctests: 1,604 passed, zero failed, 8 ignored across 238 groups. Vendor TLS: 15 passed. Focused post-cleanup tests: 480 passed, zero failed, 5 ignored. Formatting, clippy, boot order, rescue-first checks, 13 flash-helper tests, 3 stack-parser tests, web UI contracts, generated goldens and loom pass. Miri results are recorded separately when complete.
+Final native workspace and doctests: 1,604 passed, zero failed, 8 ignored across 238 groups. Vendor TLS: 15 passed. Focused post-cleanup tests: 480 passed, zero failed, 5 ignored. Formatting, clippy, boot order, rescue-first checks, 13 flash-helper tests, 3 stack-parser tests, web UI contracts, generated goldens and loom pass. Miri validates the TLS-independent unsafe queues and rings. Its threaded test correction is still being rerun: the shortened interpreter schedule delivered all accepted frames and passed ordering/accounting/PM/heap invariants, but did not trigger growth/reclaim. Native stress retains those occurrence assertions; deterministic Miri cases cover growth/reclaim. Final results will be recorded when complete.
 
 ## Owner qualification and setup handoff
 
 The owner accepted temperature and reviewed the matched join evidence. Phone setup-AP testing, the Android app and [the web UI checklist](../../docs/webui-checklist.md) remain owner qualification. Package hardware qualification flags stay false until that review. Tag 0.4.0 only after explicit owner go-ahead.
 
-Final setup-AP handoff is verified after the current gateway soak: pending. SSID `TDongle-D788BC`, open network; portal `http://192.168.4.1/`. The session lasts ten minutes, then returns to saved gateway mode; connecting a phone does not extend it.
+Setup AP entered after the current gateway soak; serial verifies the tested ELF, running stage, rescue healthy, safe mode false and setup active. SSID `TDongle-D788BC`, open network; portal `http://192.168.4.1/`. The session lasts ten minutes, then returns to saved gateway mode; connecting a phone does not extend it.
