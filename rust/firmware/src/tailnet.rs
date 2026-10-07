@@ -120,7 +120,7 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 127 * 1024;
+    pub const HEAP_REGULAR: usize = 126 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
@@ -1188,7 +1188,7 @@ fn sta_report(sh: &Sh, out: &mut String) {
         let frames = ld(&crate::NTB_IN_FRAMES);
         let _ = write!(
             out,
-            "tn_in ntb={} frames={} frames_per_ntb_x100={} frames_max={} hist_1_2_4_8={}/{}/{}/{} in_wait_us_avg={} in_wait_us_max={} in_wakes={} in_idle_timeouts={} heap_min_over_floor={} ring_enq={} ring_full={} ring_high={} pump_wakes={} pump_moved={} pump_pass_max={} udp_wakes={} udp_datagrams={} udp_batch_max={} udp_pkts={}\r\n",
+            "tn_in ntb={} frames={} frames_per_ntb_x100={} frames_max={} hist_1_2_4_8={}/{}/{}/{} in_wait_us_avg={} in_wait_us_max={} in_wakes={} in_idle_timeouts={} heap_min_over_floor={} ring_enq={} ring_full={} ring_high={} pump_wakes={} pump_moved={} pump_pass_max={} udp_wakes={} udp_datagrams={} udp_batch_max={} udp_pkts={} derp_held={} derp_reconnect[lease,tls,wait,write]={},{},{},{}\r\n",
             ntbs,
             frames,
             if ntbs == 0 { 0 } else { frames * 100 / ntbs },
@@ -1211,7 +1211,12 @@ fn sta_report(sh: &Sh, out: &mut String) {
             ld(&rt_udp::UDP_WAKES),
             ld(&rt_udp::UDP_DATAGRAMS),
             ld(&rt_udp::UDP_BATCH_MAX),
-            tdongle_tailnet_runtime::net_embassy::UDP_PKTS
+            tdongle_tailnet_runtime::net_embassy::UDP_PKTS,
+            ld(&tdongle_tailnet_runtime::derp::DERP_EGRESS_HELD),
+            ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[0]),
+            ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[1]),
+            ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[2]),
+            ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[3])
         );
     }
     for (i, sl) in sh.slots.iter().enumerate() {

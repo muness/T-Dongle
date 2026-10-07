@@ -35,6 +35,12 @@ use tdongle_tailnet_pool::{Class, PoolBuf};
 use tdongle_tailnet_tls::{DEFAULT_ANCHORS, WRITE_RECORD_BYTES};
 use tdongle_tailnet_types::{FixedStr, Key32};
 
+/// Times a relay packet stayed in the egress queue because the link's ring was full (it is sent after the one being written), and link restarts by cause:
+/// lease timeout, TLS error, record wait error, write error (`tn_in` line).
+pub static DERP_EGRESS_HELD: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// See [`DERP_EGRESS_HELD`]: `[lease_timeout, tls, wait_record, write]`.
+pub static DERP_RECONNECT: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
+
 /// Room the host queue must have before a relay record is read (see `stream`).
 pub const HOST_ROOM: usize = 4096;
 
@@ -212,8 +218,11 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
     /// Move the engine's relay packets into the link (which counts the ones it cannot send).
     fn pump_egress(&mut self) {
         let mut eg = [0u8; 32 + MAX_PACKET + 32];
-        while let Some((_k, n)) = self.sh.slots[self.idx].derp_q.try_pop(&mut eg) {
+        // a packet leaves the egress queue only when the link took it: the link's ring holds the frame being written and little else, so the rest waits here (before, every
+        // packet after the first was popped, refused by the link and lost, which TCP in the tunnel cannot live with)
+        while let Some((_k, n)) = self.sh.slots[self.idx].derp_q.try_peek(&mut eg) {
             if n < 32 {
+                self.sh.slots[self.idx].derp_q.discard_front();
                 continue;
             }
             let now = self.sh.now();
@@ -221,7 +230,13 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
             dst.copy_from_slice(&eg[..32]);
             let Drv { sh, idx, member, link, acts, stage, .. } = self;
             let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage };
-            let _ = link.send_packet(now, &dst, &eg[32..n], &mut sink);
+            match link.send_packet(now, &dst, &eg[32..n], &mut sink) {
+                Err(tdongle_tailnet_derp::txq::TxDrop::NoSpace | tdongle_tailnet_derp::txq::TxDrop::OverBudget) => {
+                    DERP_EGRESS_HELD.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                    break;
+                }
+                _ => self.sh.slots[self.idx].derp_q.discard_front(),
+            }
         }
         self.after();
     }
@@ -440,6 +455,7 @@ where
             match drive(d, false, pin!(write)).await {
                 Some(Ok(())) => d.call(Event::TxDone),
                 Some(Err(_)) => {
+                    DERP_RECONNECT[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                     d.call(Event::Reconnect);
                     return;
                 }
@@ -455,7 +471,8 @@ where
         }
         // back-pressure towards the network: a record (the relay's writes are about 2 KB, up to 16 KB) is read only when the host queue can take what it
         // carries, so a slow USB side slows the TCP connection instead of dropping packets the relay already delivered
-        if sh.host_q.free_bytes() < crate::derp::HOST_ROOM {
+        // (not in the middle of a relay frame: the link's 5 s record timer runs from its first byte, and a full host queue during a download held it past that)
+        if !d.link.rx_in_frame() && sh.host_q.free_bytes() < crate::derp::HOST_ROOM {
             if let Either::Second(()) = select(Timer::after_millis(2), d.wait(true)).await
                 && d.must_abort()
             {
@@ -477,13 +494,15 @@ where
                     .await;
                 match r {
                     Ok(_) => {}
-                    Err(ReadError::LeaseTimeout) | Err(ReadError::Tls(_)) => {
+                    Err(e) => {
+                        DERP_RECONNECT[usize::from(matches!(e, ReadError::Tls(_)))].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                         d.call(Event::Reconnect);
                         return;
                     }
                 }
             }
             Either::First(Err(_)) => {
+                DERP_RECONNECT[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 d.call(Event::Reconnect);
                 return;
             }

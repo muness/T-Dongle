@@ -502,6 +502,11 @@ impl<const TXQ: usize> Link<TXQ> {
         self.txq.set_policy(p);
     }
 
+    /// True while a relay frame has been started and not finished (the reader holds a partial frame): waiting here instead of reading is what the 5 s record timer punishes.
+    pub fn rx_in_frame(&self) -> bool {
+        self.reader.in_frame()
+    }
+
     /// Frames waiting in the transmit ring.
     pub fn tx_queued(&self) -> usize {
         self.txq.len()
