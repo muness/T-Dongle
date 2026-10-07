@@ -368,9 +368,12 @@ impl Write for EmbTcp {
         }
     }
     async fn flush(&mut self) -> Result<(), NetError> {
-        match self.sock.as_mut() {
-            Some(s) => s.flush().await.map_err(tcp_err),
-            None => Err(NetError::Closed),
+        // The data is in the socket's send buffer (`write` waited for room), which is all a stream needs. embassy-net's own flush waits until the peer has ACKed everything
+        // queued, so every TLS record would cost a round trip: one relay frame per RTT (1.4 KB in 80 ms is 0.14 Mbit/s), whatever the window. The connection is closed with a
+        // reset (`close`, `release`), which has no use for a drained buffer.
+        match self.sock.as_ref() {
+            Some(s) if s.state() != tcp::State::Closed => Ok(()),
+            _ => Err(NetError::Closed),
         }
     }
 }
