@@ -163,6 +163,54 @@ for (const m of script.matchAll(/'([a-z][a-z-]*)( [^']*)?'/g)) if (heads.has(m[1
   }
 }
 
+// The embedded USB page must also work in Android's restricted TailnetSetupView.
+// Unlike the desktop Web Serial controller, it can only GET /status, GET
+// /wifi-scan and POST /command. Execute its actual request/command functions.
+const androidHtml = fs.readFileSync(path.join(here, 'android.html'), 'utf8');
+const androidScript = /<script>([\s\S]*)<\/script>/.exec(androidHtml)[1];
+const endpoints = [...androidScript.matchAll(/request\('([^']+)'/g)].map(m => m[1]);
+assert.deepEqual([...new Set(endpoints)].sort(), ['/command', '/status', '/wifi-scan']);
+assert.ok(!androidScript.includes('/serial'));
+const requestSource = androidScript.match(/^async function request[^\n]+/m)[0];
+const commandSource = androidScript.match(/^async function command[^\n]+/m)[0];
+const feedback = { error: { textContent: '' }, notice: { textContent: '' } };
+let refreshes = 0;
+const android = new Function('error', 'notice', 'pending', 'refresh',
+  'let busy=false; ' + requestSource + '\n' + commandSource + '\nreturn {request,command};')(
+  feedback.error, feedback.notice, () => {}, async () => { refreshes++; });
+const androidCalls = [];
+globalThis.fetch = async (url, options) => {
+  androidCalls.push({ url, options });
+  return { ok: true, json: async () => ({ ok: true }) };
+};
+for (const data of [
+  { action: 'wifi', ssid: 'Phone', password: 'pass word' },
+  { action: 'wifi_remove', ssid: 'Phone' },
+  { action: 'add', label: 'home', key: '' },
+  { action: 'enable', id: 1, enabled: false },
+  { action: 'remove', id: 1 },
+  { action: 'mode', mode: 'wifi_bridge' }
+]) {
+  assert.equal(await android.command(data), true);
+  const { url, options } = androidCalls.at(-1);
+  assert.equal(url, '/command');
+  assert.equal(options.method, 'POST');
+  assert.equal(options.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(options.body), data);
+}
+assert.equal(refreshes, 6);
+globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: 'Settings unavailable' }) });
+assert.equal(await android.command({ action: 'add', label: 'home' }), false);
+assert.equal(feedback.error.textContent, 'Settings unavailable');
+for (const endpoint of ['/status', '/wifi-scan']) {
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, endpoint);
+    assert.equal(options.method, undefined);
+    return { ok: true, json: async () => ({ networks: [] }) };
+  };
+  assert.deepEqual(await android.request(endpoint), { networks: [] });
+}
+
 // the page has no external resources
 for (const bad of ['cdn.', 'unpkg', 'googleapis', '<link ']) assert.ok(!html.includes(bad), bad);
 console.log('webui: ok (' + html.length + ' bytes)');

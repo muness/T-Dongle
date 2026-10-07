@@ -1,24 +1,34 @@
 # Web controller checklist
 
-Run this by hand after flashing a build with the web controller. The page has two ways in, and both must behave the same:
+Run this after flashing a build. The desktop controller and Android-compatible USB setup page share firmware state, with different controls:
 
 - **Web Serial**: open `site/controller.html` (or the published copy) in Chrome or Edge, then press **Connect dongle (Web Serial)**. Works in both modes.
 - **USB network (HTTP)**: with the dongle in tailnet gateway mode, open `http://192.168.77.1/` on the device it is plugged into.
 
-On a laptop, run each section once over each transport. On a phone, use the USB network: plug the dongle into the phone, put it in tailnet mode, and open `http://192.168.77.1/`. If your phone's Chrome shows **Connect dongle**, run Web Serial too.
+Run the desktop sections below over Web Serial. For the USB page, including Android’s in-app tailnet setup view, run the USB setup checks below. The USB setup page uses `/status`, `/wifi-scan` and `/command`; display settings, preferred-network selection and standalone reboot remain desktop controller controls.
 
-Write down the transport (S = Web Serial, H = HTTP) next to each tick.
+## USB setup page (browser and Android in-app view)
+
+- [ ] The heading says **Wi-Fi & tailnets**, and Wi-Fi connection status appears.
+- [ ] **Find nearby Wi-Fi** fills the dropdown; saving a network and removing it update saved networks.
+- [ ] Sign in to the single tailnet; its sign-in link, connection state and returned devices appear.
+- [ ] Disconnect and reconnect the saved tailnet, preserving its identity.
+- [ ] Switching routing mode saves and restarts; reconnect and confirm the new mode.
+- [ ] Free memory and valid chip temperature appear in **About this preview**.
+- [ ] Android’s in-app page completes these actions without denied `/serial` requests.
+
+Write down the transport (S = Web Serial, H = USB browser, A = Android in-app) next to each tick.
 
 ## 0. Before you start
 
 - [ ] The host tests pass: `cargo test -p tdongle-setup --test webui_contract --test usb` and `node rust/webui/test.mjs` (from the repo root).
-- [ ] The header says **Connected · Web Serial** or **Connected · USB network**.
+- [ ] The desktop header says **Connected · Web Serial**.
 
 ## 1. Status (polls every 3 s)
 
 - [ ] Mode, Wi-Fi, Channel / PHY, USB, Free heap, Uptime and Firmware are filled in, and Uptime keeps going up.
-- [ ] **Temperature** shows `NN.N °C (peak NN.N)`. On the current Rust firmware it shows `-`, because the reading is not wired in yet (see *Known gaps*). Write down which one you see.
-- [ ] S and H show the same values, give or take one poll.
+- [ ] **Temperature** shows `NN.N °C (peak NN.N)` when the sensor is valid; write down the reading.
+- [ ] Desktop and USB setup pages agree on Wi-Fi, routing mode and tailnet state, give or take one poll.
 
 ## 2. Wi-Fi networks
 
@@ -63,6 +73,6 @@ done
 
 ## Known gaps (as of this checklist)
 
-- No `temperature` command exists. Temperature is the `chip_temperature` line of `status`, and the Rust firmware currently always reports it as invalid (`valid=0`).
-- `selftest flash` exists only on `rust/port`, not on `rust/webui`.
-- The Android app reaches the USB network through `/command` and `/wifi-scan`. The Rust firmware serves `/serial` and `/status`, so the app's tailnet setup view gets 404 on those two paths.
+- No `temperature` command exists. Temperature is the `chip_temperature` line of `status`.
+- The USB page shows the devices returned in the status snapshot; peer pagination is not available in the Rust USB router.
+- The desktop controller also supports `/serial` HTTP commands; the embedded USB setup page uses the Android-compatible JSON endpoints.

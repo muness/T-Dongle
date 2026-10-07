@@ -1,3 +1,6 @@
+# The USB firmware embeds android.html: the Android proxy allows GET /status,
+# GET /wifi-scan and POST /command only. controller.html remains the desktop
+# Web Serial controller and published site/controller.html copy.
 # The transport contract of the controller: every command form, and which transports serve it.
 #
 # One dispatcher (rust/firmware/src/main.rs `handle`) serves both transports. Web Serial types the line into the CDC-ACM

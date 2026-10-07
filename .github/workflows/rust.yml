@@ -29,6 +29,10 @@ jobs:
         with: {workspaces: rust}
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - uses: actions/setup-node@v4
+        with: {node-version: 22}
+      - name: Web UI transport contracts
+        run: node webui/test.mjs
       - run: cargo test --workspace
       - name: Boot order of the no_std images (rule 13)
         run: python3 tools/check_boot_order.py firmware/src/main.rs spikes/s1-wifi-l2/src/main.rs

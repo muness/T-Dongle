@@ -260,7 +260,12 @@ fn one_bundle_two_homes() {
     let site = fs::read(root.join("site/controller.html")).unwrap();
     let source = fs::read(root.join("rust/webui/controller.html")).unwrap();
     assert_eq!(site, source, "site/controller.html must be a byte-identical copy of rust/webui/controller.html (rust/webui/sync.sh)");
-    assert_eq!(usb::PAGE, source.as_slice(), "the firmware embeds the same bytes");
+    assert_eq!(usb::PAGE, fs::read(root.join("rust/webui/android.html")).unwrap(), "the firmware embeds the Android-compatible page");
+    let android = std::str::from_utf8(usb::PAGE).unwrap();
+    assert!(!android.contains("/serial"));
+    assert!(android.contains("request('/command'"));
+    assert!(android.contains("request('/status')"));
+    assert!(android.contains("request('/wifi-scan'"));
     let text = String::from_utf8(source).unwrap();
     assert!(!text.contains("http://") || !text.contains("src=\"http"), "no external resources");
     for banned in ["https://cdn", "//unpkg", "googleapis", "<link ", "src=\"http"] {
