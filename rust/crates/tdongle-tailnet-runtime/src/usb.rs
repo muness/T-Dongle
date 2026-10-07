@@ -315,6 +315,7 @@ where
                 }
             });
         }
+        usb.batch_end();
         // ---- housekeeping
         let now = sh.now();
         if now >= next_tick {
@@ -375,6 +376,7 @@ where
             }
             Either4::Fourth(()) => {}
         }
+        usb.batch_end();
     }
 }
 

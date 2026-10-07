@@ -144,6 +144,9 @@ static RX_BURST_MAX: AtomicU32 = AtomicU32::new(0);
 static RX_GAP_HIST: [AtomicU32; 5] = [const { AtomicU32::new(0) }; 5];
 static RX_BURSTS_GE4: AtomicU32 = AtomicU32::new(0);
 /// Time `send_ntb` spent waiting for the host to take an NTB (sum and max, microseconds), and the waits for the ring to have something (wakeups of the IN task).
+/// Set by tailnet mode while it pushes a run of frames into the ring: `usb_ring_send` then does not wake the IN task per frame (it would send the first frame alone and
+/// the rest in small NTBs); `tailnet::FwUsb::batch_end` wakes it once for the run.
+static RING_DEFER_SIG: AtomicBool = AtomicBool::new(false);
 static NTB_IN_US_SUM: AtomicU32 = AtomicU32::new(0);
 static NTB_IN_US_MAX: AtomicU32 = AtomicU32::new(0);
 static IN_WAKES: AtomicU32 = AtomicU32::new(0);
@@ -360,7 +363,9 @@ impl Env for FwEnv {
         }
         if accepted {
             RING_ENQ.fetch_add(1, Ordering::Relaxed);
-            RING_SIG.signal(());
+            if !RING_DEFER_SIG.load(Ordering::Relaxed) {
+                RING_SIG.signal(());
+            }
             RingSend::Accepted
         } else {
             RING_FULL.fetch_add(1, Ordering::Relaxed);

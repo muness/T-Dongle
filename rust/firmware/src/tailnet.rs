@@ -59,7 +59,7 @@ use crate::{ALT, CONFIGURED, CONNECTS, FIRMWARE, FwEnv, USB_GEN};
 /// Memberships that can run at once in this build (the `members-N` features).
 pub const MEMBERS: usize = MAX_RUN;
 /// NAT flows (the C's `IP_NAPT_MAX` is 512; see the memory notes in the report).
-pub const NAPT_FLOWS: usize = 512;
+pub const NAPT_FLOWS: usize = 384;
 /// Mux queue slots (1,500 bytes each): towards the radio (NAT traffic) and towards the USB host.
 pub const MUX_TXQ: usize = 4;
 /// See [`MUX_TXQ`].
@@ -120,12 +120,12 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 120 * 1024;
+    pub const HEAP_REGULAR: usize = 124 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
-    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 8 KB of margin (4 KB of the 12 went to the UDP receive ring: six datagrams instead of four, ADR 0002 "Download cap"). `tn-mem` and `heap_min` on the board settle it.
-    pub const WIFI_AND_USB: usize = 62 * 1024;
+    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 12 KB of margin (a 62 KB try measured heap_min 29,284 B, 600 B under the floor, with the UDP receive ring at 9,600 B; the 4 KB came back from the NAT table: 384 flows, 4.8 KB less static, given to the regular heap). `tn_in heap_min_over_floor` on the board settles it.
+    pub const WIFI_AND_USB: usize = 66 * 1024;
     /// The bridge's permanent ring slots (8 x 1,514 + header), allocated at boot.
     pub const RING_BASE: usize = 8 * 1_536;
 
@@ -458,7 +458,13 @@ impl UsbFrames for FwUsb {
     }
     fn send(&mut self, frame: &[u8]) -> bool {
         crate::pm::note_activity();
-        FwEnv.usb_ring_send(frame) == RingSend::Accepted
+        crate::RING_DEFER_SIG.store(true, Ordering::Relaxed);
+        let ok = FwEnv.usb_ring_send(frame) == RingSend::Accepted;
+        crate::RING_DEFER_SIG.store(false, Ordering::Relaxed);
+        ok
+    }
+    fn batch_end(&mut self) {
+        crate::RING_SIG.signal(());
     }
     fn host_ready(&self) -> bool {
         ALT.load(Ordering::Relaxed) != 0 && CONFIGURED.load(Ordering::Relaxed)
@@ -1188,7 +1194,7 @@ fn sta_report(sh: &Sh, out: &mut String) {
         let frames = ld(&crate::NTB_IN_FRAMES);
         let _ = write!(
             out,
-            "tn_in ntb={} frames={} frames_per_ntb_x100={} frames_max={} hist_1_2_4_8={}/{}/{}/{} in_wait_us_avg={} in_wait_us_max={} in_wakes={} in_idle_timeouts={} ring_enq={} ring_full={} ring_high={} pump_wakes={} pump_moved={} pump_pass_max={} udp_wakes={} udp_datagrams={} udp_batch_max={} udp_pkts={}\r\n",
+            "tn_in ntb={} frames={} frames_per_ntb_x100={} frames_max={} hist_1_2_4_8={}/{}/{}/{} in_wait_us_avg={} in_wait_us_max={} in_wakes={} in_idle_timeouts={} heap_min_over_floor={} ring_enq={} ring_full={} ring_high={} pump_wakes={} pump_moved={} pump_pass_max={} udp_wakes={} udp_datagrams={} udp_batch_max={} udp_pkts={}\r\n",
             ntbs,
             frames,
             if ntbs == 0 { 0 } else { frames * 100 / ntbs },
@@ -1201,6 +1207,7 @@ fn sta_report(sh: &Sh, out: &mut String) {
             ld(&crate::NTB_IN_US_MAX),
             ld(&crate::IN_WAKES),
             ld(&crate::IN_TIMEOUTS),
+            ld(&HEAP_MIN) as i64 - ML_HB_FLOOR as i64,
             ld(&crate::RING_ENQ),
             ld(&crate::RING_FULL),
             ld(&crate::RING_HIGH),
