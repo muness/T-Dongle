@@ -1281,9 +1281,10 @@ async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer
 
 /// Wi-Fi -> host: the ring drains into one NTB per datagram (no IN aggregation yet).
 #[embassy_executor::task]
-async fn usb_tx_task(tx: SendTx) -> ! {
+async fn usb_tx_task(mut tx: SendTx) -> ! {
     USB_NETWORK_TX.wait().await;
-    let mut tx = tx.0;
+    // borrowed in place: moving it out (`let mut tx = tx.0`) kept a second 3.2 KB copy of the sender in this task's static future (the tailnet stack margin)
+    let tx = &mut tx.0;
     let mut seq = 0u32;
     let mut next = Instant::now();
     loop {
