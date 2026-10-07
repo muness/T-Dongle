@@ -294,6 +294,8 @@ where
     let mut generation = usb.link_generation();
     let mut carrier = false;
     let mut next_tick = sh.now() + 1000;
+    // the frame the pump holds for room (see `Held`)
+    let mut held: Option<Held> = None;
     loop {
         // ---- everything that is ready for the host, bounded
         PUMP_WAKES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
@@ -355,35 +357,63 @@ where
         }
         // ---- wait
         let wait = next_tick.saturating_sub(sh.now()).max(1);
-        match select4(usb.recv(&mut rx), sh.host_q.wait_nonempty(), wifi.next_to_host(&mut wbuf), async {
+        // the next frame from the host, or, while one is held, its release: the host is not read while a frame waits (NAKs), everything else keeps being served
+        let from_host = async {
+            match held {
+                Some(h) => {
+                    let ran_out = hold_wait(sh, h).await;
+                    HostEvent::Released(ran_out)
+                }
+                None => HostEvent::Frame(usb.recv(&mut rx).await),
+            }
+        };
+        let dispatch: Option<usize>;
+        match select4(from_host, sh.host_q.wait_nonempty(), wifi.next_to_host(&mut wbuf), async {
             futures_either(sh.carrier_kick.wait(), Timer::after_millis(wait)).await
         })
         .await
         {
-            Either4::First(n) => {
+            Either4::First(HostEvent::Frame(n)) => {
                 RtStats::bump(&sh.stats.usb_rx);
                 let n = n.min(rx.len());
                 if wants_local_stack(&rx[..n]) {
                     usb.local_frame(&rx[..n]);
                 }
-                hold_for_room(sh, &rx[..n]).await;
-                sh.with_scratch(|s| {
-                    if let UsbAction::Reply(len) | UsbAction::Echo(len) | UsbAction::Icmp(len) = host_frame(sh, &mut un, wifi, sh.now(), &mut rx[..n], &mut s[REPLY]) {
-                        send_frame(sh, usb, &s[REPLY][..len]);
-                    }
-                });
+                held = hold_needed(sh, &rx[..n], n);
+                dispatch = if held.is_none() { Some(n) } else { None };
             }
-            Either4::Second(()) => {}
+            Either4::First(HostEvent::Released(ran_out)) => {
+                let h = held.take().expect("a release has a held frame");
+                hold_done(sh, h, ran_out);
+                dispatch = Some(h.n);
+            }
+            Either4::Second(()) => dispatch = None,
             Either4::Third(n) => {
+                dispatch = None;
                 sh.with_scratch(|s| {
                     if let Some(len) = frame_to_host(&un, &wbuf[..n], &mut s[REPLY]) {
                         send_frame(sh, usb, &s[REPLY][..len]);
                     }
                 });
             }
-            Either4::Fourth(()) => {}
+            Either4::Fourth(()) => dispatch = None,
+        }
+        if let Some(n) = dispatch {
+            sh.with_scratch(|s| {
+                if let UsbAction::Reply(len) | UsbAction::Echo(len) | UsbAction::Icmp(len) = host_frame(sh, &mut un, wifi, sh.now(), &mut rx[..n], &mut s[REPLY]) {
+                    send_frame(sh, usb, &s[REPLY][..len]);
+                }
+            });
         }
     }
+}
+
+/// What the pump's host branch produced.
+enum HostEvent {
+    /// A frame of this length from the host.
+    Frame(usize),
+    /// The held frame's wait is over (`true`: it ran out).
+    Released(bool),
 }
 
 /// Frames the image's own TCP stack on the USB side must see: ARP replies (it resolves the host's address itself) and TCP segments to the dongle's address.
@@ -398,46 +428,64 @@ fn wants_local_stack(frame: &[u8]) -> bool {
     }
 }
 
-/// Hold a frame destined to a tailnet peer until its membership's queues have room (bounded by [`HOLD_MAX_MS`]).
-async fn hold_for_room<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>, frame: &[u8]) {
+/// A frame the pump is holding for room in a membership's egress queues: at most one, in the pump's own receive buffer (no heap, nothing queued behind it: while it is held the
+/// pump does not read the next frame, so the host's driver sees NAKs instead of the dongle taking more than it can send).
+#[derive(Clone, Copy, Debug)]
+struct Held {
+    n: usize,
+    slot: usize,
+    start: u64,
+    limit: u64,
+}
+
+/// Does a frame destined to a tailnet peer have to wait for room in its membership's egress queues? (Bounded by [`HOLD_MAX_MS`], [`HOLD_SHORT_MS`] after a hold ran out.)
+fn hold_needed<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>, frame: &[u8], n: usize) -> Option<Held> {
+    use core::sync::atomic::Ordering::Relaxed;
     if frame.len() < 34 || rd16(frame, 12) != ETHERTYPE_IPV4 {
-        return;
+        return None;
     }
     let dst = rd32(frame, 14 + 16);
     if !is_alias(dst) {
-        return;
+        return None;
     }
-    let Some(member) = sh.with_engine(|e, _| e.aliases().owner(dst)).map(|(m, _)| m) else { return };
-    let Some((_, slot)) = sh.slot_of(member) else { return };
-    use core::sync::atomic::Ordering::Relaxed;
-    let ok = || slot.derp_q.free_bytes() >= ROOM_BYTES && slot.udp_q.free_bytes() >= ROOM_BYTES;
-    if ok() {
-        return;
+    let member = sh.with_engine(|e, _| e.aliases().owner(dst)).map(|(m, _)| m)?;
+    let (slot_idx, slot) = sh.slot_of(member)?;
+    if slot.derp_q.free_bytes() >= ROOM_BYTES && slot.udp_q.free_bytes() >= ROOM_BYTES {
+        return None;
     }
-    // hold, don't drop: the frame waits for the queue to drain (woken by every pop, not polled), up to the hold limit; once a hold has run out the limit is short for a while
     let start = sh.now();
     let last_timeout = HOLD_TIMEOUT_AT.load(Relaxed);
     let limit = if last_timeout != 0 && (start as u32).wrapping_sub(last_timeout) < HOLD_BACKOFF_MS as u32 { HOLD_SHORT_MS } else { HOLD_MAX_MS };
     HOLD_STATS[0].fetch_add(1, Relaxed);
-    let mut ran_out = false;
+    Some(Held { n, slot: slot_idx, start, limit })
+}
+
+/// Wait until the held frame's queues have room or its hold ran out (signal-driven: woken by every pop, or the timer; never a loop that does not yield). Returns `true` if it ran
+/// out. The pump polls this next to its other branches, so while it waits the host-bound traffic, the timers and the other tasks keep running.
+async fn hold_wait<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>, h: Held) -> bool {
+    let slot = &sh.slots[h.slot];
     loop {
-        if ok() {
-            break;
+        if slot.derp_q.free_bytes() >= ROOM_BYTES && slot.udp_q.free_bytes() >= ROOM_BYTES {
+            return false;
         }
-        let waited = sh.now().saturating_sub(start);
-        if waited >= limit {
-            ran_out = true;
-            break;
+        let waited = sh.now().saturating_sub(h.start);
+        if waited >= h.limit {
+            return true;
         }
-        // wait on the queue that lacks room (a wait on one that has it would return at once), against the time left: a signal that fires on every pop, or the timer
-        let left = Timer::after_millis(limit - waited);
+        // wait on the queue that lacks room (a wait on one that has it would return at once), against the time left
+        let left = Timer::after_millis(h.limit - waited);
         if slot.derp_q.free_bytes() < ROOM_BYTES {
             let _ = embassy_futures::select::select(slot.derp_q.wait_free(ROOM_BYTES), left).await;
         } else {
             let _ = embassy_futures::select::select(slot.udp_q.wait_free(ROOM_BYTES), left).await;
         }
     }
-    HOLD_STATS[2].fetch_add(sh.now().saturating_sub(start) as u32, Relaxed);
+}
+
+/// Count a finished hold.
+fn hold_done<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>, h: Held, ran_out: bool) {
+    use core::sync::atomic::Ordering::Relaxed;
+    HOLD_STATS[2].fetch_add(sh.now().saturating_sub(h.start) as u32, Relaxed);
     if ran_out {
         HOLD_STATS[1].fetch_add(1, Relaxed);
         HOLD_TIMEOUT_AT.store((sh.now() as u32).max(1), Relaxed);
