@@ -1842,6 +1842,8 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             PIN_BSS.store(b.ends_with("on"), Ordering::Relaxed);
             let _ = write!(s, "bss pin {} (applies to the next join)\r\n", if b.ends_with("on") { "on: BSSID and channel of the strongest usable access point" } else { "off: all-channel scan, join by signal (C)" });
         }
+        #[cfg(feature = "tailnet")]
+        "selftest flash" => dirflash::selftest(&mut s),
         st if st.starts_with("selftest ") => match tdongle_rescue::Selftest::parse(&st["selftest ".len()..]) {
             Some(kind) => {
                 out(wr, "selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)\r\n", 300).await;
