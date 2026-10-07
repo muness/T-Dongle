@@ -484,3 +484,17 @@ fn clock_wrap() {
     let s = w.stats();
     assert_eq!((s.h2w_sent, s.h2w_sojourn_drop, s.h2w_wait_us_max), (1, 0, 2000));
 }
+
+#[test]
+fn boot_identity_is_set_before_the_bridge_is_shared() {
+    let mut b = Bridge::new(TestEnv::new(), [0; 6]);
+    b.set_identity(MAC);
+    let b: &'static Bridge<TestEnv> = Box::leak(Box::new(b));
+    b.env().bridge.set(Some(b));
+    b.link(true, &ctx());
+    let mut producer = b.producer().unwrap();
+    assert_eq!(producer.host(&frame(64, &UNICAST, &MAC, 0)), HostOutcome::Queued);
+    assert_eq!(producer.host(&frame(64, &UNICAST, &PEER, 0)), HostOutcome::ForeignMac);
+    let _ = b.wifi_rx(&frame(64, &UNICAST, &MAC, 0));
+    assert_eq!(b.stats().w2h_own_mac, 1);
+}

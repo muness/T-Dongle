@@ -684,8 +684,11 @@ async fn main(spawner: Spawner) -> ! {
 
     // ---- the bridge (no radio needed yet: the interface is filled in by `init_task`) ----
     let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or([0; 6]); // STA MAC = base MAC
-    static BRIDGE: StaticCell<Bridge<FwEnv>> = StaticCell::new();
-    let bridge: &'static Bridge<FwEnv> = BRIDGE.init_with(|| Bridge::new(FwEnv, mac));
+    // The 12 KB queue is initialized in .bss, never constructed on main's stack.
+    static BRIDGE: ConstStaticCell<Bridge<FwEnv>> = ConstStaticCell::new(Bridge::new(FwEnv, [0; 6]));
+    let bridge = BRIDGE.take();
+    bridge.set_identity(mac);
+    let bridge: &'static Bridge<FwEnv> = bridge;
     let (Some(producer), Some(worker)) = (bridge.producer(), bridge.worker()) else {
         // Cannot happen (first and only call); if it ever does, the console still comes up below without the data path.
         loop {

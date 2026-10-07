@@ -165,7 +165,33 @@ impl<E: Env> Bridge<E> {
     /// Create the bridge for the STA MAC `identity` (the address the host speaks with). Equivalent of `tdongle_l2_start`, minus the allocations:
     /// the queue is part of the value, so a `static Bridge` is the C firmware's permanent 12 KB.
     #[must_use]
-    #[inline(always)] // built in place in `StaticCell::init_with`: three 12 KB copies on the stack otherwise (tools/check_stack.py)
+    #[cfg(not(loom))]
+    pub const fn new(env: E, identity: [u8; 6]) -> Self {
+        Self {
+            env,
+            identity,
+            queue: Spsc::from_cells([const { UnsafeCell::new(Slot { len: 0, token: LinkToken(0), enq_us: 0, bytes: [0; FRAME_MAX] }) }; HOST_SLOTS]),
+            held: AtomicBool::new(false),
+            epoch: AtomicU32::new(0),
+            linked: AtomicBool::new(false),
+            t_queue_limit: AtomicU32::new(HOST_QUEUE_LIMIT),
+            t_resume: AtomicU32::new(HOST_RESUME_DEPTH),
+            t_sojourn_ms: AtomicU32::new(SOJOURN_MS),
+            t_codel: AtomicBool::new(CODEL_DEFAULT),
+            t_codel_target_us: AtomicU32::new(TARGET_US_DEFAULT),
+            t_codel_interval_ms: AtomicU32::new(INTERVAL_MS_DEFAULT),
+            t_codel_gen: AtomicU32::new(0),
+            hold_period_start_us: AtomicU32::new(0),
+            last_hold_us: AtomicU32::new(0),
+            codel_count: AtomicU32::new(0),
+            c: Counters::new(),
+        }
+    }
+
+    /// Create the bridge for the STA MAC `identity` (the address the host speaks with). Equivalent of `tdongle_l2_start`, minus the allocations:
+    /// the queue is part of the value, so a `static Bridge` is the C firmware's permanent 12 KB.
+    #[must_use]
+    #[cfg(loom)]
     pub fn new(env: E, identity: [u8; 6]) -> Self {
         Self {
             env,
@@ -186,6 +212,12 @@ impl<E: Env> Bridge<E> {
             codel_count: AtomicU32::new(0),
             c: Counters::new(),
         }
+    }
+
+    /// Set the STA MAC before sharing the bridge with callbacks and workers.
+    /// The exclusive borrow prevents changing it while any handles exist.
+    pub fn set_identity(&mut self, identity: [u8; 6]) {
+        self.identity = identity;
     }
 
     /// The environment (for the firmware glue that owns the bridge).

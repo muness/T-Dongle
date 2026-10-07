@@ -19,6 +19,11 @@ macro_rules! counters {
         }
 
         impl Counters {
+            #[cfg(not(loom))]
+            pub(crate) const fn new() -> Self {
+                Self { $($name: AtomicU32::new(0),)* h2w_last_tx_error: AtomicI32::new(0) }
+            }
+            #[cfg(loom)]
             pub(crate) fn new() -> Self {
                 Self { $($name: AtomicU32::new(0),)* h2w_last_tx_error: AtomicI32::new(0) }
             }
