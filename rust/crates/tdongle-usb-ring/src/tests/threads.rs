@@ -199,12 +199,19 @@ fn run(flapper: bool, frames: u32) -> Totals {
 
 #[test]
 fn threads_four() {
-    let t = run(false, 300_000);
-    assert!(t.admissions > 5 && t.accepted > 10_000);
+    // Hundreds of Miri sends still race consumer/reclaim across repeated wraps; native stress is unchanged.
+    let frames = if cfg!(miri) { 512 } else { 300_000 };
+    let t = run(false, frames);
+    let min_admissions = if cfg!(miri) { u64::from(frames / 256) } else { 5 };
+    let min_accepted = if cfg!(miri) { u64::from(frames / 30) } else { 10_000 };
+    assert!(t.admissions > min_admissions && t.accepted > min_accepted);
 }
 
 #[test]
 fn threads_with_link_flapper() {
-    let t = run(true, 200_000);
-    assert!(t.flaps > 5 && t.admissions > 5);
+    // Keep ordering, flush accounting, ownership and leak assertions; scale only event volume under Miri.
+    let frames = if cfg!(miri) { 512 } else { 200_000 };
+    let t = run(true, frames);
+    let min_events = if cfg!(miri) { u64::from(frames / 256) } else { 5 };
+    assert!(t.flaps > min_events && t.admissions > min_events);
 }

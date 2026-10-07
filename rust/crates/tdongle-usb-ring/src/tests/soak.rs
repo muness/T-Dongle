@@ -133,28 +133,31 @@ fn soak_once(base: u32, chunks: u32, rounds: u32, seed: u64) {
     let st = r.stats();
     assert_eq!(accepted, u64::from(st.sent_frames + st.flushed_link_down)); // every accepted frame left the ring exactly once
     assert_eq!(u64::from(r.delivered()), u64::from(st.sent_frames));
-    assert!(st.sent_frames > 500);
+    // Interpreter runs retain accounting/invariants; only the volume floor scales with their rounds.
+    let min_sent = if cfg!(miri) { rounds / 40 } else { 500 };
+    assert!(st.sent_frames > min_sent);
     assert!(st.high_water_slabs <= max_slabs);
     assert_eq!(u64::from(st.enqueued_frames), accepted);
     assert_eq!(u64::from(st.dropped_full), dropped);
 }
 
+// Each Miri geometry still runs hundreds of send/drain/outage operations and repeated queue wraps.
 #[test]
 fn soak_base3_chunks10() {
-    soak_once(3, 10, 200_000, 88_172_645_463_325_252);
+    soak_once(3, 10, if cfg!(miri) { 512 } else { 200_000 }, 88_172_645_463_325_252);
 }
 
 #[test]
 fn soak_base2_chunks4() {
-    soak_once(2, 4, 100_000, 0x9e37_79b9_7f4a_7c15);
+    soak_once(2, 4, if cfg!(miri) { 512 } else { 100_000 }, 0x9e37_79b9_7f4a_7c15);
 }
 
 #[test]
 fn soak_base4_fixed() {
-    soak_once(4, 0, 100_000, 0x2545_f491_4f6c_dd1d);
+    soak_once(4, 0, if cfg!(miri) { 512 } else { 100_000 }, 0x2545_f491_4f6c_dd1d);
 }
 
 #[test]
 fn soak_base8_chunks12() {
-    soak_once(8, 12, 100_000, 0xd1b5_4a32_d192_ed03);
+    soak_once(8, 12, if cfg!(miri) { 512 } else { 100_000 }, 0xd1b5_4a32_d192_ed03);
 }
