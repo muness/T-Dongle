@@ -197,27 +197,30 @@ fn run(seed: u64, ops: u32, base: u32, chunks: u32) {
     assert_eq!(st.enqueued_frames, st.sent_frames + st.flushed_link_down);
 }
 
+// Preserve all seeds/geometries and native stress; keep interpreter runs bounded.
+const MODEL_OPS: u32 = if cfg!(miri) { 512 } else { 40_000 };
+
 #[test]
 fn model_seed_1() {
-    run(0x9e37_79b9_7f4a_7c15, 40_000, 3, 10);
+    run(0x9e37_79b9_7f4a_7c15, MODEL_OPS, 3, 10);
 }
 #[test]
 fn model_seed_2() {
-    run(0xd1b5_4a32_d192_ed03, 40_000, 2, 4);
+    run(0xd1b5_4a32_d192_ed03, MODEL_OPS, 2, 4);
 }
 #[test]
 fn model_seed_3() {
-    run(0x2545_f491_4f6c_dd1d, 40_000, 8, 12);
+    run(0x2545_f491_4f6c_dd1d, MODEL_OPS, 8, 12);
 }
 #[test]
 fn model_seed_4() {
-    run(0x1234_5678_9abc_def1, 40_000, 4, 0);
+    run(0x1234_5678_9abc_def1, MODEL_OPS, 4, 0);
 }
 #[test]
 fn model_seed_5() {
-    run(0xfeed_face_cafe_beef, 40_000, 8, 10);
+    run(0xfeed_face_cafe_beef, MODEL_OPS, 8, 10);
 }
 #[test]
 fn model_seed_6() {
-    run(88_172_645_463_325_252, 40_000, 5, 6);
+    run(88_172_645_463_325_252, MODEL_OPS, 5, 6);
 }
