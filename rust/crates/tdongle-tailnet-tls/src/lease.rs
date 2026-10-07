@@ -135,6 +135,13 @@ pub enum ReadError {
     Tls(TlsError),
 }
 
+impl ReadError {
+    /// The peer closed the connection (a close_notify, or the TCP end): end of stream, not a failure.
+    pub fn is_closed(&self) -> bool {
+        matches!(self, ReadError::Tls(TlsError::ConnectionClosed))
+    }
+}
+
 /// A TLS 1.3 connection to a DERP server that pins no read record buffer.
 pub struct LeasedTlsDerp<'a, IO: Read + Write> {
     conn: TlsConnection<'a, IO, Aes128GcmSha256>,

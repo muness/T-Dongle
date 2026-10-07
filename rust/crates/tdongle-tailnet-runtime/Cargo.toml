@@ -50,6 +50,7 @@ embedded-io-async = "0.7"
 embassy-net = { version = "0.9", default-features = false, features = ["proto-ipv4", "medium-ethernet", "tcp", "udp", "dns", "dhcpv4"], optional = true }
 
 [dev-dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
 embassy-time = { version = "0.5", features = ["std", "generic-queue-64"] }
 critical-section = { version = "1.2", features = ["std"] }

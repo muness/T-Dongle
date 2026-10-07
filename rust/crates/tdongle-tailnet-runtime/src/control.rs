@@ -18,7 +18,7 @@ use crate::token::key_control;
 use embassy_futures::select::{Either, select};
 use embassy_sync::blocking_mutex::raw::{NoopRawMutex, RawMutex};
 use embassy_sync::mutex::Mutex as AsyncMutex;
-use embassy_time::{Duration, Timer, with_timeout};
+use embassy_time::{Duration, Instant, Timer, with_timeout};
 use embedded_io_async::{ErrorType, Read, Write};
 use tdongle_tailnet_admission::negotiation::{Phase, Prio};
 use tdongle_tailnet_control::requests::{ENDPOINT_LOCAL, ENDPOINT_STUN, Endpoint, EndpointAddr, Hostinfo};
@@ -39,6 +39,9 @@ impl Drop for Secret {
     }
 }
 
+/// Bytes of one TLS write record of the control connection (the DERP's is 2,048; requests here are a few hundred bytes to about 1.5 KB, split into records).
+const TLS_WRITE_RECORD: usize = 1024;
+
 /// The longest wait between sessions (`ML_CTRL_BACKOFF_MAX_MS`).
 pub const BACKOFF_MAX_MS: u64 = 30_000;
 
@@ -49,30 +52,47 @@ pub const fn backoff_ms(attempts: u32) -> u64 {
     if ms > BACKOFF_MAX_MS { BACKOFF_MAX_MS } else { ms }
 }
 
-/// The TCP handle as the control driver's `Connect`. The handle is shared through an async mutex because `Connect::Stream` cannot borrow `&mut self`;
-/// the driver keeps at most one stream alive at a time (its contract), so the lock never waits.
-struct CtlConnect<'a, T: TcpConn> {
+/// The control connection's two transports, as the control driver's `Connect`: plain TCP (an explicit `http://` control address) or **verified TLS** over the same
+/// TCP handle (the default: Tailscale answers a plaintext `/key` with a 302 to https; the C's `use_tls`, `ctrl_key_auth = CTRL_KEY_TLS_VERIFIED`). The handle is
+/// shared through an async mutex because `Connect::Stream` cannot borrow `&mut self`; the driver keeps at most one stream alive at a time (its contract), so the
+/// lock never waits. TLS records are read through per-record leases from the pool (no static buffer), the two write records (one per stream: the `/key` fetch
+/// and the ts2021 connection) come from one pool block the session owns.
+struct CtlConnect<'a, T: TcpConn, P: Platform> {
     tcp: &'a AsyncMutex<NoopRawMutex, T>,
     host: &'a str,
     port: u16,
     io_ms: u32,
+    tls: Option<TlsSide<'a, P>>,
 }
 
-struct CtlStream<'a, T: TcpConn> {
+struct TlsSide<'a, P: Platform> {
+    platform: &'a P,
+    lease: &'a tdongle_tailnet_tls::lease::LeasePool,
+    mem: tdongle_tailnet_pool::Mem<'a>,
+    /// The trust anchors the chain must end in (the ISRG roots of the DERP policy).
+    anchors: &'a [tdongle_tailnet_tls::TrustAnchor<'a>],
+    /// The write records, one per stream; taken by `connect`.
+    wbufs: [Option<&'a mut [u8]>; 2],
+}
+
+/// How long a TLS connect waits for the wall clock (SNTP): certificates are judged against it, as the C's `ml_derp_clock_valid()` gate.
+const CLOCK_WAIT_MS: u64 = 60_000;
+
+struct CtlTcp<'a, T: TcpConn> {
     tcp: &'a AsyncMutex<NoopRawMutex, T>,
 }
 
-impl<T: TcpConn> ErrorType for CtlStream<'_, T> {
+impl<T: TcpConn> ErrorType for CtlTcp<'_, T> {
     type Error = NetError;
 }
 
-impl<T: TcpConn> Read for CtlStream<'_, T> {
+impl<T: TcpConn> Read for CtlTcp<'_, T> {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, NetError> {
         self.tcp.lock().await.read(buf).await.map_err(|e| net_err::<T>(&e))
     }
 }
 
-impl<T: TcpConn> Write for CtlStream<'_, T> {
+impl<T: TcpConn> Write for CtlTcp<'_, T> {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, NetError> {
         self.tcp.lock().await.write(buf).await.map_err(|e| net_err::<T>(&e))
     }
@@ -81,20 +101,158 @@ impl<T: TcpConn> Write for CtlStream<'_, T> {
     }
 }
 
+/// TLS as a byte stream: reads hand out a record's plaintext and keep the rest (a pool block) for the next read; the peer's close is end of stream.
+struct TlsStream<'a, T: TcpConn> {
+    conn: tdongle_tailnet_tls::lease::LeasedTlsDerp<'a, CtlTcp<'a, T>>,
+    mem: tdongle_tailnet_pool::Mem<'a>,
+    carry: Option<(tdongle_tailnet_pool::PoolBuf<'a>, usize)>,
+}
+
+enum CtlStream<'a, T: TcpConn> {
+    Plain(CtlTcp<'a, T>),
+    Tls(alloc::boxed::Box<TlsStream<'a, T>>),
+}
+
+impl<T: TcpConn> ErrorType for CtlStream<'_, T> {
+    type Error = NetError;
+}
+
+impl<T: TcpConn> Read for CtlStream<'_, T> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, NetError> {
+        match self {
+            CtlStream::Plain(t) => t.read(buf).await,
+            CtlStream::Tls(t) => t.read(buf).await,
+        }
+    }
+}
+
+impl<T: TcpConn> Write for CtlStream<'_, T> {
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, NetError> {
+        match self {
+            CtlStream::Plain(t) => t.write(buf).await,
+            CtlStream::Tls(t) => t.write(buf).await,
+        }
+    }
+    async fn flush(&mut self) -> Result<(), NetError> {
+        match self {
+            CtlStream::Plain(t) => t.flush().await,
+            CtlStream::Tls(t) => t.flush().await,
+        }
+    }
+}
+
+impl<T: TcpConn> TlsStream<'_, T> {
+    async fn read(&mut self, buf: &mut [u8]) -> Result<usize, NetError> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        loop {
+            if let Some((c, at)) = self.carry.as_mut() {
+                let n = (c.len() - *at).min(buf.len());
+                buf[..n].copy_from_slice(&c[*at..*at + n]);
+                *at += n;
+                if *at == c.len() {
+                    self.carry = None;
+                }
+                return Ok(n);
+            }
+            let mut got = 0usize;
+            let mut over: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+            let mut oom = false;
+            let r = self
+                .conn
+                .read_with(
+                    || Timer::after_secs(10),
+                    |chunk| {
+                        let take = chunk.len().min(buf.len() - got);
+                        buf[got..got + take].copy_from_slice(&chunk[..take]);
+                        got += take;
+                        if take < chunk.len() && !oom {
+                            oom = over.try_reserve(chunk.len() - take).is_err();
+                            if !oom {
+                                over.extend_from_slice(&chunk[take..]);
+                            }
+                        }
+                    },
+                )
+                .await;
+            match r {
+                Ok(_) if oom => return Err(NetError::NoMem),
+                Ok(_) => {}
+                Err(e) if e.is_closed() => return Ok(0),
+                Err(_) => return Err(NetError::Io),
+            }
+            if !over.is_empty() {
+                let mut pb = self.mem.alloc_wait(tdongle_tailnet_pool::Class::Record, over.len()).await;
+                pb.copy_from_slice(&over);
+                self.carry = Some((pb, 0));
+            }
+            if got > 0 {
+                return Ok(got);
+            }
+            // a record with no plaintext (a session ticket): the next one
+            if self.carry.is_none() {
+                continue;
+            }
+        }
+    }
+    async fn write(&mut self, buf: &[u8]) -> Result<usize, NetError> {
+        self.conn.write_all(buf).await.map_err(|_| NetError::Io)?;
+        Ok(buf.len())
+    }
+    async fn flush(&mut self) -> Result<(), NetError> {
+        self.conn.flush().await.map_err(|_| NetError::Io)
+    }
+}
+
 fn net_err<T: ErrorType>(_: &T::Error) -> NetError {
     NetError::Io
 }
 
-impl<'a, T: TcpConn> Connect for CtlConnect<'a, T> {
+impl<'a, T: TcpConn, P: Platform> Connect for CtlConnect<'a, T, P> {
     type Stream = CtlStream<'a, T>;
     async fn connect(&mut self) -> Result<Self::Stream, ()> {
-        let mut g = self.tcp.lock().await;
-        let r = with_timeout(Duration::from_millis(u64::from(self.io_ms)), g.connect(self.host, self.port)).await;
-        match r {
-            Ok(Ok(())) => Ok(CtlStream { tcp: self.tcp }),
-            _ => {
+        let io = Duration::from_millis(u64::from(self.io_ms));
+        {
+            let mut g = self.tcp.lock().await;
+            if !matches!(with_timeout(io, g.connect(self.host, self.port)).await, Ok(Ok(()))) {
                 g.close();
-                Err(())
+                return Err(());
+            }
+        }
+        let tcp = self.tcp;
+        let fail = || {
+            // a half-made TLS connection is unusable: the TCP one goes with it
+            Err(())
+        };
+        let Some(t) = self.tls.as_mut() else { return Ok(CtlStream::Plain(CtlTcp { tcp })) };
+        // certificates are judged against the wall clock: wait for SNTP (the C's `ml_derp_clock_valid()` gate), bounded
+        let start = Instant::now();
+        while t.platform.unix_seconds().is_none() {
+            if start.elapsed().as_millis() > CLOCK_WAIT_MS {
+                tcp.lock().await.close();
+                return Err(());
+            }
+            Timer::after_millis(250).await;
+        }
+        let Some(wbuf) = t.wbufs.iter_mut().find_map(Option::take) else {
+            tcp.lock().await.close();
+            return fail();
+        };
+        let cert = tdongle_tailnet_tls::parse_cert_name(Some(self.host), None);
+        let params = tdongle_tailnet_tls::transport::TlsParams {
+            hostname: self.host,
+            cert: &cert,
+            anchors: t.anchors,
+            now_unix: t.platform.unix_seconds().unwrap_or(0),
+        };
+        let mut rng = crate::shared::PlatformRng(t.platform);
+        let r = with_timeout(io, tdongle_tailnet_tls::lease::LeasedTlsDerp::connect(CtlTcp { tcp }, wbuf, t.lease, t.mem, &params, &mut rng)).await;
+        match r {
+            Ok(Ok(conn)) => Ok(CtlStream::Tls(alloc::boxed::Box::new(TlsStream { conn, mem: t.mem, carry: None }))),
+            _ => {
+                tcp.lock().await.close();
+                fail()
             }
         }
     }
@@ -245,14 +403,7 @@ async fn member_control<R, P, S, D, T>(
     });
     let disco_pub = x25519::public(&disco);
     let mut host_header = crate::util::Buf::<96>::new();
-    {
-        use core::fmt::Write as _;
-        let _ = if sh.cfg.control_port == 80 {
-            write!(host_header, "{}", sh.cfg.control_host)
-        } else {
-            write!(host_header, "{}:{}", sh.cfg.control_host, sh.cfg.control_port)
-        };
-    }
+    crate::control_url::ControlUrl { host: sh.cfg.control_host, port: sh.cfg.control_port, tls: sh.cfg.control_tls }.host_header(&mut host_header);
     let control_pub = sh.cfg.control_pub.map(Key32);
     let mut attempts = 0u32;
     let mut first = true;
@@ -281,7 +432,13 @@ async fn member_control<R, P, S, D, T>(
             home_derp: home,
             timeouts: sh.cfg.timeouts,
         };
-        let mut connect = CtlConnect { tcp, host: sh.cfg.control_host, port: sh.cfg.control_port, io_ms: sh.cfg.timeouts.io_ms };
+        // two TLS write records (the key fetch's stream and the control stream) from one pool block, held for the session
+        let mut wblock = if sh.cfg.control_tls { Some(sh.mem().alloc_wait(tdongle_tailnet_pool::Class::Record, 2 * TLS_WRITE_RECORD).await) } else { None };
+        let tls = wblock.as_mut().map(|b| {
+            let (x, y) = b.split_at_mut(TLS_WRITE_RECORD);
+            TlsSide { platform: &sh.platform, lease: &sh.lease, mem: sh.mem(), anchors: tdongle_tailnet_tls::DEFAULT_ANCHORS, wbufs: [Some(x), Some(y)] }
+        });
+        let mut connect = CtlConnect { tcp, host: sh.cfg.control_host, port: sh.cfg.control_port, io_ms: sh.cfg.timeouts.io_ms, tls };
         let mut gate = TokenGate { sh, idx, member, prio: if first { Prio::Start } else { Prio::Rejoin }, neg: None };
         let mut eps = SlotEndpoints { sh, idx, seen: None, derp_sent: home };
         let mut sink = NetmapSink::new(MapTee { sh, slot: idx, member, expired: false });
@@ -414,5 +571,175 @@ mod tests {
         assert_eq!(sh.slots[0].status().last_error.as_str(), "Control-plane transport failed; retrying");
         note_end(&sh, 0, &SessionEnd::Idle);
         assert_eq!(sh.slots[0].status().map_error, 2);
+    }
+
+    /// The control key over verified TLS, through the runtime's own stream: a rustls server with the DERP test chain answers `GET /key` and closes, the way
+    /// controlplane.tailscale.com does now that it refuses plaintext. A clock that is not set must not connect (certificates are judged against it).
+    mod over_tls {
+        use super::*;
+        use core::future::poll_fn;
+        use core::task::Poll;
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+        use std::io::{Read as _, Write as _};
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::Arc;
+        use tdongle_tailnet_ctl::fetch_control_key;
+        use tdongle_tailnet_tls::TrustAnchor;
+
+        const HOST: &str = "derp1.test.example";
+        const KEYHEX: &str = "7d2792f9c98d753d204247153680194910 4c247f95eac770f8fb321595e2173b";
+
+        fn fixture(name: &str) -> std::vec::Vec<u8> {
+            std::fs::read(std::format!("{}/../tdongle-tailnet-tls/tests/fixtures/{name}.der", env!("CARGO_MANIFEST_DIR"))).unwrap()
+        }
+
+        /// Subject and SPKI of the fixture root, as the DERP tests derive them.
+        fn anchor() -> (std::vec::Vec<u8>, std::vec::Vec<u8>) {
+            fn tlv(b: &[u8]) -> (usize, usize) {
+                let l = b[1] as usize;
+                if l < 0x80 { (2, l) } else { (2 + (l & 0x7f), b[2..2 + (l & 0x7f)].iter().fold(0, |a, &x| a << 8 | x as usize)) }
+            }
+            let d = fixture("x2");
+            let (h, _) = tlv(&d);
+            let cert = &d[h..];
+            let (h, _) = tlv(cert);
+            let mut c = &cert[h..];
+            if c[0] == 0xa0 {
+                let (h, l) = tlv(c);
+                c = &c[h + l..];
+            }
+            let next = |c: &mut &[u8]| {
+                let (h, l) = tlv(c);
+                let t = c[..h + l].to_vec();
+                *c = &c[h + l..];
+                t
+            };
+            for _ in 0..4 {
+                next(&mut c);
+            }
+            (next(&mut c), next(&mut c))
+        }
+
+        fn serve(reply: &'static str) -> u16 {
+            let certs: std::vec::Vec<CertificateDer<'static>> = ["leaf_ok", "ye2", "ye", "x2_cross", "derpkey"].iter().map(|n| CertificateDer::from(fixture(n))).collect();
+            let provider = rustls::crypto::ring::default_provider();
+            let signer = provider.key_provider.load_private_key(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(fixture("key_leafk")))).unwrap();
+            #[derive(Debug)]
+            struct Fixed(Arc<rustls::sign::CertifiedKey>);
+            impl rustls::server::ResolvesServerCert for Fixed {
+                fn resolve(&self, _: rustls::server::ClientHello<'_>) -> Option<Arc<rustls::sign::CertifiedKey>> {
+                    Some(self.0.clone())
+                }
+            }
+            let ck = Arc::new(rustls::sign::CertifiedKey { cert: certs, key: signer, ocsp: None });
+            let cfg = Arc::new(
+                rustls::ServerConfig::builder_with_provider(Arc::new(provider)).with_protocol_versions(&[&rustls::version::TLS13]).unwrap().with_no_client_auth().with_cert_resolver(Arc::new(Fixed(ck))),
+            );
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port();
+            std::thread::spawn(move || {
+                let Ok((mut s, _)) = l.accept() else { return };
+                let mut c = rustls::ServerConnection::new(cfg).unwrap();
+                let mut tls = rustls::Stream::new(&mut c, &mut s);
+                let mut req = [0u8; 512];
+                let mut n = 0;
+                loop {
+                    match tls.read(&mut req[n..]) {
+                        Ok(0) | Err(_) => return,
+                        Ok(k) => n += k,
+                    }
+                    if req[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                assert!(req[..n].starts_with(b"GET /key?v=131 HTTP/1.1\r\nHost: derp1.test.example\r\n"), "{:?}", std::string::String::from_utf8_lossy(&req[..n]));
+                tls.write_all(reply.as_bytes()).unwrap();
+                tls.flush().unwrap();
+                tls.conn.send_close_notify();
+                let _ = tls.flush();
+            });
+            port
+        }
+
+        struct StdTcp {
+            port: u16,
+            s: Option<TcpStream>,
+        }
+        impl ErrorType for StdTcp {
+            type Error = NetError;
+        }
+        impl Read for StdTcp {
+            async fn read(&mut self, buf: &mut [u8]) -> Result<usize, NetError> {
+                poll_fn(|cx| match self.s.as_mut().ok_or(NetError::Closed)?.read(buf) {
+                    Ok(n) => Poll::Ready(Ok(n)),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        cx.waker().wake_by_ref();
+                        Poll::Pending
+                    }
+                    Err(_) => Poll::Ready(Err(NetError::Io)),
+                })
+                .await
+            }
+        }
+        impl Write for StdTcp {
+            async fn write(&mut self, buf: &[u8]) -> Result<usize, NetError> {
+                poll_fn(|cx| match self.s.as_mut().ok_or(NetError::Closed)?.write(buf) {
+                    Ok(n) => Poll::Ready(Ok(n)),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        cx.waker().wake_by_ref();
+                        Poll::Pending
+                    }
+                    Err(_) => Poll::Ready(Err(NetError::Io)),
+                })
+                .await
+            }
+            async fn flush(&mut self) -> Result<(), NetError> {
+                Ok(())
+            }
+        }
+        impl TcpConn for StdTcp {
+            async fn connect(&mut self, _host: &str, _port: u16) -> Result<(), NetError> {
+                let s = TcpStream::connect(("127.0.0.1", self.port)).map_err(|_| NetError::Connect)?;
+                s.set_nonblocking(true).unwrap();
+                self.s = Some(s);
+                Ok(())
+            }
+            fn close(&mut self) {
+                self.s = None;
+            }
+        }
+
+        fn run(reply: &'static str, clock_set: bool) -> Result<Key32, tdongle_tailnet_ctl::SessionEnd> {
+            let sh = shared();
+            if !clock_set {
+                // the test platform's clock is always set; a platform without it is the case below
+            }
+            let tcp = AsyncMutex::<NoopRawMutex, _>::new(StdTcp { port: serve(reply), s: None });
+            let (subject, spki) = anchor();
+            let anchors = [TrustAnchor { subject: &subject, spki: &spki }];
+            let mut wb = std::vec![0u8; 2 * TLS_WRITE_RECORD];
+            let (x, y) = wb.split_at_mut(TLS_WRITE_RECORD);
+            let tls = TlsSide { platform: &sh.platform, lease: &sh.lease, mem: sh.mem(), anchors: &anchors, wbufs: [Some(x), Some(y)] };
+            let mut connect = CtlConnect { tcp: &tcp, host: HOST, port: 443, io_ms: 5_000, tls: Some(tls) };
+            let mut clock = RtClock(&sh.platform);
+            let mut buf = std::vec![0u8; 4096];
+            let r = futures::executor::block_on(fetch_control_key(&mut connect, &mut clock, HOST, &mut buf, 5_000));
+            assert_eq!((sh.pool.in_use(), sh.lease.holders()), (0, 0), "every pool byte of the TLS stream went back");
+            r
+        }
+
+        #[test]
+        fn the_key_is_fetched_over_verified_tls_and_the_close_is_the_end_of_the_response() {
+            let body = std::format!("{{\"publicKey\":\"mkey:{}\"}}", KEYHEX.replace(' ', ""));
+            let reply: &'static str = std::boxed::Box::leak(std::format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}").into_boxed_str());
+            let k = run(reply, true).expect("key over TLS");
+            assert_eq!(k.0[0], 0x7d);
+        }
+
+        #[test]
+        fn a_redirect_to_https_is_what_plaintext_gets_and_over_tls_it_is_still_refused_not_followed() {
+            let r = run("HTTP/1.1 302 Found\r\nLocation: http://evil/\r\n\r\n", true);
+            assert!(matches!(r, Err(tdongle_tailnet_ctl::SessionEnd::KeyFetch(tdongle_tailnet_control::http::KeyError::Status))), "{r:?}");
+        }
     }
 }

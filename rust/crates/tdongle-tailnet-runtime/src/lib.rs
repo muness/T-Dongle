@@ -118,6 +118,7 @@ extern crate alloc;
 extern crate std;
 pub mod api;
 pub mod control;
+pub mod control_url;
 pub mod derp;
 pub mod identity;
 pub mod members;

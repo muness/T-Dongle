@@ -490,8 +490,10 @@ pub const HOST_DNS: u8 = 1;
 pub struct Config {
     /// The control server's host name (`controlplane.tailscale.com`).
     pub control_host: &'static str,
-    /// Its port (80: plain HTTP carrying the ts2021 upgrade).
+    /// Its port (443 with TLS, the default of a bare host; 80 for an explicit `http://`).
     pub control_port: u16,
+    /// The control connection (the `/key` fetch and the ts2021 upgrade) runs over verified TLS (`control_url`: no scheme or `https://`).
+    pub control_tls: bool,
     /// The control server's Noise public key; `None` fetches it with `GET /key` on every session.
     pub control_pub: Option<[u8; 32]>,
     /// The first UDP port a membership binds (slot n binds `udp_port_base + n`; 0 lets the stack choose).
@@ -512,7 +514,8 @@ impl Config {
     pub const fn tailscale() -> Config {
         Config {
             control_host: "controlplane.tailscale.com",
-            control_port: 80,
+            control_port: 443,
+            control_tls: true,
             control_pub: None,
             udp_port_base: 41641,
             usb_mac: None,

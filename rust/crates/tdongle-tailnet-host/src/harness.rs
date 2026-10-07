@@ -126,6 +126,7 @@ impl Gateway {
         let cfg = Config {
             control_host: Box::leak(host_ip.into_boxed_str()),
             control_port: port,
+            control_tls: false,
             control_pub: None,
             udp_port_base: 0,
             usb_mac: None,

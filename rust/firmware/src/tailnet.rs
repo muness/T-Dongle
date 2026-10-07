@@ -978,21 +978,28 @@ impl SntpBufs {
 /// Seconds between 1900-01-01 and 1970-01-01.
 const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
 
-async fn sntp_once(stack: Stack<'static>, sock: &mut embassy_net::udp::UdpSocket<'_>, host: &str) -> Option<u64> {
+/// SNTP counters for the `tn_sntp` line: tries, successes, the server index in use and why the last try failed (1 no A record / DNS, 2 send, 3 no answer in 4 s,
+/// 4 not a server answer or stratum 0, 5 time before 2023).
+static SNTP_TRIES: AtomicU32 = AtomicU32::new(0);
+static SNTP_OK: AtomicU32 = AtomicU32::new(0);
+static SNTP_SERVER: AtomicU32 = AtomicU32::new(0);
+static SNTP_FAIL: AtomicU32 = AtomicU32::new(0);
+
+async fn sntp_once(stack: Stack<'static>, sock: &mut embassy_net::udp::UdpSocket<'_>, host: &str) -> Result<u64, u32> {
     use embassy_net::dns::DnsQueryType;
-    let addrs = with_timeout(Duration::from_secs(5), stack.dns_query(host, DnsQueryType::A)).await.ok()?.ok()?;
-    let embassy_net::IpAddress::Ipv4(ip) = *addrs.first()?;
+    let addrs = with_timeout(Duration::from_secs(5), stack.dns_query(host, DnsQueryType::A)).await.ok().and_then(Result::ok).ok_or(1u32)?;
+    let embassy_net::IpAddress::Ipv4(ip) = *addrs.first().ok_or(1u32)?;
     let mut req = [0u8; 48];
     req[0] = 0x23; // LI 0, version 4, mode 3 (client)
-    sock.send_to(&req, (ip, 123)).await.ok()?;
+    sock.send_to(&req, (ip, 123)).await.map_err(|_| 2u32)?;
     let mut resp = [0u8; 64];
-    let (n, _) = with_timeout(Duration::from_secs(4), sock.recv_from(&mut resp)).await.ok()?.ok()?;
+    let (n, _) = with_timeout(Duration::from_secs(4), sock.recv_from(&mut resp)).await.ok().and_then(Result::ok).ok_or(3u32)?;
     if n < 48 || resp[0] & 7 != 4 || resp[1] == 0 {
-        return None; // not a server answer, or "kiss of death" (stratum 0)
+        return Err(4); // not a server answer, or "kiss of death" (stratum 0)
     }
     let secs = u64::from(u32::from_be_bytes([resp[40], resp[41], resp[42], resp[43]]));
-    let unix = secs.checked_sub(NTP_UNIX_OFFSET)?;
-    (unix > 1_700_000_000).then_some(unix) // the C's validity rule
+    let unix = secs.checked_sub(NTP_UNIX_OFFSET).ok_or(4u32)?;
+    if unix > 1_700_000_000 { Ok(unix) } else { Err(5) } // the C's validity rule
 }
 
 #[embassy_executor::task]
@@ -1000,26 +1007,39 @@ async fn sntp_task(stack: Stack<'static>, bufs: &'static mut SntpBufs) -> ! {
     let SntpBufs { rx_meta, tx_meta, rx, tx } = bufs;
     let mut sock = embassy_net::udp::UdpSocket::new(stack, rx_meta, rx, tx_meta, tx);
     let mut clock = tdongle_serial::clock::Clock::default();
+    // the C's `clock_sync`: `pool.ntp.org`, `time.cloudflare.com`, `time.google.com` in turn, each failure moving on to the next; started as soon as the station has an
+    // address (the control connection and DERP are TLS and wait for this clock)
+    let mut server = 0usize;
     loop {
         let up = LINK_UP.load(Ordering::Acquire) && stack.config_v4().is_some();
         let valid = CLOCK_BASE.load(Ordering::Relaxed) != 0;
         let now = Instant::now().as_millis();
         let _ = clock.poll(now, valid, up);
         if !up {
-            Timer::after_secs(2).await;
+            Timer::after_secs(1).await;
             continue;
         }
         if sock.endpoint().port == 0 && sock.bind(0).is_err() {
+            SNTP_FAIL.store(6, Ordering::Relaxed);
             Timer::after_secs(2).await;
             continue;
         }
-        let host = clock.server_name();
-        if let Some(unix) = sntp_once(stack, &mut sock, host).await {
-            CLOCK_BASE.store(u32::try_from(unix.saturating_sub(Instant::now().as_secs())).unwrap_or(u32::MAX).max(1), Ordering::Relaxed);
-            // resynchronise every hour (lwIP's default is the same order)
-            Timer::after_secs(3600).await;
-        } else {
-            Timer::after_secs(5).await;
+        let host = tdongle_serial::clock::SERVER_NAMES[server % tdongle_serial::clock::SERVERS];
+        SNTP_SERVER.store((server % tdongle_serial::clock::SERVERS) as u32, Ordering::Relaxed);
+        SNTP_TRIES.fetch_add(1, Ordering::Relaxed);
+        match sntp_once(stack, &mut sock, host).await {
+            Ok(unix) => {
+                SNTP_OK.fetch_add(1, Ordering::Relaxed);
+                SNTP_FAIL.store(0, Ordering::Relaxed);
+                CLOCK_BASE.store(u32::try_from(unix.saturating_sub(Instant::now().as_secs())).unwrap_or(u32::MAX).max(1), Ordering::Relaxed);
+                // resynchronise every hour (lwIP's default is the same order)
+                Timer::after_secs(3600).await;
+            }
+            Err(why) => {
+                SNTP_FAIL.store(why, Ordering::Relaxed);
+                server += 1;
+                Timer::after_secs(2).await;
+            }
         }
     }
 }
@@ -1145,6 +1165,15 @@ fn sta_report(sh: &Sh, out: &mut String) {
         }
         let _ = write!(out, "tn_ctl slot={} stage={} connected={} end=\"{}\" error=\"{}\"\r\n", i, st.control_stage, st.connected as u8, st.last_end.as_str(), st.last_error.as_str());
     }
+    let _ = write!(
+        out,
+        "tn_sntp tries={} ok={} server={} last_fail={} clock_valid={}\r\n",
+        ld(&SNTP_TRIES),
+        ld(&SNTP_OK),
+        tdongle_serial::clock::SERVER_NAMES[ld(&SNTP_SERVER) as usize % tdongle_serial::clock::SERVERS],
+        ld(&SNTP_FAIL),
+        (CLOCK_BASE.load(Ordering::Relaxed) != 0) as u8
+    );
     let stage = match ld(&DIAL.last_stage) {
         0 => "none",
         1 => "ok",
