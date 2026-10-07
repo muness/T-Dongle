@@ -25,15 +25,15 @@ def frames(elf, objdump, graph=None):
     def flush():
         if cur and lines:
             for i, l in enumerate(lines[:14]):
-                m = re.search(r'\bentry\s+a1,\s*(\d+)', l)
+                m = re.search(r'\bentry\s+a1,\s*(0x[0-9a-fA-F]+|\d+)', l)
                 if not m:
                     continue
-                size = int(m.group(1))
+                size = int(m.group(1), 0)
                 regs = {}
                 for l2 in lines[i + 1:i + 14]:
-                    m2 = re.search(r'\bmovi(?:\.n)?\s+(a\d+),\s*(-?\d+)', l2)
+                    m2 = re.search(r'\bmovi(?:\.n)?\s+(a\d+),\s*(-?(?:0x[0-9a-fA-F]+|\d+))', l2)
                     if m2:
-                        regs[m2.group(1)] = int(m2.group(2))
+                        regs[m2.group(1)] = int(m2.group(2), 0)
                     m2 = re.search(r'\bl32r\s+(a\d+),.*\(([0-9a-f]+)[ >]', l2)
                     if m2:
                         regs[m2.group(1)] = int(m2.group(2), 16)
@@ -46,13 +46,13 @@ def frames(elf, objdump, graph=None):
                     if m2 and m2.group(2) in regs:
                         size += regs[m2.group(2)]
                         break
-                    m2 = re.search(r'\baddmi\s+a1,\s*a1,\s*(-?\d+)', l2)
+                    m2 = re.search(r'\baddmi\s+a1,\s*a1,\s*(-?(?:0x[0-9a-fA-F]+|\d+))', l2)
                     if m2:
-                        size += -int(m2.group(1))
+                        size += -int(m2.group(1), 0)
                         break
                     m2 = re.search(r'\baddi\s+a1,\s*a1,\s*(-\d+)', l2)
                     if m2:
-                        size += -int(m2.group(1))
+                        size += -int(m2.group(1), 0)
                         break
                 res.append((size, cur))
                 break
