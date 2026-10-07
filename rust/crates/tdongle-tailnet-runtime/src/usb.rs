@@ -29,7 +29,15 @@ use tdongle_tailnet_usbnet::reply::{ICMP_ERROR_MAX, RST_LEN, build_icmp_error};
 use tdongle_tailnet_usbnet::wire::{ETHERTYPE_ARP, ETHERTYPE_IPV4, Mac, USB_IP, USB_MASK, is_alias, rd16, rd32, wr16, wr32, write_eth};
 
 /// The longest a frame waits for room in its membership's egress queues before the engine is allowed to refuse it.
-pub const HOLD_MAX_MS: u64 = 100;
+pub const HOLD_MAX_MS: u64 = 400;
+/// The hold once the previous one timed out within [`HOLD_BACKOFF_MS`] (the relay is not draining): short, so a stalled relay does not stall the other flows frame by frame
+/// (the sojourn limit of ADR 0023).
+pub const HOLD_SHORT_MS: u64 = 20;
+/// How long after a timed-out hold the short hold applies.
+pub const HOLD_BACKOFF_MS: u64 = 2000;
+/// Holds that waited, holds that ran out (the frame then goes to the engine, which refuses it if the queue is still full), and the milliseconds waited in all (`tn_in`).
+pub static HOLD_STATS: [core::sync::atomic::AtomicU32; 3] = [const { core::sync::atomic::AtomicU32::new(0) }; 3];
+static HOLD_TIMEOUT_AT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// Room a membership's queues must have before a host frame for it is handed to the engine: one full tunnel packet and its relay framing.
 pub const ROOM_BYTES: usize = 1700;
 
@@ -401,9 +409,38 @@ async fn hold_for_room<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(s
     }
     let Some(member) = sh.with_engine(|e, _| e.aliases().owner(dst)).map(|(m, _)| m) else { return };
     let Some((_, slot)) = sh.slot_of(member) else { return };
+    use core::sync::atomic::Ordering::Relaxed;
+    let ok = || slot.derp_q.free_bytes() >= ROOM_BYTES && slot.udp_q.free_bytes() >= ROOM_BYTES;
+    if ok() {
+        return;
+    }
+    // hold, don't drop: the frame waits for the queue to drain (woken by every pop, not polled), up to the hold limit; once a hold has run out the limit is short for a while
     let start = sh.now();
-    while (slot.derp_q.free_bytes() < ROOM_BYTES || slot.udp_q.free_bytes() < ROOM_BYTES) && sh.now().saturating_sub(start) < HOLD_MAX_MS {
-        Timer::after_millis(1).await;
+    let last_timeout = HOLD_TIMEOUT_AT.load(Relaxed);
+    let limit = if last_timeout != 0 && (start as u32).wrapping_sub(last_timeout) < HOLD_BACKOFF_MS as u32 { HOLD_SHORT_MS } else { HOLD_MAX_MS };
+    HOLD_STATS[0].fetch_add(1, Relaxed);
+    let mut ran_out = false;
+    loop {
+        if ok() {
+            break;
+        }
+        let waited = sh.now().saturating_sub(start);
+        if waited >= limit {
+            ran_out = true;
+            break;
+        }
+        // wait on the queue that lacks room (a wait on one that has it would return at once), against the time left: a signal that fires on every pop, or the timer
+        let left = Timer::after_millis(limit - waited);
+        if slot.derp_q.free_bytes() < ROOM_BYTES {
+            let _ = embassy_futures::select::select(slot.derp_q.wait_free(ROOM_BYTES), left).await;
+        } else {
+            let _ = embassy_futures::select::select(slot.udp_q.wait_free(ROOM_BYTES), left).await;
+        }
+    }
+    HOLD_STATS[2].fetch_add(sh.now().saturating_sub(start) as u32, Relaxed);
+    if ran_out {
+        HOLD_STATS[1].fetch_add(1, Relaxed);
+        HOLD_TIMEOUT_AT.store((sh.now() as u32).max(1), Relaxed);
     }
 }
 

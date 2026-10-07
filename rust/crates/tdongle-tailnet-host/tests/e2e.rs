@@ -982,3 +982,36 @@ fn a_peer_homed_on_the_fifth_region_of_the_map_is_reached_through_the_index() {
         5,
     );
 }
+
+/// A relay that writes at about 1.4 Mbit/s (8 ms per 1.4 KB frame): a bulk transfer over DERP only, one relay link, runs at the relay's pace with nothing refused or dropped
+/// (the sender is held back by the full relay queue, as the bridge NAKs the host).
+#[test]
+fn derp_only_bulk_is_paced_by_the_relay_not_dropped() {
+    let mut go = go_or_skip!();
+    let (gw, _id, alias) = up(&mut go, "gopeer");
+    gw.net.udp_blocked.store(true, Ordering::SeqCst);
+    assert_eq!(gw.host.echo(alias, 7, b"warm", Duration::from_secs(30)).unwrap(), b"warm");
+    gw.net.derp_write_delay_ms.store(8, Ordering::Relaxed);
+    let refused = |gw: &Gateway| {
+        gw.sh.with_engine(|e, _| e.stats().tx_count(tdongle_tailnet_engine::TxFate::TxRefused))
+            + gw.sh.slots[0].derp_q.stats().refused
+    };
+    let before = refused(&gw);
+    let (n, d) = gw.host.upload(alias, 9, 192 * 1024, Duration::from_secs(90)).expect("upload over a slow relay");
+    assert_eq!(n, 192 * 1024);
+    let up = mbit(n, d);
+    let (n, d) = gw.host.get_bytes(alias, 80, 192 * 1024, Duration::from_secs(90)).expect("download over a slow relay");
+    assert_eq!(n, 192 * 1024);
+    let down = mbit(n, d);
+    let dropped = refused(&gw) - before;
+    let hold = &tdongle_tailnet_runtime::usb::HOLD_STATS;
+    println!(
+        "slow relay (8 ms per frame): up {up:.2} down {down:.2} Mbit/s, egress refused {dropped}; holds {} ran out {}",
+        hold[0].load(Ordering::Relaxed),
+        hold[1].load(Ordering::Relaxed)
+    );
+    // (the egress: what the host sends to the relay; the download direction's host queue is another change)
+    assert_eq!(dropped, 0, "no relay egress refused at steady state\n{}", gw.dump());
+    assert!(up >= 0.8, "upload {up:.2} Mbit/s over a ~1.4 Mbit/s relay");
+    gw.check_engine();
+}

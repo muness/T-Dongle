@@ -1327,7 +1327,7 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
         let frames = ld(&crate::NTB_IN_FRAMES);
         let _ = write!(
             out,
-            "tn_in ntb={} frames={} frames_per_ntb_x100={} frames_max={} hist_1_2_4_8={}/{}/{}/{} in_wait_us_avg={} in_wait_us_max={} in_wakes={} in_idle_timeouts={} heap_min_over_floor={} ring_enq={} ring_full={} ring_high={} pump_wakes={} pump_moved={} pump_pass_max={} udp_wakes={} udp_datagrams={} udp_batch_max={} udp_pkts={} derp_held={} derp_reconnect[lease,tls,wait,write]={},{},{},{}\r\n",
+            "tn_in ntb={} frames={} frames_per_ntb_x100={} frames_max={} hist_1_2_4_8={}/{}/{}/{} in_wait_us_avg={} in_wait_us_max={} in_wakes={} in_idle_timeouts={} heap_min_over_floor={} ring_enq={} ring_full={} ring_high={} pump_wakes={} pump_moved={} pump_pass_max={} udp_wakes={} udp_datagrams={} udp_batch_max={} udp_pkts={} derp_held={} derp_reconnect[lease,tls,wait,write]={},{},{},{} hold[waits,ran_out,ms_total]={},{},{}\r\n",
             ntbs,
             frames,
             if ntbs == 0 { 0 } else { frames * 100 / ntbs },
@@ -1355,7 +1355,10 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[0]),
             ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[1]),
             ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[2]),
-            ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[3])
+            ld(&tdongle_tailnet_runtime::derp::DERP_RECONNECT[3]),
+            ld(&tdongle_tailnet_runtime::usb::HOLD_STATS[0]),
+            ld(&tdongle_tailnet_runtime::usb::HOLD_STATS[1]),
+            ld(&tdongle_tailnet_runtime::usb::HOLD_STATS[2])
         );
     }
     for (i, sl) in sh.slots.iter().enumerate() {
