@@ -80,7 +80,25 @@
     "rescue": "healthy",
     "safe_mode": false,
     "setup_active": true,
-    "verified_utc": "2026-10-07T21:23:56.323604+00:00"
+    "verified_utc": "2026-10-07T21:35:56.980350+00:00",
+    "seconds_left_observed": 569,
+    "elf_sha256": "15f1a794c4758d18c0b779dca47f3c848b675d994795ccd085fb315301cfd763"
   },
-  "original_slow_join_cause_proven": false
+  "original_slow_join_cause_proven": false,
+  "miri_tests": {
+    "passed": 70,
+    "failed": 0,
+    "native_stress_counts_unchanged": true,
+    "threaded_cases_elapsed_s": 827.86
+  },
+  "host_checks": {
+    "format": "passed",
+    "clippy_all_targets_deny_warnings": "passed",
+    "vendor_tls": "passed",
+    "golden_regeneration": "passed",
+    "loom": "passed",
+    "flash_helper": "passed",
+    "package_provenance": "passed",
+    "webui_contracts": "passed"
+  }
 }
