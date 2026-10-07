@@ -78,8 +78,8 @@ pub const USB_RX_FRAMES: usize = 2;
 pub const DIR_PEERS: usize = 24;
 /// Staged directory updates per membership.
 pub const DIR_STAGED: usize = 32;
-/// Sockets of the embassy-net stack: 3 per membership (control, DERP, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + 1 spare.
-const STACK_SOCKETS: usize = 3 * MEMBERS + 5;
+/// Sockets of the embassy-net stack: 3 per membership (control, DERP, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + one for the lookup in flight (the dials and SNTP take turns on it) + 1 spare.
+const STACK_SOCKETS: usize = 3 * MEMBERS + 6;
 
 /// The stack's interrupt-free lock (see the module docs).
 #[derive(Debug)]
@@ -120,12 +120,12 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 126 * 1024;
+    pub const HEAP_REGULAR: usize = 125 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
     /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 12 KB of margin (a 62 KB try measured heap_min 29,284 B, 600 B under the floor, with the UDP receive ring at 9,600 B; the 4 KB came back from the NAT table: 384 flows, 4.8 KB less static, given to the regular heap). `tn_in heap_min_over_floor` on the board settles it.
-    pub const WIFI_AND_USB: usize = 66 * 1024;
+    pub const WIFI_AND_USB: usize = 65 * 1024;
     /// The bridge's permanent ring slots (8 x 1,514 + header), allocated at boot.
     pub const RING_BASE: usize = 8 * 1_536;
 
@@ -202,7 +202,7 @@ mod heapless_line {
         pub data: [u8; 240],
     }
 }
-static LINES: Channel<CriticalSectionRawMutex, Line, 6> = Channel::new();
+static LINES: Channel<CriticalSectionRawMutex, Line, 4> = Channel::new();
 
 /// What the image can tell the runtime about the board.
 #[derive(Debug)]
@@ -523,6 +523,15 @@ static ARP_TX: AtomicU32 = AtomicU32::new(0);
 static DNS_FRAMES: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4]; // dns tx, dns rx, ntp tx, ntp rx
 /// The first 48 bytes of the last DNS query frame the stack sent (Ethernet header, IP header, UDP header: addresses, ports, checksum), for comparing with a capture.
 static LAST_DNS_TX: critical_section::Mutex<RefCell<[u8; 48]>> = critical_section::Mutex::new(RefCell::new([0; 48]));
+/// The resolver candidates for `tn_dns`: `addr:answers/timeouts`, a star on the one that answered last.
+fn resolver_list() -> String {
+    let mut s = String::new();
+    tdongle_tailnet_runtime::resolver::RESOLVERS.snapshot(|_, a, ok, fail, last| {
+        let o = a.to_be_bytes();
+        let _ = write!(s, "{}.{}.{}.{}:{}/{}{} ", o[0], o[1], o[2], o[3], ok, fail, if last { "*" } else { "" });
+    });
+    s
+}
 fn last_dns_tx_hex() -> String {
     let h = critical_section::with(|cs| *LAST_DNS_TX.borrow_ref(cs));
     let mut s = String::new();
@@ -1048,15 +1057,15 @@ static SNTP_PORT: AtomicU32 = AtomicU32::new(0);
 async fn sntp_once(stack: Stack<'static>, sock: &mut embassy_net::udp::UdpSocket<'_>, host: &str) -> Result<u64, u32> {
     use embassy_net::dns::DnsQueryType;
     SNTP_DNS[0].fetch_add(1, Ordering::Relaxed);
-    let answer = with_timeout(Duration::from_secs(5), stack.dns_query(host, DnsQueryType::A)).await;
+    let answer = with_timeout(Duration::from_secs(12), tdongle_tailnet_runtime::net_embassy::resolve_a(stack, host)).await;
     SNTP_DNS[match &answer {
-        Ok(Ok(a)) if !a.is_empty() => 1,
-        Ok(_) => 2,
+        Ok(Ok(_)) => 1,
+        Ok(Err(_)) => 2,
         Err(_) => 3,
     }]
     .fetch_add(1, Ordering::Relaxed);
-    let addrs = answer.ok().and_then(Result::ok).ok_or(1u32)?;
-    let embassy_net::IpAddress::Ipv4(ip) = *addrs.first().ok_or(1u32)?;
+    let a = answer.ok().and_then(Result::ok).ok_or(1u32)?;
+    let ip = embassy_net::Ipv4Address::new(a[0], a[1], a[2], a[3]);
     SNTP_IP.store(u32::from_be_bytes(ip.octets()), Ordering::Relaxed);
     tdongle_tailnet_runtime::sntp::exchange(sock, ip, Duration::from_secs(4)).await
 }
@@ -1347,7 +1356,12 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
         let servers = STACK_REF.try_get().and_then(|ThreadOnly(st)| st.config_v4()).map(|c| c.dns_servers);
         let _ = write!(
             out,
-            "tn_dns frames[dns_tx,dns_rx,ntp_tx,ntp_rx]={},{},{},{} sntp_dns[started,answered,empty_or_error,timeout]={},{},{},{} drv[tx_polls,tx_noroom,rx_polls]={},{},{} tx_refused={} servers={:?} napt_replies[dns_host,dns_stack,ntp_host,ntp_stack]={},{},{},{} last_dns_tx={}\r\n",
+            "tn_dns resolvers[addr:ok/fail*]={} forwarder={} frames[dns_tx,dns_rx,ntp_tx,ntp_rx]={},{},{},{} sntp_dns[started,answered,empty_or_error,timeout]={},{},{},{} drv[tx_polls,tx_noroom,rx_polls]={},{},{} tx_refused={} servers={:?} napt_replies[dns_host,dns_stack,ntp_host,ntp_stack]={},{},{},{} last_dns_tx={}\r\n",
+            resolver_list(),
+            {
+                let o = tdongle_tailnet_runtime::resolver::RESOLVERS.forwarder().to_be_bytes();
+                alloc::format!("{}.{}.{}.{}", o[0], o[1], o[2], o[3])
+            },
             ld(&DNS_FRAMES[0]),
             ld(&DNS_FRAMES[1]),
             ld(&DNS_FRAMES[2]),

@@ -107,6 +107,16 @@ where
             gen_seen = view.generation;
             sock.close();
             bound = false;
+            crate::resolver::RESOLVERS.new_network();
+        }
+        if let Some(v4) = view.v4 {
+            // the candidates of the dial path's resolver list, so a silent DHCP server is not the forwarder's only choice either
+            if let Some(d) = v4.dns {
+                crate::resolver::RESOLVERS.add(u32::from_be_bytes(d), false);
+            }
+            if let Some(g) = v4.gateway {
+                crate::resolver::RESOLVERS.add(u32::from_be_bytes(g), true);
+            }
         }
         if !bound {
             bound = sock.bind(0).is_ok();
@@ -120,8 +130,11 @@ where
             Either::First(Ok(())) => {
                 // the shared scratch, for the moment the reply is copied out and handed to the engine
                 let r = sh.with_scratch(|buf| match sock.try_recv_from(&mut buf[..1500]) {
-                    Ok(Some((n, _src))) => {
+                    Ok(Some((n, src))) => {
                         RtStats::bump(&sh.stats.dns_replies);
+                        if let Some(o) = src.v4_octets() {
+                            crate::resolver::RESOLVERS.forward_reply(u32::from_be_bytes(o));
+                        }
                         let _ = sh.feed(Input::DnsUpstreamReply { data: &mut buf[..n] });
                         Ok(())
                     }
@@ -152,7 +165,10 @@ where
                             sock.close();
                             bound = sock.bind(0).is_ok();
                         }
-                        let upstream = Ep::v4([rec[0], rec[1], rec[2], rec[3]], 53);
+                        // the engine's choice (the DHCP server) unless it has been silent for a timeout: then the next candidate (the gateway, the public resolvers)
+                        let requested = u32::from_be_bytes([rec[0], rec[1], rec[2], rec[3]]);
+                        let target = crate::resolver::RESOLVERS.forward_target(requested, sh.now() as u32);
+                        let upstream = Ep::v4(target.to_be_bytes(), 53);
                         if !bound {
                             sh.dns_q.discard_front();
                             return DnsStep::Done;

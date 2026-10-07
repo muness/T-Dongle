@@ -234,6 +234,8 @@ pub struct Gateway {
     pub echo_internet: bool,
     /// Answer UDP datagrams sent to the gateway's MAC for an off-link address with this function of the request payload instead of echoing it (an NTP server, say).
     pub internet_reply: Option<fn(&[u8]) -> Vec<u8>>,
+    /// Datagrams to these destination addresses get no answer (a resolver that drops this client's queries).
+    pub silent_dsts: Vec<u32>,
     pub frames_from_sta: Vec<Vec<u8>>,
 }
 
@@ -315,7 +317,7 @@ impl Gateway {
                 }
             } else if f[0..6] == GW_MAC {
                 self.internet_udp.push(l3.to_vec());
-                if self.echo_internet {
+                if self.echo_internet && !self.silent_dsts.contains(&ip_dst(l3)) {
                     let dst = ip_dst(l3);
                     let src_ip = ip_src(l3);
                     let data = &l3[28..usize::from(u16::from_be_bytes([l3[2], l3[3]]))];

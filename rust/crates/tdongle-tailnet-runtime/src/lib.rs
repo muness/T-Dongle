@@ -123,6 +123,7 @@ pub mod derp;
 pub mod identity;
 pub mod members;
 pub mod net;
+pub mod resolver;
 #[cfg(feature = "embassy-net")]
 pub mod net_embassy;
 #[cfg(feature = "embassy-net")]

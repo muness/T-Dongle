@@ -862,6 +862,10 @@ fn derp_survives_idle_then_carries_traffic() {
     let (gw, _id, alias) = up(&mut go, "gopeer");
     gw.net.udp_blocked.store(true, Ordering::SeqCst);
     assert_eq!(gw.host.echo(alias, 7, b"warm", Duration::from_secs(30)).unwrap(), b"warm");
+    // what the relay carries before the quiet period (a loopback figure: the point is that it does not fall off after it)
+    let (n, d) = gw.host.get_bytes(alias, 80, 512 * 1024, Duration::from_secs(60)).expect("download over derp before idle");
+    assert_eq!(n, 512 * 1024);
+    let down_before = mbit(n, d);
     let before = gw.sh.slots[0].status().derp;
     let (connects0, frames0) = (before.connects.get(), before.frames_rx.get());
     let t0 = std::time::Instant::now();
@@ -878,6 +882,8 @@ fn derp_survives_idle_then_carries_traffic() {
     assert_eq!(n, 512 * 1024);
     let (n, _) = gw.host.upload(alias, 9, 256 * 1024, Duration::from_secs(60)).expect("upload over derp after idle");
     assert_eq!(n, 256 * 1024);
-    println!("derp after {idle} s idle: down {:.1} Mbit/s", mbit(512 * 1024, d));
+    let down_after = mbit(512 * 1024, d);
+    println!("derp after {idle} s idle: down {down_after:.1} Mbit/s (before: {down_before:.1})");
+    assert!(down_after > down_before * 0.25, "relay throughput collapsed after {idle} s idle: {down_after:.2} against {down_before:.2} Mbit/s\n{}", gw.dump());
     gw.check_engine();
 }

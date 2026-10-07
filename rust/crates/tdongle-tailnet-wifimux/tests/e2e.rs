@@ -760,3 +760,49 @@ fn host_dns_through_nat_and_the_devices_own_lookups_do_not_take_each_others_repl
     assert!(after[0] - before[0] >= 8, "host replies taken by the NAT: {before:?} {after:?}");
     assert!(after[1] - before[1] >= 8, "the device's replies left to the stack: {before:?} {after:?}");
 }
+
+/// The lease's resolver (here also the gateway) drops this client's queries: `resolve_a` must fall through to the public resolvers inside a few seconds, remember the one that
+/// answered, and answer the next lookup without waiting again.
+#[test]
+fn a_resolver_that_drops_our_queries_is_skipped_then_remembered() {
+    fn dns_answer(q: &[u8]) -> Vec<u8> {
+        let mut r = q.to_vec();
+        r[2] = 0x81;
+        r[3] = 0x80;
+        r[6..8].copy_from_slice(&1u16.to_be_bytes());
+        r.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 203, 0, 113, 7]);
+        r
+    }
+    use tdongle_tailnet_runtime::resolver::{PUBLIC, RESOLVERS};
+    let mut lan = Lan::new(RadioHandle::new());
+    lan.gw.internet_reply = Some(dns_answer);
+    lan.gw.silent_dsts = vec![GW_IP];
+    let s = sta(&mut lan);
+    bring_up(&mut lan, &s);
+    let stack = s.stack;
+    let out = Rc::new(RefCell::new(Vec::new()));
+    {
+        let out = out.clone();
+        lan.tasks.push(Box::pin(async move {
+            for host in ["pool.ntp.org", "controlplane.tailscale.com"] {
+                let t0 = embassy_time::Instant::now();
+                let r = tdongle_tailnet_runtime::net_embassy::resolve_a(stack, host).await;
+                out.borrow_mut().push((r.ok(), t0.elapsed().as_millis()));
+            }
+        }));
+    }
+    let o2 = out.clone();
+    assert!(lan.run_until(move |_| o2.borrow().len() == 2, 60_000), "{:?}", out.borrow());
+    let out = out.borrow();
+    assert_eq!(out[0].0, Some([203, 0, 113, 7]), "{out:?}");
+    assert!(out[0].1 >= 2000 && out[0].1 <= 6000, "the dropping resolver costs one timeout: {out:?}");
+    assert_eq!(out[1].0, Some([203, 0, 113, 7]));
+    assert!(out[1].1 < 1000, "the second lookup goes straight to the one that answered: {out:?}");
+    let mut active = None;
+    RESOLVERS.snapshot(|_, a, ok, _, last| {
+        if last && ok > 0 {
+            active = Some(a);
+        }
+    });
+    assert_eq!(active, Some(PUBLIC[0]));
+}

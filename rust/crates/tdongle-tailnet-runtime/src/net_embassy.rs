@@ -22,7 +22,6 @@
 
 use crate::net::{Net, NetError, NetV4, TcpConn, TcpRole, UdpConn, UdpRole, parse_ipv4};
 use crate::shared::MAX_RUN;
-use embassy_net::dns::DnsQueryType;
 use embassy_net::tcp::{self, TcpSocket};
 use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Stack};
@@ -154,32 +153,93 @@ pub static DIAL: DialDiag = DialDiag {
     last_state: AtomicU32::new(0),
 };
 
-async fn resolve(stack: Stack<'static>, host: &str) -> Result<[u8; 4], NetError> {
+/// The one set of buffers every lookup uses (lookups are serialised: one socket of the stack and about one kilobyte, not a set in every task's future).
+struct LookupBufs {
+    rm: [PacketMetadata; 2],
+    tm: [PacketMetadata; 2],
+    rb: [u8; 384],
+    tb: [u8; 272],
+    /// The query being sent and the datagram being read, kept here and not in each caller's future.
+    q: [u8; 272],
+    ib: [u8; 384],
+}
+static LOOKUP: embassy_sync::mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, LookupBufs> =
+    embassy_sync::mutex::Mutex::new(LookupBufs { rm: [PacketMetadata::EMPTY; 2], tm: [PacketMetadata::EMPTY; 2], rb: [0; 384], tb: [0; 272], q: [0; 272], ib: [0; 384] });
+
+/// One DNS query round trip to `server`: send, wait half the budget, resend once, wait the other half. `None` on silence or a reply that is not an answer for this query.
+async fn ask(stack: Stack<'static>, bufs: &mut LookupBufs, server: u32, id: u16, qn: usize) -> Option<[u8; 4]> {
+    let LookupBufs { rm, tm, rb, tb, q, ib } = bufs;
+    let mut sock = UdpSocket::new(stack, &mut rm[..], &mut rb[..], &mut tm[..], &mut tb[..]);
+    sock.bind(0).ok()?;
+    let dst = IpEndpoint::new(ip4(server.to_be_bytes()), 53);
+    for _ in 0..2 {
+        sock.send_to(&q[..qn], dst).await.ok()?;
+        let wait = Duration::from_millis(crate::resolver::QUERY_MS / 2);
+        let got = with_timeout(wait, async {
+            let buf = &mut ib[..];
+            loop {
+                let (n, meta) = sock.recv_from(buf).await.ok()?;
+                let IpAddress::Ipv4(from) = meta.endpoint.addr;
+                if u32::from_be_bytes(from.octets()) == server && meta.endpoint.port == 53 {
+                    if let Some(a) = crate::resolver::parse_answer(id, &buf[..n]) {
+                        return Some(a);
+                    }
+                    if n >= 4 && u16::from_be_bytes([buf[0], buf[1]]) == id {
+                        return None; // an answer with an error or no address: the next candidate
+                    }
+                }
+            }
+        })
+        .await;
+        match got {
+            Ok(r) => return r,
+            Err(_) => continue,
+        }
+    }
+    None
+}
+
+/// Resolve `host` to an IPv4 address: the candidates of [`crate::resolver::RESOLVERS`] in order (the one that answered last, the DHCP servers, the gateway, the public
+/// resolvers), two seconds each, remembering the one that answers. A resolver that drops this client's queries (it happens) costs two seconds once, not the lookup.
+pub async fn resolve_a(stack: Stack<'static>, host: &str) -> Result<[u8; 4], NetError> {
+    use crate::resolver::{RESOLVERS, SLOTS, build_query};
     if let Some(ip) = parse_ipv4(host) {
         return Ok(ip);
     }
-    match stack.dns_query(host, DnsQueryType::A).await {
-        Ok(addrs) => match addrs.iter().map(|IpAddress::Ipv4(v)| v.octets()).next() {
-            Some(a) => Ok(a),
-            None => {
-                DIAL.dns[3].fetch_add(1, Ordering::Relaxed);
-                DIAL.last_stage.store(2, Ordering::Relaxed);
-                DIAL.last_detail.store(3, Ordering::Relaxed);
-                Err(NetError::Dns)
-            }
-        },
-        Err(e) => {
-            let i = match e {
-                embassy_net::dns::Error::InvalidName => 0,
-                embassy_net::dns::Error::NameTooLong => 1,
-                embassy_net::dns::Error::Failed => 2,
-            };
-            DIAL.dns[i].fetch_add(1, Ordering::Relaxed);
-            DIAL.last_stage.store(2, Ordering::Relaxed);
-            DIAL.last_detail.store(i as u32, Ordering::Relaxed);
-            Err(NetError::Dns)
+    if let Some(cfg) = stack.config_v4() {
+        for s in cfg.dns_servers.iter() {
+            RESOLVERS.add(u32::from_be_bytes(s.octets()), false);
+        }
+        if let Some(g) = cfg.gateway {
+            RESOLVERS.add(u32::from_be_bytes(g.octets()), true);
         }
     }
+    static ID: AtomicU32 = AtomicU32::new(0x2b1d);
+    let id = (ID.fetch_add(0x9e37, Ordering::Relaxed) ^ embassy_time::Instant::now().as_micros() as u32) as u16;
+    let mut bufs = LOOKUP.lock().await;
+    let Some(n) = build_query(id, host, &mut bufs.q) else {
+        DIAL.dns[0].fetch_add(1, Ordering::Relaxed);
+        return Err(NetError::Dns);
+    };
+    let mut order = [0u32; SLOTS];
+    let count = RESOLVERS.order(&mut order);
+    for &server in &order[..count] {
+        match ask(stack, &mut bufs, server, id, n).await {
+            Some(a) => {
+                RESOLVERS.note_ok(server);
+                return Ok(a);
+            }
+            None => RESOLVERS.note_fail(server),
+        }
+    }
+    DIAL.dns[2].fetch_add(1, Ordering::Relaxed);
+    DIAL.last_stage.store(2, Ordering::Relaxed);
+    DIAL.last_detail.store(2, Ordering::Relaxed);
+    Err(NetError::Dns)
+}
+
+async fn resolve(stack: Stack<'static>, host: &str) -> Result<[u8; 4], NetError> {
+    resolve_a(stack, host).await
 }
 
 impl Net for EmbassyNet {
