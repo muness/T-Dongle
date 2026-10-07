@@ -712,6 +712,8 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         best
     }
     /// A live record found through table `t` under `h` that satisfies `pred`.
+    // Explicit transaction geometry and cursor arguments keep flash ownership visible.
+    #[allow(clippy::too_many_arguments)]
     fn find_in(&self, g: &Geometry, m: usize, a: u8, t: usize, h: u32, v: View<'_>, pred: &dyn Fn(&DirRecord) -> bool) -> Option<(u32, DirRecord)> {
         let ms = &self.m[m];
         let mut found = None;
@@ -1153,6 +1155,8 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         Ok(())
     }
     /// Replace `old` (when there is one) by `v`.
+    // Explicit transaction geometry and cursor arguments keep flash ownership visible.
+    #[allow(clippy::too_many_arguments)]
     fn replace(&self, g: &Geometry, m: usize, a: u8, end: &mut u32, cx: &mut Ctx, old: Option<&DirRecord>, v: &DirRecord) -> Result<(), DirError> {
         if let Some(e) = old
             && Canon::of(e) != Canon::of(v)
@@ -1162,6 +1166,8 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         self.put(g, m, a, end, cx, v)
     }
 
+    // Explicit transaction geometry and cursor arguments keep flash ownership visible.
+    #[allow(clippy::too_many_arguments)]
     fn commit_body(&self, g: &Geometry, m: usize, a: u8, end: &mut u32, cx: &mut Ctx, lo: usize, hi: usize) -> Result<(), DirError> {
         for pass in 0..3u8 {
             for i in lo..hi {
@@ -1371,7 +1377,7 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
         }
         let sector = i / PER_SECTOR;
         let s = self.m[member];
-        if i % PER_SECTOR == 0 && (sector as u32) >= s.tx_ready && (sector as u32) < s.tx_dirty {
+        if i.is_multiple_of(PER_SECTOR) && (sector as u32) >= s.tx_ready && (sector as u32) < s.tx_dirty {
             // the background has not erased this one yet
             if !self.clean(g.tx_sector(member, sector)) {
                 return Err(DirError);

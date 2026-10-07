@@ -1323,7 +1323,8 @@ mod const_build {
     }
     type Sh = Shared<CriticalSectionRawMutex, Plat, Store, RamDirectory<MAX_RUN, 24, 32>>;
 
-    #[allow(clippy::declare_interior_mutable_const)]
+    // This test deliberately proves the full state can be constructed as a const, not just a static.
+    #[allow(clippy::declare_interior_mutable_const, clippy::large_const_arrays)]
     const BUILT_AT_COMPILE_TIME: Sh = Shared::new(Config::tailscale(), Plat, Store, RamDirectory::new());
 
     #[test]

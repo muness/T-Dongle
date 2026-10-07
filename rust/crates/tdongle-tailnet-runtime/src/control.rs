@@ -739,6 +739,8 @@ mod tests {
             }
         }
 
+        // Keep the production session error intact so these tests inspect its variants.
+        #[allow(clippy::result_large_err)]
         fn run(reply: &'static str, clock_set: bool) -> Result<Key32, tdongle_tailnet_ctl::SessionEnd> {
             let sh = shared();
             if !clock_set {

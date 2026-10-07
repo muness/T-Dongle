@@ -258,8 +258,8 @@ impl Run {
                 let a = rng.next();
                 let b = rng.next();
                 let dur = if down {
-                    if a % 4 == 0 { 1600 + b % 900 } else { 20 + b % 80 }
-                } else if a % 8 == 0 {
+                    if a.is_multiple_of(4) { 1600 + b % 900 } else { 20 + b % 80 }
+                } else if a.is_multiple_of(8) {
                     12000
                 } else {
                     40 + b % 800
@@ -267,7 +267,7 @@ impl Run {
                 next_toggle = self.now + dur as u64;
             }
             let r = rng.next();
-            if r % 48 == 0 {
+            if r.is_multiple_of(48) {
                 let k = rng.next() % 12;
                 let v = rng.next();
                 self.mutate(k, v);
@@ -275,7 +275,7 @@ impl Run {
             let a = rng.next();
             let b = rng.next();
             let c = rng.next();
-            if c % 4 == 0 {
+            if c.is_multiple_of(4) {
                 self.w.counters.0 = self.w.counters.0.wrapping_add(a % 3000);
                 self.w.counters.2 += 1;
                 self.w.counters.1 = self.w.counters.1.wrapping_add(b % 800);
@@ -303,10 +303,10 @@ impl Run {
                     w.session = Session::start(now);
                 }
             }
-            2 => w.state_ok = v % 8 != 0,
+            2 => w.state_ok = !v.is_multiple_of(8),
             3 => w.wifi = v & 1 != 0,
             4 => w.usb = v & 1 != 0,
-            5 => w.recovery = v % 8 == 0,
+            5 => w.recovery = v.is_multiple_of(8),
             6 => w.bridge = v & 1 != 0,
             7 => {
                 w.ready = v % 3;
@@ -315,8 +315,8 @@ impl Run {
             }
             8 => w.last_reason = REASONS[(v % 5) as usize],
             9 => w.display.dim_seconds = DIMS[(v % 3) as usize],
-            10 => w.saved_wifi = v % 8 != 0,
-            _ => w.wifi_ready = v % 4 != 0,
+            10 => w.saved_wifi = !v.is_multiple_of(8),
+            _ => w.wifi_ready = !v.is_multiple_of(4),
         }
     }
 }

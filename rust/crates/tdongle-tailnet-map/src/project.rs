@@ -726,7 +726,7 @@ impl State {
         self.key_dec = t.decoded_len;
         self.key_unclean = !t.is_clean();
         self.key_f = field_lookup(top.role, &t);
-        let mut gp = gp_field(top.gp, &t);
+        let gp = gp_field(top.gp, &t);
         self.key_gp = gp;
         self.key_dup = false;
         if self.key_f != F::None {
@@ -1535,23 +1535,6 @@ impl State {
             Event::Null => self.on_value(Val::Null, sink),
         }
     }
-}
-
-fn u32_digits(mut v: u32, out: &mut [u8; 5]) -> usize {
-    let mut tmp = [0u8; 5];
-    let mut n = 0;
-    loop {
-        tmp[n] = b'0' + (v % 10) as u8;
-        n += 1;
-        v /= 10;
-        if v == 0 || n == 5 {
-            break;
-        }
-    }
-    for i in 0..n {
-        out[i] = tmp[n - 1 - i];
-    }
-    n
 }
 
 struct Adapter<'a, S: MapSink> {

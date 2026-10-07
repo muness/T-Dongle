@@ -15,6 +15,7 @@ pub const QUERY_MS: u64 = 2000;
 pub const PUBLIC: [u32; 3] = [u32::from_be_bytes([1, 1, 1, 1]), u32::from_be_bytes([8, 8, 8, 8]), u32::from_be_bytes([9, 9, 9, 9])];
 
 /// The candidate resolvers and what each did.
+#[derive(Debug)]
 pub struct Resolvers {
     addr: [AtomicU32; SLOTS],
     ok: [AtomicU32; SLOTS],

@@ -30,6 +30,8 @@ pub fn ap_conn() -> Conn {
     Conn { peer: Some(AP_PEER), local: Some(AP_LOCAL) }
 }
 
+type SavedCall = (Vec<u8>, Vec<u8>, Option<Vec<u8>>, i32, i32);
+
 #[derive(Default, Debug)]
 pub struct FakeHost {
     pub ready: bool,
@@ -40,7 +42,7 @@ pub struct FakeHost {
     pub scan: Option<ScanList>,
     pub busy: bool,
     pub kicks: Vec<bool>,
-    pub saves: Vec<(Vec<u8>, Vec<u8>, Option<Vec<u8>>, i32, i32)>,
+    pub saves: Vec<SavedCall>,
     pub removes: Vec<Vec<u8>>,
     pub leave_requests: u32,
     pub leave_ok: bool,

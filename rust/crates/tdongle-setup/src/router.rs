@@ -153,6 +153,8 @@ impl Portal {
     }
 
     /// `endpoint_allowed`: the refusal, or the origin.
+    // Keep the bounded response inline: error paths must not allocate on the device.
+    #[allow(clippy::result_large_err)]
     fn gate(&self, req: &Request<'_>, conn: &Conn, endpoint: Endpoint) -> Result<Origin, Response<'static>> {
         let origin = self.origin(req, conn);
         if !access::endpoint_allowed(origin, endpoint) {

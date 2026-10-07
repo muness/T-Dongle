@@ -329,7 +329,7 @@ mod tests {
             x ^= x >> 17;
             x ^= x << 5;
             // a cause seen in most samples, but a clean one at least every three seconds
-            let caught = x % 5 != 0 && t % 3_000 != 0;
+            let caught = !x.is_multiple_of(5) && t % 3_000 != 0;
             let s = Sample { pending: if caught { (1 << 4) | (1 << 18) } else { 0 }, ..OK };
             assert_eq!(p.decide(t, &s), None, "reset at {t}");
         }

@@ -641,7 +641,7 @@ fn owned_record_body_cancel_resume_preserves_exact_plaintext_and_single_lease() 
         }
         budget.store(7, Ordering::Relaxed); // Complete 5-byte header and only two ciphertext bytes.
         {
-            let mut read = core::pin::pin!(c.read_owned(|| core::future::pending::<()>()));
+            let mut read = core::pin::pin!(c.read_owned(core::future::pending::<()>));
             poll_fn(|cx| {
                 assert!(read.as_mut().poll(cx).is_pending());
                 if budget.load(Ordering::Relaxed) == 0 {

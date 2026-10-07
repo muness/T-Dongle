@@ -142,7 +142,7 @@ fn wifi_saved_for_usb_has_everything() {
 
 #[test]
 fn free_slot_and_preselect() {
-    let mut p = portal();
+    let p = portal();
     let mut h = FakeHost::new();
     h.saved = (0..8).map(|i| (format!("n{i}").into_bytes(), vec![], 50)).collect();
     let (r, _) = exchange(&p, &ap_conn(), &mut h, &get("/wifi-saved", H, &tok_hdr(&p)));
@@ -209,7 +209,7 @@ fn rule_token_is_required_and_constant_time_checked() {
     let (r, _) = exchange(&p, &ap_conn(), &mut h, &get("/", H, ""));
     assert!(text(&r).starts_with("HTTP/1.1 200 OK"));
     // the token is per boot
-    let other = Portal2::new([0x22; 16]);
+    let other = Portal2::create([0x22; 16]);
     assert_ne!(token(&p), token(&other));
 }
 
@@ -227,7 +227,7 @@ fn token_header_lookup_is_case_insensitive_and_first_wins() {
 type Portal2 = TestPortal;
 struct TestPortal;
 impl TestPortal {
-    fn new(random: [u8; 16]) -> tdongle_setup::router::Portal {
+    fn create(random: [u8; 16]) -> tdongle_setup::router::Portal {
         let boot = SetupBoot::decide(false, 0, 0, 0, false, true).unwrap();
         tdongle_setup::router::Portal::new(&boot, &random, &[0; 6], 0)
     }

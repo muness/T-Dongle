@@ -276,10 +276,11 @@ impl<const M: usize, const N: usize, const S: usize> PeerDirectory for RamDirect
             // update is dropped and counted. The map is not refused (a real tailnet has hundreds of peers).
             let online = |r: &DirRecord| r.has_online && r.online;
             let incoming = to_dir_record(rec);
-            if rec.action == PeerAction::Add && online(&incoming) {
-                if let Some(slot) = staged.iter_mut().find(|o| o.action == Action::Add && !online(&o.record)) {
-                    *slot = Op { group: rec.group as u32, action: action_of(rec.action), record: incoming };
-                }
+            if rec.action == PeerAction::Add
+                && online(&incoming)
+                && let Some(slot) = staged.iter_mut().find(|o| o.action == Action::Add && !online(&o.record))
+            {
+                *slot = Op { group: rec.group as u32, action: action_of(rec.action), record: incoming };
             }
             self.stage_dropped[member] = self.stage_dropped[member].saturating_add(1);
             return Ok(());
@@ -463,7 +464,7 @@ mod tests {
     #[test]
     fn a_full_staging_area_prefers_online_peers() {
         let mut d = RamDirectory::<1, 8, 2>::new();
-        let mut off = |ip: u32, k: u8| {
+        let off = |ip: u32, k: u8| {
             let mut r = rec(ip, k, u64::from(k));
             r.online = Some(false);
             r

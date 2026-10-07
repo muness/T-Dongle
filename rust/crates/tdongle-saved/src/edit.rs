@@ -18,6 +18,8 @@ fn copy_trunc(dst: &mut [u8], src: &[u8]) {
 
 /// C `wifi_save_with`. `name` empty or `None` and `priority < 0` keep what the slot has (or the defaults for a new or replaced network); `slot >= 0` targets that
 /// slot (one past the end appends), `-1` finds the network by SSID. Returns the new list and metadata, or `None` where the C returns false.
+// Preserve the C command's explicit network fields and slot selection.
+#[allow(clippy::too_many_arguments)]
 #[must_use]
 pub fn save_with(
     list: &SavedNetworks,

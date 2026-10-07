@@ -128,7 +128,7 @@ proptest! {
     ) {
         let mut ui = Ui::new(start);
         let mut now = start;
-        let name = |s: u32| if s % 2 == 0 { None } else { Some("a long long long long long long network name") };
+        let name = |s: u32| if s.is_multiple_of(2) { None } else { Some("a long long long long long long network name") };
         for (dt, down, setup, saved, (c0, c1), ok) in steps {
             now = now.wrapping_add(dt);
             let snap = Snapshot { saved_wifi: true, ssid: "s", ..Snapshot::default() };

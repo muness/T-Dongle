@@ -11,11 +11,11 @@ use crate::{Dest, Reply};
 pub const HEADERS: usize = 14 + 20 + 8;
 
 fn sum(data: &[u8], mut acc: u32) -> u32 {
-    let mut chunks = data.chunks_exact(2);
-    for c in &mut chunks {
+    let (chunks, remainder) = data.as_chunks::<2>();
+    for c in chunks {
         acc += u32::from(u16::from_be_bytes([c[0], c[1]]));
     }
-    if let [last] = chunks.remainder() {
+    if let [last] = remainder {
         acc += u32::from(*last) << 8;
     }
     acc

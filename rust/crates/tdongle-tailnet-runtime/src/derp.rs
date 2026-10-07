@@ -41,6 +41,9 @@ pub static DERP_EGRESS_HELD: core::sync::atomic::AtomicU32 = core::sync::atomic:
 /// See [`DERP_EGRESS_HELD`]: `[lease_timeout, tls, wait_record, write]`.
 pub static DERP_RECONNECT: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
 
+type DiagnosticText =
+    embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, core::cell::RefCell<([u8; 64], [u8; 64])>>;
+
 /// What the relay connection is doing, for the `tn_derp` line: the region and port of the target, its address, the stage reached (1 dial, 2 connected, 3 TLS done, 4 relaying), when
 /// the current link became ready, how the last one ended (`END_*`) after how long, and the text of the transport error that ended it.
 pub struct DerpDiag {
@@ -61,7 +64,12 @@ pub struct DerpDiag {
     /// Links ended by each cause: `[wait_record, lease, tls_read, write, link_asked_close, other]`.
     pub ends: [core::sync::atomic::AtomicU32; 6],
     /// Host name and the last transport error text.
-    pub text: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, core::cell::RefCell<([u8; 64], [u8; 64])>>,
+    pub text: DiagnosticText,
+}
+impl core::fmt::Debug for DerpDiag {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DerpDiag").finish_non_exhaustive()
+    }
 }
 pub use tdongle_tailnet_derp::link::LAST_RX_FRAME_TYPE;
 /// See [`DerpDiag`].
@@ -245,14 +253,11 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
         if self.link.state() != State::Ready {
             return;
         }
-        loop {
-            let Some(pkt) = XQ.lock(|q| {
-                let mut q = q.borrow_mut();
-                let i = q.iter().position(|p| p.slot == idx && p.region == region)?;
-                Some(q.remove(i))
-            }) else {
-                break;
-            };
+        while let Some(pkt) = XQ.lock(|q| {
+            let mut q = q.borrow_mut();
+            let i = q.iter().position(|p| p.slot == idx && p.region == region)?;
+            Some(q.remove(i))
+        }) {
             let now = self.sh.now();
             let Drv { sh, idx, member, link, acts, stage, .. } = self;
             let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage };

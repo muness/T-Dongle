@@ -409,7 +409,7 @@ impl EmbTcp {
     /// Drop the socket (it must be closed: the stack has had its turn to send the reset) and give its windows back.
     fn drop_socket(&mut self) {
         if self.sock.take().is_some() {
-            for (addr, len) in core::mem::replace(&mut self.held, [(0, 0); 2]) {
+            for (addr, len) in core::mem::take(&mut self.held) {
                 if len != 0 {
                     self.mem.give(addr, len);
                 }
@@ -580,12 +580,12 @@ impl core::fmt::Debug for EmbUdp {
 impl EmbUdp {
     /// Give back whatever windows and metadata are held (the socket is already gone).
     fn give_all(&mut self) {
-        for (addr, len) in core::mem::replace(&mut self.held, [(0, 0); 2]) {
+        for (addr, len) in core::mem::take(&mut self.held) {
             if len != 0 {
                 self.mem.give(addr, len);
             }
         }
-        for (addr, n) in core::mem::replace(&mut self.held_meta, [(0, 0); 2]) {
+        for (addr, n) in core::mem::take(&mut self.held_meta) {
             if n != 0 {
                 self.mem.give_meta(addr, n);
             }

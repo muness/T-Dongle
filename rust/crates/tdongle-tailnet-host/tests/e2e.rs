@@ -177,7 +177,7 @@ fn macos_frames_through_usbnet_and_the_router() {
     // ping: ICMP echo request, id/seq, 56 bytes of payload starting with a timestamp
     let mut icmp = vec![8, 0, 0, 0, 0x12, 0x34, 0, 1];
     icmp.extend_from_slice(&[0x66, 0x1a, 0x2b, 0x3c, 0, 0, 0, 0]);
-    icmp.extend((8u8..56).map(|i| i));
+    icmp.extend(8u8..56);
     let c = ip_sum(&icmp);
     icmp[2..4].copy_from_slice(&c.to_be_bytes());
     gw.host.inject(host_frame(hip, alias, 1, false, &icmp, 0));
@@ -198,7 +198,7 @@ fn macos_frames_through_usbnet_and_the_router() {
     settle();
     let e = extra();
     assert!(e.contains("tn_bad host={icmp:1 }"), "TCP frames must not be bad packets: {e}");
-    assert!(num(&cmd("route"), "forwarded_out") >= fwd0 + 1, "the SYN must be routed: {e}");
+    assert!(num(&cmd("route"), "forwarded_out") > fwd0, "the SYN must be routed: {e}");
     let eng = e.lines().find(|l| l.starts_with("tn_eng ")).unwrap();
     assert!(!eng.contains("hs_init=0 "), "routing the SYN starts the handshake: {eng}");
 
@@ -938,7 +938,7 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
         use tdongle_tailnet_runtime::derp::X_COUNTS;
         eprintln!("{}", gw.dump());
         let mut extra = String::new();
-        TailnetApi::serial_status_extra(&*gw.sh, &mut extra);
+        TailnetApi::serial_status_extra(gw.sh, &mut extra);
         eprintln!("{extra}");
         eprintln!("home {home}; visit counts {:?}; peers {:?}", X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect::<Vec<_>>(), go.ids());
     }

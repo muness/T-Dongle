@@ -57,7 +57,7 @@ pub fn restore_aliases<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(s
     let got = sh.storage.lock(|s| s.borrow_mut().get(SETTINGS_NAMESPACE, ALIASES_KEY, &mut b[..]));
     if let Ok(n) = got {
         sh.with_engine_mut(|e| {
-            for c in b[..n.min(b.len())].chunks_exact(12) {
+            for c in b[..n.min(b.len())].as_chunks::<12>().0 {
                 let w = |i: usize| u32::from_le_bytes([c[i], c[i + 1], c[i + 2], c[i + 3]]);
                 let _ = e.restore_alias((w(0), w(4), w(8)));
             }

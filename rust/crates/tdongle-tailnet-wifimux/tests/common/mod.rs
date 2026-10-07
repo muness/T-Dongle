@@ -1,6 +1,8 @@
 //! Test bench: a scripted radio, packet builders, a one-segment LAN with a gateway that speaks ARP/DHCP/"the Internet", and a manual poller.
 #![allow(dead_code)]
 
+type InternetReply = fn(&[u8]) -> Vec<u8>;
+
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
@@ -233,7 +235,7 @@ pub struct Gateway {
     /// Echo UDP datagrams that were sent to the gateway's MAC for off-link addresses back (the "Internet").
     pub echo_internet: bool,
     /// Answer UDP datagrams sent to the gateway's MAC for an off-link address with this function of the request payload instead of echoing it (an NTP server, say).
-    pub internet_reply: Option<fn(&[u8]) -> Vec<u8>>,
+    pub internet_reply: Option<InternetReply>,
     /// Datagrams to these destination addresses get no answer (a resolver that drops this client's queries).
     pub silent_dsts: Vec<u32>,
     pub frames_from_sta: Vec<Vec<u8>>,

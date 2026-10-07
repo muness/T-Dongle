@@ -335,16 +335,16 @@ impl Ui {
         }
         self.menu.tick(now);
         // Screen: redraw on a gesture or every DRAW_MS.
-        if self.redraw || now.wrapping_sub(self.last_draw_ms) >= DRAW_MS {
-            if let Some(content) = self.compose(now, now_ms, input) {
-                self.last_draw_ms = now;
-                self.redraw = false;
-                out.draw = Some(Draw { backlight_percent: input.display.backlight_percent(dim), rotation: input.display.rotation, content });
-                let mode = led::select(&self.led_in);
-                if mode != self.led {
-                    self.led = mode;
-                    self.led_since_ms = now;
-                }
+        if (self.redraw || now.wrapping_sub(self.last_draw_ms) >= DRAW_MS)
+            && let Some(content) = self.compose(now, now_ms, input)
+        {
+            self.last_draw_ms = now;
+            self.redraw = false;
+            out.draw = Some(Draw { backlight_percent: input.display.backlight_percent(dim), rotation: input.display.rotation, content });
+            let mode = led::select(&self.led_in);
+            if mode != self.led {
+                self.led = mode;
+                self.led_since_ms = now;
             }
         }
         // Status light: animated every LED_MS, written only when the colour changed (and once a second regardless).
@@ -426,10 +426,11 @@ impl Ui {
             let ctx = MenuContext { setup_active: input.setup_active, saved_count: if input.setup_active { 0 } else { input.saved_count } };
             // ui_name_of: only the shown item's name is fetched; the previous name stays when the lock is busy.
             let item = if self.menu.item < ctx.item_count() { self.menu.item } else { 0 };
-            if item >= 1 && item <= ctx.saved_count as u32 {
-                if let Some(n) = (input.network_name)(item) {
-                    self.menu_name = Text::from_str_truncated(n);
-                }
+            if item >= 1
+                && item <= ctx.saved_count as u32
+                && let Some(n) = (input.network_name)(item)
+            {
+                self.menu_name = Text::from_str_truncated(n);
             }
             let name = self.menu_name;
             let rows = self.menu.render(&ctx, |_| name.as_str());

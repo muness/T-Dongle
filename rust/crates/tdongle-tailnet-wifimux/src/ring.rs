@@ -57,9 +57,7 @@ impl<const N: usize> Ring<N> {
     }
     pub(crate) fn clear(&mut self) -> usize {
         let n = self.len;
-        for s in &mut self.slots {
-            *s = None;
-        }
+        self.slots.fill(None);
         self.head = 0;
         self.len = 0;
         n
