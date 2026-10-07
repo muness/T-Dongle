@@ -1329,6 +1329,14 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             );
         }
         {
+            use tdongle_tailnet_runtime::net_embassy::TCP_DIAG as T;
+            let _ = write!(
+                out,
+                "tn_tcp_errs read={} write={} flush_on_closed={} aborted_by_us={} last_op={} (1 read, 2 write, 3 flush) last_state={} (0 Closed, 4 Established, 7 CloseWait) send_queue={} recv_queue={} after_ms={}\r\n",
+                T[0].load(Relaxed), T[1].load(Relaxed), T[2].load(Relaxed), T[3].load(Relaxed), T[4].load(Relaxed), T[5].load(Relaxed), T[6].load(Relaxed), T[7].load(Relaxed), T[8].load(Relaxed)
+            );
+        }
+        {
             use tdongle_tailnet_runtime::derp::{HANDSHAKE_NOMEM, RELAY_DOWN};
             let since = RELAY_DOWN[2].load(Relaxed);
             let _ = write!(

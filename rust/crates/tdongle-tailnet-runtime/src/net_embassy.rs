@@ -264,7 +264,7 @@ impl Net for EmbassyNet {
         };
         // the relay's big windows (see `TcpConn::set_big_windows`): a round trip's worth of bytes at about 1 Mbit/s, only while it carries data
         let big = if matches!(role, TcpRole::Derp) { (DERP_RX_BIG, DERP_TX_BIG) } else { (rx, tx) };
-        Some(EmbTcp { stack: self.stack, mem: self.mem, rx_len: rx, tx_len: tx, big, base: (rx, tx), sock: None, held: [(0, 0); 2] })
+        Some(EmbTcp { stack: self.stack, mem: self.mem, rx_len: rx, tx_len: tx, big, base: (rx, tx), connected_at: 0, sock: None, held: [(0, 0); 2] })
     }
 
     fn udp(&self, role: UdpRole, slot: usize) -> Option<EmbUdp> {
@@ -326,6 +326,8 @@ pub struct EmbTcp {
     /// The windows of the next connect when it is asked for the big ones (`set_big_windows`), and the idle ones.
     big: (usize, usize),
     base: (usize, usize),
+    /// When the socket connected (ms clock), for the error diagnostics.
+    connected_at: u32,
     sock: Option<TcpSocket<'static>>,
     /// Address and length of the two windows the socket holds (receive, transmit); `(0, 0)` when none.
     held: [(usize, usize); 2],
@@ -339,6 +341,32 @@ impl core::fmt::Debug for EmbTcp {
 
 fn tcp_err(_: tcp::Error) -> NetError {
     NetError::Closed
+}
+
+/// Why TCP handles failed, for the relay's `ConnectionAborted`: `[read errors, write errors, flush on a closed socket, aborts by us (`close`), last error's operation (1 read, 2
+/// write, 3 flush), the socket's state then (smoltcp `State` as a number), its send queue then, its receive queue then, milliseconds since the socket connected]`.
+pub static TCP_DIAG: [AtomicU32; 9] = [const { AtomicU32::new(0) }; 9];
+
+fn note_tcp_err(op: u32, s: &TcpSocket<'_>, since_ms: u32) {
+    let st = match s.state() {
+        tcp::State::Closed => 0,
+        tcp::State::Listen => 1,
+        tcp::State::SynSent => 2,
+        tcp::State::SynReceived => 3,
+        tcp::State::Established => 4,
+        tcp::State::FinWait1 => 5,
+        tcp::State::FinWait2 => 6,
+        tcp::State::CloseWait => 7,
+        tcp::State::Closing => 8,
+        tcp::State::LastAck => 9,
+        tcp::State::TimeWait => 10,
+    };
+    TCP_DIAG[(op - 1) as usize].fetch_add(1, Ordering::Relaxed);
+    TCP_DIAG[4].store(op, Ordering::Relaxed);
+    TCP_DIAG[5].store(st, Ordering::Relaxed);
+    TCP_DIAG[6].store(s.send_queue() as u32, Ordering::Relaxed);
+    TCP_DIAG[7].store(s.recv_queue() as u32, Ordering::Relaxed);
+    TCP_DIAG[8].store(since_ms, Ordering::Relaxed);
 }
 
 impl EmbTcp {
@@ -366,8 +394,15 @@ impl ErrorType for EmbTcp {
 
 impl Read for EmbTcp {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, NetError> {
+        let since = (embassy_time::Instant::now().as_millis() as u32).wrapping_sub(self.connected_at);
         match self.sock.as_mut() {
-            Some(s) => s.read(buf).await.map_err(tcp_err),
+            Some(s) => {
+                let r = s.read(buf).await;
+                if r.is_err() {
+                    note_tcp_err(1, s, since);
+                }
+                r.map_err(tcp_err)
+            }
             None => Err(NetError::Closed),
         }
     }
@@ -375,8 +410,15 @@ impl Read for EmbTcp {
 
 impl Write for EmbTcp {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, NetError> {
+        let since = (embassy_time::Instant::now().as_millis() as u32).wrapping_sub(self.connected_at);
         match self.sock.as_mut() {
-            Some(s) => s.write(buf).await.map_err(tcp_err),
+            Some(s) => {
+                let r = s.write(buf).await;
+                if r.is_err() {
+                    note_tcp_err(2, s, since);
+                }
+                r.map_err(tcp_err)
+            }
             None => Err(NetError::Closed),
         }
     }
@@ -386,7 +428,11 @@ impl Write for EmbTcp {
         // reset (`close`, `release`), which has no use for a drained buffer.
         match self.sock.as_ref() {
             Some(s) if s.state() != tcp::State::Closed => Ok(()),
-            _ => Err(NetError::Closed),
+            Some(s) => {
+                note_tcp_err(3, s, (embassy_time::Instant::now().as_millis() as u32).wrapping_sub(self.connected_at));
+                Err(NetError::Closed)
+            }
+            None => Err(NetError::Closed),
         }
     }
 }
@@ -431,6 +477,7 @@ impl TcpConn for EmbTcp {
             }
         });
         if r.is_ok() {
+            self.connected_at = embassy_time::Instant::now().as_millis() as u32;
             DIAL.ok.fetch_add(1, Ordering::Relaxed);
             DIAL.last_stage.store(1, Ordering::Relaxed);
         }
@@ -443,6 +490,7 @@ impl TcpConn for EmbTcp {
     }
     fn close(&mut self) {
         if let Some(s) = self.sock.as_mut() {
+            TCP_DIAG[3].fetch_add(1, Ordering::Relaxed);
             s.abort();
         }
     }

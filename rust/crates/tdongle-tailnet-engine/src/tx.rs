@@ -304,7 +304,9 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
             Via::Derp => Route::Derp,
         };
         let key = Self::peer_key(m, idx);
-        if matches!(emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, peer_region(m, idx), &self.ctl[..n]), Sent::Direct | Sent::Derp) {
+        // DISCO (pings, call-me-maybe) always goes out on the member's own relay link, whatever region the peer is homed on: it must not make the link travel (a visit is a
+        // reconnect, seconds of nothing): the relay moves for a peer with traffic, not for the probes of every peer in the map. As in the C, which has one link.
+        if matches!(emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, crate::io::REGION_BACKGROUND, &self.ctl[..n]), Sent::Direct | Sent::Derp) {
             self.stats.disco_tx.bump();
         }
     }

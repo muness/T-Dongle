@@ -41,6 +41,10 @@ impl core::fmt::Debug for MemberConfig {
     }
 }
 
+/// `Out::DerpSend::region` of a packet that is not for any peer's conversation (DISCO probes): it goes out on the member's own relay link and does not count as traffic
+/// for the home region, so it neither makes the link travel nor keeps it from travelling.
+pub const REGION_BACKGROUND: u16 = u16::MAX;
+
 /// An owned map event (what [`crate::NetmapSink`] translates the projector's borrowed events into, so a control task can queue them for the engine task).
 #[derive(Clone, Debug)]
 pub enum NetmapEvent {

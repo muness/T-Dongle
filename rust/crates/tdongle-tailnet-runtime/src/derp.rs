@@ -146,7 +146,7 @@ static XQ: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw
 static X_SIG: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
 static X_PUMP: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
 /// Packets that may wait for a visit (TCP sends a window of them while the link switches).
-pub const XQ_MAX: usize = 16;
+pub const XQ_MAX: usize = 6;
 /// How long a packet waits for the link to reach its region before it is dropped (TCP in the tunnel retransmits).
 pub const X_EXPIRE_MS: u32 = 10_000;
 /// Visit timing in ms, `[idle, minimum, hold-off]`: the link leaves a region it visited after `idle` without a packet for it, never before `minimum` (control has to push the
@@ -772,7 +772,10 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
                 continue;
             }
             // a packet for a peer homed on another region: a relay server only forwards to clients connected to it, so it goes to the member's link to that region
-            let region = u16::from_be_bytes([eg[32], eg[33]]);
+            let raw_region = u16::from_be_bytes([eg[32], eg[33]]);
+            // background packets (DISCO, `REGION_BACKGROUND`) go out on the link wherever it is and do not count as traffic for the home region
+            let background = raw_region == u16::MAX;
+            let region = if background { 0 } else { raw_region };
             if region != 0 && region != self.link.target().region {
                 push_x(self.sh, self.idx, region, &eg[..32], &eg[34..n]);
                 self.sh.slots[self.idx].derp_q.discard_front();
@@ -790,7 +793,7 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
                 }
                 _ => {
                     self.sh.slots[self.idx].derp_q.discard_front();
-                    if self.visiting.is_none() {
+                    if self.visiting.is_none() && !background {
                         HOME_LAST_MS.store((now as u32).max(1), core::sync::atomic::Ordering::Relaxed);
                     }
                 }
