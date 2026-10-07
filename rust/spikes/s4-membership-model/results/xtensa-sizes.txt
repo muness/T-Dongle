@@ -1,0 +1,52 @@
+# xtensa-esp32s3 type sizes (rustc -Zprint-type-sizes on the linked crate) and task-pool/static symbol sizes (nm -S); firmware ELF md5 of s4.bin: d126373dee5f18c0df74e2487f82d240
+pe: `s4_model::coord::PeerRecC`: 464 bytes, alignment: 8 bytes
+pe: `s4_model::coord::PeerRecReordered`: 448 bytes, alignment: 8 bytes
+pe: `s4_model::coord::Coord`: 424 bytes, alignment: 8 bytes
+pe: `s4_model::coord::StreamParser`: 268 bytes, alignment: 4 bytes
+pe: `snow::transportstate::TransportState`: 112 bytes, alignment: 8 bytes
+pe: `snow::handshakestate::HandshakeState`: 744 bytes, alignment: 8 bytes
+pe: `s4_model::wg::Peer`: 984 bytes, alignment: 8 bytes
+pe: `s4_model::wg::Keypair`: 168 bytes, alignment: 8 bytes
+pe: `s4_model::wg::Handshake`: 140 bytes, alignment: 4 bytes
+pe: `s4_model::wg::Device`: 200 bytes, alignment: 4 bytes
+pe: `s4_model::disco::Disco`: 2288 bytes, alignment: 8 bytes
+pe: `smoltcp::socket::udp::Socket<'_>`: 92 bytes, alignment: 4 bytes
+pe: `smoltcp::socket::tcp::Socket<'_>`: 320 bytes, alignment: 8 bytes
+pe: `embedded_tls::asynch::TlsConnection<'_, s4_model::tls::Replay, embedded_tls::config::Aes128GcmSha256>`: 1304 bytes, alignment: 8 bytes
+pe: `embedded_tls::pki::CertVerifier<'_, embedded_tls::config::Aes128GcmSha256, s4_model::tls::FixedClock, 2048>`: 2520 bytes, alignment: 8 bytes
+pe: `s4_model::tls::Derp`: 1312 bytes, alignment: 8 bytes
+pe: `s4_model::tls::Provider<'_>`: 2832 bytes, alignment: 8 bytes
+pe: `{async fn body of s4_model::tls::setup<mem::M>()}`: 7648 bytes, alignment: 8 bytes
+pe: `{async fn body of s4_model::tls::app_data<mem::M>()}`: 1252 bytes, alignment: 4 bytes
+pe: `{async fn body of __negotiator_task_task::__negotiator_task_task_inner_function()}`: 8992 bytes, alignment: 8 bytes
+pe: `{async fn body of __disco_task_task::__disco_task_task_inner_function()}`: 4632 bytes, alignment: 8 bytes
+pe: `{async fn body of __derp_task_task::__derp_task_task_inner_function()}`: 1352 bytes, alignment: 8 bytes
+pe: `{async fn body of __coord_task_task::__coord_task_task_inner_function()}`: 904 bytes, alignment: 8 bytes
+pe: `{async fn body of __wg_task_task::__wg_task_task_inner_function()}`: 456 bytes, alignment: 8 bytes
+# static symbols
+288 s4_membership_model::DONE
+16 s4_membership_model::TOKEN
+48 s4_membership_model::HS_REQ
+1352 s4_membership_model::DERP_OUT
+6176 s4_membership_model::mbed::run::{closure#0}::C2S
+320 s4_membership_model::mbed::run::{closure#0}::RNG
+6176 s4_membership_model::mbed::run::{closure#0}::S2C
+2832 s4_membership_model::coord_task::POOL
+14016 s4_membership_model::disco_task::POOL
+9032 s4_membership_model::negotiator_task::POOL
+1488 s4_membership_model::wg_task::POOL
+4176 s4_membership_model::derp_task::POOL
+5576 s4_membership_model::__main::__embassy_main::POOL
+# size -A
+.rwtext                   8600   1077380096
+.rwtext.wifi                 0   1077388696
+.rwdata_dummy             9624   1070104576
+.data                     5000   1070114200
+.data.wifi                   0   1070119200
+.bss                    217636   1070119200
+.rodata_merge                0   1006633248
+.rodata                 153528   1006633248
+.rodata.wifi                 0   1006786776
+.text                   689023   1107492896
+.stack                  109500   1070336836
+.dram2_uninit            73728   1070446336

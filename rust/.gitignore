@@ -1,0 +1,10 @@
+/target/
+/sdkconfig
+/sdkconfig.old
+/.embuild/
+/components_*.lock.bak
+*.orig
+/dist/
+/spikes/*/target/
+/spikes/*/*.bin
+/spikes/*/Cargo.lock.bak

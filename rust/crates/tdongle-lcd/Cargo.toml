@@ -1,0 +1,17 @@
+[package]
+name = "tdongle-lcd"
+description = "The T-Dongle-S3 status screen: LcdState, View, compose, row renderer, ST7735 panel data. Port of lcd_view.c, byte-identical (golden tests from the C)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tdongle-nvs-format = { path = "../tdongle-nvs-format" }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

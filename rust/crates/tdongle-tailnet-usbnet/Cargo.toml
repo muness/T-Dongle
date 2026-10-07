@@ -1,0 +1,18 @@
+[package]
+name = "tdongle-tailnet-usbnet"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "USB side of the tailnet gateway without lwIP: Ethernet/ARP, a DHCP server (the ESP-IDF one's behaviour) and NAPT (TCP, UDP, ICMP echo) over the Wi-Fi address, all sans-IO and allocation free."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+
+[dev-dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+proptest = { version = "1", default-features = false, features = ["std"] }

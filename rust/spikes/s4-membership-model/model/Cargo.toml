@@ -1,0 +1,19 @@
+[package]
+name = "s4-model"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# no_std + alloc. Used by the firmware (xtensa) and by host/ (std, counting allocator) so the sizes are of the SAME types.
+[dependencies]
+snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-chacha20poly1305", "use-blake2", "use-curve25519"] }
+embedded-tls = { version = "0.19", default-features = false, features = ["rustpki", "p384"] }
+embedded-io-async = "0.7"
+chacha20poly1305 = { version = "0.11", default-features = false, features = ["alloc"] }
+blake2 = { version = "0.11", default-features = false }
+x25519-dalek = { version = "3", default-features = false, features = ["static_secrets", "zeroize"] }
+rand_core = { version = "0.6", default-features = false }
+rand_chacha = { version = "0.3", default-features = false }
+smoltcp = { version = "0.14", default-features = false, features = ["alloc", "medium-ip", "proto-ipv4", "socket-udp", "socket-tcp"] }
+embassy-futures = "0.1"
+embedded-io = "0.7"

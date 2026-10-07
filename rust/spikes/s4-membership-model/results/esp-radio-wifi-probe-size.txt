@@ -1,0 +1,14 @@
+# esp-radio 1.0.0-beta.1 Wi-Fi probe (init only, esp-alloc 64K reclaimed + 36K as in esp-radio src/lib.rs:40-41): size -A
+.rwtext                   8956   1077380096
+.rwtext.wifi             31980   1077389052
+.rwdata_dummy            41960   1070104576
+.data                    10208   1070146536
+.data.wifi                 496   1070156744
+.bss                     48264   1070157240
+.rodata_merge                0   1006633248
+.rodata                  26000   1006633248
+.rodata.wifi             32636   1006659248
+.vectors                  1024   1077379072
+.text                   298149   1107361824
+.stack                  240832   1070205504
+.dram2_uninit            65536   1070446336

@@ -1,0 +1,13 @@
+[package]
+name = "s2-desc-check"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Host-side (std) check: runs the spike's real acm.rs/ncm.rs builder code against a mock embassy-usb
+# driver and diffs the generated configuration descriptor against the C firmware's golden bytes.
+[workspace]
+
+[dependencies]
+embassy-usb = { version = "0.6", default-features = false }
+critical-section = { version = "1", features = ["std"] }

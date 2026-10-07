@@ -1,0 +1,21 @@
+[package]
+name = "tdongle-tailnet-sockmem"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The one place where pool-admitted heap blocks become the `&'static mut` windows embassy-net sockets want, and are reclaimed by address when the socket is gone: the only unsafe of the tailnet buffer path, kept out of the runtime (which forbids it)."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-pool = { path = "../tdongle-tailnet-pool" }
+tdongle-tailnet-runtime = { path = "../tdongle-tailnet-runtime", features = ["embassy-net"] }
+embassy-net = { version = "0.9", default-features = false, features = ["proto-ipv4", "medium-ethernet", "tcp", "udp", "dns", "dhcpv4"] }
+embassy-sync = "0.8"
+
+[dev-dependencies]
+tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }
+critical-section = { version = "1.2", features = ["std"] }

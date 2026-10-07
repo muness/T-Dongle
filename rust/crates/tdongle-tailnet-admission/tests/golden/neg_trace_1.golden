@@ -1,0 +1,1500 @@
+R G obs=1
+R Q obs=1
+L N obs=1
+R Q obs=1
+R Q obs=1
+L N obs=1
+R Q obs=1
+R Q holder=7 phase=start held=254 waiting=3 grants=1 timeouts=0 lease=0 stale=0 full=0 maxwait=0 maxhold=0 obs=1 busy=1 busynow=1
+R Q obs=1
+R G obs=3
+R Q obs=3
+R Q obs=3
+R Q obs=3
+R Q obs=3
+S - holder=1 phase=start held=529 waiting=3 grants=2 timeouts=0 lease=1 stale=4 full=0 maxwait=0 maxhold=70284 obs=3 busy=2 busynow=1
+S - holder=1 phase=start held=539 waiting=3 grants=2 timeouts=0 lease=1 stale=4 full=0 maxwait=0 maxhold=70284 obs=3 busy=2 busynow=1
+R Q obs=3
+R Q obs=3
+R Q obs=3
+R Q obs=3
+L N obs=3
+R Q obs=3
+R Q obs=3
+R Q holder=1 phase=start held=3114 waiting=3 grants=2 timeouts=0 lease=1 stale=9 full=0 maxwait=0 maxhold=70284 obs=3 busy=2 busynow=1
+R Q obs=3
+S - holder=1 phase=start held=3228 waiting=3 grants=2 timeouts=0 lease=1 stale=9 full=0 maxwait=0 maxhold=70284 obs=3 busy=2 busynow=1
+L T obs=4
+R G obs=5
+R G obs=5
+S - holder=9 phase=start held=5 waiting=0 grants=3 timeouts=0 lease=1 stale=12 full=0 maxwait=0 maxhold=70284 obs=5 busy=3 busynow=1
+R G obs=7
+R G holder=2 phase=start held=0 waiting=0 grants=5 timeouts=0 lease=3 stale=12 full=0 maxwait=0 maxhold=70284 obs=9 busy=5 busynow=1
+R Q obs=9
+R G obs=9
+R G obs=11
+R G obs=13
+R G obs=15
+R G obs=17
+R Q obs=17
+R Q holder=1 phase=control held=10 waiting=1 grants=9 timeouts=0 lease=7 stale=13 full=0 maxwait=0 maxhold=70284 obs=17 busy=9 busynow=1
+R G obs=19
+R Q obs=19
+R Q obs=19
+L N obs=19
+L N obs=19
+R Q obs=19
+S - holder=2 phase=derp held=68 waiting=3 grants=10 timeouts=0 lease=8 stale=14 full=0 maxwait=0 maxhold=70284 obs=19 busy=10 busynow=1
+R Q holder=2 phase=derp held=76 waiting=3 grants=10 timeouts=0 lease=8 stale=14 full=0 maxwait=0 maxhold=70284 obs=19 busy=10 busynow=1
+L N obs=19
+R Q obs=19
+S - holder=2 phase=derp held=2608 waiting=1 grants=10 timeouts=0 lease=8 stale=15 full=0 maxwait=0 maxhold=70284 obs=19 busy=10 busynow=1
+L N obs=19
+R G obs=21
+R Q obs=21
+R Q obs=21
+L N holder=5 phase=start held=505 waiting=2 grants=11 timeouts=0 lease=9 stale=16 full=0 maxwait=0 maxhold=72608 obs=21 busy=11 busynow=1
+R Q obs=21
+R Q obs=21
+R Q obs=21
+L N obs=21
+S - holder=5 phase=start held=20561 waiting=3 grants=11 timeouts=0 lease=9 stale=16 full=0 maxwait=0 maxhold=72608 obs=21 busy=11 busynow=1
+R G obs=23
+L N obs=23
+R Q holder=7 phase=start held=41 waiting=1 grants=12 timeouts=0 lease=10 stale=18 full=0 maxwait=20071 maxhold=72608 obs=23 busy=12 busynow=1
+R Q obs=23
+S - holder=7 phase=start held=99 waiting=2 grants=12 timeouts=0 lease=10 stale=18 full=0 maxwait=20071 maxhold=72608 obs=23 busy=12 busynow=1
+R Q obs=23
+L N obs=23
+S - holder=7 phase=start held=124 waiting=2 grants=12 timeouts=0 lease=10 stale=18 full=0 maxwait=20071 maxhold=72608 obs=23 busy=12 busynow=1
+S - holder=7 phase=start held=224 waiting=2 grants=12 timeouts=0 lease=10 stale=18 full=0 maxwait=20071 maxhold=72608 obs=23 busy=12 busynow=1
+R G obs=23
+R Q holder=7 phase=start held=247 waiting=2 grants=12 timeouts=0 lease=10 stale=18 full=0 maxwait=20071 maxhold=72608 obs=23 busy=12 busynow=1
+R Q obs=23
+S - holder=7 phase=start held=766 waiting=2 grants=12 timeouts=0 lease=10 stale=19 full=0 maxwait=20071 maxhold=72608 obs=23 busy=12 busynow=1
+L N obs=23
+R G obs=23
+L T obs=24
+R G obs=25
+L N obs=25
+R G holder=5 phase=start held=0 waiting=0 grants=14 timeouts=0 lease=11 stale=21 full=0 maxwait=20071 maxhold=90788 obs=27 busy=14 busynow=1
+R Q obs=27
+R Q obs=27
+R Q obs=27
+L N obs=27
+L N obs=27
+R Q obs=27
+S - holder=5 phase=start held=2540 waiting=1 grants=14 timeouts=0 lease=11 stale=22 full=0 maxwait=20071 maxhold=90788 obs=27 busy=14 busynow=1
+R Q holder=5 phase=start held=2550 waiting=2 grants=14 timeouts=0 lease=11 stale=22 full=0 maxwait=20071 maxhold=90788 obs=27 busy=14 busynow=1
+R Q obs=27
+R Q obs=27
+L N obs=27
+R Q obs=27
+S - holder=5 phase=start held=3124 waiting=1 grants=14 timeouts=0 lease=11 stale=24 full=0 maxwait=20071 maxhold=90788 obs=27 busy=14 busynow=1
+R Q obs=27
+R Q obs=27
+R Q holder=5 phase=start held=3157 waiting=4 grants=14 timeouts=0 lease=11 stale=24 full=0 maxwait=20071 maxhold=90788 obs=27 busy=14 busynow=1
+L N obs=27
+R Q obs=27
+S - holder=5 phase=start held=3175 waiting=4 grants=14 timeouts=0 lease=11 stale=24 full=0 maxwait=20071 maxhold=90788 obs=27 busy=14 busynow=1
+L N obs=27
+R G obs=29
+R G obs=29
+R Q obs=29
+R Q holder=9 phase=control held=3005 waiting=2 grants=15 timeouts=0 lease=12 stale=27 full=0 maxwait=20071 maxhold=90788 obs=29 busy=15 busynow=1
+R Q obs=29
+L N obs=29
+R G obs=31
+L N obs=31
+R G obs=31
+R Q obs=31
+R G obs=33
+R Q holder=5 phase=start held=7 waiting=1 grants=17 timeouts=0 lease=14 stale=30 full=0 maxwait=20071 maxhold=90788 obs=33 busy=17 busynow=1
+S - holder=5 phase=start held=507 waiting=1 grants=17 timeouts=0 lease=14 stale=30 full=0 maxwait=20071 maxhold=90788 obs=33 busy=17 busynow=1
+R G obs=33
+L N obs=33
+R Q obs=33
+S - holder=5 phase=start held=73045 waiting=1 grants=17 timeouts=0 lease=14 stale=31 full=0 maxwait=20071 maxhold=90788 obs=33 busy=17 busynow=1
+S - holder=5 phase=start held=73145 waiting=1 grants=17 timeouts=0 lease=14 stale=31 full=0 maxwait=20071 maxhold=90788 obs=33 busy=17 busynow=1
+R G obs=35
+R Q holder=7 phase=start held=500 waiting=1 grants=18 timeouts=0 lease=15 stale=32 full=0 maxwait=20071 maxhold=90788 obs=35 busy=18 busynow=1
+R Q obs=35
+L N obs=35
+R Q obs=35
+R Q obs=35
+L T obs=36
+R G obs=37
+R G obs=37
+L N holder=8 phase=derp held=70008 waiting=0 grants=19 timeouts=0 lease=15 stale=34 full=0 maxwait=20071 maxhold=90788 obs=37 busy=19 busynow=1
+L N obs=37
+R G obs=39
+R Q obs=39
+R Q obs=39
+R Q obs=39
+S - holder=2 phase=control held=157 waiting=3 grants=20 timeouts=0 lease=16 stale=34 full=0 maxwait=20071 maxhold=90788 obs=39 busy=20 busynow=1
+R Q obs=39
+R Q holder=2 phase=control held=167 waiting=4 grants=20 timeouts=0 lease=16 stale=34 full=0 maxwait=20071 maxhold=90788 obs=39 busy=20 busynow=1
+R Q obs=39
+R Q obs=39
+L N obs=39
+R Q obs=39
+R Q obs=39
+R Q obs=39
+R G obs=39
+R Q holder=2 phase=control held=335 waiting=5 grants=20 timeouts=0 lease=16 stale=34 full=0 maxwait=20071 maxhold=90788 obs=39 busy=20 busynow=1
+S - holder=2 phase=control held=2835 waiting=5 grants=20 timeouts=0 lease=16 stale=34 full=0 maxwait=20071 maxhold=90788 obs=39 busy=20 busynow=1
+R Q obs=39
+R Q obs=39
+R Q obs=39
+R Q obs=39
+R Q obs=39
+R Q obs=39
+L N holder=2 phase=control held=3878 waiting=2 grants=20 timeouts=0 lease=16 stale=41 full=0 maxwait=20071 maxhold=90788 obs=39 busy=20 busynow=1
+L N obs=39
+R Q obs=39
+R Q obs=39
+R Q obs=39
+R G obs=41
+R Q obs=41
+R G obs=43
+R Q holder=7 phase=start held=3 waiting=1 grants=22 timeouts=0 lease=18 stale=43 full=0 maxwait=70024 maxhold=90788 obs=43 busy=22 busynow=1
+R Q obs=43
+R Q obs=43
+R Q obs=43
+L T obs=44
+R Q obs=44
+R Q obs=44
+L N obs=44
+R Q holder=0 phase=none held=0 waiting=5 grants=22 timeouts=0 lease=18 stale=43 full=0 maxwait=70024 maxhold=90788 obs=44 busy=22 busynow=0
+L N obs=44
+L N obs=44
+R Q obs=44
+L N obs=44
+R G obs=45
+L N obs=45
+R G obs=45
+R Q holder=2 phase=derp held=7 waiting=1 grants=23 timeouts=0 lease=18 stale=47 full=0 maxwait=70024 maxhold=90788 obs=45 busy=23 busynow=1
+R G obs=47
+S - holder=1 phase=control held=100 waiting=0 grants=24 timeouts=0 lease=19 stale=48 full=0 maxwait=70024 maxhold=90788 obs=47 busy=24 busynow=1
+R Q obs=47
+R Q obs=47
+R Q obs=47
+L N obs=47
+S - holder=1 phase=control held=73116 waiting=2 grants=24 timeouts=0 lease=19 stale=49 full=0 maxwait=70024 maxhold=90788 obs=47 busy=24 busynow=1
+S - holder=1 phase=control held=73116 waiting=2 grants=24 timeouts=0 lease=19 stale=49 full=0 maxwait=70024 maxhold=90788 obs=47 busy=24 busynow=1
+L N obs=47
+R G obs=49
+R G obs=49
+R Q obs=49
+R Q obs=49
+L N obs=49
+L T obs=50
+R G holder=4 phase=start held=0 waiting=0 grants=26 timeouts=0 lease=20 stale=52 full=0 maxwait=70024 maxhold=90788 obs=51 busy=26 busynow=1
+L N obs=51
+L N obs=51
+L N obs=51
+R G obs=51
+R G obs=51
+R G obs=51
+R G obs=53
+S - holder=9 phase=derp held=5 waiting=0 grants=27 timeouts=0 lease=21 stale=52 full=0 maxwait=70024 maxhold=90788 obs=53 busy=27 busynow=1
+R Q obs=53
+R Q obs=53
+R Q obs=53
+R Q obs=53
+R Q obs=53
+S - holder=9 phase=derp held=20055 waiting=5 grants=27 timeouts=0 lease=21 stale=52 full=0 maxwait=70024 maxhold=90788 obs=53 busy=27 busynow=1
+L T obs=54
+S - holder=0 phase=none held=0 waiting=5 grants=27 timeouts=0 lease=21 stale=52 full=0 maxwait=70024 maxhold=90788 obs=54 busy=27 busynow=0
+R G obs=55
+L N obs=55
+R Q obs=55
+R Q obs=55
+R Q obs=55
+R Q obs=55
+L N obs=55
+S - holder=2 phase=start held=3221 waiting=1 grants=28 timeouts=0 lease=21 stale=59 full=0 maxwait=70024 maxhold=90788 obs=55 busy=28 busynow=1
+R G obs=57
+L N obs=57
+L N obs=57
+R Q obs=57
+R Q obs=57
+R Q obs=57
+R Q obs=57
+R Q holder=9 phase=start held=2642 waiting=2 grants=29 timeouts=0 lease=22 stale=63 full=0 maxwait=70024 maxhold=90788 obs=57 busy=29 busynow=1
+R Q obs=57
+R G obs=59
+R Q obs=59
+R Q obs=59
+R Q obs=59
+S - holder=6 phase=control held=75 waiting=3 grants=30 timeouts=0 lease=23 stale=65 full=0 maxwait=70024 maxhold=90788 obs=59 busy=30 busynow=1
+R Q obs=59
+R Q holder=6 phase=control held=577 waiting=2 grants=30 timeouts=0 lease=23 stale=68 full=0 maxwait=70024 maxhold=90788 obs=59 busy=30 busynow=1
+R Q obs=59
+R G obs=59
+R Q obs=59
+R Q obs=59
+R G obs=61
+L N obs=61
+R G obs=63
+L N holder=4 phase=derp held=1 waiting=0 grants=32 timeouts=0 lease=25 stale=72 full=0 maxwait=70024 maxhold=90788 obs=63 busy=32 busynow=1
+R Q obs=63
+R Q obs=63
+R Q obs=63
+L N obs=63
+R G obs=65
+R Q obs=65
+S - holder=7 phase=start held=100 waiting=1 grants=33 timeouts=0 lease=26 stale=74 full=0 maxwait=70024 maxhold=90788 obs=65 busy=33 busynow=1
+S - holder=7 phase=start held=600 waiting=1 grants=33 timeouts=0 lease=26 stale=74 full=0 maxwait=70024 maxhold=90788 obs=65 busy=33 busynow=1
+R G obs=65
+R G obs=67
+R G obs=69
+R Q obs=69
+R Q obs=69
+R Q obs=69
+R G obs=71
+S - holder=2 phase=derp held=14 waiting=0 grants=36 timeouts=0 lease=29 stale=78 full=0 maxwait=70024 maxhold=90788 obs=71 busy=36 busynow=1
+R G obs=71
+L N obs=71
+S - holder=2 phase=derp held=20019 waiting=0 grants=36 timeouts=0 lease=29 stale=78 full=0 maxwait=70024 maxhold=90788 obs=71 busy=36 busynow=1
+L N obs=71
+L N obs=71
+R G obs=73
+L N obs=73
+R Q holder=8 phase=control held=47 waiting=1 grants=37 timeouts=0 lease=30 stale=78 full=0 maxwait=70024 maxhold=90788 obs=73 busy=37 busynow=1
+L N obs=73
+S - holder=8 phase=control held=20059 waiting=1 grants=37 timeouts=0 lease=30 stale=78 full=0 maxwait=70024 maxhold=90788 obs=73 busy=37 busynow=1
+L T obs=74
+R G obs=75
+R Q obs=75
+R Q obs=75
+S - holder=6 phase=control held=32 waiting=2 grants=38 timeouts=0 lease=30 stale=79 full=0 maxwait=70024 maxhold=90788 obs=75 busy=38 busynow=1
+L N holder=6 phase=control held=56 waiting=1 grants=38 timeouts=0 lease=30 stale=79 full=0 maxwait=70024 maxhold=90788 obs=75 busy=38 busynow=1
+L N obs=75
+R Q obs=75
+L N obs=75
+L N obs=75
+R Q obs=75
+S - holder=6 phase=control held=2612 waiting=1 grants=38 timeouts=0 lease=30 stale=81 full=0 maxwait=70024 maxhold=90788 obs=75 busy=38 busynow=1
+R G obs=75
+R G holder=3 phase=control held=0 waiting=0 grants=39 timeouts=0 lease=31 stale=82 full=0 maxwait=70024 maxhold=90788 obs=77 busy=39 busynow=1
+S - holder=3 phase=control held=1 waiting=0 grants=39 timeouts=0 lease=31 stale=82 full=0 maxwait=70024 maxhold=90788 obs=77 busy=39 busynow=1
+R Q obs=77
+R G obs=79
+R Q obs=79
+R Q obs=79
+R Q obs=79
+R Q obs=79
+R Q holder=2 phase=start held=43 waiting=3 grants=40 timeouts=0 lease=32 stale=83 full=0 maxwait=70024 maxhold=90788 obs=79 busy=40 busynow=1
+S - holder=2 phase=start held=67 waiting=3 grants=40 timeouts=0 lease=32 stale=83 full=0 maxwait=70024 maxhold=90788 obs=79 busy=40 busynow=1
+R Q obs=79
+L N obs=79
+R G obs=79
+L N obs=79
+R Q obs=79
+R Q obs=79
+R Q holder=2 phase=start held=139 waiting=5 grants=40 timeouts=0 lease=32 stale=83 full=0 maxwait=70024 maxhold=90788 obs=79 busy=40 busynow=1
+R Q obs=79
+L N obs=79
+R Q obs=79
+R Q obs=79
+L T obs=80
+R G obs=81
+R Q obs=81
+R G holder=1 phase=control held=70015 waiting=1 grants=41 timeouts=0 lease=32 stale=87 full=0 maxwait=70185 maxhold=90788 obs=81 busy=41 busynow=1
+R G obs=83
+L N obs=83
+R G obs=85
+R Q obs=85
+R Q obs=85
+R Q obs=85
+R Q obs=85
+L N holder=5 phase=derp held=63 waiting=2 grants=43 timeouts=0 lease=34 stale=88 full=0 maxwait=70185 maxhold=90788 obs=85 busy=43 busynow=1
+R Q obs=85
+R Q obs=85
+S - holder=5 phase=derp held=104 waiting=4 grants=43 timeouts=0 lease=34 stale=88 full=0 maxwait=70185 maxhold=90788 obs=85 busy=43 busynow=1
+S - holder=5 phase=derp held=119 waiting=4 grants=43 timeouts=0 lease=34 stale=88 full=0 maxwait=70185 maxhold=90788 obs=85 busy=43 busynow=1
+S - holder=5 phase=derp held=120 waiting=4 grants=43 timeouts=0 lease=34 stale=88 full=0 maxwait=70185 maxhold=90788 obs=85 busy=43 busynow=1
+S - holder=5 phase=derp held=135 waiting=4 grants=43 timeouts=0 lease=34 stale=88 full=0 maxwait=70185 maxhold=90788 obs=85 busy=43 busynow=1
+R Q obs=85
+R G holder=1 phase=start held=0 waiting=0 grants=44 timeouts=0 lease=35 stale=92 full=0 maxwait=70185 maxhold=90788 obs=87 busy=44 busynow=1
+R Q obs=87
+R G obs=87
+S - holder=1 phase=start held=22502 waiting=1 grants=44 timeouts=0 lease=35 stale=92 full=0 maxwait=70185 maxhold=90788 obs=87 busy=44 busynow=1
+R G obs=89
+L N obs=89
+R Q obs=89
+L N obs=89
+L N holder=3 phase=control held=2550 waiting=1 grants=45 timeouts=0 lease=36 stale=93 full=0 maxwait=70185 maxhold=90788 obs=89 busy=45 busynow=1
+L N obs=89
+L N obs=89
+R Q obs=89
+R Q obs=89
+R Q obs=89
+S - holder=3 phase=control held=3107 waiting=2 grants=45 timeouts=0 lease=36 stale=93 full=0 maxwait=70185 maxhold=90788 obs=89 busy=45 busynow=1
+R Q obs=89
+R Q holder=3 phase=control held=3124 waiting=3 grants=45 timeouts=0 lease=36 stale=94 full=0 maxwait=70185 maxhold=90788 obs=89 busy=45 busynow=1
+L N obs=89
+S - holder=3 phase=control held=3163 waiting=3 grants=45 timeouts=0 lease=36 stale=94 full=0 maxwait=70185 maxhold=90788 obs=89 busy=45 busynow=1
+S - holder=3 phase=control held=3173 waiting=3 grants=45 timeouts=0 lease=36 stale=94 full=0 maxwait=70185 maxhold=90788 obs=89 busy=45 busynow=1
+L N obs=89
+S - holder=3 phase=control held=3220 waiting=2 grants=45 timeouts=0 lease=36 stale=94 full=0 maxwait=70185 maxhold=90788 obs=89 busy=45 busynow=1
+L N obs=89
+S - holder=3 phase=control held=23237 waiting=2 grants=45 timeouts=0 lease=36 stale=94 full=0 maxwait=70185 maxhold=90788 obs=89 busy=45 busynow=1
+R G holder=3 phase=control held=23263 waiting=2 grants=45 timeouts=0 lease=36 stale=94 full=0 maxwait=70185 maxhold=90788 obs=89 busy=45 busynow=1
+R G obs=91
+L N obs=91
+L N obs=91
+R G obs=93
+R Q obs=93
+R Q obs=93
+R G obs=95
+R Q holder=3 phase=start held=1 waiting=1 grants=48 timeouts=0 lease=39 stale=97 full=0 maxwait=70185 maxhold=90788 obs=95 busy=48 busynow=1
+R G obs=95
+R G obs=95
+L N obs=95
+R G obs=97
+L N obs=97
+R Q obs=97
+R G obs=99
+R Q holder=4 phase=control held=9 waiting=1 grants=50 timeouts=0 lease=41 stale=98 full=0 maxwait=70185 maxhold=90788 obs=99 busy=50 busynow=1
+R G obs=101
+L N obs=101
+R Q obs=101
+R Q obs=101
+R Q obs=101
+R Q obs=101
+R Q obs=101
+R Q holder=8 phase=derp held=2545 waiting=5 grants=51 timeouts=0 lease=42 stale=99 full=0 maxwait=70185 maxhold=90788 obs=101 busy=51 busynow=1
+R Q obs=101
+R Q obs=101
+S - holder=8 phase=derp held=2560 waiting=5 grants=51 timeouts=0 lease=42 stale=99 full=0 maxwait=70185 maxhold=90788 obs=101 busy=51 busynow=1
+L N obs=101
+R G obs=103
+S - holder=2 phase=control held=5 waiting=0 grants=52 timeouts=0 lease=43 stale=104 full=0 maxwait=70185 maxhold=90788 obs=103 busy=52 busynow=1
+S - holder=2 phase=control held=10 waiting=0 grants=52 timeouts=0 lease=43 stale=104 full=0 maxwait=70185 maxhold=90788 obs=103 busy=52 busynow=1
+L N holder=2 phase=control held=20010 waiting=0 grants=52 timeouts=0 lease=43 stale=104 full=0 maxwait=70185 maxhold=90788 obs=103 busy=52 busynow=1
+R G obs=105
+R Q obs=105
+L N obs=105
+R G obs=105
+R Q obs=105
+R G obs=107
+L N obs=107
+R Q holder=1 phase=start held=1 waiting=1 grants=54 timeouts=0 lease=45 stale=106 full=0 maxwait=70185 maxhold=90788 obs=107 busy=54 busynow=1
+L T obs=108
+L N obs=108
+R G obs=109
+L N obs=109
+L N obs=109
+L N obs=109
+R Q obs=109
+R Q holder=5 phase=start held=151 waiting=2 grants=55 timeouts=0 lease=45 stale=106 full=0 maxwait=70185 maxhold=90788 obs=109 busy=55 busynow=1
+R G obs=109
+L N obs=109
+S - holder=5 phase=start held=675 waiting=1 grants=55 timeouts=0 lease=45 stale=106 full=0 maxwait=70185 maxhold=90788 obs=109 busy=55 busynow=1
+R Q obs=109
+R G obs=109
+L N obs=109
+L T obs=110
+R Q holder=0 phase=none held=0 waiting=2 grants=55 timeouts=0 lease=45 stale=107 full=0 maxwait=70185 maxhold=90788 obs=110 busy=55 busynow=0
+S - holder=0 phase=none held=0 waiting=2 grants=55 timeouts=0 lease=45 stale=107 full=0 maxwait=70185 maxhold=90788 obs=110 busy=55 busynow=0
+R G obs=111
+S - holder=9 phase=start held=0 waiting=0 grants=56 timeouts=0 lease=45 stale=109 full=0 maxwait=70185 maxhold=90788 obs=111 busy=56 busynow=1
+R Q obs=111
+L T obs=112
+R G obs=113
+L N obs=113
+L N holder=1 phase=derp held=2515 waiting=0 grants=57 timeouts=0 lease=45 stale=110 full=0 maxwait=70185 maxhold=90788 obs=113 busy=57 busynow=1
+R Q obs=113
+S - holder=1 phase=derp held=2523 waiting=1 grants=57 timeouts=0 lease=45 stale=110 full=0 maxwait=70185 maxhold=90788 obs=113 busy=57 busynow=1
+L N obs=113
+R Q obs=113
+R G obs=115
+S - holder=5 phase=derp held=22 waiting=0 grants=58 timeouts=0 lease=46 stale=111 full=0 maxwait=70185 maxhold=90788 obs=115 busy=58 busynow=1
+L N obs=115
+R Q holder=5 phase=derp held=48 waiting=1 grants=58 timeouts=0 lease=46 stale=111 full=0 maxwait=70185 maxhold=90788 obs=115 busy=58 busynow=1
+L N obs=115
+R G obs=115
+R Q obs=115
+L N obs=115
+R Q obs=115
+R G obs=117
+S - holder=3 phase=start held=20000 waiting=0 grants=59 timeouts=0 lease=47 stale=113 full=0 maxwait=70185 maxhold=90788 obs=117 busy=59 busynow=1
+R G holder=6 phase=control held=0 waiting=0 grants=60 timeouts=0 lease=48 stale=113 full=0 maxwait=70185 maxhold=90788 obs=119 busy=60 busynow=1
+S - holder=6 phase=control held=9 waiting=0 grants=60 timeouts=0 lease=48 stale=113 full=0 maxwait=70185 maxhold=90788 obs=119 busy=60 busynow=1
+L N obs=119
+R G obs=121
+S - holder=5 phase=derp held=1 waiting=0 grants=61 timeouts=0 lease=49 stale=113 full=0 maxwait=70185 maxhold=90788 obs=121 busy=61 busynow=1
+S - holder=5 phase=derp held=11 waiting=0 grants=61 timeouts=0 lease=49 stale=113 full=0 maxwait=70185 maxhold=90788 obs=121 busy=61 busynow=1
+R G obs=121
+R Q obs=121
+R Q holder=5 phase=derp held=23 waiting=2 grants=61 timeouts=0 lease=49 stale=113 full=0 maxwait=70185 maxhold=90788 obs=121 busy=61 busynow=1
+L N obs=121
+R Q obs=121
+R Q obs=121
+R Q obs=121
+R Q obs=121
+R Q obs=121
+R Q obs=121
+R G holder=8 phase=start held=0 waiting=0 grants=62 timeouts=0 lease=50 stale=116 full=0 maxwait=70185 maxhold=90788 obs=123 busy=62 busynow=1
+S - holder=8 phase=start held=0 waiting=0 grants=62 timeouts=0 lease=50 stale=116 full=0 maxwait=70185 maxhold=90788 obs=123 busy=62 busynow=1
+S - holder=8 phase=start held=2500 waiting=0 grants=62 timeouts=0 lease=50 stale=116 full=0 maxwait=70185 maxhold=90788 obs=123 busy=62 busynow=1
+R Q obs=123
+R Q obs=123
+L N obs=123
+R Q obs=123
+R Q obs=123
+R G holder=8 phase=start held=2643 waiting=1 grants=62 timeouts=0 lease=50 stale=116 full=0 maxwait=70185 maxhold=90788 obs=123 busy=62 busynow=1
+R Q obs=123
+L N obs=123
+R G obs=125
+L N obs=125
+L N obs=125
+R G obs=127
+S - holder=6 phase=derp held=100 waiting=0 grants=64 timeouts=0 lease=52 stale=117 full=0 maxwait=70185 maxhold=90788 obs=127 busy=64 busynow=1
+L N holder=6 phase=derp held=111 waiting=0 grants=64 timeouts=0 lease=52 stale=117 full=0 maxwait=70185 maxhold=90788 obs=127 busy=64 busynow=1
+R G obs=129
+R Q obs=129
+R Q obs=129
+L N obs=129
+S - holder=3 phase=derp held=40 waiting=1 grants=65 timeouts=0 lease=53 stale=117 full=0 maxwait=70185 maxhold=90788 obs=129 busy=65 busynow=1
+L N obs=129
+R Q obs=129
+S - holder=3 phase=derp held=155 waiting=2 grants=65 timeouts=0 lease=53 stale=117 full=0 maxwait=70185 maxhold=90788 obs=129 busy=65 busynow=1
+S - holder=3 phase=derp held=155 waiting=2 grants=65 timeouts=0 lease=53 stale=117 full=0 maxwait=70185 maxhold=90788 obs=129 busy=65 busynow=1
+S - holder=3 phase=derp held=179 waiting=2 grants=65 timeouts=0 lease=53 stale=117 full=0 maxwait=70185 maxhold=90788 obs=129 busy=65 busynow=1
+L N obs=129
+L T obs=130
+R Q obs=130
+R G obs=131
+R Q obs=131
+S - holder=8 phase=start held=21 waiting=1 grants=66 timeouts=0 lease=53 stale=119 full=0 maxwait=70185 maxhold=90788 obs=131 busy=66 busynow=1
+R Q obs=131
+R Q obs=131
+R Q obs=131
+L N obs=131
+R Q obs=131
+L N obs=131
+S - holder=8 phase=start held=610 waiting=1 grants=66 timeouts=0 lease=53 stale=122 full=0 maxwait=70185 maxhold=90788 obs=131 busy=66 busynow=1
+S - holder=8 phase=start held=70610 waiting=1 grants=66 timeouts=0 lease=53 stale=122 full=0 maxwait=70185 maxhold=90788 obs=131 busy=66 busynow=1
+R G obs=131
+R G obs=133
+R Q obs=133
+R Q obs=133
+L N obs=133
+L N obs=133
+R G obs=135
+R Q holder=1 phase=derp held=12 waiting=1 grants=68 timeouts=0 lease=55 stale=124 full=0 maxwait=70185 maxhold=90788 obs=135 busy=68 busynow=1
+R Q obs=135
+R Q obs=135
+S - holder=1 phase=derp held=70 waiting=3 grants=68 timeouts=0 lease=55 stale=124 full=0 maxwait=70185 maxhold=90788 obs=135 busy=68 busynow=1
+R G obs=135
+L T obs=136
+S - holder=0 phase=none held=0 waiting=3 grants=68 timeouts=0 lease=55 stale=124 full=0 maxwait=70185 maxhold=90788 obs=136 busy=68 busynow=0
+R G obs=137
+L N holder=4 phase=start held=10 waiting=2 grants=69 timeouts=0 lease=55 stale=124 full=0 maxwait=70185 maxhold=90788 obs=137 busy=69 busynow=1
+R Q obs=137
+R G obs=139
+L N obs=139
+R Q obs=139
+R Q obs=139
+R Q obs=139
+L N obs=139
+S - holder=6 phase=control held=20236 waiting=2 grants=70 timeouts=0 lease=56 stale=127 full=0 maxwait=70185 maxhold=90788 obs=139 busy=70 busynow=1
+L N obs=139
+R G obs=141
+L N obs=141
+R G obs=141
+R G obs=143
+R G obs=143
+L N obs=143
+R Q holder=1 phase=derp held=1 waiting=1 grants=72 timeouts=0 lease=58 stale=129 full=0 maxwait=70185 maxhold=90788 obs=143 busy=72 busynow=1
+R Q obs=143
+R G obs=145
+R G obs=145
+L N obs=145
+R Q obs=145
+S - holder=7 phase=derp held=29 waiting=1 grants=73 timeouts=0 lease=59 stale=131 full=0 maxwait=70185 maxhold=90788 obs=145 busy=73 busynow=1
+R Q obs=145
+R Q holder=7 phase=derp held=139 waiting=2 grants=73 timeouts=0 lease=59 stale=131 full=0 maxwait=70185 maxhold=90788 obs=145 busy=73 busynow=1
+R G obs=147
+L N obs=147
+R Q obs=147
+R G obs=149
+L N obs=149
+R Q obs=149
+R Q obs=149
+R G holder=9 phase=start held=33 waiting=2 grants=75 timeouts=0 lease=61 stale=133 full=0 maxwait=70185 maxhold=90788 obs=149 busy=75 busynow=1
+R Q obs=149
+R Q obs=149
+L N obs=149
+R Q obs=149
+R Q obs=149
+S - holder=9 phase=start held=98 waiting=5 grants=75 timeouts=0 lease=61 stale=133 full=0 maxwait=70185 maxhold=90788 obs=149 busy=75 busynow=1
+R Q obs=149
+L N holder=9 phase=start held=620 waiting=1 grants=75 timeouts=0 lease=61 stale=137 full=0 maxwait=70185 maxhold=90788 obs=149 busy=75 busynow=1
+S - holder=9 phase=start held=70620 waiting=1 grants=75 timeouts=0 lease=61 stale=137 full=0 maxwait=70185 maxhold=90788 obs=149 busy=75 busynow=1
+R G obs=151
+L N obs=151
+R Q obs=151
+R Q obs=151
+R G obs=151
+R Q obs=151
+L N holder=2 phase=control held=139 waiting=2 grants=76 timeouts=0 lease=62 stale=138 full=0 maxwait=70185 maxhold=90788 obs=151 busy=76 busynow=1
+L N obs=151
+R Q obs=151
+R Q obs=151
+S - holder=2 phase=control held=2790 waiting=3 grants=76 timeouts=0 lease=62 stale=138 full=0 maxwait=70185 maxhold=90788 obs=151 busy=76 busynow=1
+L N obs=151
+R Q obs=151
+L N obs=151
+R G holder=8 phase=control held=0 waiting=0 grants=77 timeouts=0 lease=63 stale=142 full=0 maxwait=70185 maxhold=90788 obs=153 busy=77 busynow=1
+R Q obs=153
+R Q obs=153
+L N obs=153
+S - holder=8 phase=control held=13 waiting=2 grants=77 timeouts=0 lease=63 stale=142 full=0 maxwait=70185 maxhold=90788 obs=153 busy=77 busynow=1
+R Q obs=153
+R Q obs=153
+S - holder=8 phase=control held=2519 waiting=4 grants=77 timeouts=0 lease=63 stale=142 full=0 maxwait=70185 maxhold=90788 obs=153 busy=77 busynow=1
+R G holder=8 phase=control held=2545 waiting=4 grants=77 timeouts=0 lease=63 stale=142 full=0 maxwait=70185 maxhold=90788 obs=153 busy=77 busynow=1
+S - holder=8 phase=control held=2550 waiting=4 grants=77 timeouts=0 lease=63 stale=142 full=0 maxwait=70185 maxhold=90788 obs=153 busy=77 busynow=1
+R Q obs=153
+R Q obs=153
+R G obs=155
+L N obs=155
+R G obs=155
+L N obs=155
+R Q holder=1 phase=derp held=122 waiting=1 grants=78 timeouts=0 lease=64 stale=147 full=0 maxwait=70185 maxhold=90788 obs=155 busy=78 busynow=1
+R Q obs=155
+L N obs=155
+S - holder=1 phase=derp held=1131 waiting=1 grants=78 timeouts=0 lease=64 stale=147 full=0 maxwait=70185 maxhold=90788 obs=155 busy=78 busynow=1
+R Q obs=155
+R Q obs=155
+R Q obs=155
+R G obs=155
+S - holder=1 phase=derp held=1201 waiting=3 grants=78 timeouts=0 lease=64 stale=148 full=0 maxwait=70185 maxhold=90788 obs=155 busy=78 busynow=1
+R G obs=155
+R Q obs=155
+S - holder=1 phase=derp held=1241 waiting=4 grants=78 timeouts=0 lease=64 stale=148 full=0 maxwait=70185 maxhold=90788 obs=155 busy=78 busynow=1
+S - holder=1 phase=derp held=1263 waiting=4 grants=78 timeouts=0 lease=64 stale=148 full=0 maxwait=70185 maxhold=90788 obs=155 busy=78 busynow=1
+R Q obs=155
+R Q obs=155
+L N obs=155
+R G holder=2 phase=derp held=0 waiting=0 grants=79 timeouts=0 lease=65 stale=153 full=0 maxwait=70185 maxhold=90788 obs=157 busy=79 busynow=1
+R G obs=157
+L N obs=157
+R Q obs=157
+R Q obs=157
+R G obs=157
+L T obs=158
+R G obs=159
+R Q holder=5 phase=control held=2 waiting=1 grants=80 timeouts=0 lease=65 stale=155 full=0 maxwait=70185 maxhold=90788 obs=159 busy=80 busynow=1
+S - holder=5 phase=control held=19 waiting=1 grants=80 timeouts=0 lease=65 stale=155 full=0 maxwait=70185 maxhold=90788 obs=159 busy=80 busynow=1
+L N obs=159
+S - holder=5 phase=control held=2520 waiting=1 grants=80 timeouts=0 lease=65 stale=155 full=0 maxwait=70185 maxhold=90788 obs=159 busy=80 busynow=1
+R Q obs=159
+R Q obs=159
+R Q obs=159
+R Q obs=159
+R Q holder=5 phase=control held=2555 waiting=5 grants=80 timeouts=0 lease=65 stale=156 full=0 maxwait=70185 maxhold=90788 obs=159 busy=80 busynow=1
+R G obs=159
+R G obs=161
+R Q obs=161
+L N obs=161
+R Q obs=161
+R Q obs=161
+R Q obs=161
+R Q holder=4 phase=derp held=86 waiting=3 grants=81 timeouts=0 lease=66 stale=160 full=0 maxwait=70185 maxhold=90788 obs=161 busy=81 busynow=1
+R Q obs=161
+R Q obs=161
+S - holder=4 phase=derp held=108 waiting=4 grants=81 timeouts=0 lease=66 stale=160 full=0 maxwait=70185 maxhold=90788 obs=161 busy=81 busynow=1
+L N obs=161
+R Q obs=161
+L N obs=161
+R Q obs=161
+R Q holder=4 phase=derp held=2644 waiting=2 grants=81 timeouts=0 lease=66 stale=164 full=0 maxwait=70185 maxhold=90788 obs=161 busy=81 busynow=1
+R Q obs=161
+R Q obs=161
+R Q obs=161
+R Q obs=161
+L T obs=162
+R G obs=163
+R Q obs=163
+R Q holder=2 phase=control held=27 waiting=1 grants=82 timeouts=0 lease=66 stale=170 full=0 maxwait=70185 maxhold=90788 obs=163 busy=82 busynow=1
+R G obs=163
+R Q obs=163
+S - holder=2 phase=control held=70052 waiting=2 grants=82 timeouts=0 lease=66 stale=170 full=0 maxwait=70185 maxhold=90788 obs=163 busy=82 busynow=1
+R G obs=165
+R Q obs=165
+R Q obs=165
+R G obs=165
+R Q holder=8 phase=start held=84 waiting=3 grants=83 timeouts=0 lease=67 stale=171 full=0 maxwait=70185 maxhold=90788 obs=165 busy=83 busynow=1
+R Q obs=165
+R G obs=167
+R G obs=169
+R Q obs=169
+S - holder=9 phase=start held=18 waiting=1 grants=85 timeouts=0 lease=69 stale=175 full=0 maxwait=70185 maxhold=90788 obs=169 busy=85 busynow=1
+L N obs=169
+L N obs=169
+R Q holder=9 phase=start held=34 waiting=2 grants=85 timeouts=0 lease=69 stale=175 full=0 maxwait=70185 maxhold=90788 obs=169 busy=85 busynow=1
+L N obs=169
+R Q obs=169
+S - holder=9 phase=start held=70 waiting=2 grants=85 timeouts=0 lease=69 stale=175 full=0 maxwait=70185 maxhold=90788 obs=169 busy=85 busynow=1
+R Q obs=169
+R Q obs=169
+L N obs=169
+R Q obs=169
+L N holder=9 phase=start held=1094 waiting=1 grants=85 timeouts=0 lease=69 stale=178 full=0 maxwait=70185 maxhold=90788 obs=169 busy=85 busynow=1
+R Q obs=169
+R Q obs=169
+L N obs=169
+R Q obs=169
+L N obs=169
+L N obs=169
+L N obs=169
+S - holder=9 phase=start held=24660 waiting=3 grants=85 timeouts=0 lease=69 stale=178 full=0 maxwait=70185 maxhold=90788 obs=169 busy=85 busynow=1
+R G obs=171
+R Q obs=171
+L N obs=171
+L N obs=171
+R Q obs=171
+R G obs=173
+S - holder=1 phase=derp held=0 waiting=0 grants=87 timeouts=0 lease=71 stale=181 full=0 maxwait=70185 maxhold=90788 obs=173 busy=87 busynow=1
+S - holder=1 phase=derp held=0 waiting=0 grants=87 timeouts=0 lease=71 stale=181 full=0 maxwait=70185 maxhold=90788 obs=173 busy=87 busynow=1
+R Q obs=173
+R Q obs=173
+R G obs=173
+S - holder=1 phase=derp held=630 waiting=2 grants=87 timeouts=0 lease=71 stale=181 full=0 maxwait=70185 maxhold=90788 obs=173 busy=87 busynow=1
+S - holder=1 phase=derp held=654 waiting=2 grants=87 timeouts=0 lease=71 stale=181 full=0 maxwait=70185 maxhold=90788 obs=173 busy=87 busynow=1
+R Q obs=173
+R Q obs=173
+L N holder=1 phase=derp held=70683 waiting=2 grants=87 timeouts=0 lease=71 stale=183 full=0 maxwait=70185 maxhold=90788 obs=173 busy=87 busynow=1
+S - holder=1 phase=derp held=70688 waiting=2 grants=87 timeouts=0 lease=71 stale=183 full=0 maxwait=70185 maxhold=90788 obs=173 busy=87 busynow=1
+S - holder=1 phase=derp held=70788 waiting=2 grants=87 timeouts=0 lease=71 stale=183 full=0 maxwait=70185 maxhold=90788 obs=173 busy=87 busynow=1
+R G obs=175
+R Q obs=175
+R Q obs=175
+R Q obs=175
+S - holder=6 phase=control held=2513 waiting=3 grants=88 timeouts=0 lease=72 stale=185 full=0 maxwait=70185 maxhold=90788 obs=175 busy=88 busynow=1
+R Q holder=6 phase=control held=2533 waiting=3 grants=88 timeouts=0 lease=72 stale=185 full=0 maxwait=70185 maxhold=90788 obs=175 busy=88 busynow=1
+R Q obs=175
+R G obs=175
+R Q obs=175
+S - holder=6 phase=control held=2690 waiting=4 grants=88 timeouts=0 lease=72 stale=185 full=0 maxwait=70185 maxhold=90788 obs=175 busy=88 busynow=1
+R Q obs=175
+L N obs=175
+L N obs=175
+R G holder=7 phase=control held=0 waiting=0 grants=89 timeouts=0 lease=73 stale=186 full=0 maxwait=70317 maxhold=90788 obs=177 busy=89 busynow=1
+L N obs=177
+L N obs=177
+L N obs=177
+R Q obs=177
+S - holder=7 phase=control held=22520 waiting=1 grants=89 timeouts=0 lease=73 stale=186 full=0 maxwait=70317 maxhold=90788 obs=177 busy=89 busynow=1
+R G obs=177
+S - holder=7 phase=control held=42520 waiting=1 grants=89 timeouts=0 lease=73 stale=186 full=0 maxwait=70317 maxhold=90788 obs=177 busy=89 busynow=1
+R G holder=5 phase=derp held=0 waiting=0 grants=90 timeouts=0 lease=74 stale=187 full=0 maxwait=70317 maxhold=90788 obs=179 busy=90 busynow=1
+R Q obs=179
+L N obs=179
+S - holder=5 phase=derp held=70058 waiting=1 grants=90 timeouts=0 lease=74 stale=187 full=0 maxwait=70317 maxhold=90788 obs=179 busy=90 busynow=1
+L N obs=179
+R G obs=181
+R G obs=183
+R Q obs=183
+R G holder=5 phase=start held=507 waiting=1 grants=92 timeouts=0 lease=76 stale=188 full=0 maxwait=70317 maxhold=90788 obs=183 busy=92 busynow=1
+R Q obs=183
+S - holder=5 phase=start held=516 waiting=2 grants=92 timeouts=0 lease=76 stale=188 full=0 maxwait=70317 maxhold=90788 obs=183 busy=92 busynow=1
+R G obs=183
+L N obs=183
+R Q obs=183
+R Q obs=183
+S - holder=5 phase=start held=70558 waiting=3 grants=92 timeouts=0 lease=76 stale=189 full=0 maxwait=70317 maxhold=90788 obs=183 busy=92 busynow=1
+R G holder=5 phase=start held=70563 waiting=3 grants=92 timeouts=0 lease=76 stale=189 full=0 maxwait=70317 maxhold=90788 obs=183 busy=92 busynow=1
+R G obs=185
+L N obs=185
+R Q obs=185
+R Q obs=185
+R G obs=185
+L N obs=185
+L N obs=185
+S - holder=6 phase=control held=164 waiting=1 grants=93 timeouts=0 lease=77 stale=192 full=0 maxwait=70317 maxhold=90788 obs=185 busy=93 busynow=1
+R Q obs=185
+R Q obs=185
+R Q obs=185
+L N obs=185
+L N obs=185
+R Q obs=185
+S - holder=6 phase=control held=808 waiting=4 grants=93 timeouts=0 lease=77 stale=193 full=0 maxwait=70317 maxhold=90788 obs=185 busy=93 busynow=1
+R Q holder=6 phase=control held=814 waiting=5 grants=93 timeouts=0 lease=77 stale=193 full=0 maxwait=70317 maxhold=90788 obs=185 busy=93 busynow=1
+L N obs=185
+R G obs=185
+R G obs=185
+R Q obs=185
+R Q obs=185
+R G obs=187
+S - holder=5 phase=derp held=29 waiting=0 grants=94 timeouts=0 lease=78 stale=198 full=0 maxwait=70317 maxhold=90788 obs=187 busy=94 busynow=1
+R Q holder=5 phase=derp held=30 waiting=1 grants=94 timeouts=0 lease=78 stale=198 full=0 maxwait=70317 maxhold=90788 obs=187 busy=94 busynow=1
+R Q obs=187
+R Q obs=187
+R Q obs=187
+R G obs=189
+L N obs=189
+R Q obs=189
+R Q obs=189
+R Q holder=1 phase=derp held=535 waiting=2 grants=95 timeouts=0 lease=79 stale=202 full=0 maxwait=70317 maxhold=90788 obs=189 busy=95 busynow=1
+R Q obs=189
+R G obs=191
+R Q obs=191
+R Q obs=191
+S - holder=3 phase=start held=29 waiting=2 grants=96 timeouts=0 lease=80 stale=205 full=0 maxwait=70317 maxhold=90788 obs=191 busy=96 busynow=1
+L N obs=191
+S - holder=3 phase=start held=83 waiting=2 grants=96 timeouts=0 lease=80 stale=205 full=0 maxwait=70317 maxhold=90788 obs=191 busy=96 busynow=1
+R Q holder=3 phase=start held=96 waiting=3 grants=96 timeouts=0 lease=80 stale=205 full=0 maxwait=70317 maxhold=90788 obs=191 busy=96 busynow=1
+R Q obs=191
+R Q obs=191
+S - holder=3 phase=start held=231 waiting=5 grants=96 timeouts=0 lease=80 stale=205 full=0 maxwait=70317 maxhold=90788 obs=191 busy=96 busynow=1
+R Q obs=191
+R Q obs=191
+S - holder=3 phase=start held=3231 waiting=1 grants=96 timeouts=0 lease=80 stale=210 full=0 maxwait=70317 maxhold=90788 obs=191 busy=96 busynow=1
+R Q obs=191
+L T holder=0 phase=none held=0 waiting=2 grants=96 timeouts=0 lease=80 stale=210 full=0 maxwait=70317 maxhold=90788 obs=192 busy=96 busynow=0
+R Q obs=192
+S - holder=0 phase=none held=0 waiting=2 grants=96 timeouts=0 lease=80 stale=211 full=0 maxwait=70317 maxhold=90788 obs=192 busy=96 busynow=0
+L N obs=192
+L N obs=192
+R G obs=193
+R G obs=193
+L N obs=193
+R G holder=5 phase=control held=0 waiting=0 grants=98 timeouts=0 lease=81 stale=212 full=0 maxwait=70317 maxhold=90788 obs=195 busy=98 busynow=1
+L N obs=195
+L N obs=195
+L N obs=195
+R Q obs=195
+R Q obs=195
+S - holder=5 phase=control held=127 waiting=2 grants=98 timeouts=0 lease=81 stale=212 full=0 maxwait=70317 maxhold=90788 obs=195 busy=98 busynow=1
+S - holder=5 phase=control held=134 waiting=2 grants=98 timeouts=0 lease=81 stale=212 full=0 maxwait=70317 maxhold=90788 obs=195 busy=98 busynow=1
+R Q holder=5 phase=control held=144 waiting=3 grants=98 timeouts=0 lease=81 stale=212 full=0 maxwait=70317 maxhold=90788 obs=195 busy=98 busynow=1
+R Q obs=195
+S - holder=5 phase=control held=150 waiting=4 grants=98 timeouts=0 lease=81 stale=212 full=0 maxwait=70317 maxhold=90788 obs=195 busy=98 busynow=1
+R Q obs=195
+L N obs=195
+R Q obs=195
+R G obs=197
+L N obs=197
+R G holder=5 phase=start held=0 waiting=0 grants=100 timeouts=0 lease=83 stale=216 full=0 maxwait=70317 maxhold=90788 obs=199 busy=100 busynow=1
+R Q obs=199
+R Q obs=199
+R Q obs=199
+R Q obs=199
+R G obs=201
+R Q obs=201
+R Q obs=201
+R Q holder=9 phase=control held=214 waiting=2 grants=101 timeouts=0 lease=84 stale=220 full=0 maxwait=70317 maxhold=90788 obs=201 busy=101 busynow=1
+S - holder=9 phase=control held=238 waiting=2 grants=101 timeouts=0 lease=84 stale=220 full=0 maxwait=70317 maxhold=90788 obs=201 busy=101 busynow=1
+L N obs=201
+S - holder=9 phase=control held=259 waiting=2 grants=101 timeouts=0 lease=84 stale=220 full=0 maxwait=70317 maxhold=90788 obs=201 busy=101 busynow=1
+R G obs=201
+R Q obs=201
+R Q obs=201
+L N obs=201
+L N holder=9 phase=control held=461 waiting=2 grants=101 timeouts=0 lease=84 stale=220 full=0 maxwait=70317 maxhold=90788 obs=201 busy=101 busynow=1
+L N obs=201
+R G obs=203
+R Q obs=203
+R Q obs=203
+R Q obs=203
+R G obs=203
+S - holder=2 phase=derp held=53 waiting=3 grants=102 timeouts=0 lease=85 stale=222 full=0 maxwait=70317 maxhold=90788 obs=203 busy=102 busynow=1
+L N holder=2 phase=derp held=553 waiting=2 grants=102 timeouts=0 lease=85 stale=222 full=0 maxwait=70317 maxhold=90788 obs=203 busy=102 busynow=1
+S - holder=2 phase=derp held=575 waiting=2 grants=102 timeouts=0 lease=85 stale=222 full=0 maxwait=70317 maxhold=90788 obs=203 busy=102 busynow=1
+L T obs=204
+R G obs=205
+S - holder=1 phase=control held=10 waiting=0 grants=103 timeouts=0 lease=85 stale=224 full=0 maxwait=70317 maxhold=90788 obs=205 busy=103 busynow=1
+R Q obs=205
+R Q obs=205
+R Q obs=205
+L N holder=1 phase=control held=2512 waiting=1 grants=103 timeouts=0 lease=85 stale=224 full=0 maxwait=70317 maxhold=90788 obs=205 busy=103 busynow=1
+L T obs=206
+L N obs=206
+S - holder=0 phase=none held=0 waiting=0 grants=103 timeouts=0 lease=85 stale=224 full=0 maxwait=70317 maxhold=90788 obs=206 busy=103 busynow=0
+R G obs=207
+L T obs=208
+L N obs=208
+L N obs=208
+L N holder=0 phase=none held=0 waiting=0 grants=104 timeouts=0 lease=85 stale=224 full=0 maxwait=70317 maxhold=90788 obs=208 busy=104 busynow=0
+S - holder=0 phase=none held=0 waiting=0 grants=104 timeouts=0 lease=85 stale=224 full=0 maxwait=70317 maxhold=90788 obs=208 busy=104 busynow=0
+S - holder=0 phase=none held=0 waiting=0 grants=104 timeouts=0 lease=85 stale=224 full=0 maxwait=70317 maxhold=90788 obs=208 busy=104 busynow=0
+R G obs=209
+R Q obs=209
+S - holder=8 phase=control held=501 waiting=1 grants=105 timeouts=0 lease=85 stale=224 full=0 maxwait=70317 maxhold=90788 obs=209 busy=105 busynow=1
+R Q obs=209
+L N obs=209
+S - holder=8 phase=control held=633 waiting=1 grants=105 timeouts=0 lease=85 stale=225 full=0 maxwait=70317 maxhold=90788 obs=209 busy=105 busynow=1
+S - holder=8 phase=control held=650 waiting=1 grants=105 timeouts=0 lease=85 stale=225 full=0 maxwait=70317 maxhold=90788 obs=209 busy=105 busynow=1
+L N obs=209
+R Q obs=209
+R Q obs=209
+R Q obs=209
+S - holder=8 phase=control held=774 waiting=3 grants=105 timeouts=0 lease=85 stale=225 full=0 maxwait=70317 maxhold=90788 obs=209 busy=105 busynow=1
+R G obs=209
+L N holder=8 phase=control held=798 waiting=3 grants=105 timeouts=0 lease=85 stale=225 full=0 maxwait=70317 maxhold=90788 obs=209 busy=105 busynow=1
+S - holder=8 phase=control held=1298 waiting=3 grants=105 timeouts=0 lease=85 stale=225 full=0 maxwait=70317 maxhold=90788 obs=209 busy=105 busynow=1
+L N obs=209
+S - holder=8 phase=control held=71798 waiting=2 grants=105 timeouts=0 lease=85 stale=225 full=0 maxwait=70317 maxhold=90788 obs=209 busy=105 busynow=1
+R G obs=211
+R Q obs=211
+R G obs=213
+R Q obs=213
+R Q holder=4 phase=derp held=600 waiting=2 grants=107 timeouts=0 lease=87 stale=228 full=0 maxwait=70317 maxhold=90788 obs=213 busy=107 busynow=1
+L N obs=213
+R Q obs=213
+R Q obs=213
+R Q obs=213
+L N obs=213
+R Q obs=213
+R Q obs=213
+R Q holder=4 phase=derp held=1296 waiting=3 grants=107 timeouts=0 lease=87 stale=231 full=0 maxwait=70317 maxhold=90788 obs=213 busy=107 busynow=1
+R Q obs=213
+S - holder=4 phase=derp held=1317 waiting=4 grants=107 timeouts=0 lease=87 stale=231 full=0 maxwait=70317 maxhold=90788 obs=213 busy=107 busynow=1
+L N obs=213
+L T obs=214
+L N obs=214
+S - holder=0 phase=none held=0 waiting=4 grants=107 timeouts=0 lease=87 stale=231 full=0 maxwait=70317 maxhold=90788 obs=214 busy=107 busynow=0
+L N obs=214
+L N holder=0 phase=none held=0 waiting=3 grants=107 timeouts=0 lease=87 stale=231 full=0 maxwait=70317 maxhold=90788 obs=214 busy=107 busynow=0
+R G obs=215
+R Q obs=215
+R Q obs=215
+R Q obs=215
+R Q obs=215
+L T obs=216
+R Q obs=216
+R Q holder=0 phase=none held=0 waiting=3 grants=108 timeouts=0 lease=87 stale=233 full=0 maxwait=72654 maxhold=90788 obs=216 busy=108 busynow=0
+R Q obs=216
+R G obs=217
+R Q obs=217
+R Q obs=217
+S - holder=5 phase=start held=505 waiting=2 grants=109 timeouts=0 lease=87 stale=237 full=0 maxwait=72654 maxhold=90788 obs=217 busy=109 busynow=1
+R Q obs=217
+L N obs=217
+S - holder=5 phase=start held=20551 waiting=1 grants=109 timeouts=0 lease=87 stale=239 full=0 maxwait=72654 maxhold=90788 obs=217 busy=109 busynow=1
+R G obs=219
+L N obs=219
+R Q obs=219
+R G obs=221
+R Q obs=221
+L N obs=221
+L N obs=221
+R G holder=8 phase=start held=0 waiting=0 grants=112 timeouts=0 lease=90 stale=242 full=0 maxwait=72654 maxhold=90788 obs=223 busy=112 busynow=1
+R Q obs=223
+R G obs=223
+R Q obs=223
+R Q obs=223
+S - holder=8 phase=start held=151 waiting=3 grants=112 timeouts=0 lease=90 stale=242 full=0 maxwait=72654 maxhold=90788 obs=223 busy=112 busynow=1
+R Q obs=223
+R Q obs=223
+R Q holder=8 phase=start held=175 waiting=4 grants=112 timeouts=0 lease=90 stale=242 full=0 maxwait=72654 maxhold=90788 obs=223 busy=112 busynow=1
+R Q obs=223
+R Q obs=223
+R Q obs=223
+R G obs=225
+R Q obs=225
+R Q obs=225
+R G obs=227
+S - holder=3 phase=start held=5 waiting=0 grants=114 timeouts=0 lease=92 stale=248 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+R Q obs=227
+R Q obs=227
+R Q obs=227
+R Q obs=227
+R Q obs=227
+R G obs=227
+R Q obs=227
+R Q holder=3 phase=start held=119 waiting=4 grants=114 timeouts=0 lease=92 stale=248 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+L N obs=227
+S - holder=3 phase=start held=1119 waiting=4 grants=114 timeouts=0 lease=92 stale=248 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+R Q obs=227
+L N obs=227
+R Q obs=227
+S - holder=3 phase=start held=1645 waiting=1 grants=114 timeouts=0 lease=92 stale=252 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+S - holder=3 phase=start held=1659 waiting=1 grants=114 timeouts=0 lease=92 stale=252 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+L N holder=3 phase=start held=1681 waiting=0 grants=114 timeouts=0 lease=92 stale=252 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+L N obs=227
+S - holder=3 phase=start held=4181 waiting=0 grants=114 timeouts=0 lease=92 stale=252 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+L N obs=227
+S - holder=3 phase=start held=4215 waiting=0 grants=114 timeouts=0 lease=92 stale=252 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+R Q obs=227
+S - holder=3 phase=start held=6725 waiting=1 grants=114 timeouts=0 lease=92 stale=252 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+S - holder=3 phase=start held=6725 waiting=1 grants=114 timeouts=0 lease=92 stale=252 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+S - holder=3 phase=start held=6735 waiting=1 grants=114 timeouts=0 lease=92 stale=252 full=0 maxwait=72654 maxhold=90788 obs=227 busy=114 busynow=1
+L N obs=227
+R G obs=229
+S - holder=5 phase=derp held=29 waiting=0 grants=115 timeouts=0 lease=93 stale=253 full=0 maxwait=72654 maxhold=90788 obs=229 busy=115 busynow=1
+R Q obs=229
+R Q obs=229
+R Q obs=229
+S - holder=5 phase=derp held=2571 waiting=1 grants=115 timeouts=0 lease=93 stale=254 full=0 maxwait=72654 maxhold=90788 obs=229 busy=115 busynow=1
+S - holder=5 phase=derp held=22571 waiting=1 grants=115 timeouts=0 lease=93 stale=254 full=0 maxwait=72654 maxhold=90788 obs=229 busy=115 busynow=1
+L N obs=229
+R G obs=231
+L N obs=231
+R Q obs=231
+R Q obs=231
+R G obs=233
+L N obs=233
+R Q holder=4 phase=control held=11 waiting=1 grants=117 timeouts=0 lease=95 stale=257 full=0 maxwait=72654 maxhold=90788 obs=233 busy=117 busynow=1
+R Q obs=233
+R Q obs=233
+R Q obs=233
+R Q obs=233
+R G obs=233
+L N obs=233
+R Q obs=233
+R Q holder=4 phase=control held=671 waiting=2 grants=117 timeouts=0 lease=95 stale=260 full=0 maxwait=72654 maxhold=90788 obs=233 busy=117 busynow=1
+L T obs=234
+L N obs=234
+R Q obs=234
+R G obs=235
+R G obs=237
+L N obs=237
+R Q obs=237
+R G holder=8 phase=start held=5017 waiting=1 grants=119 timeouts=0 lease=96 stale=262 full=0 maxwait=72654 maxhold=90788 obs=237 busy=119 busynow=1
+L N obs=237
+R Q obs=238
+L N obs=238
+R G obs=239
+R Q obs=239
+R G obs=241
+R Q obs=241
+L N holder=6 phase=control held=39 waiting=1 grants=121 timeouts=0 lease=98 stale=263 full=0 maxwait=72654 maxhold=90788 obs=241 busy=121 busynow=1
+R Q obs=241
+R G obs=243
+R Q obs=243
+R Q obs=243
+R Q obs=243
+R Q obs=243
+S - holder=4 phase=control held=75 waiting=3 grants=122 timeouts=0 lease=99 stale=265 full=0 maxwait=72654 maxhold=90788 obs=243 busy=122 busynow=1
+R Q holder=4 phase=control held=575 waiting=1 grants=122 timeouts=0 lease=99 stale=267 full=0 maxwait=72654 maxhold=90788 obs=243 busy=122 busynow=1
+R Q obs=243
+L N obs=243
+R Q obs=243
+L N obs=243
+R Q obs=243
+L N obs=243
+L T obs=244
+R Q holder=0 phase=none held=0 waiting=2 grants=122 timeouts=0 lease=99 stale=267 full=0 maxwait=72654 maxhold=90788 obs=244 busy=122 busynow=0
+L N obs=244
+R G obs=245
+R G obs=247
+L N obs=247
+R Q obs=247
+R Q obs=247
+S - holder=7 phase=control held=550 waiting=2 grants=124 timeouts=0 lease=100 stale=268 full=0 maxwait=72654 maxhold=90788 obs=247 busy=124 busynow=1
+R Q holder=7 phase=control held=575 waiting=1 grants=124 timeouts=0 lease=100 stale=269 full=0 maxwait=72654 maxhold=90788 obs=247 busy=124 busynow=1
+R Q obs=247
+S - holder=7 phase=control held=1093 waiting=2 grants=124 timeouts=0 lease=100 stale=269 full=0 maxwait=72654 maxhold=90788 obs=247 busy=124 busynow=1
+R Q obs=247
+S - holder=7 phase=control held=71103 waiting=1 grants=124 timeouts=0 lease=100 stale=270 full=0 maxwait=72654 maxhold=90788 obs=247 busy=124 busynow=1
+R G obs=249
+R Q obs=249
+S - holder=5 phase=control held=11 waiting=1 grants=125 timeouts=0 lease=101 stale=271 full=0 maxwait=72654 maxhold=90788 obs=249 busy=125 busynow=1
+L N holder=5 phase=control held=32 waiting=1 grants=125 timeouts=0 lease=101 stale=271 full=0 maxwait=72654 maxhold=90788 obs=249 busy=125 busynow=1
+R Q obs=249
+R Q obs=249
+R G obs=251
+R Q obs=251
+R Q obs=251
+R Q obs=251
+R Q obs=251
+L N holder=3 phase=derp held=58 waiting=2 grants=126 timeouts=0 lease=102 stale=273 full=0 maxwait=72654 maxhold=90788 obs=251 busy=126 busynow=1
+R Q obs=251
+S - holder=3 phase=derp held=70068 waiting=3 grants=126 timeouts=0 lease=102 stale=273 full=0 maxwait=72654 maxhold=90788 obs=251 busy=126 busynow=1
+S - holder=3 phase=derp held=70069 waiting=3 grants=126 timeouts=0 lease=102 stale=273 full=0 maxwait=72654 maxhold=90788 obs=251 busy=126 busynow=1
+R G obs=253
+S - holder=7 phase=derp held=8 waiting=0 grants=127 timeouts=0 lease=103 stale=275 full=0 maxwait=72654 maxhold=90788 obs=253 busy=127 busynow=1
+R Q obs=253
+R Q obs=253
+R G holder=3 phase=start held=0 waiting=0 grants=128 timeouts=0 lease=104 stale=277 full=0 maxwait=72654 maxhold=90788 obs=255 busy=128 busynow=1
+R Q obs=255
+R Q obs=255
+R Q obs=255
+R G obs=257
+R G obs=257
+R Q obs=257
+R Q obs=257
+S - holder=6 phase=derp held=550 waiting=1 grants=129 timeouts=0 lease=105 stale=280 full=0 maxwait=72654 maxhold=90788 obs=257 busy=129 busynow=1
+L N obs=257
+R Q obs=257
+R Q obs=257
+L N obs=257
+R Q obs=257
+R Q obs=257
+R G obs=259
+S - holder=3 phase=control held=6 waiting=0 grants=130 timeouts=0 lease=106 stale=284 full=0 maxwait=72654 maxhold=90788 obs=259 busy=130 busynow=1
+R Q obs=259
+R Q obs=259
+R Q obs=259
+S - holder=3 phase=control held=2545 waiting=2 grants=130 timeouts=0 lease=106 stale=284 full=0 maxwait=72654 maxhold=90788 obs=259 busy=130 busynow=1
+L T obs=260
+L N obs=260
+R G obs=261
+R Q holder=7 phase=derp held=100 waiting=1 grants=131 timeouts=0 lease=106 stale=286 full=0 maxwait=72654 maxhold=90788 obs=261 busy=131 busynow=1
+R G obs=261
+R Q obs=261
+S - holder=7 phase=derp held=136 waiting=2 grants=131 timeouts=0 lease=106 stale=286 full=0 maxwait=72654 maxhold=90788 obs=261 busy=131 busynow=1
+S - holder=7 phase=derp held=140 waiting=2 grants=131 timeouts=0 lease=106 stale=286 full=0 maxwait=72654 maxhold=90788 obs=261 busy=131 busynow=1
+R Q obs=261
+L N obs=261
+L T obs=262
+S - holder=0 phase=none held=0 waiting=2 grants=131 timeouts=0 lease=106 stale=286 full=0 maxwait=72654 maxhold=90788 obs=262 busy=131 busynow=0
+R Q obs=262
+R Q obs=262
+R Q obs=262
+R Q obs=262
+S - holder=0 phase=none held=0 waiting=5 grants=131 timeouts=0 lease=106 stale=286 full=0 maxwait=72654 maxhold=90788 obs=262 busy=131 busynow=0
+R G obs=263
+S - holder=1 phase=derp held=10 waiting=0 grants=132 timeouts=0 lease=106 stale=290 full=0 maxwait=72654 maxhold=90788 obs=263 busy=132 busynow=1
+L N holder=1 phase=derp held=13 waiting=0 grants=132 timeouts=0 lease=106 stale=290 full=0 maxwait=72654 maxhold=90788 obs=263 busy=132 busynow=1
+R Q obs=263
+L N obs=263
+R G obs=265
+R Q obs=265
+R Q obs=265
+L N obs=265
+S - holder=7 phase=control held=21030 waiting=1 grants=133 timeouts=0 lease=107 stale=291 full=0 maxwait=72654 maxhold=90788 obs=265 busy=133 busynow=1
+L N holder=7 phase=control held=23530 waiting=1 grants=133 timeouts=0 lease=107 stale=291 full=0 maxwait=72654 maxhold=90788 obs=265 busy=133 busynow=1
+R G obs=267
+R Q obs=267
+R G obs=269
+R Q obs=269
+R Q obs=269
+R G obs=269
+R G obs=271
+L N holder=6 phase=control held=100 waiting=0 grants=136 timeouts=0 lease=110 stale=295 full=0 maxwait=72654 maxhold=90788 obs=271 busy=136 busynow=1
+S - holder=6 phase=control held=101 waiting=0 grants=136 timeouts=0 lease=110 stale=295 full=0 maxwait=72654 maxhold=90788 obs=271 busy=136 busynow=1
+R G obs=273
+R Q obs=273
+R Q obs=273
+R G obs=275
+R G obs=275
+R Q obs=275
+R G holder=3 phase=start held=0 waiting=0 grants=139 timeouts=0 lease=113 stale=297 full=0 maxwait=72654 maxhold=90788 obs=277 busy=139 busynow=1
+R Q obs=277
+R Q obs=277
+R G obs=279
+S - holder=7 phase=derp held=6 waiting=0 grants=140 timeouts=0 lease=114 stale=298 full=0 maxwait=72654 maxhold=90788 obs=279 busy=140 busynow=1
+R G obs=279
+L N obs=279
+R Q obs=279
+R G holder=7 phase=derp held=217 waiting=1 grants=140 timeouts=0 lease=114 stale=298 full=0 maxwait=72654 maxhold=90788 obs=279 busy=140 busynow=1
+L N obs=279
+R Q obs=279
+S - holder=7 phase=derp held=272 waiting=2 grants=140 timeouts=0 lease=114 stale=298 full=0 maxwait=72654 maxhold=90788 obs=279 busy=140 busynow=1
+R Q obs=279
+L N obs=279
+R G obs=279
+R Q obs=279
+R Q holder=7 phase=derp held=295 waiting=4 grants=140 timeouts=0 lease=114 stale=298 full=0 maxwait=72654 maxhold=90788 obs=279 busy=140 busynow=1
+R Q obs=279
+L N obs=279
+R Q obs=279
+R G obs=279
+R G obs=279
+R G obs=281
+R Q obs=281
+S - holder=5 phase=derp held=5 waiting=1 grants=141 timeouts=0 lease=115 stale=304 full=0 maxwait=72654 maxhold=90788 obs=281 busy=141 busynow=1
+R Q obs=281
+R Q obs=281
+L N obs=281
+R Q obs=281
+L N obs=281
+R G obs=283
+R Q obs=283
+R Q holder=4 phase=derp held=14 waiting=2 grants=142 timeouts=0 lease=116 stale=306 full=0 maxwait=72654 maxhold=90788 obs=283 busy=142 busynow=1
+R Q obs=283
+L N obs=283
+R G obs=285
+L N obs=285
+L N obs=285
+S - holder=7 phase=start held=5012 waiting=0 grants=143 timeouts=0 lease=117 stale=307 full=0 maxwait=72654 maxhold=90788 obs=285 busy=143 busynow=1
+S - holder=7 phase=start held=5030 waiting=0 grants=143 timeouts=0 lease=117 stale=307 full=0 maxwait=72654 maxhold=90788 obs=285 busy=143 busynow=1
+R G holder=3 phase=start held=0 waiting=0 grants=144 timeouts=0 lease=118 stale=307 full=0 maxwait=72654 maxhold=90788 obs=287 busy=144 busynow=1
+L N obs=287
+R Q obs=287
+R G obs=287
+R Q obs=287
+S - holder=3 phase=start held=2637 waiting=1 grants=144 timeouts=0 lease=118 stale=307 full=0 maxwait=72654 maxhold=90788 obs=287 busy=144 busynow=1
+S - holder=3 phase=start held=22637 waiting=1 grants=144 timeouts=0 lease=118 stale=307 full=0 maxwait=72654 maxhold=90788 obs=287 busy=144 busynow=1
+R G obs=289
+S - holder=6 phase=start held=1 waiting=0 grants=145 timeouts=0 lease=119 stale=308 full=0 maxwait=72654 maxhold=90788 obs=289 busy=145 busynow=1
+L T obs=290
+R G obs=291
+S - holder=5 phase=derp held=1 waiting=0 grants=146 timeouts=0 lease=119 stale=308 full=0 maxwait=72654 maxhold=90788 obs=291 busy=146 busynow=1
+S - holder=5 phase=derp held=30 waiting=0 grants=146 timeouts=0 lease=119 stale=308 full=0 maxwait=72654 maxhold=90788 obs=291 busy=146 busynow=1
+R Q obs=291
+R Q obs=291
+R Q obs=291
+S - holder=5 phase=derp held=2572 waiting=1 grants=146 timeouts=0 lease=119 stale=310 full=0 maxwait=72654 maxhold=90788 obs=291 busy=146 busynow=1
+R G obs=293
+R Q obs=293
+R Q obs=293
+R Q obs=293
+R G obs=295
+L N obs=295
+S - holder=4 phase=start held=2517 waiting=0 grants=148 timeouts=0 lease=121 stale=314 full=0 maxwait=72654 maxhold=90788 obs=295 busy=148 busynow=1
+L N holder=4 phase=start held=5017 waiting=0 grants=148 timeouts=0 lease=121 stale=314 full=0 maxwait=72654 maxhold=90788 obs=295 busy=148 busynow=1
+R G obs=297
+R Q obs=297
+S - holder=7 phase=control held=32 waiting=1 grants=149 timeouts=0 lease=122 stale=314 full=0 maxwait=72654 maxhold=90788 obs=297 busy=149 busynow=1
+R Q obs=297
+R Q obs=297
+L N obs=297
+R G obs=299
+S - holder=2 phase=control held=23 waiting=0 grants=150 timeouts=0 lease=123 stale=316 full=0 maxwait=72654 maxhold=90788 obs=299 busy=150 busynow=1
+L N obs=299
+L N obs=299
+R G obs=299
+S - holder=2 phase=control held=20056 waiting=0 grants=150 timeouts=0 lease=123 stale=316 full=0 maxwait=72654 maxhold=90788 obs=299 busy=150 busynow=1
+R G obs=301
+L N obs=301
+R Q obs=301
+L T holder=0 phase=none held=0 waiting=1 grants=151 timeouts=0 lease=124 stale=316 full=0 maxwait=72654 maxhold=90788 obs=302 busy=151 busynow=0
+R G obs=303
+R Q obs=303
+R G obs=303
+R G obs=305
+R G obs=307
+R Q obs=307
+L N obs=307
+R Q holder=2 phase=start held=23 waiting=2 grants=154 timeouts=0 lease=126 stale=317 full=0 maxwait=72654 maxhold=90788 obs=307 busy=154 busynow=1
+L N obs=307
+L N obs=307
+S - holder=2 phase=start held=2645 waiting=1 grants=154 timeouts=0 lease=126 stale=317 full=0 maxwait=72654 maxhold=90788 obs=307 busy=154 busynow=1
+L N obs=307
+R G obs=309
+R Q obs=309
+R Q obs=309
+L N holder=7 phase=derp held=509 waiting=1 grants=155 timeouts=0 lease=127 stale=318 full=0 maxwait=72654 maxhold=90788 obs=309 busy=155 busynow=1
+S - holder=7 phase=derp held=514 waiting=1 grants=155 timeouts=0 lease=127 stale=318 full=0 maxwait=72654 maxhold=90788 obs=309 busy=155 busynow=1
+R Q obs=309
+L N obs=309
+R Q obs=309
+R Q obs=309
+R Q obs=309
+R Q obs=309
+R Q holder=7 phase=derp held=1075 waiting=2 grants=155 timeouts=0 lease=127 stale=321 full=0 maxwait=72654 maxhold=90788 obs=309 busy=155 busynow=1
+R G obs=309
+R G obs=311
+R Q obs=311
+S - holder=8 phase=start held=40 waiting=1 grants=156 timeouts=0 lease=128 stale=323 full=0 maxwait=72654 maxhold=90788 obs=311 busy=156 busynow=1
+S - holder=8 phase=start held=49 waiting=1 grants=156 timeouts=0 lease=128 stale=323 full=0 maxwait=72654 maxhold=90788 obs=311 busy=156 busynow=1
+R Q obs=311
+R Q obs=311
+R Q holder=8 phase=start held=98 waiting=4 grants=156 timeouts=0 lease=128 stale=323 full=0 maxwait=72654 maxhold=90788 obs=311 busy=156 busynow=1
+S - holder=8 phase=start held=20098 waiting=4 grants=156 timeouts=0 lease=128 stale=323 full=0 maxwait=72654 maxhold=90788 obs=311 busy=156 busynow=1
+R G obs=313
+L N obs=313
+R G obs=315
+R Q obs=315
+S - holder=9 phase=derp held=20 waiting=1 grants=158 timeouts=0 lease=130 stale=327 full=0 maxwait=72654 maxhold=90788 obs=315 busy=158 busynow=1
+R G obs=315
+R Q holder=9 phase=derp held=37 waiting=2 grants=158 timeouts=0 lease=130 stale=327 full=0 maxwait=72654 maxhold=90788 obs=315 busy=158 busynow=1
+R G obs=315
+L T obs=316
+L N obs=316
+R Q obs=316
+R Q obs=316
+L N obs=316
+R G obs=317
+R G holder=1 phase=start held=0 waiting=0 grants=160 timeouts=0 lease=131 stale=331 full=0 maxwait=72654 maxhold=90788 obs=319 busy=160 busynow=1
+R Q obs=319
+R G obs=319
+R Q obs=319
+R G obs=319
+R G obs=321
+R Q obs=321
+S - holder=8 phase=derp held=70001 waiting=1 grants=161 timeouts=0 lease=132 stale=332 full=0 maxwait=72654 maxhold=90788 obs=321 busy=161 busynow=1
+R G holder=7 phase=start held=0 waiting=0 grants=162 timeouts=0 lease=133 stale=333 full=0 maxwait=72654 maxhold=90788 obs=323 busy=162 busynow=1
+S - holder=7 phase=start held=2500 waiting=0 grants=162 timeouts=0 lease=133 stale=333 full=0 maxwait=72654 maxhold=90788 obs=323 busy=162 busynow=1
+R Q obs=323
+R G obs=323
+R G obs=325
+S - holder=4 phase=derp held=5 waiting=0 grants=163 timeouts=0 lease=134 stale=334 full=0 maxwait=72654 maxhold=90788 obs=325 busy=163 busynow=1
+S - holder=4 phase=derp held=29 waiting=0 grants=163 timeouts=0 lease=134 stale=334 full=0 maxwait=72654 maxhold=90788 obs=325 busy=163 busynow=1
+R Q obs=325
+L N holder=4 phase=derp held=629 waiting=1 grants=163 timeouts=0 lease=134 stale=334 full=0 maxwait=72654 maxhold=90788 obs=325 busy=163 busynow=1
+L N obs=325
+L N obs=325
+L N obs=325
+R Q obs=325
+L N obs=325
+R Q obs=325
+R Q obs=325
+R Q holder=4 phase=derp held=729 waiting=5 grants=163 timeouts=0 lease=134 stale=334 full=0 maxwait=72654 maxhold=90788 obs=325 busy=163 busynow=1
+R Q obs=325
+S - holder=4 phase=derp held=21229 waiting=2 grants=163 timeouts=0 lease=134 stale=337 full=0 maxwait=72654 maxhold=90788 obs=325 busy=163 busynow=1
+L N obs=325
+S - holder=4 phase=derp held=21269 waiting=2 grants=163 timeouts=0 lease=134 stale=337 full=0 maxwait=72654 maxhold=90788 obs=325 busy=163 busynow=1
+R G obs=327
+R G obs=327
+L N obs=327
+R G holder=6 phase=start held=40 waiting=0 grants=164 timeouts=0 lease=135 stale=339 full=0 maxwait=72654 maxhold=90788 obs=327 busy=164 busynow=1
+L N obs=327
+R G obs=329
+R Q obs=329
+R Q obs=329
+L N obs=329
+R Q obs=329
+R Q obs=329
+R Q holder=2 phase=control held=170 waiting=4 grants=165 timeouts=0 lease=136 stale=339 full=0 maxwait=72654 maxhold=90788 obs=329 busy=165 busynow=1
+R Q obs=329
+R Q obs=329
+R Q obs=329
+R Q obs=329
+L N obs=329
+R Q obs=329
+R Q obs=329
+S - holder=2 phase=control held=778 waiting=4 grants=165 timeouts=0 lease=136 stale=344 full=0 maxwait=72654 maxhold=90788 obs=329 busy=165 busynow=1
+L N obs=329
+S - holder=2 phase=control held=791 waiting=4 grants=165 timeouts=0 lease=136 stale=344 full=0 maxwait=72654 maxhold=90788 obs=329 busy=165 busynow=1
+R Q obs=329
+R Q obs=329
+R Q obs=329
+L N obs=329
+S - holder=2 phase=control held=953 waiting=5 grants=165 timeouts=0 lease=136 stale=344 full=0 maxwait=72654 maxhold=90788 obs=329 busy=165 busynow=1
+S - holder=2 phase=control held=20953 waiting=5 grants=165 timeouts=0 lease=136 stale=344 full=0 maxwait=72654 maxhold=90788 obs=329 busy=165 busynow=1
+L N obs=329
+R G obs=331
+L N obs=331
+L N obs=331
+R Q obs=331
+L N obs=331
+R Q obs=331
+L T holder=0 phase=none held=0 waiting=2 grants=166 timeouts=0 lease=137 stale=348 full=0 maxwait=72654 maxhold=90788 obs=332 busy=166 busynow=0
+R G obs=333
+L N obs=333
+R G obs=335
+L N obs=335
+S - holder=4 phase=control held=19 waiting=0 grants=168 timeouts=0 lease=138 stale=350 full=0 maxwait=72654 maxhold=90788 obs=335 busy=168 busynow=1
+L N obs=335
+R G obs=337
+S - holder=7 phase=control held=26 waiting=0 grants=169 timeouts=0 lease=139 stale=350 full=0 maxwait=72654 maxhold=90788 obs=337 busy=169 busynow=1
+L N obs=337
+S - holder=7 phase=control held=74 waiting=0 grants=169 timeouts=0 lease=139 stale=350 full=0 maxwait=72654 maxhold=90788 obs=337 busy=169 busynow=1
+R Q obs=337
+R Q obs=337
+S - holder=7 phase=control held=117 waiting=2 grants=169 timeouts=0 lease=139 stale=350 full=0 maxwait=72654 maxhold=90788 obs=337 busy=169 busynow=1
+S - holder=7 phase=control held=217 waiting=2 grants=169 timeouts=0 lease=139 stale=350 full=0 maxwait=72654 maxhold=90788 obs=337 busy=169 busynow=1
+R G obs=339
+L N holder=8 phase=start held=1 waiting=0 grants=170 timeouts=0 lease=140 stale=352 full=0 maxwait=72654 maxhold=90788 obs=339 busy=170 busynow=1
+L N obs=339
+S - holder=8 phase=start held=26 waiting=0 grants=170 timeouts=0 lease=140 stale=352 full=0 maxwait=72654 maxhold=90788 obs=339 busy=170 busynow=1
+L N obs=339
+R Q obs=339
+S - holder=8 phase=start held=70146 waiting=1 grants=170 timeouts=0 lease=140 stale=352 full=0 maxwait=72654 maxhold=90788 obs=339 busy=170 busynow=1
+R G obs=341
+L N obs=341
+R Q holder=7 phase=control held=2517 waiting=1 grants=171 timeouts=0 lease=141 stale=353 full=0 maxwait=72654 maxhold=90788 obs=341 busy=171 busynow=1
+R G obs=341
+S - holder=7 phase=control held=2617 waiting=1 grants=171 timeouts=0 lease=141 stale=353 full=0 maxwait=72654 maxhold=90788 obs=341 busy=171 busynow=1
+L N obs=341
+R Q obs=341
+L N obs=341
+L N obs=341
+R Q obs=341
+R Q holder=7 phase=control held=2867 waiting=2 grants=171 timeouts=0 lease=141 stale=353 full=0 maxwait=72654 maxhold=90788 obs=341 busy=171 busynow=1
+R Q obs=341
+R Q obs=341
+R G obs=343
+R G obs=343
+R G obs=343
+R Q obs=343
+L N obs=343
+R Q holder=8 phase=control held=205 waiting=2 grants=172 timeouts=0 lease=142 stale=356 full=0 maxwait=72654 maxhold=90788 obs=343 busy=172 busynow=1
+S - holder=8 phase=control held=705 waiting=2 grants=172 timeouts=0 lease=142 stale=356 full=0 maxwait=72654 maxhold=90788 obs=343 busy=172 busynow=1
+L N obs=343
+R Q obs=343
+L N obs=343
+R Q obs=343
+R Q obs=343
+R Q obs=343
+L N holder=8 phase=control held=768 waiting=4 grants=172 timeouts=0 lease=142 stale=358 full=0 maxwait=72654 maxhold=90788 obs=343 busy=172 busynow=1
+R Q obs=343
+L N obs=343
+S - holder=8 phase=control held=887 waiting=3 grants=172 timeouts=0 lease=142 stale=358 full=0 maxwait=72654 maxhold=90788 obs=343 busy=172 busynow=1
+R Q obs=343
+S - holder=8 phase=control held=1387 waiting=4 grants=172 timeouts=0 lease=142 stale=358 full=0 maxwait=72654 maxhold=90788 obs=343 busy=172 busynow=1
+R Q obs=343
+S - holder=8 phase=control held=1420 waiting=1 grants=172 timeouts=0 lease=142 stale=361 full=0 maxwait=72654 maxhold=90788 obs=343 busy=172 busynow=1
+R Q holder=8 phase=control held=1437 waiting=2 grants=172 timeouts=0 lease=142 stale=361 full=0 maxwait=72654 maxhold=90788 obs=343 busy=172 busynow=1
+S - holder=8 phase=control held=1537 waiting=2 grants=172 timeouts=0 lease=142 stale=361 full=0 maxwait=72654 maxhold=90788 obs=343 busy=172 busynow=1
+R Q obs=343
+R Q obs=343
+R G obs=345
+L N obs=345
+S - holder=6 phase=control held=8 waiting=0 grants=173 timeouts=0 lease=143 stale=364 full=0 maxwait=72654 maxhold=90788 obs=345 busy=173 busynow=1
+R Q obs=345
+R Q holder=6 phase=control held=21 waiting=2 grants=173 timeouts=0 lease=143 stale=364 full=0 maxwait=72654 maxhold=90788 obs=345 busy=173 busynow=1
+R Q obs=345
+L N obs=345
+S - holder=6 phase=control held=2557 waiting=3 grants=173 timeouts=0 lease=143 stale=364 full=0 maxwait=72654 maxhold=90788 obs=345 busy=173 busynow=1
+R Q obs=345
+R Q obs=345
+R Q obs=345
+L N obs=345
+L N holder=6 phase=control held=2689 waiting=2 grants=173 timeouts=0 lease=143 stale=366 full=0 maxwait=72654 maxhold=90788 obs=345 busy=173 busynow=1
+R Q obs=345
+R G obs=345
+R G obs=347
+S - holder=9 phase=derp held=15 waiting=0 grants=174 timeouts=0 lease=144 stale=368 full=0 maxwait=72654 maxhold=90788 obs=347 busy=174 busynow=1
+R Q obs=347
+R G obs=347
+R Q obs=347
+S - holder=9 phase=derp held=20149 waiting=2 grants=174 timeouts=0 lease=144 stale=368 full=0 maxwait=72654 maxhold=90788 obs=347 busy=174 busynow=1
+R G obs=349
+R G obs=351
+R Q obs=351
+R Q obs=351
+S - holder=1 phase=derp held=2528 waiting=1 grants=176 timeouts=0 lease=146 stale=371 full=0 maxwait=72654 maxhold=90788 obs=351 busy=176 busynow=1
+L N obs=351
+S - holder=1 phase=derp held=2629 waiting=1 grants=176 timeouts=0 lease=146 stale=371 full=0 maxwait=72654 maxhold=90788 obs=351 busy=176 busynow=1
+R Q holder=1 phase=derp held=2634 waiting=2 grants=176 timeouts=0 lease=146 stale=371 full=0 maxwait=72654 maxhold=90788 obs=351 busy=176 busynow=1
+R Q obs=351
+L N obs=351
+R G obs=351
+L N obs=351
+S - holder=1 phase=derp held=2827 waiting=2 grants=176 timeouts=0 lease=146 stale=371 full=0 maxwait=72654 maxhold=90788 obs=351 busy=176 busynow=1
+L T obs=352
+L N obs=352
+L N holder=0 phase=none held=0 waiting=2 grants=176 timeouts=0 lease=146 stale=371 full=0 maxwait=72654 maxhold=90788 obs=352 busy=176 busynow=0
+S - holder=0 phase=none held=0 waiting=2 grants=176 timeouts=0 lease=146 stale=371 full=0 maxwait=72654 maxhold=90788 obs=352 busy=176 busynow=0
+S - holder=0 phase=none held=0 waiting=2 grants=176 timeouts=0 lease=146 stale=371 full=0 maxwait=72654 maxhold=90788 obs=352 busy=176 busynow=0
+R Q obs=352
+L N obs=352
+R G obs=353
+L N obs=353
+R Q obs=353
+S - holder=8 phase=start held=20129 waiting=1 grants=177 timeouts=0 lease=146 stale=374 full=0 maxwait=72654 maxhold=90788 obs=353 busy=177 busynow=1
+R G obs=353
+R G obs=355
+R Q obs=355
+S - holder=1 phase=derp held=501 waiting=1 grants=178 timeouts=0 lease=147 stale=375 full=0 maxwait=72654 maxhold=90788 obs=355 busy=178 busynow=1
+R Q obs=355
+R Q obs=355
+R Q obs=355
+L N holder=1 phase=derp held=510 waiting=2 grants=178 timeouts=0 lease=147 stale=376 full=0 maxwait=72654 maxhold=90788 obs=355 busy=178 busynow=1
+L N obs=355
+R G obs=357
+R Q obs=357
+L N obs=357
+S - holder=4 phase=control held=51 waiting=1 grants=179 timeouts=0 lease=148 stale=378 full=0 maxwait=72654 maxhold=90788 obs=357 busy=179 busynow=1
+L N obs=357
+L N obs=357
+R G holder=7 phase=derp held=0 waiting=0 grants=180 timeouts=0 lease=149 stale=378 full=0 maxwait=72654 maxhold=90788 obs=359 busy=180 busynow=1
+R G obs=359
+L N obs=359
+S - holder=7 phase=derp held=70024 waiting=0 grants=180 timeouts=0 lease=149 stale=378 full=0 maxwait=72654 maxhold=90788 obs=359 busy=180 busynow=1
+R G obs=361
+R Q obs=361
+S - holder=1 phase=control held=48 waiting=1 grants=181 timeouts=0 lease=150 stale=378 full=0 maxwait=72654 maxhold=90788 obs=361 busy=181 busynow=1
+R Q obs=361
+S - holder=1 phase=control held=77 waiting=2 grants=181 timeouts=0 lease=150 stale=378 full=0 maxwait=72654 maxhold=90788 obs=361 busy=181 busynow=1
+L N obs=361
+L N obs=361
+R Q obs=361
+S - holder=1 phase=control held=126 waiting=2 grants=181 timeouts=0 lease=150 stale=378 full=0 maxwait=72654 maxhold=90788 obs=361 busy=181 busynow=1
+L N obs=361
+R Q obs=361
+L N obs=361
+S - holder=1 phase=control held=661 waiting=3 grants=181 timeouts=0 lease=150 stale=378 full=0 maxwait=72654 maxhold=90788 obs=361 busy=181 busynow=1
+R Q obs=361
+R Q obs=361
+L N obs=361
+L N obs=361
+S - holder=1 phase=control held=70792 waiting=2 grants=181 timeouts=0 lease=150 stale=381 full=0 maxwait=72654 maxhold=90788 obs=361 busy=181 busynow=1
+R G obs=363
+R G obs=365
+S - holder=7 phase=start held=28 waiting=0 grants=183 timeouts=0 lease=152 stale=382 full=0 maxwait=72654 maxhold=90788 obs=365 busy=183 busynow=1
+R G obs=367
+S - holder=9 phase=derp held=10 waiting=0 grants=184 timeouts=0 lease=153 stale=382 full=0 maxwait=72654 maxhold=90788 obs=367 busy=184 busynow=1
+R Q obs=367
+R Q obs=367
+R G obs=367
+L N obs=367
+R Q obs=367
+L N holder=9 phase=derp held=2533 waiting=1 grants=184 timeouts=0 lease=153 stale=384 full=0 maxwait=72654 maxhold=90788 obs=367 busy=184 busynow=1
+R G obs=369
+R Q obs=369
+S - holder=8 phase=start held=530 waiting=1 grants=185 timeouts=0 lease=154 stale=385 full=0 maxwait=72654 maxhold=90788 obs=369 busy=185 busynow=1
+L N obs=369
+R Q obs=369
+R Q obs=369
+L T obs=370
+L N holder=0 phase=none held=0 waiting=2 grants=185 timeouts=0 lease=154 stale=386 full=0 maxwait=72654 maxhold=90788 obs=370 busy=185 busynow=0
+R G obs=371
+R G obs=373
+L N obs=373
+R Q obs=373
+L N obs=373
+R Q obs=373
+R Q obs=373
+R Q holder=5 phase=control held=70 waiting=3 grants=187 timeouts=0 lease=155 stale=388 full=0 maxwait=72654 maxhold=90788 obs=373 busy=187 busynow=1
+L N obs=373
+S - holder=5 phase=control held=110 waiting=2 grants=187 timeouts=0 lease=155 stale=388 full=0 maxwait=72654 maxhold=90788 obs=373 busy=187 busynow=1
+R Q obs=373
+S - holder=5 phase=control held=116 waiting=3 grants=187 timeouts=0 lease=155 stale=388 full=0 maxwait=72654 maxhold=90788 obs=373 busy=187 busynow=1
+R Q obs=373
+R Q obs=373
+R Q obs=373
+S - holder=5 phase=control held=2621 waiting=1 grants=187 timeouts=0 lease=155 stale=391 full=0 maxwait=72654 maxhold=90788 obs=373 busy=187 busynow=1
+L N obs=373
+R G obs=375
+R G obs=375
+R Q obs=375
+R G obs=375
+L N obs=375
+R Q obs=375
+R Q holder=2 phase=derp held=50 waiting=2 grants=188 timeouts=0 lease=156 stale=392 full=0 maxwait=72654 maxhold=90788 obs=375 busy=188 busynow=1
+R Q obs=375
+L N obs=375
+R Q obs=375
+L N obs=375
+R Q obs=375
+R Q obs=375
+R Q obs=375
+R Q holder=2 phase=derp held=2792 waiting=5 grants=188 timeouts=0 lease=156 stale=394 full=0 maxwait=72654 maxhold=90788 obs=375 busy=188 busynow=1
+L N obs=375
+R Q obs=375
+R G obs=377
+S - holder=6 phase=start held=23 waiting=0 grants=189 timeouts=0 lease=157 stale=398 full=0 maxwait=72654 maxhold=90788 obs=377 busy=189 busynow=1
+R Q obs=377
+R Q obs=377
+L N obs=377
+R Q holder=6 phase=start held=2546 waiting=1 grants=189 timeouts=0 lease=157 stale=400 full=0 maxwait=72654 maxhold=90788 obs=377 busy=189 busynow=1
+R Q obs=377
+R Q obs=377
+L N obs=377
+R G obs=379
+R Q obs=379
+R G obs=379
+R G obs=379
+R Q holder=8 phase=derp held=71 waiting=2 grants=190 timeouts=0 lease=158 stale=403 full=0 maxwait=72654 maxhold=90788 obs=379 busy=190 busynow=1
+R Q obs=379
+R Q obs=379
+R G obs=381
+R Q obs=381
+R Q obs=381
+L T obs=382
+S - holder=0 phase=none held=0 waiting=2 grants=191 timeouts=0 lease=159 stale=407 full=0 maxwait=72654 maxhold=90788 obs=382 busy=191 busynow=0
+R Q holder=0 phase=none held=0 waiting=3 grants=191 timeouts=0 lease=159 stale=407 full=0 maxwait=72654 maxhold=90788 obs=382 busy=191 busynow=0
+R Q obs=382
+R Q obs=382
+S - holder=0 phase=none held=0 waiting=5 grants=191 timeouts=0 lease=159 stale=407 full=0 maxwait=72654 maxhold=90788 obs=382 busy=191 busynow=0
+R Q obs=382
+R Q obs=382
+L N obs=382
+L N obs=382
+R G holder=6 phase=control held=0 waiting=0 grants=192 timeouts=0 lease=159 stale=410 full=0 maxwait=72654 maxhold=90788 obs=383 busy=192 busynow=1
+L T obs=384
+L N obs=384
+S - holder=0 phase=none held=0 waiting=0 grants=192 timeouts=0 lease=159 stale=410 full=0 maxwait=72654 maxhold=90788 obs=384 busy=192 busynow=0
+S - holder=0 phase=none held=0 waiting=0 grants=192 timeouts=0 lease=159 stale=410 full=0 maxwait=72654 maxhold=90788 obs=384 busy=192 busynow=0

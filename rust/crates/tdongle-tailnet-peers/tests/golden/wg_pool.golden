@@ -1,0 +1,99 @@
+@@@@ SCENARIO zero LEN 217 @@@@
+"wg_pool":{"capacity":0,"used":0,"peak":0,"refused_full":0,"refused_nomem":0,"evictions_own":0,"evictions_other":0,"rejected":0,"refused_largest":0,"refused_heap":0,"largest_low":null,"slot_bytes":0,"device_bytes":0},
+@@@@ END @@@@
+@@@@ SCENARIO none_yet LEN 217 @@@@
+"wg_pool":{"capacity":7,"used":7,"peak":7,"refused_full":7,"refused_nomem":7,"evictions_own":7,"evictions_other":7,"rejected":7,"refused_largest":7,"refused_heap":7,"largest_low":null,"slot_bytes":7,"device_bytes":7},
+@@@@ END @@@@
+@@@@ SCENARIO max LEN 331 @@@@
+"wg_pool":{"capacity":4294967295,"used":4294967295,"peak":4294967295,"refused_full":4294967295,"refused_nomem":4294967295,"evictions_own":4294967295,"evictions_other":4294967295,"rejected":4294967295,"refused_largest":4294967295,"refused_heap":4294967295,"largest_low":4294967294,"slot_bytes":4294967295,"device_bytes":4294967295},
+@@@@ END @@@@
+@@@@ SCENARIO random0 LEN 312 @@@@
+"wg_pool":{"capacity":9,"used":25816557,"peak":1838169158,"refused_full":1582673827,"refused_nomem":1372471176,"evictions_own":920378661,"evictions_other":2775899327,"rejected":3393530620,"refused_largest":3698466750,"refused_heap":3332070412,"largest_low":null,"slot_bytes":142042433,"device_bytes":1440925453},
+@@@@ END @@@@
+@@@@ SCENARIO random1 LEN 314 @@@@
+"wg_pool":{"capacity":15,"used":4150950459,"peak":1948455945,"refused_full":1954336497,"refused_nomem":1511492538,"evictions_own":32914805,"evictions_other":451146261,"rejected":3644750317,"refused_largest":3850243263,"refused_heap":4012038411,"largest_low":8984,"slot_bytes":1695828257,"device_bytes":2474057532},
+@@@@ END @@@@
+@@@@ SCENARIO random2 LEN 314 @@@@
+"wg_pool":{"capacity":2,"used":3133321419,"peak":1095461693,"refused_full":4245780550,"refused_nomem":3738137742,"evictions_own":507910968,"evictions_other":1350954335,"rejected":544885501,"refused_largest":3148498826,"refused_heap":2457410855,"largest_low":7298,"slot_bytes":2642391894,"device_bytes":2136948942},
+@@@@ END @@@@
+@@@@ SCENARIO random3 LEN 313 @@@@
+"wg_pool":{"capacity":9,"used":2911806265,"peak":4152068027,"refused_full":1658643604,"refused_nomem":3801379052,"evictions_own":4032896003,"evictions_other":3265898562,"rejected":2528113933,"refused_largest":264293946,"refused_heap":275345585,"largest_low":43372,"slot_bytes":177978068,"device_bytes":140301240},
+@@@@ END @@@@
+@@@@ SCENARIO random4 LEN 313 @@@@
+"wg_pool":{"capacity":9,"used":1258419598,"peak":3682969718,"refused_full":412907285,"refused_nomem":2758371404,"evictions_own":3588252237,"evictions_other":3446883519,"rejected":4193237547,"refused_largest":1384126838,"refused_heap":660703328,"largest_low":null,"slot_bytes":2096618532,"device_bytes":203409834},
+@@@@ END @@@@
+@@@@ SCENARIO random5 LEN 313 @@@@
+"wg_pool":{"capacity":1,"used":1348006171,"peak":2081630736,"refused_full":724394616,"refused_nomem":368398514,"evictions_own":3288441319,"evictions_other":1289759592,"rejected":3274140927,"refused_largest":3355364435,"refused_heap":804742958,"largest_low":35684,"slot_bytes":613709724,"device_bytes":3585351787},
+@@@@ END @@@@
+@@@@ SCENARIO random6 LEN 315 @@@@
+"wg_pool":{"capacity":1,"used":315982203,"peak":1363420299,"refused_full":375546188,"refused_nomem":2418701437,"evictions_own":2587832166,"evictions_other":2406658155,"rejected":3621425347,"refused_largest":1656936457,"refused_heap":1745692595,"largest_low":13466,"slot_bytes":2970338172,"device_bytes":2176149727},
+@@@@ END @@@@
+@@@@ SCENARIO random7 LEN 315 @@@@
+"wg_pool":{"capacity":9,"used":2418841442,"peak":3058876837,"refused_full":3863924274,"refused_nomem":2898959759,"evictions_own":853250095,"evictions_other":3497802982,"rejected":1462721105,"refused_largest":303697459,"refused_heap":3836512958,"largest_low":21872,"slot_bytes":2195101192,"device_bytes":2483600913},
+@@@@ END @@@@
+@@@@ SCENARIO random8 LEN 310 @@@@
+"wg_pool":{"capacity":3,"used":904093616,"peak":4002387733,"refused_full":148193655,"refused_nomem":426018354,"evictions_own":2249967676,"evictions_other":2891591914,"rejected":585597425,"refused_largest":1846869070,"refused_heap":1444959284,"largest_low":null,"slot_bytes":60085200,"device_bytes":3326501794},
+@@@@ END @@@@
+@@@@ SCENARIO random9 LEN 311 @@@@
+"wg_pool":{"capacity":16,"used":3178210395,"peak":1550546458,"refused_full":3834888318,"refused_nomem":2881684938,"evictions_own":707900616,"evictions_other":88091099,"rejected":688154843,"refused_largest":1276607549,"refused_heap":863533763,"largest_low":55843,"slot_bytes":824141516,"device_bytes":234513105},
+@@@@ END @@@@
+@@@@ SCENARIO random10 LEN 316 @@@@
+"wg_pool":{"capacity":11,"used":2160872723,"peak":2058064256,"refused_full":3857489254,"refused_nomem":787915674,"evictions_own":2119489470,"evictions_other":1513705130,"rejected":2251694385,"refused_largest":2156155084,"refused_heap":1667184602,"largest_low":9503,"slot_bytes":2616947617,"device_bytes":2291811709},
+@@@@ END @@@@
+@@@@ SCENARIO random11 LEN 314 @@@@
+"wg_pool":{"capacity":5,"used":201668936,"peak":2793370399,"refused_full":1021176950,"refused_nomem":1510583410,"evictions_own":2928195370,"evictions_other":3290275444,"rejected":2543065641,"refused_largest":3724910646,"refused_heap":162614867,"largest_low":7874,"slot_bytes":1471544581,"device_bytes":2613937538},
+@@@@ END @@@@
+@@@@ SCENARIO random12 LEN 316 @@@@
+"wg_pool":{"capacity":1,"used":1471562461,"peak":2027827905,"refused_full":1767466761,"refused_nomem":3405454928,"evictions_own":3950356768,"evictions_other":3931311059,"rejected":2702468427,"refused_largest":2534715023,"refused_heap":1360308625,"largest_low":null,"slot_bytes":1776122230,"device_bytes":2668183615},
+@@@@ END @@@@
+@@@@ SCENARIO random13 LEN 313 @@@@
+"wg_pool":{"capacity":4,"used":87481001,"peak":3598157543,"refused_full":1805090267,"refused_nomem":2035141021,"evictions_own":233387040,"evictions_other":1396320970,"rejected":2699130237,"refused_largest":699732259,"refused_heap":1092782765,"largest_low":34329,"slot_bytes":2310712489,"device_bytes":2904083809},
+@@@@ END @@@@
+@@@@ SCENARIO random14 LEN 315 @@@@
+"wg_pool":{"capacity":4,"used":1183378247,"peak":3274571502,"refused_full":2420672160,"refused_nomem":2342532796,"evictions_own":529523731,"evictions_other":789331570,"rejected":2612161277,"refused_largest":1471251392,"refused_heap":3957686490,"largest_low":57845,"slot_bytes":3711060652,"device_bytes":1089304083},
+@@@@ END @@@@
+@@@@ SCENARIO random15 LEN 316 @@@@
+"wg_pool":{"capacity":14,"used":1097606552,"peak":3067857443,"refused_full":2225350279,"refused_nomem":3807150649,"evictions_own":3843700436,"evictions_other":906371259,"rejected":3917813220,"refused_largest":3864186959,"refused_heap":214187652,"largest_low":58621,"slot_bytes":2398192955,"device_bytes":2295656041},
+@@@@ END @@@@
+@@@@ SCENARIO random16 LEN 313 @@@@
+"wg_pool":{"capacity":4,"used":2447245688,"peak":1893159717,"refused_full":2386389558,"refused_nomem":2003297088,"evictions_own":394208701,"evictions_other":206125723,"rejected":3443855164,"refused_largest":3740904286,"refused_heap":2035861671,"largest_low":null,"slot_bytes":2114563550,"device_bytes":286407083},
+@@@@ END @@@@
+@@@@ SCENARIO random17 LEN 315 @@@@
+"wg_pool":{"capacity":14,"used":3287813440,"peak":1914017779,"refused_full":206065712,"refused_nomem":1628480608,"evictions_own":309499596,"evictions_other":1281049211,"rejected":667760172,"refused_largest":2253542246,"refused_heap":3038391593,"largest_low":36870,"slot_bytes":2078997660,"device_bytes":3002456675},
+@@@@ END @@@@
+@@@@ SCENARIO random18 LEN 309 @@@@
+"wg_pool":{"capacity":9,"used":2090474000,"peak":489583665,"refused_full":191234067,"refused_nomem":2499022678,"evictions_own":3472074326,"evictions_other":41923748,"rejected":73515799,"refused_largest":2217034676,"refused_heap":3496250990,"largest_low":6850,"slot_bytes":122663534,"device_bytes":1065683933},
+@@@@ END @@@@
+@@@@ SCENARIO random19 LEN 313 @@@@
+"wg_pool":{"capacity":13,"used":1367930671,"peak":906508642,"refused_full":76931335,"refused_nomem":3912927486,"evictions_own":2366886193,"evictions_other":654513965,"rejected":3738749948,"refused_largest":1116611275,"refused_heap":301575202,"largest_low":37105,"slot_bytes":1820031598,"device_bytes":2976189970},
+@@@@ END @@@@
+@@@@ SCENARIO random20 LEN 313 @@@@
+"wg_pool":{"capacity":15,"used":811439176,"peak":2887687814,"refused_full":3508175672,"refused_nomem":467886170,"evictions_own":431215093,"evictions_other":2039717666,"rejected":854906971,"refused_largest":3698862678,"refused_heap":3630542274,"largest_low":null,"slot_bytes":3238255682,"device_bytes":3318615903},
+@@@@ END @@@@
+@@@@ SCENARIO random21 LEN 316 @@@@
+"wg_pool":{"capacity":7,"used":1625428264,"peak":1611098805,"refused_full":717981161,"refused_nomem":2479461505,"evictions_own":2934921442,"evictions_other":1128742059,"rejected":2465429484,"refused_largest":3860253034,"refused_heap":1615204619,"largest_low":47202,"slot_bytes":3598875972,"device_bytes":2192855259},
+@@@@ END @@@@
+@@@@ SCENARIO random22 LEN 315 @@@@
+"wg_pool":{"capacity":8,"used":1046706998,"peak":2014536845,"refused_full":4185892104,"refused_nomem":178399668,"evictions_own":2150122177,"evictions_other":3226435275,"rejected":3678308426,"refused_largest":2074760681,"refused_heap":1316648612,"largest_low":37777,"slot_bytes":618516292,"device_bytes":2228033706},
+@@@@ END @@@@
+@@@@ SCENARIO random23 LEN 312 @@@@
+"wg_pool":{"capacity":9,"used":4200950746,"peak":1474092394,"refused_full":5622225,"refused_nomem":136527460,"evictions_own":2854524786,"evictions_other":2739438508,"rejected":2706842556,"refused_largest":3635381367,"refused_heap":1378170410,"largest_low":31782,"slot_bytes":1299626478,"device_bytes":307748035},
+@@@@ END @@@@
+@@@@ SCENARIO random24 LEN 316 @@@@
+"wg_pool":{"capacity":2,"used":2719409599,"peak":1865719495,"refused_full":3479873644,"refused_nomem":1833609461,"evictions_own":4149392840,"evictions_other":1271802639,"rejected":3428846692,"refused_largest":3580810764,"refused_heap":1034449109,"largest_low":null,"slot_bytes":2267486460,"device_bytes":1154921823},
+@@@@ END @@@@
+@@@@ SCENARIO random25 LEN 317 @@@@
+"wg_pool":{"capacity":15,"used":149019935,"peak":1657969201,"refused_full":1603942336,"refused_nomem":2597351088,"evictions_own":2716906331,"evictions_other":1456764606,"rejected":3846197164,"refused_largest":3305597641,"refused_heap":2085843697,"largest_low":23217,"slot_bytes":2305953506,"device_bytes":2414253226},
+@@@@ END @@@@
+@@@@ SCENARIO random26 LEN 314 @@@@
+"wg_pool":{"capacity":4,"used":3949104842,"peak":2303709253,"refused_full":816466020,"refused_nomem":1813397384,"evictions_own":1891260209,"evictions_other":1288652403,"rejected":736173589,"refused_largest":170227196,"refused_heap":2650684612,"largest_low":36329,"slot_bytes":1154241775,"device_bytes":1974208329},
+@@@@ END @@@@
+@@@@ SCENARIO random27 LEN 314 @@@@
+"wg_pool":{"capacity":12,"used":139197220,"peak":2154875090,"refused_full":1674225124,"refused_nomem":1460903264,"evictions_own":364421247,"evictions_other":3586727161,"rejected":310884640,"refused_largest":3762920117,"refused_heap":4195721950,"largest_low":34047,"slot_bytes":242782800,"device_bytes":2850541862},
+@@@@ END @@@@
+@@@@ SCENARIO random28 LEN 312 @@@@
+"wg_pool":{"capacity":4,"used":1444442452,"peak":2363628411,"refused_full":841296532,"refused_nomem":886296340,"evictions_own":2926291849,"evictions_other":3202752435,"rejected":2108606516,"refused_largest":2300673525,"refused_heap":841577568,"largest_low":null,"slot_bytes":3001628254,"device_bytes":726034424},
+@@@@ END @@@@
+@@@@ SCENARIO random29 LEN 316 @@@@
+"wg_pool":{"capacity":11,"used":1555736065,"peak":1764449735,"refused_full":2303394172,"refused_nomem":1734345455,"evictions_own":1969338612,"evictions_other":3202231496,"rejected":3265809595,"refused_largest":780038307,"refused_heap":947523527,"largest_low":47846,"slot_bytes":1990240179,"device_bytes":2717923460},
+@@@@ END @@@@

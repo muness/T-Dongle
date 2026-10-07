@@ -1,0 +1,19 @@
+[package]
+name = "tdongle-spsc"
+description = "The only unsafe the bridge's host queue needs: a single-producer single-consumer slot array with move-only reservation and lease handles. loom-checked."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+# Lets tests of crates built on this one construct a TaskContext without `unsafe`.
+test-support = []
+
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+[lints]
+workspace = true
+

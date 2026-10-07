@@ -1,0 +1,63 @@
+[package]
+name = "s3-bridge"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+# pins: S1 (radio) + S2 (USB/embassy) union; same versions as the two spikes
+esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
+esp-radio = { version = "=1.0.0-beta.1", features = ["esp32s3", "wifi", "unstable"] }
+esp-rtos = { version = "0.4", features = ["esp32s3", "esp-radio", "esp-alloc", "embassy"] }
+esp-alloc = { version = "0.11", features = ["esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
+# UART, never USB-Serial-JTAG: once the OTG device owns the pads nothing drains the JTAG FIFO.
+esp-println = { version = "0.18", default-features = false, features = ["esp32s3", "uart", "critical-section"] }
+# no `panic-handler`: `common/guard.rs` has its own that records the panic in RTC memory and resets
+esp-backtrace = { version = "0.20", default-features = false, features = ["esp32s3", "println"] }
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+embassy-usb = { version = "0.6", default-features = false }
+embassy-net-driver = "0.2"
+static_cell = "2.1"
+embassy-usb-synopsys-otg = "0.4"
+tdongle-usb-out = { path = "../../crates/tdongle-usb-out" }
+tdongle-wifi-budget = { path = "../../crates/tdongle-wifi-budget" }
+esp-wifi-sys-esp32s3 = "0.3"
+critical-section = "1"
+
+# the real pure logic, shared with the std firmware
+tdongle-bridge = { path = "../../crates/tdongle-bridge" }
+tdongle-aqm = { path = "../../crates/tdongle-aqm" }
+tdongle-spsc = { path = "../../crates/tdongle-spsc" }
+tdongle-serial = { path = "../../crates/tdongle-serial" }
+tdongle-traffic = { path = "../../crates/tdongle-traffic" }
+tdongle-rescue = { path = "../../crates/tdongle-rescue", features = ["hal"] }
+tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
+tdongle-saved = { path = "../../crates/tdongle-saved" }
+tdongle-nvs-read = { path = "../../crates/tdongle-nvs-read" }
+tdongle-nvs-format = { path = "../../crates/tdongle-nvs-format" }
+tdongle-wifi-policy = { path = "../../crates/tdongle-wifi-policy" }
+esp-storage = { version = "0.10", features = ["esp32s3", "embedded-storage"] }
+embedded-storage = "0.3"
+
+[patch.crates-io]
+esp-hal = { path = "../../vendor/esp-hal" }
+embassy-usb-synopsys-otg = { path = "../../vendor/embassy-usb-synopsys-otg" }
+
+[features]
+# Stock one-packet OUT transfers (no multi-packet arming): the A/B baseline.
+stock-out = []
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 1
+
+[profile.dev]
+opt-level = "s"

@@ -1,0 +1,18 @@
+[package]
+name = "tdongle-setup"
+description = "The setup access point boot mode of the T-Dongle (ADR 0024): captive DNS, the HTTP request parser and router, the setup page, the session timer and the SetupBoot typestate. Pure, no_std, host-tested."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tdongle-serial = { path = "../tdongle-serial" }
+tdongle-nvs-format = { path = "../tdongle-nvs-format" }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

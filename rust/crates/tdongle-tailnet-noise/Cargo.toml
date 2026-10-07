@@ -1,0 +1,21 @@
+[package]
+name = "tdongle-tailnet-noise"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Tailscale ts2021 control-plane Noise_IK_25519_ChaChaPoly_BLAKE2s handshake and record framing: sans-IO, allocation free, in-place records, incremental reader."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+zeroize = { version = "1", default-features = false, features = ["derive"] }
+
+[dev-dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
+snow = "0.10"

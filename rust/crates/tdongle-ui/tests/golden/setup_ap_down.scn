@@ -1,0 +1,6 @@
+# A setup boot whose access point never comes up: the poll asks for the restart at 30 s.
+start 1000
+set saved_wifi 0
+set wifi_ready 0
+setup_start
+tick 1000 40000 250

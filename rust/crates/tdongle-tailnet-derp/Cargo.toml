@@ -1,0 +1,19 @@
+[package]
+name = "tdongle-tailnet-derp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "DERP relay client for the tailnet gateway: frame encoder and streaming decoder, handshake messages, and a sans-IO link state machine (connect, handshake, relay, retry, pacing). Allocation free."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+
+[dev-dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+proptest = { version = "1", default-features = false, features = ["std"] }

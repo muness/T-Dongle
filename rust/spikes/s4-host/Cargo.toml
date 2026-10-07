@@ -1,0 +1,16 @@
+[package]
+name = "s4-host"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+s4-model = { path = "../s4-membership-model/model" }
+embassy-futures = "0.1"
+embedded-tls = { version = "0.19", default-features = false, features = ["rustpki", "p384", "std"] }
+embedded-io-async = { version = "0.7", features = ["std"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = "0.14"
+snow = { version = "0.10", default-features = false, features = ["default-resolver", "use-chacha20poly1305", "use-blake2", "use-curve25519"] }

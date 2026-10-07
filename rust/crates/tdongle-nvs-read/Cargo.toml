@@ -1,0 +1,14 @@
+[package]
+name = "tdongle-nvs-read"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tdongle-nvs-format = { path = "../tdongle-nvs-format" }
+proptest = { version = "1", default-features = false, features = ["std"] }

@@ -1,0 +1,20 @@
+[package]
+name = "tdongle-tailnet-peers"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Peer table, the global WireGuard peer-slot pool policy (static, generic over the slot payload, no crypto), inbound-trial rules and the flash peer directory codec of the tailnet gateway (ADR 0012, 0013)."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }
+zeroize = { version = "1", default-features = false }
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }

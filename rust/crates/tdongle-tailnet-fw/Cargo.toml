@@ -1,0 +1,18 @@
+[package]
+name = "tdongle-tailnet-fw"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The seam between the firmware image and the tailnet gateway: what the image provides (platform, storage, USB frames, Wi-Fi driver) and what tailnet mode offers it (member actions, /status, serial)."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-members = { path = "../tdongle-tailnet-members" }
+tdongle-tailnet-status = { path = "../tdongle-tailnet-status" }
+tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }
+embassy-net-driver = "0.2"

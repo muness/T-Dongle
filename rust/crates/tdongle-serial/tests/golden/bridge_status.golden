@@ -1,0 +1,110 @@
+@@@@ SCENARIO zero LEN 1234 @@@@
+bridge_link linked=0 changes=0 worker_stack_free=0
+bridge_to_host frames=0 forwarded=0 invalid=0 own_mac=0 link_down=0 usb_not_ready=0 ring_full=0 raced=0
+bridge_to_wifi frames=0 queued=0 invalid=0 foreign_mac=0 link_down=0 held=0 resumes=0 sent=0 stale=0 sojourn_drop=0 link_down_queued=0 tx_failed=0 tx_retries=0 last_tx_error=0 queue_depth=0 queue_high_water=0 codel_signals=0 ce_marked=0 codel_drop=0 codel_count=0
+bridge_ecn not_ect=0 capable=0 ce=0 exempt=0 not_ip=0 syn_setup=0 synack_accept=0
+bridge_rx_class ntbs=0 ntb_bytes=0 ntb_max_bytes=0 datagrams=0 dwell_us_sum=0 dwell_us_max=0 holds=0 hold_us_sum=0 hold_us_max=0
+bridge_usb_ring ring_bytes=0 high_water_slabs=0 enqueued=0 sent=0 dropped_full=0 dropped_link_down=0 flushed_link_down=0 grow_events=0 shrink_events=0 grow_denied_heap=0 grow_denied_largest=0 ring_max_bytes=0
+bridge_timing cold_starts=0 cold_us_sum=0 cold_us_max=0 pm_notes=0 pm_note_us_sum=0 pm_note_us_max=0 wait_us_sum=0 wait_us_max=0 tx_us_sum=0 tx_us_max=0 signal_us_sum=0 signal_us_max=0 room_waits=0 room_wait_us_sum=0 room_wait_us_max=0
+bridge_wifi_tx installed=0 tx_done_cb=0 charged=0 done=0 aborted=0 flushed=0 stale=0 unmatched=0 inflight=0 high_water=0 refused_pool=0 refused_heap=0
+
+@@@@ END @@@@
+@@@@ SCENARIO distinct LEN 1483 @@@@
+bridge_link linked=1 changes=1007 worker_stack_free=1014
+bridge_to_host frames=1021 forwarded=1028 invalid=1035 own_mac=1042 link_down=1049 usb_not_ready=1056 ring_full=1063 raced=1070
+bridge_to_wifi frames=1077 queued=1084 invalid=1091 foreign_mac=1098 link_down=1105 held=1112 resumes=1119 sent=1126 stale=1133 sojourn_drop=1140 link_down_queued=1147 tx_failed=1154 tx_retries=1161 last_tx_error=1168 queue_depth=1175 queue_high_water=1182 codel_signals=1189 ce_marked=1196 codel_drop=1203 codel_count=1210
+bridge_ecn not_ect=1217 capable=1224 ce=1231 exempt=1238 not_ip=1245 syn_setup=1252 synack_accept=1259
+bridge_rx_class ntbs=1600 ntb_bytes=1607 ntb_max_bytes=1614 datagrams=1621 dwell_us_sum=1628 dwell_us_max=1635 holds=1642 hold_us_sum=1649 hold_us_max=1656
+bridge_usb_ring ring_bytes=1300 high_water_slabs=1307 enqueued=1314 sent=1321 dropped_full=1328 dropped_link_down=1335 flushed_link_down=1342 grow_events=1349 shrink_events=1356 grow_denied_heap=1363 grow_denied_largest=1370 ring_max_bytes=1377
+bridge_timing cold_starts=1384 cold_us_sum=1391 cold_us_max=1398 pm_notes=1266 pm_note_us_sum=1273 pm_note_us_max=1280 wait_us_sum=1287 wait_us_max=1294 tx_us_sum=1301 tx_us_max=1308 signal_us_sum=1315 signal_us_max=1322 room_waits=1329 room_wait_us_sum=1336 room_wait_us_max=1343
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=1914 done=1921 aborted=1928 flushed=1935 stale=1942 unmatched=1949 inflight=1956 high_water=1963 refused_pool=1970 refused_heap=1977
+
+@@@@ END @@@@
+@@@@ SCENARIO ones LEN 1234 @@@@
+bridge_link linked=1 changes=1 worker_stack_free=1
+bridge_to_host frames=1 forwarded=1 invalid=1 own_mac=1 link_down=1 usb_not_ready=1 ring_full=1 raced=1
+bridge_to_wifi frames=1 queued=1 invalid=1 foreign_mac=1 link_down=1 held=1 resumes=1 sent=1 stale=1 sojourn_drop=1 link_down_queued=1 tx_failed=1 tx_retries=1 last_tx_error=1 queue_depth=1 queue_high_water=1 codel_signals=1 ce_marked=1 codel_drop=1 codel_count=1
+bridge_ecn not_ect=1 capable=1 ce=1 exempt=1 not_ip=1 syn_setup=1 synack_accept=1
+bridge_rx_class ntbs=1 ntb_bytes=1 ntb_max_bytes=1 datagrams=1 dwell_us_sum=1 dwell_us_max=1 holds=1 hold_us_sum=1 hold_us_max=1
+bridge_usb_ring ring_bytes=1 high_water_slabs=1 enqueued=1 sent=1 dropped_full=1 dropped_link_down=1 flushed_link_down=1 grow_events=1 shrink_events=1 grow_denied_heap=1 grow_denied_largest=1 ring_max_bytes=1
+bridge_timing cold_starts=1 cold_us_sum=1 cold_us_max=1 pm_notes=1 pm_note_us_sum=1 pm_note_us_max=1 wait_us_sum=1 wait_us_max=1 tx_us_sum=1 tx_us_max=1 signal_us_sum=1 signal_us_max=1 room_waits=1 room_wait_us_sum=1 room_wait_us_max=1
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=1 done=1 aborted=1 flushed=1 stale=1 unmatched=1 inflight=1 high_water=1 refused_pool=1 refused_heap=1
+
+@@@@ END @@@@
+@@@@ SCENARIO max_u32 LEN 1981 @@@@
+bridge_link linked=1 changes=4294967295 worker_stack_free=4294967295
+bridge_to_host frames=4294967295 forwarded=4294967295 invalid=4294967295 own_mac=4294967295 link_down=4294967295 usb_not_ready=4294967295 ring_full=4294967295 raced=4294967295
+bridge_to_wifi frames=4294967295 queued=4294967295 invalid=4294967295 foreign_mac=4294967295 link_down=4294967295 held=4294967295 resumes=4294967295 sent=4294967295 stale=4294967295 sojourn_drop=4294967295 link_down_queued=4294967295 tx_failed=4294967295 tx_retries=4294967295 last_tx_error=2147483647 queue_depth=4294967295 queue_high_water=4294967295 codel_signals=4294967295 ce_marked=4294967295 codel_drop=4294967295 codel_count=4294967295
+bridge_ecn not_ect=4294967295 capable=4294967295 ce=4294967295 exempt=4294967295 not_ip=4294967295 syn_setup=4294967295 synack_accept=4294967295
+bridge_rx_class ntbs=4294967295 ntb_bytes=4294967295 ntb_max_bytes=4294967295 datagrams=4294967295 dwell_us_sum=4294967295 dwell_us_max=4294967295 holds=4294967295 hold_us_sum=4294967295 hold_us_max=4294967295
+bridge_usb_ring ring_bytes=4294967295 high_water_slabs=4294967295 enqueued=4294967295 sent=4294967295 dropped_full=4294967295 dropped_link_down=4294967295 flushed_link_down=4294967295 grow_events=4294967295 shrink_events=4294967295 grow_denied_heap=4294967295 grow_denied_largest=4294967295 ring_max_bytes=4294967295
+bridge_timing cold_starts=4294967295 cold_us_sum=4294967295 cold_us_max=4294967295 pm_notes=4294967295 pm_note_us_sum=4294967295 pm_note_us_max=4294967295 wait_us_sum=4294967295 wait_us_max=4294967295 tx_us_sum=4294967295 tx_us_max=4294967295 signal_us_sum=4294967295 signal_us_max=4294967295 room_waits=4294967295 room_wait_us_sum=4294967295 room_wait_us_max=4294967295
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=4294967295 done=4294967295 aborted=4294967295 flushed=4294967295 stale=4294967295 unmatched=4294967295 inflight=4294967295 high_water=4294967295 refused_pool=4294967295 refused_heap=4294967295
+
+@@@@ END @@@@
+@@@@ SCENARIO max_u32_with_error_min LEN 1982 @@@@
+bridge_link linked=1 changes=4294967295 worker_stack_free=4294967295
+bridge_to_host frames=4294967295 forwarded=4294967295 invalid=4294967295 own_mac=4294967295 link_down=4294967295 usb_not_ready=4294967295 ring_full=4294967295 raced=4294967295
+bridge_to_wifi frames=4294967295 queued=4294967295 invalid=4294967295 foreign_mac=4294967295 link_down=4294967295 held=4294967295 resumes=4294967295 sent=4294967295 stale=4294967295 sojourn_drop=4294967295 link_down_queued=4294967295 tx_failed=4294967295 tx_retries=4294967295 last_tx_error=-2147483648 queue_depth=4294967295 queue_high_water=4294967295 codel_signals=4294967295 ce_marked=4294967295 codel_drop=4294967295 codel_count=4294967295
+bridge_ecn not_ect=4294967295 capable=4294967295 ce=4294967295 exempt=4294967295 not_ip=4294967295 syn_setup=4294967295 synack_accept=4294967295
+bridge_rx_class ntbs=4294967295 ntb_bytes=4294967295 ntb_max_bytes=4294967295 datagrams=4294967295 dwell_us_sum=4294967295 dwell_us_max=4294967295 holds=4294967295 hold_us_sum=4294967295 hold_us_max=4294967295
+bridge_usb_ring ring_bytes=4294967295 high_water_slabs=4294967295 enqueued=4294967295 sent=4294967295 dropped_full=4294967295 dropped_link_down=4294967295 flushed_link_down=4294967295 grow_events=4294967295 shrink_events=4294967295 grow_denied_heap=4294967295 grow_denied_largest=4294967295 ring_max_bytes=4294967295
+bridge_timing cold_starts=4294967295 cold_us_sum=4294967295 cold_us_max=4294967295 pm_notes=4294967295 pm_note_us_sum=4294967295 pm_note_us_max=4294967295 wait_us_sum=4294967295 wait_us_max=4294967295 tx_us_sum=4294967295 tx_us_max=4294967295 signal_us_sum=4294967295 signal_us_max=4294967295 room_waits=4294967295 room_wait_us_sum=4294967295 room_wait_us_max=4294967295
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=4294967295 done=4294967295 aborted=4294967295 flushed=4294967295 stale=4294967295 unmatched=4294967295 inflight=4294967295 high_water=4294967295 refused_pool=4294967295 refused_heap=4294967295
+
+@@@@ END @@@@
+@@@@ SCENARIO max_u32_with_error_max LEN 1981 @@@@
+bridge_link linked=1 changes=4294967295 worker_stack_free=4294967295
+bridge_to_host frames=4294967295 forwarded=4294967295 invalid=4294967295 own_mac=4294967295 link_down=4294967295 usb_not_ready=4294967295 ring_full=4294967295 raced=4294967295
+bridge_to_wifi frames=4294967295 queued=4294967295 invalid=4294967295 foreign_mac=4294967295 link_down=4294967295 held=4294967295 resumes=4294967295 sent=4294967295 stale=4294967295 sojourn_drop=4294967295 link_down_queued=4294967295 tx_failed=4294967295 tx_retries=4294967295 last_tx_error=2147483647 queue_depth=4294967295 queue_high_water=4294967295 codel_signals=4294967295 ce_marked=4294967295 codel_drop=4294967295 codel_count=4294967295
+bridge_ecn not_ect=4294967295 capable=4294967295 ce=4294967295 exempt=4294967295 not_ip=4294967295 syn_setup=4294967295 synack_accept=4294967295
+bridge_rx_class ntbs=4294967295 ntb_bytes=4294967295 ntb_max_bytes=4294967295 datagrams=4294967295 dwell_us_sum=4294967295 dwell_us_max=4294967295 holds=4294967295 hold_us_sum=4294967295 hold_us_max=4294967295
+bridge_usb_ring ring_bytes=4294967295 high_water_slabs=4294967295 enqueued=4294967295 sent=4294967295 dropped_full=4294967295 dropped_link_down=4294967295 flushed_link_down=4294967295 grow_events=4294967295 shrink_events=4294967295 grow_denied_heap=4294967295 grow_denied_largest=4294967295 ring_max_bytes=4294967295
+bridge_timing cold_starts=4294967295 cold_us_sum=4294967295 cold_us_max=4294967295 pm_notes=4294967295 pm_note_us_sum=4294967295 pm_note_us_max=4294967295 wait_us_sum=4294967295 wait_us_max=4294967295 tx_us_sum=4294967295 tx_us_max=4294967295 signal_us_sum=4294967295 signal_us_max=4294967295 room_waits=4294967295 room_wait_us_sum=4294967295 room_wait_us_max=4294967295
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=4294967295 done=4294967295 aborted=4294967295 flushed=4294967295 stale=4294967295 unmatched=4294967295 inflight=4294967295 high_water=4294967295 refused_pool=4294967295 refused_heap=4294967295
+
+@@@@ END @@@@
+@@@@ SCENARIO negative_error LEN 1236 @@@@
+bridge_link linked=1 changes=5 worker_stack_free=5
+bridge_to_host frames=5 forwarded=5 invalid=5 own_mac=5 link_down=5 usb_not_ready=5 ring_full=5 raced=5
+bridge_to_wifi frames=5 queued=5 invalid=5 foreign_mac=5 link_down=5 held=5 resumes=5 sent=5 stale=5 sojourn_drop=5 link_down_queued=5 tx_failed=5 tx_retries=5 last_tx_error=-12 queue_depth=5 queue_high_water=5 codel_signals=5 ce_marked=5 codel_drop=5 codel_count=5
+bridge_ecn not_ect=5 capable=5 ce=5 exempt=5 not_ip=5 syn_setup=5 synack_accept=5
+bridge_rx_class ntbs=5 ntb_bytes=5 ntb_max_bytes=5 datagrams=5 dwell_us_sum=5 dwell_us_max=5 holds=5 hold_us_sum=5 hold_us_max=5
+bridge_usb_ring ring_bytes=5 high_water_slabs=5 enqueued=5 sent=5 dropped_full=5 dropped_link_down=5 flushed_link_down=5 grow_events=5 shrink_events=5 grow_denied_heap=5 grow_denied_largest=5 ring_max_bytes=5
+bridge_timing cold_starts=5 cold_us_sum=5 cold_us_max=5 pm_notes=5 pm_note_us_sum=5 pm_note_us_max=5 wait_us_sum=5 wait_us_max=5 tx_us_sum=5 tx_us_max=5 signal_us_sum=5 signal_us_max=5 room_waits=5 room_wait_us_sum=5 room_wait_us_max=5
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=5 done=5 aborted=5 flushed=5 stale=5 unmatched=5 inflight=5 high_water=5 refused_pool=5 refused_heap=5
+
+@@@@ END @@@@
+@@@@ SCENARIO ten_digits_each LEN 1981 @@@@
+bridge_link linked=1 changes=1000000001 worker_stack_free=1000000002
+bridge_to_host frames=1000000003 forwarded=1000000004 invalid=1000000005 own_mac=1000000006 link_down=1000000007 usb_not_ready=1000000008 ring_full=1000000009 raced=1000000010
+bridge_to_wifi frames=1000000011 queued=1000000012 invalid=1000000013 foreign_mac=1000000014 link_down=1000000015 held=1000000016 resumes=1000000017 sent=1000000018 stale=1000000019 sojourn_drop=1000000020 link_down_queued=1000000021 tx_failed=1000000022 tx_retries=1000000023 last_tx_error=1000000024 queue_depth=1000000025 queue_high_water=1000000026 codel_signals=1000000027 ce_marked=1000000028 codel_drop=1000000029 codel_count=1000000030
+bridge_ecn not_ect=1000000031 capable=1000000032 ce=1000000033 exempt=1000000034 not_ip=1000000035 syn_setup=1000000036 synack_accept=1000000037
+bridge_rx_class ntbs=1000000000 ntb_bytes=1000000001 ntb_max_bytes=1000000002 datagrams=1000000003 dwell_us_sum=1000000004 dwell_us_max=1000000005 holds=1000000006 hold_us_sum=1000000007 hold_us_max=1000000008
+bridge_usb_ring ring_bytes=1000000000 high_water_slabs=1000000001 enqueued=1000000002 sent=1000000003 dropped_full=1000000004 dropped_link_down=1000000005 flushed_link_down=1000000006 grow_events=1000000007 shrink_events=1000000008 grow_denied_heap=1000000009 grow_denied_largest=1000000010 ring_max_bytes=1000000011
+bridge_timing cold_starts=1000000012 cold_us_sum=1000000013 cold_us_max=1000000014 pm_notes=1000000038 pm_note_us_sum=1000000039 pm_note_us_max=1000000040 wait_us_sum=1000000041 wait_us_max=1000000042 tx_us_sum=1000000043 tx_us_max=1000000044 signal_us_sum=1000000045 signal_us_max=1000000046 room_waits=1000000047 room_wait_us_sum=1000000048 room_wait_us_max=1000000049
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=1000000002 done=1000000003 aborted=1000000004 flushed=1000000005 stale=1000000006 unmatched=1000000007 inflight=1000000008 high_water=1000000009 refused_pool=1000000010 refused_heap=1000000011
+
+@@@@ END @@@@
+@@@@ SCENARIO nine_digits_each LEN 1898 @@@@
+bridge_link linked=1 changes=100000001 worker_stack_free=100000002
+bridge_to_host frames=100000003 forwarded=100000004 invalid=100000005 own_mac=100000006 link_down=100000007 usb_not_ready=100000008 ring_full=100000009 raced=100000010
+bridge_to_wifi frames=100000011 queued=100000012 invalid=100000013 foreign_mac=100000014 link_down=100000015 held=100000016 resumes=100000017 sent=100000018 stale=100000019 sojourn_drop=100000020 link_down_queued=100000021 tx_failed=100000022 tx_retries=100000023 last_tx_error=100000024 queue_depth=100000025 queue_high_water=100000026 codel_signals=100000027 ce_marked=100000028 codel_drop=100000029 codel_count=100000030
+bridge_ecn not_ect=100000031 capable=100000032 ce=100000033 exempt=100000034 not_ip=100000035 syn_setup=100000036 synack_accept=100000037
+bridge_rx_class ntbs=100000000 ntb_bytes=100000001 ntb_max_bytes=100000002 datagrams=100000003 dwell_us_sum=100000004 dwell_us_max=100000005 holds=100000006 hold_us_sum=100000007 hold_us_max=100000008
+bridge_usb_ring ring_bytes=100000000 high_water_slabs=100000001 enqueued=100000002 sent=100000003 dropped_full=100000004 dropped_link_down=100000005 flushed_link_down=100000006 grow_events=100000007 shrink_events=100000008 grow_denied_heap=100000009 grow_denied_largest=100000010 ring_max_bytes=100000011
+bridge_timing cold_starts=100000012 cold_us_sum=100000013 cold_us_max=100000014 pm_notes=100000038 pm_note_us_sum=100000039 pm_note_us_max=100000040 wait_us_sum=100000041 wait_us_max=100000042 tx_us_sum=100000043 tx_us_max=100000044 signal_us_sum=100000045 signal_us_max=100000046 room_waits=100000047 room_wait_us_sum=100000048 room_wait_us_max=100000049
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=100000002 done=100000003 aborted=100000004 flushed=100000005 stale=100000006 unmatched=100000007 inflight=100000008 high_water=100000009 refused_pool=100000010 refused_heap=100000011
+
+@@@@ END @@@@
+@@@@ SCENARIO identities LEN 1251 @@@@
+bridge_link linked=1 changes=0 worker_stack_free=1500
+bridge_to_host frames=915 forwarded=900 invalid=1 own_mac=2 link_down=3 usb_not_ready=4 ring_full=5 raced=0
+bridge_to_wifi frames=821 queued=800 invalid=6 foreign_mac=7 link_down=8 held=0 resumes=0 sent=760 stale=1 sojourn_drop=2 link_down_queued=3 tx_failed=4 tx_retries=0 last_tx_error=0 queue_depth=25 queue_high_water=0 codel_signals=0 ce_marked=0 codel_drop=5 codel_count=0
+bridge_ecn not_ect=0 capable=0 ce=0 exempt=0 not_ip=0 syn_setup=0 synack_accept=0
+bridge_rx_class ntbs=0 ntb_bytes=0 ntb_max_bytes=0 datagrams=0 dwell_us_sum=0 dwell_us_max=0 holds=0 hold_us_sum=0 hold_us_max=0
+bridge_usb_ring ring_bytes=0 high_water_slabs=0 enqueued=0 sent=0 dropped_full=0 dropped_link_down=0 flushed_link_down=0 grow_events=0 shrink_events=0 grow_denied_heap=0 grow_denied_largest=0 ring_max_bytes=0
+bridge_timing cold_starts=0 cold_us_sum=0 cold_us_max=0 pm_notes=0 pm_note_us_sum=0 pm_note_us_max=0 wait_us_sum=0 wait_us_max=0 tx_us_sum=0 tx_us_max=0 signal_us_sum=0 signal_us_max=0 room_waits=0 room_wait_us_sum=0 room_wait_us_max=0
+bridge_wifi_tx installed=1 tx_done_cb=1 charged=100 done=90 aborted=3 flushed=2 stale=1 unmatched=0 inflight=4 high_water=0 refused_pool=0 refused_heap=0
+
+@@@@ END @@@@

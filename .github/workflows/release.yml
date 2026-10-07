@@ -80,6 +80,50 @@ jobs:
             dist/tdongle-${{ steps.ver.outputs.version }}.tar.gz.sha256
             dist/tdongle-${{ steps.ver.outputs.version }}/
             site-out/
+  rust-build:
+    # The Rust (no_std) image in the C package layout, built and checked on every release run so it stays releasable. It is an artifact only: it is NOT attached to the GitHub
+    # release and the public flash page (site/index.html, Pages) still publishes the C image. Switching the page is a separate, explicit decision (ADR rust/docs/adr/0001, phase 4).
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ESPUP_VERSION: v0.17.1
+      XTENSA_RUST_VERSION: 1.97.0.0
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-dryrun"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.rustup/toolchains/esp
+            ~/.cargo/bin/espflash
+            ~/.cargo/bin/espup
+          key: xtensa-${{ env.ESPUP_VERSION }}-${{ env.XTENSA_RUST_VERSION }}-${{ runner.os }}
+      - name: Install the Xtensa toolchain and espflash (cache miss only)
+        run: |
+          if [ ! -d "$HOME/.rustup/toolchains/esp" ]; then
+            curl -fsSL -o /usr/local/bin/espup "https://github.com/esp-rs/espup/releases/download/${ESPUP_VERSION}/espup-x86_64-unknown-linux-gnu" || exit 1
+            chmod +x /usr/local/bin/espup
+            espup install --targets esp32s3 --toolchain-version "${XTENSA_RUST_VERSION}" --export-file "$HOME/export-esp.sh"
+          fi
+          command -v espflash || cargo install --locked espflash@4.6.0
+      - name: Build, package and check the Rust image
+        run: TDONGLE_VERSION='${{ steps.ver.outputs.version }}' rust/tools/build.sh
+      - name: Verify the package
+        run: |
+          set -e
+          V='${{ steps.ver.outputs.version }}'
+          P="rust/dist/tdongle-rust-0.3.0-dev/package/tdongle-$V"
+          python3 -c "import json; m=json.load(open('$P/manifest.json')); assert m['version']=='$V' and m['flash_mode']=='dio' and m['flash_freq']=='40m' and m['firmware']=='rust-no_std', m"
+          grep -aq "$V" "$P/app.bin"
+          (cd "$P/.." && sha256sum -c "tdongle-$V.tar.gz.sha256")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-rust-${{ steps.ver.outputs.version }}
+          path: rust/dist/tdongle-rust-*/package/
   publish:
     # Always runs so dry runs exercise routing and the artifact layout; the release and Pages steps
     # run only for a v* tag (tag push, or tag dispatch with dry_run=false).

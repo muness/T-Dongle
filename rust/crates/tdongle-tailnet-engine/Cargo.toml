@@ -1,0 +1,39 @@
+[package]
+name = "tdongle-tailnet-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The sans-IO gateway engine of the tailnet gateway: composes WireGuard, DISCO, DERP, the router, DNS and the peer pool into the behaviour of the C microlink runtime."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# The shared entry points of the libfuzzer targets and the in-crate mini-fuzz (needs the test generator from the types crate).
+fuzzing = ["tdongle-tailnet-types/test-util"]
+# Mapping of the engine's StatusSnapshot onto the status crate's input structs.
+status = ["dep:tdongle-tailnet-status"]
+# Memberships the gateway configuration runs at once ([`GATEWAY_M`]): 3 by default, 2 or 1 to shrink every static that scales with it. Tests assume 3.
+slots-2 = []
+slots-1 = []
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+tdongle-tailnet-wg = { path = "../tdongle-tailnet-wg" }
+tdongle-tailnet-peers = { path = "../tdongle-tailnet-peers" }
+tdongle-tailnet-router = { path = "../tdongle-tailnet-router" }
+tdongle-tailnet-disco = { path = "../tdongle-tailnet-disco" }
+tdongle-tailnet-derp = { path = "../tdongle-tailnet-derp" }
+tdongle-tailnet-dns = { path = "../tdongle-tailnet-dns" }
+tdongle-tailnet-map = { path = "../tdongle-tailnet-map" }
+tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }
+tdongle-tailnet-status = { path = "../tdongle-tailnet-status", optional = true }
+
+[dev-dependencies]
+tdongle-tailnet-engine = { path = ".", features = ["fuzzing"] }
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+proptest = { version = "1", default-features = false, features = ["std"] }

@@ -1,0 +1,158 @@
+//! The receive hook: every frame from the radio is offered to an [`RxTap`] before the stack sees it, and [`NaptTap`] is the one that runs the NAPT
+//! inbound path.
+
+use core::cell::RefCell;
+
+use embassy_sync::blocking_mutex::Mutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use tdongle_tailnet_types::{Entropy, Millis};
+use tdongle_tailnet_usbnet::napt::{Napt, NaptConfig, Verdict, WifiAddr};
+
+use crate::info::Ipv4Cfg;
+use core::sync::atomic::{AtomicU32, Ordering};
+
+/// UDP replies from port 53 and 123 that the tap sent to the USB host (it matched a host flow) and that it left to the station's own stack, in that order: `[dns host, dns stack,
+/// ntp host, ntp stack]`. Diagnostics: a lookup of the device that never completes is either not on the air (the driver's own counters) or taken here.
+pub static REPLY_VERDICTS: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
+
+fn count_reply(frame: &[u8], to_host: bool) {
+    let ip = &frame[crate::ETH_HDR..];
+    if ip.len() < 28 || ip[0] >> 4 != 4 || ip[9] != 17 {
+        return;
+    }
+    let l4 = usize::from(ip[0] & 15) * 4;
+    if ip.len() < l4 + 2 {
+        return;
+    }
+    let i = match u16::from_be_bytes([ip[l4], ip[l4 + 1]]) {
+        53 => 0,
+        123 => 2,
+        _ => return,
+    };
+    REPLY_VERDICTS[i + usize::from(!to_host)].fetch_add(1, Ordering::Relaxed);
+}
+
+/// Why a tap consumed a frame without delivering it anywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TapDrop {
+    /// The tap refused the frame with a reply the mux cannot originate (NAPT inbound reject).
+    Rejected,
+    /// The tap dropped the frame (a spoof, a malformed packet).
+    Dropped,
+}
+
+/// The tap's decision for one frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub enum TapVerdict {
+    /// Not the tap's: the stack gets the frame unchanged (the tap must not have modified it).
+    Stack,
+    /// The IPv4 packet `frame[offset..offset + len]` (rewritten in place by the tap) belongs to the USB host: queue it for [`crate::RawPort::next_to_host`].
+    ToHost {
+        /// Offset of the IP header in the frame.
+        offset: usize,
+        /// IP packet length.
+        len: usize,
+    },
+    /// Consumed and counted by the mux; neither the stack nor the host sees it.
+    Dropped(TapDrop),
+}
+
+/// The inbound decision. The mux calls it for every **IPv4 frame addressed to the station's own MAC whose IP header the mux found consistent**
+/// (broadcast, multicast, ARP and everything else never reach it). `frame` is the whole Ethernet frame; the tap may rewrite it in place.
+pub trait RxTap {
+    /// Decide what happens to `frame`.
+    fn classify(&mut self, now: Millis, frame: &mut [u8]) -> TapVerdict;
+    /// The association ended or changed: forget every flow.
+    fn reset(&mut self) {}
+    /// The stack's IPv4 configuration changed (`None`: unconfigured).
+    fn config_changed(&mut self, _cfg: Option<Ipv4Cfg>) {}
+}
+
+/// A tap that passes everything to the stack (a gateway without NAPT).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoTap;
+
+impl RxTap for NoTap {
+    fn classify(&mut self, _now: Millis, _frame: &mut [u8]) -> TapVerdict {
+        TapVerdict::Stack
+    }
+}
+
+/// The NAT table shared between the receive path (the mux's [`NaptTap`], in the stack's task) and the transmit path (the runtime, which calls
+/// [`Napt::outbound`] on the host's packets). A critical-section mutex: every operation is a few microseconds (checksums are patched
+/// incrementally, nothing is copied).
+#[derive(Debug)]
+pub struct SharedNapt<const N: usize>(Mutex<CriticalSectionRawMutex, RefCell<Napt<N>>>);
+
+impl<const N: usize> SharedNapt<N> {
+    /// A NAT with the given constants, its port allocator seeded from `entropy`.
+    pub fn new(cfg: NaptConfig, entropy: &mut dyn Entropy) -> Self {
+        SharedNapt(Mutex::new(RefCell::new(Napt::new(cfg, entropy))))
+    }
+    /// A NAT built at compile time (for a `static`): seed it with [`SharedNapt::seed`] before the first packet.
+    pub const fn new_const(cfg: NaptConfig) -> Self {
+        SharedNapt(Mutex::new(RefCell::new(Napt::new_unseeded(cfg))))
+    }
+    /// Seed the port allocator and hash salt (see [`Napt::seed`]).
+    pub fn seed(&self, entropy: &mut dyn Entropy) {
+        self.with(|n| n.seed(entropy));
+    }
+    /// Run `f` on the table. Do not call it from inside another `with` of the same table.
+    pub fn with<R>(&self, f: impl FnOnce(&mut Napt<N>) -> R) -> R {
+        self.0.lock(|n| f(&mut n.borrow_mut()))
+    }
+    /// [`Napt::outbound`]: translate a packet from the host (then give it to [`crate::RawPort::send`] on `Verdict::Forward`).
+    pub fn outbound(&self, now: Millis, pkt: &mut [u8]) -> Verdict {
+        self.with(|n| n.outbound(now, pkt))
+    }
+    /// Keep a local socket's port out of the mapped range (see [`Napt::reserve_local_port`]).
+    pub fn reserve_local_port(&self, proto: tdongle_tailnet_usbnet::napt::Proto, port: u16) -> bool {
+        self.with(|n| n.reserve_local_port(proto, port))
+    }
+    /// Undo [`SharedNapt::reserve_local_port`].
+    pub fn release_local_port(&self, proto: tdongle_tailnet_usbnet::napt::Proto, port: u16) {
+        self.with(|n| n.release_local_port(proto, port));
+    }
+}
+
+/// The ready [`RxTap`]: runs [`Napt::inbound`] on the shared table. The mux sets the NAT's Wi-Fi address from the stack's configuration and flushes it
+/// on re-association.
+#[derive(Debug)]
+pub struct NaptTap<'a, const N: usize> {
+    napt: &'a SharedNapt<N>,
+}
+
+impl<'a, const N: usize> NaptTap<'a, N> {
+    /// A tap over `napt`.
+    pub const fn new(napt: &'a SharedNapt<N>) -> Self {
+        NaptTap { napt }
+    }
+}
+
+impl<const N: usize> RxTap for NaptTap<'_, N> {
+    fn classify(&mut self, now: Millis, frame: &mut [u8]) -> TapVerdict {
+        if frame.len() <= crate::ETH_HDR {
+            return TapVerdict::Stack;
+        }
+        match self.napt.with(|n| n.inbound(now, &mut frame[crate::ETH_HDR..])) {
+            Verdict::Forward { len, .. } => {
+                count_reply(frame, true);
+                TapVerdict::ToHost { offset: crate::ETH_HDR, len: usize::from(len) }
+            }
+            Verdict::Local(_) => {
+                count_reply(frame, false);
+                TapVerdict::Stack
+            }
+            Verdict::Reject(_) => TapVerdict::Dropped(TapDrop::Rejected),
+            Verdict::Drop(_) => TapVerdict::Dropped(TapDrop::Dropped),
+        }
+    }
+    fn reset(&mut self) {
+        self.napt.with(|n| n.set_wifi(None));
+    }
+    fn config_changed(&mut self, cfg: Option<Ipv4Cfg>) {
+        let w = cfg.map(|c| WifiAddr { ip: c.addr, mask: c.mask() });
+        self.napt.with(|n| n.set_wifi(w));
+    }
+}

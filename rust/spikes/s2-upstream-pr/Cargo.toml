@@ -1,0 +1,52 @@
+[package]
+name = "s2-upstream-pr"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.4", features = ["esp32s3", "embassy"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
+esp-println = { version = "0.18", default-features = false, features = ["esp32s3", "uart", "critical-section"] }
+esp-backtrace = { version = "0.20", default-features = false, features = ["esp32s3", "println"] }
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+embassy-usb = { version = "0.6", default-features = false }
+static_cell = "2.1"
+tdongle-rescue = { path = "../../crates/tdongle-rescue", features = ["hal"] }
+tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
+tdongle-serial = { path = "../../crates/tdongle-serial" }
+
+[patch.crates-io]
+# Upstream PR https://github.com/embassy-rs/embassy/pull/7191 (fork muness/embassy, branch synopsys-otg-multi-packet-out), head f81997b6109b119e856767959f6c6591221bd6a8.
+# The PR driver is built on embassy MAIN: it needs embassy-sync with `CriticalSectionRawMutex: Copy` (unreleased), so embassy-sync, embassy-usb-driver and the crates that use
+# them (embassy-net-driver-channel, embassy-futures) come from that checkout. embassy-time, embassy-time-driver, embassy-time-queue-utils and the EXECUTOR stay the released
+# crates: patching the time crates to git gave a SECOND embassy-executor-timer-queue (0.1.1 from git beside the executor's 0.1.0), after which timers never fired (FINDINGS.md).
+# upstream-usb is embassy-usb from the same commit (main's embassy-net-driver-channel API no longer matches the released embassy-usb 0.6.0), with its path deps pointed at crates.io/the patches.
+# upstream-otg is the driver exactly as in that commit (src/ byte-identical, checked by tools/check below); only its Cargo.toml points embassy-time at crates.io.
+embassy-usb-synopsys-otg = { path = "upstream-otg" }
+embassy-usb = { path = "upstream-usb" }
+embassy-usb-driver = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-sync = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-net-driver-channel = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+embassy-futures = { git = "https://github.com/muness/embassy", rev = "f81997b6109b119e856767959f6c6591221bd6a8" }
+# Copy of rust/vendor/esp-hal (RTC watchdog kept armed through init) plus the OTG glue edits for the PR driver (see FINDINGS.md); the S1/S2/S3 builds keep rust/vendor/esp-hal.
+esp-hal = { path = "esp-hal-patched" }
+
+[features]
+# Compile-time backpressure demo: the NCM receive task never calls read_packet.
+hold-rx = []
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 1
+
+[profile.dev]
+opt-level = "s"

@@ -1,0 +1,226 @@
+@@@@ SCENARIO list/empty LEN 0 @@@@
+
+@@@@ END @@@@
+@@@@ SCENARIO list/one LEN 39 @@@@
+1* name=Home ssid=HomeNet priority=80
+
+@@@@ END @@@@
+@@@@ SCENARIO list/one_not_current LEN 38 @@@@
+1 name=Home ssid=HomeNet priority=80
+
+@@@@ END @@@@
+@@@@ SCENARIO list/two_second_current LEN 82 @@@@
+1 name=Home sweet ssid=HomeNet priority=80
+2* name=Car ssid=CarWifi priority=10
+
+@@@@ END @@@@
+@@@@ SCENARIO list/empty_name_and_ssid LEN 27 @@@@
+1* name= ssid= priority=0
+
+@@@@ END @@@@
+@@@@ SCENARIO list/widest_name_ssid LEN 673 @@@@
+1 name=NNNNNNNNNNNNNNNNNNNNNNNN ssid=SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS priority=255
+2 name=NNNNNNNNNNNNNNNNNNNNNNNN ssid=SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS priority=255
+3 name=NNNNNNNNNNNNNNNNNNNNNNNN ssid=SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS priority=255
+4 name=NNNNNNNNNNNNNNNNNNNNNNNN ssid=SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS priority=255
+5 name=NNNNNNNNNNNNNNNNNNNNNNNN ssid=SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS priority=255
+6 name=NNNNNNNNNNNNNNNNNNNNNNNN ssid=SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS priority=255
+7 name=NNNNNNNNNNNNNNNNNNNNNNNN ssid=SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS priority=255
+8* name=NNNNNNNNNNNNNNNNNNNNNNNN ssid=SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS priority=255
+
+@@@@ END @@@@
+@@@@ SCENARIO list/utf8_ssid LEN 42 @@@@
+1* name=CafÃ© ssid=CafÃ© â˜• priority=50
+
+@@@@ END @@@@
+@@@@ SCENARIO list/non_utf8_ssid LEN 40 @@@@
+1* name=raw ssid=ÿþ€ ssid priority=100
+
+@@@@ END @@@@
+@@@@ SCENARIO list/current_out_of_range LEN 28 @@@@
+1 name=a ssid=b priority=1
+
+@@@@ END @@@@
+@@@@ SCENARIO list/eight_priorities LEN 272 @@@@
+1 name=n0 ssid=ssid0 priority=0
+2 name=n1 ssid=ssid1 priority=14
+3 name=n2 ssid=ssid2 priority=28
+4* name=n3 ssid=ssid3 priority=42
+5 name=n4 ssid=ssid4 priority=56
+6 name=n5 ssid=ssid5 priority=70
+7 name=n6 ssid=ssid6 priority=84
+8 name=n7 ssid=ssid7 priority=98
+
+@@@@ END @@@@
+@@@@ SCENARIO display/d0 LEN 49 @@@@
+display brightness=60 rotation=0 dim_seconds=60
+
+@@@@ END @@@@
+@@@@ SCENARIO display/d1 LEN 48 @@@@
+display brightness=5 rotation=0 dim_seconds=10
+
+@@@@ END @@@@
+@@@@ SCENARIO display/d2 LEN 52 @@@@
+display brightness=100 rotation=1 dim_seconds=3600
+
+@@@@ END @@@@
+@@@@ SCENARIO display/d3 LEN 47 @@@@
+display brightness=0 rotation=0 dim_seconds=0
+
+@@@@ END @@@@
+@@@@ SCENARIO display/d4 LEN 55 @@@@
+display brightness=255 rotation=255 dim_seconds=65535
+
+@@@@ END @@@@
+@@@@ SCENARIO display/d5 LEN 50 @@@@
+display brightness=35 rotation=1 dim_seconds=900
+
+@@@@ END @@@@
+@@@@ SCENARIO display/d6 LEN 51 @@@@
+display brightness=7 rotation=0 dim_seconds=12345
+
+@@@@ END @@@@
+@@@@ SCENARIO scan/plain LEN 30 @@@@
+ssid=HomeNet rssi=-61 auth=3
+
+@@@@ END @@@@
+@@@@ SCENARIO scan/empty LEN 23 @@@@
+ssid= rssi=-90 auth=0
+
+@@@@ END @@@@
+@@@@ SCENARIO scan/full_32 LEN 56 @@@@
+ssid=0123456789abcdef0123456789abcdef rssi=-128 auth=7
+
+@@@@ END @@@@
+@@@@ SCENARIO scan/controls LEN 32 @@@@
+ssid=a?b?c?d?e rssi=127 auth=9
+
+@@@@ END @@@@
+@@@@ SCENARIO scan/high_bytes LEN 26 @@@@
+ssid=????? rssi=0 auth=1
+
+@@@@ END @@@@
+@@@@ SCENARIO scan/nul_then_text LEN 24 @@@@
+ssid=ab rssi=-1 auth=2
+
+@@@@ END @@@@
+@@@@ SCENARIO scan/all_nonprintable LEN 55 @@@@
+ssid=???????????????????????????????? rssi=-77 auth=4
+
+@@@@ END @@@@
+@@@@ SCENARIO scan/space_and_tilde LEN 26 @@@@
+ssid= ~  rssi=-70 auth=6
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/0 LEN 38 @@@@
+OK saved to slot 1; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/1 LEN 38 @@@@
+OK saved to slot 2; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/2 LEN 38 @@@@
+OK saved to slot 3; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/7 LEN 38 @@@@
+OK saved to slot 8; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/8 LEN 38 @@@@
+OK saved to slot 9; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/9 LEN 39 @@@@
+OK saved to slot 10; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/100 LEN 40 @@@@
+OK saved to slot 101; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/-1 LEN 38 @@@@
+OK saved to slot 0; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/2147483646 LEN 47 @@@@
+OK saved to slot 2147483647; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO saved/2147483646 LEN 47 @@@@
+OK saved to slot 2147483647; setup stays open
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/0/1 LEN 19 @@@@
+OK switching to 0
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/0/0 LEN 42 @@@@
+OK switching to 0 (preference not saved)
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/1/1 LEN 19 @@@@
+OK switching to 1
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/1/0 LEN 42 @@@@
+OK switching to 1 (preference not saved)
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/2/1 LEN 19 @@@@
+OK switching to 2
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/2/0 LEN 42 @@@@
+OK switching to 2 (preference not saved)
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/8/1 LEN 19 @@@@
+OK switching to 8
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/8/0 LEN 42 @@@@
+OK switching to 8 (preference not saved)
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/9/1 LEN 19 @@@@
+OK switching to 9
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/9/0 LEN 42 @@@@
+OK switching to 9 (preference not saved)
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/-3/1 LEN 20 @@@@
+OK switching to -3
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/-3/0 LEN 43 @@@@
+OK switching to -3 (preference not saved)
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/2147483647/1 LEN 28 @@@@
+OK switching to 2147483647
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/2147483647/0 LEN 51 @@@@
+OK switching to 2147483647 (preference not saved)
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/-2147483648/1 LEN 29 @@@@
+OK switching to -2147483648
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/-2147483648/0 LEN 52 @@@@
+OK switching to -2147483648 (preference not saved)
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/12345/1 LEN 23 @@@@
+OK switching to 12345
+
+@@@@ END @@@@
+@@@@ SCENARIO switching/12345/0 LEN 46 @@@@
+OK switching to 12345 (preference not saved)
+
+@@@@ END @@@@

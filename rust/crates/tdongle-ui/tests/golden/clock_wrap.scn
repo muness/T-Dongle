@@ -1,0 +1,17 @@
+# The 32 bit millisecond clock wraps mid-run: the 64 bit button clock does not, dimming, the menu confirm and the LED glow use wrapped differences.
+start 4294960000
+set dim_seconds 10
+set saved 1
+set saved_wifi 1
+set online 1
+set wifi 1
+set usb 1
+set connects 1
+set last_connect_ms 4294960100
+press 4294962000 4294963700
+press 4294964000 4294964100
+press 4294965000 4294965100
+press 4294966000 4294967700
+press 4294970000 4294971700
+press 4294990000 4294990100
+tick 4294960000 4295010000 20

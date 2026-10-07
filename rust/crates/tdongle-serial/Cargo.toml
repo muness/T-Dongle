@@ -1,0 +1,19 @@
+[package]
+name = "tdongle-serial"
+description = "The serial console of the T-Dongle: line discipline, command parser, reply texts and the byte-exact `status` report (the Android app parses it)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tdongle-bridge = { path = "../tdongle-bridge" }
+tdongle-nvs-format = { path = "../tdongle-nvs-format" }
+tdongle-traffic = { path = "../tdongle-traffic" }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

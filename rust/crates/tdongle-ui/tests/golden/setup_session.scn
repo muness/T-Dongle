@@ -1,0 +1,16 @@
+# A setup boot: AP name and countdown on the screen, menu says Cancel setup AP, no dimming, `cancel` from the menu, then the session ending.
+start 1000
+set saved 2
+set saved_wifi 1
+set ap_name TDongle-AB0CF9
+set dim_seconds 10
+setup_start
+set wifi_ready 1
+press 5000 6700
+press 8000 9700
+tick 1000 15000 20
+tick 20000 40000 500
+tick 595000 602000 250
+set wifi_ready 0
+setup_start
+tick 602000 640000 500

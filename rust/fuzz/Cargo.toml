@@ -1,0 +1,330 @@
+[package]
+name = "tdongle-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# A separate workspace: libfuzzer needs nightly and sanitizer flags that must not leak into the firmware build.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tdongle-aqm = { path = "../crates/tdongle-aqm" }
+tdongle-lcd = { path = "../crates/tdongle-lcd" }
+tdongle-serial = { path = "../crates/tdongle-serial" }
+tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
+tdongle-nvs-write = { path = "../crates/tdongle-nvs-write", features = ["sim"] }
+tdongle-usb-descriptors = { path = "../crates/tdongle-usb-descriptors" }
+tdongle-setup = { path = "../crates/tdongle-setup" }
+tdongle-dhcp = { path = "../crates/tdongle-dhcp" }
+
+# tailnet crates (phase 3)
+tdongle-tailnet-admission = { path = "../crates/tdongle-tailnet-admission" }
+tdongle-tailnet-control = { path = "../crates/tdongle-tailnet-control" }
+tdongle-tailnet-crypto = { path = "../crates/tdongle-tailnet-crypto" }
+tdongle-tailnet-derp = { path = "../crates/tdongle-tailnet-derp" }
+tdongle-tailnet-disco = { path = "../crates/tdongle-tailnet-disco", features = ["fuzzing"] }
+tdongle-tailnet-dns = { path = "../crates/tdongle-tailnet-dns" }
+tdongle-tailnet-map = { path = "../crates/tdongle-tailnet-map" }
+tdongle-tailnet-members = { path = "../crates/tdongle-tailnet-members" }
+tdongle-tailnet-noise = { path = "../crates/tdongle-tailnet-noise" }
+tdongle-tailnet-peers = { path = "../crates/tdongle-tailnet-peers" }
+tdongle-tailnet-router = { path = "../crates/tdongle-tailnet-router" }
+tdongle-tailnet-status = { path = "../crates/tdongle-tailnet-status" }
+tdongle-tailnet-tls = { path = "../crates/tdongle-tailnet-tls" }
+tdongle-tailnet-types = { path = "../crates/tdongle-tailnet-types" }
+tdongle-tailnet-usbnet = { path = "../crates/tdongle-tailnet-usbnet" }
+tdongle-tailnet-engine = { path = "../crates/tdongle-tailnet-engine", features = ["fuzzing"] }
+tdongle-tailnet-wifimux = { path = "../crates/tdongle-tailnet-wifimux" }
+tdongle-tailnet-wg = { path = "../crates/tdongle-tailnet-wg" }
+
+[[bin]]
+name = "ecn_classify"
+path = "fuzz_targets/ecn_classify.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "command_line"
+path = "fuzz_targets/command_line.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "profile_json"
+path = "fuzz_targets/profile_json.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "saved_blobs"
+path = "fuzz_targets/saved_blobs.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "lcd_compose"
+path = "fuzz_targets/lcd_compose.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "setup_dns"
+path = "fuzz_targets/setup_dns.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "setup_http"
+path = "fuzz_targets/setup_http.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "setup_router"
+path = "fuzz_targets/setup_router.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "nvs_ops"
+path = "fuzz_targets/nvs_ops.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_admission_budgets"
+path = "fuzz_targets/tailnet_admission_budgets.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_admission_negotiation"
+path = "fuzz_targets/tailnet_admission_negotiation.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_control_h2"
+path = "fuzz_targets/tailnet_control_h2.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_control_hpack"
+path = "fuzz_targets/tailnet_control_hpack.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_control_http"
+path = "fuzz_targets/tailnet_control_http.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_control_map"
+path = "fuzz_targets/tailnet_control_map.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_control_register"
+path = "fuzz_targets/tailnet_control_register.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_derp_frame"
+path = "fuzz_targets/tailnet_derp_frame.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_derp_link"
+path = "fuzz_targets/tailnet_derp_link.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_disco_envelope"
+path = "fuzz_targets/tailnet_disco_envelope.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_disco_message"
+path = "fuzz_targets/tailnet_disco_message.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_disco_path"
+path = "fuzz_targets/tailnet_disco_path.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_disco_stun_request"
+path = "fuzz_targets/tailnet_disco_stun_request.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_disco_stun_response"
+path = "fuzz_targets/tailnet_disco_stun_response.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_dns_query"
+path = "fuzz_targets/tailnet_dns_query.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_map_projector"
+path = "fuzz_targets/tailnet_map_projector.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_map_tokenizer"
+path = "fuzz_targets/tailnet_map_tokenizer.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_members_decode"
+path = "fuzz_targets/tailnet_members_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_noise_early"
+path = "fuzz_targets/tailnet_noise_early.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_noise_handshake"
+path = "fuzz_targets/tailnet_noise_handshake.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_noise_reader"
+path = "fuzz_targets/tailnet_noise_reader.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_peers_directory"
+path = "fuzz_targets/tailnet_peers_directory.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_peers_nvs_cache"
+path = "fuzz_targets/tailnet_peers_nvs_cache.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_peers_pool"
+path = "fuzz_targets/tailnet_peers_pool.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_router_packets"
+path = "fuzz_targets/tailnet_router_packets.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_status_parsers"
+path = "fuzz_targets/tailnet_status_parsers.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_tls_chain"
+path = "fuzz_targets/tailnet_tls_chain.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_tls_upgrade"
+path = "fuzz_targets/tailnet_tls_upgrade.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_wg_parse"
+path = "fuzz_targets/tailnet_wg_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_wg_replay"
+path = "fuzz_targets/tailnet_wg_replay.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_wg_transport"
+path = "fuzz_targets/tailnet_wg_transport.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_usbnet_dhcp"
+path = "fuzz_targets/tailnet_usbnet_dhcp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_usbnet_eth"
+path = "fuzz_targets/tailnet_usbnet_eth.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_usbnet_napt"
+path = "fuzz_targets/tailnet_usbnet_napt.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_engine_derp"
+path = "fuzz_targets/tailnet_engine_derp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_engine_script"
+path = "fuzz_targets/tailnet_engine_script.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_engine_udp"
+path = "fuzz_targets/tailnet_engine_udp.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tailnet_wifimux_rx"
+path = "fuzz_targets/tailnet_wifimux_rx.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "dhcp_server"
+path = "fuzz_targets/dhcp_server.rs"
+test = false
+doc = false

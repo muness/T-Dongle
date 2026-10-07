@@ -1,0 +1,38 @@
+[package]
+name = "s4-membership-model"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Spike S4: memory model of ONE tailnet membership on no_std (esp-hal + embassy), real crates, synthetic data, no network.
+# See FINDINGS.md.
+[workspace]
+
+[dependencies]
+s4-model = { path = "model" }
+esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.4", features = ["esp32s3", "embassy"] }
+# default-features = false: no #[global_allocator] here; src/mem.rs wraps esp_alloc::HEAP in a counting allocator.
+esp-alloc = { version = "0.11", default-features = false, features = ["esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
+esp-println = { version = "0.18", default-features = false, features = ["esp32s3", "auto", "critical-section"] }
+esp-backtrace = { version = "0.20", features = ["esp32s3", "panic-handler", "println"] }
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+static_cell = "2.1"
+tinyrlibc = { version = "0.5", features = ["alloc"] }
+rand_core10 = { package = "rand_core", version = "0.10", default-features = false }
+rand_core = { version = "0.6", default-features = false }
+rand_chacha = { version = "0.3", default-features = false }
+mbedtls-rs = { version = "0.3", features = ["esp32s3", "tls", "pem-parse", "ssl-in-content-len-16384", "ssl-out-content-len-4096", "use-gcc"] }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 1
+
+[profile.dev]
+opt-level = "s"

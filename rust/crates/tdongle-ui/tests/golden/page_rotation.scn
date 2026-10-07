@@ -1,0 +1,29 @@
+# Short presses cycle the four pages; the Health page rotates its three views every 4 s; the largest heap block is read only while it is shown.
+start 1000
+set saved 2
+set saved_wifi 1
+set online 1
+set wifi 1
+set usb 1
+set usb_configured 1
+set ssid HomeNet
+set active_slot 1
+set active_name Home
+set link_connected 1
+set link_rssi_valid 1
+set link_rssi -61
+set connects 2
+set last_connect_ms 500
+set heap_free 123456
+set heap_min 90000
+set heap_largest 70000
+set boots 3
+set panics 1
+set watchdogs 2
+set reset_reason 3
+set usb_resets 4
+press 2000 2100
+press 3000 3100
+press 4000 4100
+press 5000 5100
+tick 1000 20000 20

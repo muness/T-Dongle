@@ -1,0 +1,152 @@
+package controlbase
+
+import (
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"testing"
+
+	"go4.org/mem"
+	"tailscale.com/net/memnet"
+	"tailscale.com/types/key"
+)
+
+func fill(b byte) []byte {
+	r := make([]byte, 32)
+	for i := range r {
+		r[i] = b + byte(i)
+	}
+	return r
+}
+
+func mk(b byte) key.MachinePrivate {
+	var k key.MachinePrivate
+	if err := k.UnmarshalText([]byte("privkey:" + hex.EncodeToString(fill(b)))); err != nil {
+		panic(err)
+	}
+	return k
+}
+
+func TestZZVectors(t *testing.T) {
+	var out strings.Builder
+	emit := func(name string, b []byte) { fmt.Fprintf(&out, "%s=%s\n", name, hex.EncodeToString(b)) }
+	for _, version := range []uint16{1, 131} {
+		p := fmt.Sprintf("v%d_", version)
+		machineKey, controlKey := mk(0x10), mk(0x40)
+		machineEph, controlEph := mk(0x70), mk(0xa0)
+		controlPub := controlKey.Public()
+		emit(p+"machine_priv", machineKey.UntypedBytes())
+		emit(p+"control_priv", controlKey.UntypedBytes())
+		emit(p+"machine_eph_priv", machineEph.UntypedBytes())
+		emit(p+"control_eph_priv", controlEph.UntypedBytes())
+		mp := machineKey.Public()
+		emit(p+"machine_pub", mp.UntypedBytes())
+		emit(p+"control_pub", controlPub.UntypedBytes())
+
+		// client side (copy of ClientDeferred with fixed ephemeral)
+		var s symmetricState
+		s.Initialize()
+		s.MixHash(protocolVersionPrologue(version))
+		s.MixHash(controlPub.UntypedBytes())
+		init := mkInitiationMessage(version)
+		mePub := machineEph.Public()
+		copy(init.EphemeralPub(), mePub.UntypedBytes())
+		s.MixHash(mePub.UntypedBytes())
+		cipher, err := s.MixDH(machineEph, controlPub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.EncryptAndHash(cipher, init.MachinePub(), mp.UntypedBytes())
+		cipher, err = s.MixDH(machineKey, controlPub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.EncryptAndHash(cipher, init.Tag(), nil)
+		emit(p+"msg1", init[:])
+
+		// server side
+		var ss symmetricState
+		ss.Initialize()
+		ss.MixHash(protocolVersionPrologue(version))
+		ss.MixHash(controlPub.UntypedBytes())
+		ss.MixHash(mePub.UntypedBytes())
+		c, _ := ss.MixDH(controlKey, mePub)
+		var mkb [32]byte
+		if err := ss.DecryptAndHash(c, mkb[:], init.MachinePub()); err != nil {
+			t.Fatal(err)
+		}
+		c, _ = ss.MixDH(controlKey, mp)
+		if err := ss.DecryptAndHash(c, nil, init.Tag()); err != nil {
+			t.Fatal(err)
+		}
+		resp := mkResponseMessage()
+		cePub := controlEph.Public()
+		copy(resp.EphemeralPub(), cePub.UntypedBytes())
+		ss.MixHash(cePub.UntypedBytes())
+		ss.MixDH(controlEph, mePub)
+		c, _ = ss.MixDH(controlEph, mp)
+		ss.EncryptAndHash(c, resp.Tag(), nil)
+		emit(p+"msg2", resp[:])
+
+		// client finishes
+		cePub2 := key.MachinePublicFromRaw32(mem.B(resp.EphemeralPub()))
+		s.MixHash(cePub2.UntypedBytes())
+		s.MixDH(machineEph, cePub2)
+		c, _ = s.MixDH(machineKey, cePub2)
+		if err := s.DecryptAndHash(c, nil, resp.Tag()); err != nil {
+			t.Fatal(err)
+		}
+		c1, c2, _ := s.Split()
+		d1, d2, _ := ss.Split()
+		if s.h != ss.h {
+			t.Fatal("hash mismatch")
+		}
+		emit(p+"handshake_hash", s.h[:])
+
+		a, b := memnet.NewConn("noise", 1<<20)
+		cli := &Conn{conn: a, version: version, tx: txState{cipher: c1}, rx: rxState{cipher: c2}}
+		srv := &Conn{conn: b, version: version, tx: txState{cipher: d2}, rx: rxState{cipher: d1}}
+		payloads := [][]byte{[]byte("hello"), make([]byte, 4077), make([]byte, 5000), []byte("x")}
+		for i := range payloads[1] {
+			payloads[1][i] = byte(i * 7)
+		}
+		for i := range payloads[2] {
+			payloads[2][i] = byte(i * 13)
+		}
+		// client -> server
+		var all []byte
+		for i, pl := range payloads {
+			emit(fmt.Sprintf("%sc2s_plain%d", p, i), pl)
+			if _, err := cli.Write(pl); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_ = all
+		// read raw wire from b side without decrypting: read the ciphertext via conn b directly
+		// records: 5 total (hello, 4077, 4077+923, x)
+		for i, n := range []int{5, 4077, 4077, 923, 1} {
+			buf := make([]byte, 3+n+16)
+			if _, err := io.ReadFull(b, buf); err != nil {
+				t.Fatal(err)
+			}
+			emit(fmt.Sprintf("%sc2s_rec%d", p, i), buf)
+		}
+		// server -> client
+		for i, pl := range payloads {
+			emit(fmt.Sprintf("%ss2c_plain%d", p, i), pl)
+			if _, err := srv.Write(pl); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i, n := range []int{5, 4077, 4077, 923, 1} {
+			buf := make([]byte, 3+n+16)
+			if _, err := io.ReadFull(a, buf); err != nil {
+				t.Fatal(err)
+			}
+			emit(fmt.Sprintf("%ss2c_rec%d", p, i), buf)
+		}
+	}
+	os.WriteFile(os.Getenv("VEC_OUT"), []byte(out.String()), 0o644)
+}

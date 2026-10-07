@@ -1,0 +1,23 @@
+[package]
+name = "tdongle-tailnet-ctl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The tailnet control client driver: key fetch, ts2021 upgrade, Noise, HTTP/2, register and the streaming map long poll over an abstract async byte stream. no_std, allocation free."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+tdongle-tailnet-crypto = { path = "../tdongle-tailnet-crypto" }
+tdongle-tailnet-noise = { path = "../tdongle-tailnet-noise" }
+tdongle-tailnet-control = { path = "../tdongle-tailnet-control" }
+tdongle-tailnet-map = { path = "../tdongle-tailnet-map" }
+embedded-io-async = "0.7"
+
+[dev-dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
+futures = { version = "0.3", features = ["executor"] }

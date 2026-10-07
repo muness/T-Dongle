@@ -1,0 +1,68 @@
+@@@@ SCENARIO help/bridge/release LEN 416 @@@@
+T-Dongle Wi-Fi bridge protocol=1
+Commands: status, list, use N, del N, scan, profile JSON, display BRIGHTNESS ROTATION DIM_SECONDS, setup [N], cancel, reset, confirm-reset, mode wifi_bridge|tailnet_gateway, capabilities, pm, reboot, bootloader. Add Wi-Fi: hold the button for the setup access point (TDongle-XXXXXX), or profile {"slot":N,"priority":50,"name":"X","ssid":"X","password":"X"}, or muness.com/T-Dongle
+
+@@@@ END @@@@
+@@@@ SCENARIO capabilities/bridge/release LEN 201 @@@@
+capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings,roaming_assist
+
+@@@@ END @@@@
+@@@@ SCENARIO unknown/bridge/release LEN 32 @@@@
+ERR Unknown command; type help
+
+@@@@ END @@@@
+@@@@ SCENARIO greeting/bridge/release LEN 67 @@@@
+T-Dongle-S3 adapter 1.2.3-golden. Type help. Input is not echoed.
+
+@@@@ END @@@@
+@@@@ SCENARIO help/tailnet/release LEN 318 @@@@
+T-Dongle tailnet gateway protocol=1
+Commands: status, list, use N, del N, scan, profile JSON, display BRIGHTNESS ROTATION DIM_SECONDS, setup [N], cancel, reset, confirm-reset, mode wifi_bridge|tailnet_gateway, capabilities, pm, reboot, bootloader. Setup: http://192.168.77.1/ or the button menu (setup access point)
+
+@@@@ END @@@@
+@@@@ SCENARIO capabilities/tailnet/release LEN 202 @@@@
+capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings
+
+@@@@ END @@@@
+@@@@ SCENARIO unknown/tailnet/release LEN 65 @@@@
+ERR Unknown command; type help. USB setup: http://192.168.77.1/
+
+@@@@ END @@@@
+@@@@ SCENARIO greeting/tailnet/release LEN 67 @@@@
+T-Dongle-S3 tailnet 1.2.3-golden. Type help. Input is not echoed.
+
+@@@@ END @@@@
+@@@@ SCENARIO help/bridge/diagnostics LEN 478 @@@@
+T-Dongle Wi-Fi bridge protocol=1
+Commands: status, list, use N, del N, scan, profile JSON, display BRIGHTNESS ROTATION DIM_SECONDS, setup [N], cancel, reset, confirm-reset, mode wifi_bridge|tailnet_gateway, capabilities, pm, memory [guard N|bench], members, cpu, wifistats [reset|dump], reboot, bootloader. Add Wi-Fi: hold the button for the setup access point (TDongle-XXXXXX), or profile {"slot":N,"priority":50,"name":"X","ssid":"X","password":"X"}, or muness.com/T-Dongle
+
+@@@@ END @@@@
+@@@@ SCENARIO capabilities/bridge/diagnostics LEN 231 @@@@
+capabilities schema=1 features=boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings,roaming_assist,memory_diagnostics,wifi_stats
+
+@@@@ END @@@@
+@@@@ SCENARIO unknown/bridge/diagnostics LEN 32 @@@@
+ERR Unknown command; type help
+
+@@@@ END @@@@
+@@@@ SCENARIO greeting/bridge/diagnostics LEN 67 @@@@
+T-Dongle-S3 adapter 1.2.3-golden. Type help. Input is not echoed.
+
+@@@@ END @@@@
+@@@@ SCENARIO help/tailnet/diagnostics LEN 380 @@@@
+T-Dongle tailnet gateway protocol=1
+Commands: status, list, use N, del N, scan, profile JSON, display BRIGHTNESS ROTATION DIM_SECONDS, setup [N], cancel, reset, confirm-reset, mode wifi_bridge|tailnet_gateway, capabilities, pm, memory [guard N|bench], members, cpu, wifistats [reset|dump], reboot, bootloader. Setup: http://192.168.77.1/ or the button menu (setup access point)
+
+@@@@ END @@@@
+@@@@ SCENARIO capabilities/tailnet/diagnostics LEN 232 @@@@
+capabilities schema=1 features=tailnet_gateway,boot_diagnostics,mode_switch,chip_temperature,automatic_display,power_report,setup_ap,button_menu,factory_reset,status_led,display_pages,display_settings,memory_diagnostics,wifi_stats
+
+@@@@ END @@@@
+@@@@ SCENARIO unknown/tailnet/diagnostics LEN 65 @@@@
+ERR Unknown command; type help. USB setup: http://192.168.77.1/
+
+@@@@ END @@@@
+@@@@ SCENARIO greeting/tailnet/diagnostics LEN 67 @@@@
+T-Dongle-S3 tailnet 1.2.3-golden. Type help. Input is not echoed.
+
+@@@@ END @@@@

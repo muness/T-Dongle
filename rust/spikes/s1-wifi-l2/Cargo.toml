@@ -1,0 +1,46 @@
+[package]
+name = "s1-wifi-l2"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+esp-hal = { version = "~1.2", features = ["esp32s3", "unstable"] }
+esp-radio = { version = "=1.0.0-beta.1", features = ["esp32s3", "wifi", "unstable"] }
+esp-rtos = { version = "0.4", features = ["esp32s3", "esp-radio", "esp-alloc", "embassy"] }
+esp-alloc = { version = "0.11", features = ["esp32s3"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32s3"] }
+# UART, never USB-Serial-JTAG: once the OTG device owns the pads nothing drains the JTAG FIFO.
+esp-println = { version = "0.18", default-features = false, features = ["esp32s3", "uart", "critical-section"] }
+esp-backtrace = { version = "0.20", default-features = false, features = ["esp32s3", "println"] }
+embassy-futures = "0.1"
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-usb = { version = "0.6", default-features = false }
+static_cell = "2.1"
+critical-section = "1"
+tdongle-serial = { path = "../../crates/tdongle-serial" }
+tdongle-rescue = { path = "../../crates/tdongle-rescue", features = ["hal"] }
+tdongle-boot-guard = { path = "../../crates/tdongle-boot-guard" }
+tdongle-saved = { path = "../../crates/tdongle-saved" }
+tdongle-nvs-read = { path = "../../crates/tdongle-nvs-read" }
+tdongle-nvs-format = { path = "../../crates/tdongle-nvs-format" }
+tdongle-wifi-policy = { path = "../../crates/tdongle-wifi-policy" }
+esp-storage = { version = "0.10", features = ["esp32s3", "embedded-storage"] }
+embedded-storage = "0.3"
+esp-wifi-sys-esp32s3 = "0.3"
+
+[patch.crates-io]
+esp-hal = { path = "../../vendor/esp-hal" }
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = 1
+
+[profile.dev]
+opt-level = "s"

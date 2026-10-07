@@ -1,0 +1,21 @@
+[package]
+name = "tdongle-tailnet-router"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "USB host <-> WireGuard tunnel forwarding engine of the tailnet gateway: alias NAT, flow table, RFC 1624 checksums, bounded queues and packet pool. Sans-IO, allocation free."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+
+[[bench]]
+name = "forward"
+harness = false

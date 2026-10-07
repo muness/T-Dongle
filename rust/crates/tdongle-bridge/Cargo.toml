@@ -1,0 +1,21 @@
+[package]
+name = "tdongle-bridge"
+description = "The transparent Wi-Fi bridge's forwarding logic (ADR 0023): bounded host queue with USB backpressure, CoDel/ECN at the hand-to-radio, counted drops. Pure, host-tested."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tdongle-aqm = { path = "../tdongle-aqm" }
+tdongle-spsc = { path = "../tdongle-spsc" }
+
+[dev-dependencies]
+tdongle-spsc = { path = "../tdongle-spsc", features = ["test-support"] }
+
+[lints]
+workspace = true
+
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.7"

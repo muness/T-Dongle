@@ -1,0 +1,101 @@
+@@@@ SCENARIO idle LEN 92 @@@@
+power scaling=1 cpu_mhz=80 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+
+@@@@ END @@@@
+@@@@ SCENARIO busy_with_locks LEN 459 @@@@
+power scaling=1 cpu_mhz=240 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+pm_lock name=usb_tx depth=3 acquires=4 releases=5 held_us=3000 max_depth=6 underflows=0 forced_releases=1 backend_failures=0 isr_rejects=0
+pm_lock name=wifi_rx depth=0 acquires=1 releases=2 held_us=0 max_depth=3 underflows=0 forced_releases=0 backend_failures=0 isr_rejects=0
+esp_pm_dump_locks:
+Lock stats:
+  APB_FREQ_MAX  0  0
+  CPU_FREQ_MAX  1  42
+Total: 2
+
+@@@@ END @@@@
+@@@@ SCENARIO scaling_off LEN 181 @@@@
+power scaling=0 cpu_mhz=240 max_mhz=0 min_mhz=0 configure_error=-258 lock_create_failures=2
+esp_pm_dump_locks:
+Lock stats:
+  APB_FREQ_MAX  0  0
+  CPU_FREQ_MAX  1  42
+Total: 2
+
+@@@@ END @@@@
+@@@@ SCENARIO eight_locks LEN 1241 @@@@
+power scaling=1 cpu_mhz=240 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+pm_lock name=lock_0 depth=0 acquires=1 releases=2 held_us=0 max_depth=3 underflows=0 forced_releases=0 backend_failures=0 isr_rejects=0
+pm_lock name=lock_1 depth=7 acquires=8 releases=9 held_us=7000 max_depth=10 underflows=0 forced_releases=1 backend_failures=0 isr_rejects=1
+pm_lock name=lock_2 depth=14 acquires=15 releases=16 held_us=14000 max_depth=17 underflows=0 forced_releases=0 backend_failures=0 isr_rejects=2
+pm_lock name=lock_3 depth=21 acquires=22 releases=23 held_us=21000 max_depth=24 underflows=0 forced_releases=1 backend_failures=0 isr_rejects=0
+pm_lock name=lock_4 depth=28 acquires=29 releases=30 held_us=28000 max_depth=31 underflows=0 forced_releases=0 backend_failures=0 isr_rejects=1
+pm_lock name=lock_5 depth=35 acquires=36 releases=37 held_us=35000 max_depth=38 underflows=0 forced_releases=1 backend_failures=0 isr_rejects=2
+pm_lock name=lock_6 depth=42 acquires=43 releases=44 held_us=42000 max_depth=45 underflows=0 forced_releases=0 backend_failures=0 isr_rejects=0
+pm_lock name=lock_7 depth=49 acquires=50 releases=51 held_us=49000 max_depth=52 underflows=0 forced_releases=1 backend_failures=0 isr_rejects=1
+
+@@@@ END @@@@
+@@@@ SCENARIO widest LEN 421 @@@@
+power scaling=1 cpu_mhz=4294967295 max_mhz=4294967295 min_mhz=4294967295 configure_error=-2147483648 lock_create_failures=4294967295
+pm_lock name=xxxxxxxxxxxxxxxxxxxx depth=4294967295 acquires=4294967295 releases=4294967295 held_us=4294967295 max_depth=4294967295 underflows=4294967295 forced_releases=4294967295 backend_failures=42esp_pm_dump_locks:
+Lock stats:
+  APB_FREQ_MAX  0  0
+  CPU_FREQ_MAX  1  42
+Total: 2
+
+@@@@ END @@@@
+@@@@ SCENARIO name_cuts_line LEN 287 @@@@
+power scaling=1 cpu_mhz=1 max_mhz=2 min_mhz=3 configure_error=0 lock_create_failures=4
+pm_lock name=LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL depth=5 acquires=6 releases=7 held_
+@@@@ END @@@@
+@@@@ SCENARIO dump_no_trailing_newline LEN 127 @@@@
+power scaling=1 cpu_mhz=80 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+esp_pm_dump_locks:
+first
+second
+
+@@@@ END @@@@
+@@@@ SCENARIO dump_blank_lines LEN 125 @@@@
+power scaling=1 cpu_mhz=80 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+esp_pm_dump_locks:
+
+
+third
+
+
+@@@@ END @@@@
+@@@@ SCENARIO dump_only_newline LEN 114 @@@@
+power scaling=1 cpu_mhz=80 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+esp_pm_dump_locks:
+
+
+@@@@ END @@@@
+@@@@ SCENARIO dump_line_117 LEN 237 @@@@
+power scaling=1 cpu_mhz=80 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+esp_pm_dump_locks:
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+next
+
+@@@@ END @@@@
+@@@@ SCENARIO dump_line_118 LEN 239 @@@@
+power scaling=1 cpu_mhz=80 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+esp_pm_dump_locks:
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
+next
+
+@@@@ END @@@@
+@@@@ SCENARIO dump_line_300_loses_bytes LEN 422 @@@@
+power scaling=1 cpu_mhz=80 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+esp_pm_dump_locks:
+abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklm
+opqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyza
+cdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmn
+tail
+
+@@@@ END @@@@
+@@@@ SCENARIO dump_long_without_newline LEN 231 @@@@
+power scaling=1 cpu_mhz=80 max_mhz=240 min_mhz=80 configure_error=0 lock_create_failures=0
+esp_pm_dump_locks:
+ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+
+@@@@ END @@@@

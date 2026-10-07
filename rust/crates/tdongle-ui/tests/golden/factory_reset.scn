@@ -1,0 +1,21 @@
+# Menu to Factory reset (item 2 with one saved network); hold asks; hold again inside 10 s confirms.
+# Then: ask, short press cancels; then ask and let the 10 s lapse, hold asks again.
+start 1000
+set saved 1
+set saved_wifi 1
+set online 1
+set wifi 1
+set usb 1
+press 2000 3700
+press 4000 4100
+press 5000 5100
+press 6000 7700
+press 9000 10700
+press 12000 12100
+press 14000 14100
+press 15000 15100
+press 16000 17700
+press 20000 21700
+press 25000 26700
+press 38000 39700
+tick 1000 45000 20

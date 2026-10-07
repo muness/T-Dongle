@@ -1,0 +1,18 @@
+[package]
+name = "tdongle-tailnet-status"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The tailnet gateway's /status JSON (bounded jw_* writer with a chunk sink, typed sections, same keys in the same order as the C) and the diagnostics-image JSON reports. Sans-IO, allocation free."
+
+[lints]
+workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+proptest = { version = "1", default-features = false, features = ["std"] }
+serde_json = "1"
+tdongle-serial = { path = "../tdongle-serial" }

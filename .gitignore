@@ -9,3 +9,5 @@ dist/
 
 sdkconfig.unified*
 site-out/
+/rust/target-xtensa/
+/rust/target-host/

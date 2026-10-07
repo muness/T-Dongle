@@ -1,0 +1,11 @@
+[package]
+name = "tdongle-traffic"
+description = "Traffic through the dongle's USB side: wrap-safe counters and the windowed rate sampler (status line, Traffic screen)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true

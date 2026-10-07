@@ -1,0 +1,167 @@
+t=1000 led 00000000e2002f5effffffff
+t=1060 led 00000000e2002b57ffffffff
+t=1120 led 00000000e200274fffffffff
+t=1180 led 00000000e2002347ffffffff
+t=1240 led 00000000e2002040ffffffff
+t=1300 led 00000000e2001c38ffffffff
+t=1360 led 00000000e2001830ffffffff
+t=1420 led 00000000e2001429ffffffff
+t=1480 led 00000000e2001021ffffffff
+t=1540 led 00000000e2000d1affffffff
+t=1600 led 00000000e2000912ffffffff
+t=1660 led 00000000e2000d1affffffff
+t=1720 led 00000000e2001021ffffffff
+t=1780 led 00000000e2001429ffffffff
+t=1840 led 00000000e2001830ffffffff
+t=1900 led 00000000e2001c38ffffffff
+t=1960 led 00000000e2002040ffffffff
+t=2000 apply backlight=60 rotation=0
+t=2000 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=2 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=2020 led 00000000e2002347ffffffff
+t=2080 led 00000000e200274fffffffff
+t=2140 led 00000000e2002b57ffffffff
+t=2200 led 00000000e2002f5effffffff
+t=2260 apply backlight=60 rotation=0
+t=2260 show status same
+t=2260 led 00000000e2003366ffffffff
+t=2320 led 00000000e200366dffffffff
+t=2380 led 00000000e2003a75ffffffff
+t=2440 led 00000000e2003972ffffffff
+t=2500 led 00000000e200356bffffffff
+t=2520 apply backlight=60 rotation=0
+t=2520 show status same
+t=2560 led 00000000e2003163ffffffff
+t=2620 led 00000000e2002d5bffffffff
+t=2680 led 00000000e2002a54ffffffff
+t=2740 led 00000000e200264cffffffff
+t=2780 apply backlight=60 rotation=0
+t=2780 show status same
+t=2800 led 00000000e2002245ffffffff
+t=2860 led 00000000e2001e3dffffffff
+t=2920 led 00000000e2001b36ffffffff
+t=2980 led 00000000e200172effffffff
+t=3040 apply backlight=60 rotation=0
+t=3040 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=3 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=3040 led 00000000e2001327ffffffff
+t=3100 led 00000000e2000f1fffffffff
+t=3160 led 00000000e2000b17ffffffff
+t=3220 led 00000000e2000a15ffffffff
+t=3280 led 00000000e2000e1cffffffff
+t=3300 apply backlight=60 rotation=0
+t=3300 show status same
+t=3340 led 00000000e2001224ffffffff
+t=3400 led 00000000e200152bffffffff
+t=3460 led 00000000e2001933ffffffff
+t=3520 led 00000000e2001d3bffffffff
+t=3560 apply backlight=60 rotation=0
+t=3560 show status same
+t=3580 led 00000000e2002142ffffffff
+t=3640 led 00000000e200254affffffff
+t=3700 led 00000000e2002851ffffffff
+t=3760 led 00000000e2002c59ffffffff
+t=3820 apply backlight=60 rotation=0
+t=3820 show status same
+t=3820 led 00000000e2003060ffffffff
+t=3880 led 00000000e2003468ffffffff
+t=3940 led 00000000e2003870ffffffff
+t=4000 led 00000000e2003c78ffffffff
+t=4060 led 00000000e2003870ffffffff
+t=4080 apply backlight=60 rotation=0
+t=4080 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=4 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=4120 led 00000000e2003468ffffffff
+t=4180 led 00000000e2003060ffffffff
+t=4240 led 00000000e2002c59ffffffff
+t=4300 led 00000000e2002851ffffffff
+t=4340 apply backlight=60 rotation=0
+t=4340 show status same
+t=4360 led 00000000e200254affffffff
+t=4420 led 00000000e2002142ffffffff
+t=4480 led 00000000e2001d3bffffffff
+t=4540 apply backlight=60 rotation=0
+t=4540 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=4540 led 00000000e2001933ffffffff
+t=4600 led 00000000e200152bffffffff
+t=4660 led 00000000e2001224ffffffff
+t=4720 led 00000000e2000e1cffffffff
+t=4780 led 00000000e2000a15ffffffff
+t=4800 apply backlight=60 rotation=0
+t=4800 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=4840 led 00000000e2000b17ffffffff
+t=4900 led 00000000e2000f1fffffffff
+t=4960 led 00000000e2001327ffffffff
+t=5020 led 00000000e200172effffffff
+t=5060 apply backlight=60 rotation=0
+t=5060 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=5080 led 00000000e2001b36ffffffff
+t=5140 led 00000000e2001e3dffffffff
+t=5200 led 00000000e2002245ffffffff
+t=5260 led 00000000e200264cffffffff
+t=5320 apply backlight=60 rotation=0
+t=5320 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=5320 led 00000000e2002a54ffffffff
+t=5380 led 00000000e2002d5bffffffff
+t=5440 led 00000000e2003163ffffffff
+t=5500 led 00000000e200356bffffffff
+t=5560 led 00000000e2003972ffffffff
+t=5580 apply backlight=60 rotation=0
+t=5580 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=5620 led 00000000e2003a75ffffffff
+t=5640 apply backlight=60 rotation=0
+t=5640 show rows attention=0 |SETUP MENU |1  | |Short: next  Hold: select |
+t=5680 led 00000000e200366dffffffff
+t=5740 led 00000000e2003366ffffffff
+t=5800 led 00000000e2002f5effffffff
+t=5860 led 00000000e2002b57ffffffff
+t=5900 apply backlight=60 rotation=0
+t=5900 show rows attention=0 |SETUP MENU |1  | |Short: next  Hold: select |
+t=5920 led 00000000e200274fffffffff
+t=5980 led 00000000e2002347ffffffff
+t=6040 led 00000000e2002040ffffffff
+t=6100 led 00000000e2001c38ffffffff
+t=6160 apply backlight=60 rotation=0
+t=6160 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=6160 led 00000000e2001830ffffffff
+t=6220 led 00000000e2001429ffffffff
+t=6280 led 00000000e2001021ffffffff
+t=6340 led 00000000e2000d1affffffff
+t=6400 led 00000000e2000912ffffffff
+t=6420 apply backlight=60 rotation=0
+t=6420 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=6460 led 00000000e2000d1affffffff
+t=6520 led 00000000e2001021ffffffff
+t=6580 led 00000000e2001429ffffffff
+t=6640 apply backlight=60 rotation=0
+t=6640 show rows attention=0 |SETUP MENU |2 Second | |Short: next  Hold: select |
+t=6640 led 00000000e2001830ffffffff
+t=6700 led 00000000e2001c38ffffffff
+t=6760 led 00000000e2002040ffffffff
+t=6820 led 00000000e2002347ffffffff
+t=6880 led 00000000e200274fffffffff
+t=6900 apply backlight=60 rotation=0
+t=6900 show rows attention=0 |SETUP MENU |2 Second | |Short: next  Hold: select |
+t=6940 led 00000000e2002b57ffffffff
+t=7000 led 00000000e2002f5effffffff
+t=7060 led 00000000e2003366ffffffff
+t=7120 led 00000000e200366dffffffff
+t=7160 apply backlight=60 rotation=0
+t=7160 show rows attention=0 |SETUP MENU |2 Second | |Short: next  Hold: select |
+t=7180 led 00000000e2003a75ffffffff
+t=7240 led 00000000e2003972ffffffff
+t=7300 led 00000000e200356bffffffff
+t=7360 led 00000000e2003163ffffffff
+t=7420 apply backlight=60 rotation=0
+t=7420 show rows attention=0 |SETUP MENU |2 Second | |Short: next  Hold: select |
+t=7420 led 00000000e2002d5bffffffff
+t=7480 led 00000000e2002a54ffffffff
+t=7540 led 00000000e200264cffffffff
+t=7600 led 00000000e2002245ffffffff
+t=7660 led 00000000e2001e3dffffffff
+t=7680 apply backlight=60 rotation=0
+t=7680 show rows attention=0 |SETUP MENU |2 Second | |Short: next  Hold: select |
+t=7720 led 00000000e2001b36ffffffff
+t=7780 led 00000000e200172effffffff
+t=7840 led 00000000e2001327ffffffff
+t=7900 led 00000000e2000f1fffffffff
+t=7940 apply backlight=60 rotation=0
+t=7940 show rows attention=0 |SETUP MENU |2 Second | |Short: next  Hold: select |
+t=7960 led 00000000e2000b17ffffffff

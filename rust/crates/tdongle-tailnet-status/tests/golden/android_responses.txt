@@ -1,0 +1,97 @@
+mode=adapter trial=0 active=1 wifi=joining rssi=unknown usb_enumerated=0 usb_transport_ready=0 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=adapter trial=0 active=1 wifi=joining rssi=unknown usb_enumerated=0 usb_transport_ready=1 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=adapter trial=0 active=1 wifi=joining rssi=unknown usb_enumerated=1 usb_transport_ready=0 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=adapter trial=0 active=1 wifi=joining rssi=unknown usb_enumerated=1 usb_transport_ready=1 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=adapter trial=0 active=1 wifi=up rssi=-61 usb_enumerated=0 usb_transport_ready=0 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=adapter trial=0 active=1 wifi=up rssi=-61 usb_enumerated=0 usb_transport_ready=1 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=adapter trial=0 active=1 wifi=up rssi=-61 usb_enumerated=1 usb_transport_ready=0 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=adapter trial=0 active=1 wifi=up rssi=-61 usb_enumerated=1 usb_transport_ready=1 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=tailnet trial=0 active=1 wifi=joining rssi=unknown usb_enumerated=0 usb_transport_ready=0 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=tailnet trial=0 active=1 wifi=joining rssi=unknown usb_enumerated=0 usb_transport_ready=1 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=tailnet trial=0 active=1 wifi=joining rssi=unknown usb_enumerated=1 usb_transport_ready=0 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=tailnet trial=0 active=1 wifi=joining rssi=unknown usb_enumerated=1 usb_transport_ready=1 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=tailnet trial=0 active=1 wifi=up rssi=-61 usb_enumerated=0 usb_transport_ready=0 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=tailnet trial=0 active=1 wifi=up rssi=-61 usb_enumerated=0 usb_transport_ready=1 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=tailnet trial=0 active=1 wifi=up rssi=-61 usb_enumerated=1 usb_transport_ready=0 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+mode=tailnet trial=0 active=1 wifi=up rssi=-61 usb_enumerated=1 usb_transport_ready=1 host_interface_ready=unknown internet=not_checked
+firmware=0.0.0-host
+uptime_ms=1234 free_heap=219640
+chip_temperature valid=1 current_tenths=553 peak_tenths=600 sampled_uptime_ms=0 errors=0
+chip_temperature_detail age_ms=0 samples=0 changed_uptime_ms=0 step_tenths=10
+done>
+

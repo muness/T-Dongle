@@ -1,0 +1,221 @@
+use super::*;
+use crate::report::{BootStatus, write_boot_status};
+use proptest::prelude::*;
+
+fn text<F: FnOnce(&mut std::string::String)>(f: F) -> std::string::String {
+    let mut s = std::string::String::new();
+    f(&mut s);
+    s
+}
+
+#[test]
+fn first_boot_is_normal() {
+    let mut rec = Record::EMPTY;
+    let boot = rec.begin_boot();
+    assert!(!boot.safe_mode);
+    assert_eq!(boot.previous.unstable_boots, 0);
+    assert_eq!(boot.previous.panic_text(), "");
+}
+
+#[test]
+fn power_on_garbage_is_an_empty_record() {
+    for fill in [0u32, 0xffff_ffff, 0xdead_beef, 0x7d6c_b007] {
+        let words = [fill; WORDS];
+        let mut rec = Record::from_words(&words);
+        assert!(!rec.begin_boot().safe_mode, "{fill:#x}");
+    }
+}
+
+#[test]
+fn two_unstable_boots_then_safe_mode_which_is_sticky() {
+    let mut rec = Record::EMPTY;
+    assert!(!rec.begin_boot().safe_mode); // boot 1, resets before stable
+    assert!(!rec.begin_boot().safe_mode); // boot 2
+    let third = rec.begin_boot();
+    assert!(third.safe_mode);
+    assert_eq!(third.previous.unstable_boots, 2);
+    rec.mark_stable(third.safe_mode); // safe mode stays up: no change
+    assert!(rec.begin_boot().safe_mode);
+    rec.leave_safe_mode(); // console `normal`
+    assert!(!rec.begin_boot().safe_mode);
+}
+
+#[test]
+fn a_stable_boot_forgets_history() {
+    let mut rec = Record::EMPTY;
+    let _ = rec.begin_boot();
+    let _ = rec.begin_boot();
+    rec.note_panic(format_args!("boom"));
+    let boot = rec.begin_boot();
+    assert!(boot.safe_mode);
+    let mut rec = Record::EMPTY;
+    let _ = rec.begin_boot();
+    rec.mark_stable(false);
+    let boot = rec.begin_boot();
+    assert!(!boot.safe_mode);
+    assert_eq!(boot.previous.unstable_boots, 0);
+    assert_eq!(boot.previous.panic_text(), "");
+}
+
+#[test]
+fn stage_and_panic_reach_the_next_boot_through_rtc_words() {
+    let mut rec = Record::EMPTY;
+    let _ = rec.begin_boot();
+    rec.note_stage(Stage::RadioInit);
+    rec.note_panic(format_args!("src/main.rs:{} {}", 412, "called `Result::unwrap()` on an `Err` value"));
+    let words = rec.to_words(); // the reset
+    let mut rec = Record::from_words(&words);
+    let boot = rec.begin_boot();
+    assert_eq!(boot.previous.stage, Some(Stage::RadioInit));
+    assert_eq!(boot.previous.panics, 1);
+    assert_eq!(boot.previous.panic_text(), "src/main.rs:412 called `Result::unwrap()` on an `Err` value");
+    assert_eq!(rec.stage(), Some(Stage::Boot));
+}
+
+#[test]
+fn long_panic_text_is_cut_on_a_character_boundary() {
+    let mut rec = Record::EMPTY;
+    let long: std::string::String = "ä".repeat(200);
+    rec.note_panic(format_args!("{long}"));
+    let boot = Record::from_words(&rec.to_words()).begin_boot();
+    let t = boot.previous.panic_text();
+    assert!(t.len() <= MSG_MAX && !t.is_empty());
+    assert!(t.chars().all(|c| c == 'ä'));
+}
+
+#[test]
+fn a_corrupt_length_or_text_is_dropped_not_trusted() {
+    let mut rec = Record::EMPTY;
+    rec.note_panic(format_args!("x"));
+    let mut words = rec.to_words();
+    words[1] = (words[1] & 0x00ff_ffff) | (250u32 << 24); // msg_len = 250 > MSG_MAX
+    assert_eq!(Record::from_words(&words), Record::EMPTY);
+    let mut words = rec.to_words();
+    words[2] = 0xffff_ffff; // invalid UTF-8 in the text (length 1 covers byte 8 only)
+    assert_eq!(Record::from_words(&words), Record::EMPTY);
+}
+
+#[test]
+fn boot_status_is_one_valid_json_line_with_escaped_text() {
+    let elf = [0xabu8; 32];
+    let s = BootStatus {
+        firmware: "0.3.0-rust",
+        elf: &elf,
+        reset_reason: "CoreMwdt0",
+        stage: "usb",
+        previous_stage: "radio_init",
+        rwdt: [0xB007_EE00, 1_234_567, 0, 0, 0],
+        supervisor: [10, 9, 20, 21],
+        rescue_state: "armed",
+        rescue_count: 1,
+        previous_hang: "thread",
+        previous_op: "joined_bss",
+        previous_panic: "src/a.rs:1 \"quote\" back\\slash \u{1} tab\t newline\n ünïcode",
+        safe_mode: true,
+        unstable_boots: 2,
+        uptime_ms: 1234,
+        free_heap: Some(99_000),
+    };
+    let line = text(|o| write_boot_status(o, &s).unwrap());
+    assert!(!line.contains('\n') && !line.contains('\r'));
+    let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(v["elf"], "ab".repeat(32));
+    assert_eq!(v["previous_panic"], s.previous_panic);
+    assert_eq!(v["safe_mode"], true);
+    assert_eq!(v["recovery"], true);
+    assert_eq!(v["previous_stage"], "radio_init");
+    assert_eq!(v["free_memory"], 99_000);
+    assert_eq!(v["rwdt"]["cfg0"], "0xb007ee00");
+    assert_eq!(v["rwdt"]["action"], 3);
+    assert_eq!(v["rwdt"]["enabled"], true);
+    assert_eq!(v["rwdt"]["flashboot"], false);
+    assert_eq!(v["rwdt"]["hold"], 1_234_567);
+    assert_eq!(v["sup"]["feeds"], 9);
+    assert_eq!(v["rescue"]["state"], "armed");
+    assert_eq!(v["rescue"]["count"], 1);
+}
+
+proptest! {
+    #[test]
+    fn any_words_decode_and_begin_boot_without_panicking(words in proptest::collection::vec(any::<u32>(), WORDS)) {
+        let words: [u32; WORDS] = words.try_into().unwrap();
+        let mut rec = Record::from_words(&words);
+        let boot = rec.begin_boot();
+        let _ = boot.previous.panic_text();
+        prop_assert_eq!(Record::from_words(&rec.to_words()), rec);
+    }
+
+    #[test]
+    fn panic_text_always_fits_and_round_trips(s in ".{0,300}") {
+        let mut rec = Record::EMPTY;
+        rec.note_panic(format_args!("{s}"));
+        let back = Record::from_words(&rec.to_words());
+        let boot = { let mut b = back; b.begin_boot() };
+        prop_assert!(boot.previous.panic_text().len() <= MSG_MAX);
+        prop_assert!(s.starts_with(boot.previous.panic_text()));
+    }
+}
+
+#[test]
+fn stage_bytes_round_trip() {
+    for s in Stage::ALL {
+        assert_eq!(Stage::from_byte(s as u8), Some(s));
+    }
+    assert_eq!(Stage::from_byte(7), None);
+}
+
+#[test]
+fn hang_and_op_tags_survive_a_reset_and_are_cleared_by_the_right_events() {
+    let mut rec = Record::EMPTY;
+    let _ = rec.begin_boot();
+    rec.note_op("esp_wifi_sta_get_ap_info");
+    rec.note_hang("console");
+    let mut after = Record::from_words(&rec.to_words());
+    let boot = after.begin_boot();
+    assert_eq!(boot.previous.op.as_str(), "esp_wifi_sta_get_ap_info");
+    assert_eq!(boot.previous.hang.as_str(), "console");
+    // the op is per boot; the hang is remembered until a stable boot
+    let boot = after.begin_boot();
+    assert_eq!(boot.previous.op.as_str(), "");
+    assert_eq!(boot.previous.hang.as_str(), "console");
+    after.mark_stable(false);
+    assert_eq!(after.begin_boot().previous.hang.as_str(), "");
+    // long tags are cut on a character boundary
+    let mut r = Record::EMPTY;
+    r.note_op(&"ä".repeat(40));
+    let b = Record::from_words(&r.to_words()).begin_boot();
+    assert!(b.previous.op.as_str().len() <= TAG_MAX && b.previous.op.as_str().chars().all(|c| c == 'ä'));
+}
+
+/// A restart the firmware asked for (setup, cancel, Done, mode, reboot, confirm-reset, the setup timeout) must not count: any number of them in a row, however quickly, never
+/// reaches safe mode; real failures still do, and a planned restart between them does not erase them.
+#[test]
+fn planned_restarts_never_make_safe_mode_but_real_failures_still_do() {
+    let mut rec = Record::EMPTY;
+    for _ in 0..10 {
+        let boot = rec.begin_boot();
+        assert!(!boot.safe_mode);
+        rec.planned_restart(); // dies within 30 s, on purpose
+    }
+    // two real failures (a watchdog or panic reset: nothing marks them planned) -> safe mode
+    let mut rec = Record::EMPTY;
+    assert!(!rec.begin_boot().safe_mode);
+    assert!(!rec.begin_boot().safe_mode);
+    assert!(rec.begin_boot().safe_mode);
+    // fail, planned, fail: the planned restart takes back only its own boot's count
+    let mut rec = Record::EMPTY;
+    assert!(!rec.begin_boot().safe_mode); // boot 1 fails (count 1)
+    assert!(!rec.begin_boot().safe_mode); // boot 2 is requested restart
+    rec.planned_restart(); // count back to 1
+    assert!(!rec.begin_boot().safe_mode); // boot 3 fails (count 2)
+    assert!(rec.begin_boot().safe_mode);
+    // the reported case: setup, then cancel ten seconds later, then setup again
+    let mut rec = Record::EMPTY;
+    let _ = rec.begin_boot(); // normal boot, up for 10 s
+    rec.planned_restart(); // `setup`
+    assert!(!rec.begin_boot().safe_mode);
+    rec.planned_restart(); // `cancel`
+    assert!(!rec.begin_boot().safe_mode);
+    rec.planned_restart();
+    assert!(!rec.begin_boot().safe_mode);
+}

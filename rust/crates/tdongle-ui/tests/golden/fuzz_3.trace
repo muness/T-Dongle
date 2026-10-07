@@ -1,0 +1,1598 @@
+t=1037 apply backlight=60 rotation=0
+t=1037 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=0 up_bytes=0 down_frames=0 up_frames=0 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=1 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=1037 led 00000000e2002c59ffffffff
+t=1098 led 00000000e2002851ffffffff
+t=1167 led 00000000e2002449ffffffff
+t=1228 led 00000000e2002041ffffffff
+t=1299 apply backlight=60 rotation=0
+t=1299 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=4364 up_bytes=925 down_frames=2 up_frames=2 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=1 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=1299 led 00000000e2001c38ffffffff
+t=1365 led 00000000e2001830ffffffff
+t=1416 led 00000000e2001429ffffffff
+t=1487 led 00000000e2001020ffffffff
+t=1549 apply backlight=60 rotation=0
+t=1549 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=10538 up_bytes=2293 down_frames=6 up_frames=6 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=1 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=1549 led 00000000e2000c18ffffffff
+t=1609 led 00000000e2000913ffffffff
+t=1677 led 00000000e2000e1cffffffff
+t=1731 led 00000000e2001123ffffffff
+t=1783 led 00000000e2001429ffffffff
+t=1803 apply backlight=60 rotation=0
+t=1803 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=13508 up_bytes=3366 down_frames=8 up_frames=8 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=1 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=1835 apply backlight=60 rotation=0
+t=1835 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=0 up_kbps=0 down_bytes=13508 up_bytes=3366 down_frames=8 up_frames=8 bars=0000000000000000000000000000000000000000000000000000000000000000 uptime_s=1 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=1835 led 00000000e2001830ffffffff
+t=1908 led 00000000e2001c39ffffffff
+t=1964 led 00000000e2002040ffffffff
+t=2042 led 00000000e200254affffffff
+t=2103 apply backlight=60 rotation=0
+t=2103 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=137 up_kbps=41 down_bytes=18354 up_bytes=5536 down_frames=13 up_frames=13 bars=0000000000000000000000000000000000000000000000000000000000000003 uptime_s=2 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=2103 led 00000000e2002952ffffffff
+t=2155 led 00000000e2002c58ffffffff
+t=2210 led 00000000e2002f5fffffffff
+t=2277 led 00000000e2003468ffffffff
+t=2330 led 00000000e200376fffffffff
+t=2364 apply backlight=60 rotation=0
+t=2364 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=137 up_kbps=41 down_bytes=20764 up_bytes=6159 down_frames=15 up_frames=15 bars=0000000000000000000000000000000000000000000000000000000000000003 uptime_s=2 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=2401 led 00000000e2003b77ffffffff
+t=2473 led 00000000e200376effffffff
+t=2545 led 00000000e2003265ffffffff
+t=2625 apply backlight=60 rotation=0
+t=2625 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=137 up_kbps=41 down_bytes=31187 up_bytes=7833 down_frames=20 up_frames=20 bars=0000000000000000000000000000000000000000000000000000000000000003 uptime_s=2 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=2625 led 00000000e2002d5bffffffff
+t=2666 apply backlight=60 rotation=0
+t=2666 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=137 up_kbps=41 down_bytes=31473 up_bytes=7986 down_frames=21 up_frames=21 bars=0000000000000000000000000000000000000000000000000000000000000003 uptime_s=2 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=2695 led 00000000e2002952ffffffff
+t=2768 led 00000000e2002449ffffffff
+t=2824 led 00000000e2002142ffffffff
+t=2875 led 00000000e2001d3bffffffff
+t=2927 apply backlight=60 rotation=0
+t=2927 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=137 up_kbps=41 down_bytes=32777 up_bytes=8656 down_frames=22 up_frames=22 bars=0000000000000000000000000000000000000000000000000000000000000003 uptime_s=2 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=2927 led 00000000e2001a35ffffffff
+t=2994 led 00000000e200162cffffffff
+t=3051 led 00000000e2001225ffffffff
+t=3105 led 00000000e2000f1effffffff
+t=3162 led 00000000e2000b17ffffffff
+t=3188 apply backlight=60 rotation=0
+t=3188 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=114 up_kbps=29 down_bytes=33875 up_bytes=9473 down_frames=24 up_frames=24 bars=0000000000000000000000000000000000000000000000000000000000000302 uptime_s=3 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=3221 led 00000000e2000a15ffffffff
+t=3277 led 00000000e2000e1cffffffff
+t=3345 led 00000000e2001224ffffffff
+t=3395 led 00000000e200152bffffffff
+t=3452 apply backlight=60 rotation=0
+t=3452 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=114 up_kbps=29 down_bytes=41213 up_bytes=11853 down_frames=29 up_frames=29 bars=0000000000000000000000000000000000000000000000000000000000000302 uptime_s=3 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=3452 led 00000000e2001932ffffffff
+t=3512 led 00000000e2001c39ffffffff
+t=3560 apply backlight=60 rotation=0
+t=3560 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=3 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=114 up_kbps=29 down_bytes=41213 up_bytes=11853 down_frames=29 up_frames=29 bars=0000000000000000000000000000000000000000000000000000000000000302 uptime_s=3 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=3581 led 00000000e2002142ffffffff
+t=3639 led 00000000e2002449ffffffff
+t=3707 led 00000000e2002952ffffffff
+t=3762 apply backlight=60 rotation=0
+t=3762 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=114 up_kbps=29 down_bytes=43435 up_bytes=12295 down_frames=30 up_frames=30 bars=0000000000000000000000000000000000000000000000000000000000000302 uptime_s=3 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=3762 led 00000000e2002c59ffffffff
+t=3841 led 00000000e2003163ffffffff
+t=3894 led 00000000e200356affffffff
+t=3950 led 00000000e2003871ffffffff
+t=4012 apply backlight=60 rotation=0
+t=4012 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=114 up_kbps=29 down_bytes=51138 up_bytes=12940 down_frames=33 up_frames=33 bars=0000000000000000000000000000000000000000000000000000000000000302 uptime_s=4 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=4012 led 00000000e2003b76ffffffff
+t=4062 led 00000000e2003870ffffffff
+t=4143 led 00000000e2003265ffffffff
+t=4209 led 00000000e2002e5dffffffff
+t=4269 apply backlight=60 rotation=0
+t=4269 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=181 up_kbps=38 down_bytes=58361 up_bytes=14653 down_frames=37 up_frames=37 bars=0000000000000000000000000000000000000000000000000000000000030204 uptime_s=4 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=4269 led 00000000e2002a55ffffffff
+t=4327 led 00000000e200274effffffff
+t=4399 led 00000000e2002245ffffffff
+t=4458 led 00000000e2001e3dffffffff
+t=4512 led 00000000e2001b37ffffffff
+t=4549 apply backlight=60 rotation=0
+t=4549 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=181 up_kbps=38 down_bytes=62095 up_bytes=15718 down_frames=39 up_frames=39 bars=0000000000000000000000000000000000000000000000000000000000030204 uptime_s=4 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=4586 led 00000000e200162dffffffff
+t=4640 led 00000000e2001327ffffffff
+t=4695 apply backlight=60 rotation=0
+t=4695 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=181 up_kbps=38 down_bytes=65864 up_bytes=16055 down_frames=41 up_frames=41 bars=0000000000000000000000000000000000000000000000000000000000030204 uptime_s=4 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=4695 led 00000000e2001020ffffffff
+t=4761 led 00000000e2000b17ffffffff
+t=4813 led 00000000e2000a14ffffffff
+t=4869 led 00000000e2000d1bffffffff
+t=4928 led 00000000e2001122ffffffff
+t=4949 apply backlight=60 rotation=0
+t=4949 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=181 up_kbps=38 down_bytes=66989 up_bytes=16802 down_frames=42 up_frames=42 bars=0000000000000000000000000000000000000000000000000000000000030204 uptime_s=4 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=4980 apply backlight=60 rotation=0
+t=4980 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=181 up_kbps=38 down_bytes=66989 up_bytes=16802 down_frames=42 up_frames=42 bars=0000000000000000000000000000000000000000000000000000000000030204 uptime_s=4 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=4980 led 00000000e2001429ffffffff
+t=5054 led 00000000e2001932ffffffff
+t=5105 led 00000000e2001c38ffffffff
+t=5163 led 00000000e2002040ffffffff
+t=5236 apply backlight=60 rotation=0
+t=5236 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=181 up_kbps=38 down_bytes=75456 up_bytes=18658 down_frames=47 up_frames=47 bars=0000000000000000000000000000000000000000000000000000000000030204 uptime_s=5 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=5236 led 00000000e2002449ffffffff
+t=5318 led 00000000e2002a54ffffffff
+t=5374 led 00000000e2002d5bffffffff
+t=5432 led 00000000e2003162ffffffff
+t=5487 apply backlight=60 rotation=0
+t=5487 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=141 up_kbps=39 down_bytes=79859 up_bytes=20713 down_frames=51 up_frames=51 bars=0000000000000000000000000000000000000000000000000000000003020403 uptime_s=5 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=5487 led 00000000e2003469ffffffff
+t=5553 led 00000000e2003871ffffffff
+t=5612 led 00000000e2003b76ffffffff
+t=5670 led 00000000e200376fffffffff
+t=5720 led 00000000e2003468ffffffff
+t=5758 apply backlight=60 rotation=0
+t=5758 show status same
+t=5793 led 00000000e2002f5fffffffff
+t=5850 led 00000000e2002c58ffffffff
+t=5920 led 00000000e200274fffffffff
+t=5979 led 00000000e2002448ffffffff
+t=6010 apply backlight=60 rotation=0
+t=6010 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=141 up_kbps=39 down_bytes=82660 up_bytes=22000 down_frames=53 up_frames=53 bars=0000000000000000000000000000000000000000000000000000000003020403 uptime_s=6 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=6039 led 00000000e2002040ffffffff
+t=6115 led 00000000e2001b36ffffffff
+t=6165 led 00000000e2001830ffffffff
+t=6226 led 00000000e2001428ffffffff
+t=6286 apply backlight=60 rotation=0
+t=6286 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=141 up_kbps=39 down_bytes=83395 up_bytes=23038 down_frames=55 up_frames=55 bars=0000000000000000000000000000000000000000000000000000000003020403 uptime_s=6 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=6286 led 00000000e2001020ffffffff
+t=6338 led 00000000e2000d1affffffff
+t=6389 led 00000000e2000913ffffffff
+t=6467 led 00000000e2000d1bffffffff
+t=6529 led 00000000e2001122ffffffff
+t=6542 apply backlight=60 rotation=0
+t=6542 show status bridge=1 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=49 up_kbps=22 down_bytes=86368 up_bytes=23736 down_frames=56 up_frames=56 bars=0000000000000000000000000000000000000000000000000000000302040301 uptime_s=6 wifi_up_s=0 connects=0 last_reason=0 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=6584 led 00000000e2001429ffffffff
+t=6649 led 00000000e2001831ffffffff
+t=6715 apply backlight=60 rotation=0
+t=6715 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=6715 led 00000000e2001d3affffffff
+t=6776 led 00000000e2002142ffffffff
+t=6844 led 00000000e200254affffffff
+t=6894 led 00000000e2002850ffffffff
+t=6946 led 00000000e2002b57ffffffff
+t=6977 apply backlight=60 rotation=0
+t=6977 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=7019 led 00000000e2003060ffffffff
+t=7095 led 00000000e200356affffffff
+t=7176 led 00000000e2003a74ffffffff
+t=7232 apply backlight=60 rotation=0
+t=7232 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=7232 led 00000000e2003973ffffffff
+t=7303 led 00000000e200356affffffff
+t=7362 led 00000000e2003163ffffffff
+t=7383 apply backlight=60 rotation=0
+t=7383 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=7415 led 00000000e2002e5cffffffff
+t=7465 led 00000000e2002b56ffffffff
+t=7521 led 00000000e200274fffffffff
+t=7576 led 00000000e2002448ffffffff
+t=7627 led 00000000e2002041ffffffff
+t=7639 apply backlight=60 rotation=0
+t=7639 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=7697 led 00000000e20000b4ffffffff
+t=7816 led 00000000e2000000ffffffff
+t=7900 apply backlight=60 rotation=0
+t=7900 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=7959 led 00000000e20000b4ffffffff
+t=8145 led 00000000e2000000ffffffff
+t=8155 apply backlight=60 rotation=0
+t=8155 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=8223 led 00000000e200002cffffffff
+t=8290 led 00000000e2000032ffffffff
+t=8353 led 00000000e2000036ffffffff
+t=8409 apply backlight=60 rotation=0
+t=8409 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=8409 led 00000000e200003affffffff
+t=8441 apply backlight=60 rotation=0
+t=8441 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=8492 led 00000000e2000040ffffffff
+t=8563 led 00000000e2000046ffffffff
+t=8627 led 00000000e200004bffffffff
+t=8698 apply backlight=60 rotation=0
+t=8698 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=8698 led 00000000e2000051ffffffff
+t=8754 led 00000000e2000055ffffffff
+t=8807 led 00000000e2000058ffffffff
+t=8862 led 00000000e200005dffffffff
+t=8918 led 00000000e2000061ffffffff
+t=8949 apply backlight=60 rotation=0
+t=8949 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=8986 led 00000000e2000066ffffffff
+t=9065 led 00000000e200006cffffffff
+t=9135 apply backlight=60 rotation=0
+t=9135 show rows attention=0 |SETUP MENU |3 Net3 | |Short: next  Hold: select |
+t=9135 led 00000000e2000072ffffffff
+t=9205 led 00000000e2000077ffffffff
+t=9274 led 00000000e200007cffffffff
+t=9327 led 00000000e2000080ffffffff
+t=9382 led 00000000e2000084ffffffff
+t=9406 apply backlight=60 rotation=0
+t=9406 show rows attention=0 |SETUP MENU |3 Net3 | |Short: next  Hold: select |
+t=9435 led 00000000e2000088ffffffff
+t=9489 led 00000000e200008dffffffff
+t=9544 led 00000000e2000090ffffffff
+t=9600 led 00000000e2000095ffffffff
+t=9653 led 00000000e2000099ffffffff
+t=9692 apply backlight=60 rotation=0
+t=9692 show rows attention=0 |SETUP MENU |3 Net3 | |Short: next  Hold: select |
+t=9708 led 00000000e200009dffffffff
+t=9782 led 00000000e20000a3ffffffff
+t=9836 led 00000000e20000a7ffffffff
+t=9889 led 00000000e20000abffffffff
+t=9961 apply backlight=60 rotation=0
+t=9961 show rows attention=0 |SETUP MENU |3 Net3 | |Short: next  Hold: select |
+t=9961 led 00000000e20000b0ffffffff
+t=10016 led 00000000e20000b2ffffffff
+t=10027 apply backlight=60 rotation=0
+t=10027 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=10102 led 00000000e20000acffffffff
+t=10178 led 00000000e20000a5ffffffff
+t=10244 led 00000000e20000a0ffffffff
+t=10291 apply backlight=60 rotation=0
+t=10291 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=10317 led 00000000e200009bffffffff
+t=10382 led 00000000e2000096ffffffff
+t=10435 led 00000000e2000092ffffffff
+t=10495 led 00000000e200008dffffffff
+t=10559 apply backlight=60 rotation=0
+t=10559 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=10559 led 00000000e2000088ffffffff
+t=10627 led 00000000e2000084ffffffff
+t=10691 led 00000000e200007fffffffff
+t=10760 led 00000000e200007affffffff
+t=10810 apply backlight=60 rotation=0
+t=10810 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=10810 led 00000000e2000075ffffffff
+t=10873 led 00000000e2000071ffffffff
+t=10957 led 00000000e200006bffffffff
+t=11029 led 00000000e2000065ffffffff
+t=11064 apply backlight=60 rotation=0
+t=11064 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=11087 led 00000000e2000061ffffffff
+t=11140 led 00000000e200005dffffffff
+t=11198 led 00000000e2000058ffffffff
+t=11254 led 00000000e2000054ffffffff
+t=11304 led 00000000e2000050ffffffff
+t=11321 apply backlight=60 rotation=0
+t=11321 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=11358 led 00000000e200004cffffffff
+t=11427 led 00000000e2000047ffffffff
+t=11510 led 00000000e2000040ffffffff
+t=11564 led 00000000e200003cffffffff
+t=11586 apply backlight=60 rotation=0
+t=11586 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=11624 led 00000000e2000038ffffffff
+t=11678 led 00000000e2000034ffffffff
+t=11756 led 00000000e200002effffffff
+t=11813 led 00000000e200002affffffff
+t=11836 apply backlight=60 rotation=0
+t=11836 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=11891 led 00000000e2000024ffffffff
+t=11947 led 00000000e200001fffffffff
+t=12025 led 00000000e200001dffffffff
+t=12076 led 00000000e2000021ffffffff
+t=12099 apply backlight=60 rotation=0
+t=12099 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=12132 led 00000000e2000026ffffffff
+t=12201 led 00000000e200002bffffffff
+t=12272 led 00000000e2000030ffffffff
+t=12351 apply backlight=60 rotation=0
+t=12351 show rows attention=0 |SETUP MENU |4 Net4 | |Short: next  Hold: select |
+t=12351 led 00000000e2000036ffffffff
+t=12403 apply backlight=60 rotation=0
+t=12403 show status bridge=1 wifi=0 saved_wifi=1 recovery=1 starting=0 installing=0 usb=0 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=0 login=0 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=162 up_kbps=22 down_bytes=185987 up_bytes=47107 down_frames=116 up_frames=116 bars=0000000000000000000000000000000000000000000003020403010302040103 uptime_s=12 wifi_up_s=0 connects=0 last_reason=15 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=12403 led 00000000e200003affffffff
+t=12403 cmd use 4
+t=12465 led 00000000e200003effffffff
+t=12516 led 00000000e2000043ffffffff
+t=12576 led 00000000e2000047ffffffff
+t=12637 led 00000000e200004cffffffff
+t=12698 led 00000000e2000051ffffffff
+t=12779 led 00000000e2000056ffffffff
+t=12854 led 00000000e200005cffffffff
+t=12915 led 00000000e2000061ffffffff
+t=12988 led 00000000e2000067ffffffff
+t=13051 led 00000000e200006bffffffff
+t=13103 led 00000000e200006fffffffff
+t=13159 led 00000000e2000073ffffffff
+t=13210 led 00000000e2000078ffffffff
+t=13268 led 00000000e200007cffffffff
+t=13337 led 00000000e2000081ffffffff
+t=13392 led 00000000e2000085ffffffff
+t=13460 led 00000000e200008affffffff
+t=13510 led 00000000e200008effffffff
+t=13578 led 00000000e2000093ffffffff
+t=13653 led 00000000e2000099ffffffff
+t=13721 led 00000000e200009effffffff
+t=13773 led 00000000e20000a2ffffffff
+t=13845 led 00000000e20000a8ffffffff
+t=13898 led 00000000e20000acffffffff
+t=13970 led 00000000e20000b1ffffffff
+t=14082 led 00000000e20000adffffffff
+t=14154 led 00000000e20000a8ffffffff
+t=14208 led 00000000e20000a3ffffffff
+t=14281 led 00000000e200009effffffff
+t=14341 led 00000000e2000099ffffffff
+t=14398 led 00000000e2000095ffffffff
+t=14453 led 00000000e2000091ffffffff
+t=14521 led 00000000e200008bffffffff
+t=14592 led 00000000e2000086ffffffff
+t=14662 led 00000000e2000081ffffffff
+t=14715 led 00000000e200007dffffffff
+t=14778 led 00000000e2000078ffffffff
+t=14843 led 00000000e2000073ffffffff
+t=14927 led 00000000e200006dffffffff
+t=14991 led 00000000e2000068ffffffff
+t=15049 led 00000000e2000064ffffffff
+t=15107 led 00000000e200005fffffffff
+t=15167 led 00000000e200005bffffffff
+t=15223 led 00000000e2000056ffffffff
+t=15285 led 00000000e2000051ffffffff
+t=15343 led 00000000e200004dffffffff
+t=15398 led 00000000e2000049ffffffff
+t=15474 led 00000000e2000043ffffffff
+t=15546 led 00000000e200003effffffff
+t=15602 led 00000000e2000039ffffffff
+t=15653 led 00000000e2000036ffffffff
+t=15714 led 00000000e2000031ffffffff
+t=15779 led 00000000e200002cffffffff
+t=15847 led 00000000e2000027ffffffff
+t=15924 led 00000000e2000021ffffffff
+t=15988 led 00000000e200001cffffffff
+t=16042 led 00000000e200001fffffffff
+t=16116 led 00000000e2000024ffffffff
+t=16166 led 00000000e2000028ffffffff
+t=16236 led 00000000e200002dffffffff
+t=16295 led 00000000e2000032ffffffff
+t=16375 led 00000000e2000038ffffffff
+t=16451 led 00000000e200003effffffff
+t=16510 led 00000000e2000042ffffffff
+t=16561 led 00000000e2000046ffffffff
+t=16622 led 00000000e200004affffffff
+t=16677 led 00000000e200004fffffffff
+t=16751 led 00000000e2000054ffffffff
+t=16819 led 00000000e200005affffffff
+t=16888 led 00000000e200005fffffffff
+t=16966 led 00000000e2000064ffffffff
+t=17032 led 00000000e2000069ffffffff
+t=17091 led 00000000e200006effffffff
+t=17168 led 00000000e2000074ffffffff
+t=17227 led 00000000e2000078ffffffff
+t=17284 led 00000000e200007dffffffff
+t=17354 led 00000000e2000082ffffffff
+t=17425 led 00000000e2000088ffffffff
+t=17497 led 00000000e200008dffffffff
+t=17568 led 00000000e2000092ffffffff
+t=17627 led 00000000e2000097ffffffff
+t=17684 led 00000000e200009cffffffff
+t=17738 led 00000000e200009fffffffff
+t=17801 led 00000000e20000a4ffffffff
+t=17861 led 00000000e20000a9ffffffff
+t=17946 led 00000000e20000afffffffff
+t=18008 led 00000000e20000b3ffffffff
+t=18067 led 00000000e20000aeffffffff
+t=18117 led 00000000e20000aaffffffff
+t=18177 led 00000000e20000a5ffffffff
+t=18239 led 00000000e20000a1ffffffff
+t=18301 led 00000000e200009cffffffff
+t=18356 led 00000000e2000098ffffffff
+t=18356 cmd use 1
+t=18417 led 00000000e2000094ffffffff
+t=18494 led 00000000e200008dffffffff
+t=18544 led 00000000e200008affffffff
+t=18609 led 00000000e2000085ffffffff
+t=18669 led 00000000e2000081ffffffff
+t=18732 led 00000000e200007cffffffff
+t=18817 led 00000000e2000075ffffffff
+t=18880 led 00000000e2000070ffffffff
+t=18936 led 00000000e200006cffffffff
+t=18989 led 00000000e2000068ffffffff
+t=19048 led 00000000e2000064ffffffff
+t=19105 led 00000000e2000060ffffffff
+t=19157 led 00000000e200005bffffffff
+t=19210 led 00000000e2000057ffffffff
+t=19286 led 00000000e2000051ffffffff
+t=19365 led 00000000e200004cffffffff
+t=19425 led 00000000e2000047ffffffff
+t=19491 led 00000000e2000042ffffffff
+t=19553 led 00000000e200003effffffff
+t=19608 led 00000000e2000039ffffffff
+t=19665 led 00000000e2000035ffffffff
+t=19715 led 00000000e2000031ffffffff
+t=19780 led 00000000e200002cffffffff
+t=19841 led 00000000e2000028ffffffff
+t=19897 led 00000000e2000024ffffffff
+t=19963 led 00000000e200001effffffff
+t=20013 led 00000000e200001cffffffff
+t=20091 led 00000000e2000022ffffffff
+t=20167 led 00000000e2000028ffffffff
+t=20228 led 00000000e200002dffffffff
+t=20281 led 00000000e2000031ffffffff
+t=20344 led 00000000e2000035ffffffff
+t=20412 led 00000000e200003bffffffff
+t=20471 led 00000000e200003fffffffff
+t=20529 led 00000000e2000043ffffffff
+t=20592 led 00000000e2000048ffffffff
+t=20654 led 00000000e200004dffffffff
+t=20710 led 00000000e2000051ffffffff
+t=20775 led 00000000e2000056ffffffff
+t=20840 led 00000000e200005bffffffff
+t=20901 led 00000000e2000060ffffffff
+t=20968 led 00000000e2000065ffffffff
+t=21034 led 00000000e200006affffffff
+t=21105 led 00000000e200006fffffffff
+t=21166 led 00000000e2000074ffffffff
+t=21246 led 00000000e200007affffffff
+t=21314 led 00000000e200007fffffffff
+t=21388 led 00000000e2000085ffffffff
+t=21457 led 00000000e200008affffffff
+t=21523 led 00000000e200008fffffffff
+t=21585 led 00000000e2000094ffffffff
+t=21640 led 00000000e2000098ffffffff
+t=21710 led 00000000e200009dffffffff
+t=21786 led 00000000e20000a3ffffffff
+t=21862 led 00000000e20000a9ffffffff
+t=21927 led 00000000e20000aeffffffff
+t=22006 led 00000000e20000b3ffffffff
+t=22070 led 00000000e20000aeffffffff
+t=22125 led 00000000e20000aaffffffff
+t=22193 led 00000000e20000a5ffffffff
+t=22267 led 00000000e200009fffffffff
+t=22334 led 00000000e200009affffffff
+t=22388 led 00000000e2000096ffffffff
+t=22456 led 00000000e2000090ffffffff
+t=22526 led 00000000e200008bffffffff
+t=22593 led 00000000e2000086ffffffff
+t=22654 led 00000000e2000081ffffffff
+t=22720 led 00000000e200007cffffffff
+t=22774 led 00000000e2000078ffffffff
+t=22837 led 00000000e2000074ffffffff
+t=22900 led 00000000e200006fffffffff
+t=22970 led 00000000e2000069ffffffff
+t=23025 led 00000000e2000065ffffffff
+t=23098 led 00000000e2000060ffffffff
+t=23172 led 00000000e200005bffffffff
+t=23225 led 00000000e2000056ffffffff
+t=23282 led 00000000e2000052ffffffff
+t=23356 led 00000000e200004cffffffff
+t=23430 led 00000000e2000047ffffffff
+t=23484 led 00000000e2000043ffffffff
+t=23542 led 00000000e200003effffffff
+t=23595 led 00000000e200003affffffff
+t=23662 led 00000000e2000035ffffffff
+t=23716 led 00000000e2000031ffffffff
+t=23783 led 00000000e200002cffffffff
+t=23849 led 00000000e2000027ffffffff
+t=23910 led 00000000e2000022ffffffff
+t=23966 led 00000000e200001effffffff
+t=24106 led 00000000e2000024ffffffff
+t=24172 led 00000000e2000028ffffffff
+t=24224 led 00000000e200002dffffffff
+t=24294 led 00000000e2000032ffffffff
+t=24353 led 00000000e2000036ffffffff
+t=24418 led 00000000e200003bffffffff
+t=24479 led 00000000e2000040ffffffff
+t=24546 led 00000000e2000045ffffffff
+t=24607 led 00000000e200004affffffff
+t=24658 led 00000000e200004dffffffff
+t=24714 led 00000000e2000051ffffffff
+t=24785 led 00000000e2000057ffffffff
+t=24848 led 00000000e200005cffffffff
+t=24906 led 00000000e2000060ffffffff
+t=24967 led 00000000e2000064ffffffff
+t=25042 led 00000000e200006bffffffff
+t=25121 led 00000000e2000070ffffffff
+t=25180 led 00000000e2000075ffffffff
+t=25244 led 00000000e200007affffffff
+t=25296 led 00000000e200007effffffff
+t=25359 led 00000000e2000083ffffffff
+t=25441 led 00000000e2000088ffffffff
+t=25495 led 00000000e200008dffffffff
+t=25548 led 00000000e2000091ffffffff
+t=25609 led 00000000e2000095ffffffff
+t=25683 led 00000000e200009bffffffff
+t=25747 led 00000000e20000a0ffffffff
+t=25812 led 00000000e20000a5ffffffff
+t=25870 led 00000000e20000aaffffffff
+t=25940 led 00000000e20000afffffffff
+t=26019 led 00000000e20000b1ffffffff
+t=26073 led 00000000e20000aeffffffff
+t=26139 led 00000000e20000a9ffffffff
+t=26193 led 00000000e20000a5ffffffff
+t=26251 led 00000000e20000a0ffffffff
+t=26331 led 00000000e200009affffffff
+t=26404 led 00000000e2000094ffffffff
+t=26474 led 00000000e2000090ffffffff
+t=26536 led 00000000e200008bffffffff
+t=26609 led 00000000e2000085ffffffff
+t=26676 led 00000000e2000080ffffffff
+t=26743 led 00000000e200007bffffffff
+t=26803 led 00000000e2000076ffffffff
+t=26857 led 00000000e2000072ffffffff
+t=26919 led 00000000e200006effffffff
+t=26974 led 00000000e2000069ffffffff
+t=27039 led 00000000e2000064ffffffff
+t=27119 led 00000000e200005effffffff
+t=27193 led 00000000e2000058ffffffff
+t=27266 led 00000000e2000053ffffffff
+t=27318 led 00000000e200004fffffffff
+t=27385 led 00000000e200004affffffff
+t=27460 led 00000000e2000045ffffffff
+t=27529 led 00000000e200003fffffffff
+t=27585 led 00000000e200003bffffffff
+t=27661 led 00000000e2000035ffffffff
+t=27722 led 00000000e2000030ffffffff
+t=27774 led 00000000e200002dffffffff
+t=27827 led 00000000e2000028ffffffff
+t=27891 led 00000000e2000024ffffffff
+t=27945 led 00000000e200001fffffffff
+t=28007 led 00000000e200001cffffffff
+t=28082 led 00000000e2000021ffffffff
+t=28153 led 00000000e2000027ffffffff
+t=28209 led 00000000e200002bffffffff
+t=28260 led 00000000e200002fffffffff
+t=28324 led 00000000e2000034ffffffff
+t=28386 led 00000000e2000039ffffffff
+t=28447 led 00000000e200003effffffff
+t=28519 led 00000000e2000043ffffffff
+t=28577 led 00000000e2000048ffffffff
+t=28645 led 00000000e200004cffffffff
+t=28717 led 00000000e2000052ffffffff
+t=28769 led 00000000e2000056ffffffff
+t=28825 led 00000000e200005affffffff
+t=28886 led 00000000e200005fffffffff
+t=28956 led 00000000e2000064ffffffff
+t=29010 led 00000000e2000068ffffffff
+t=29076 led 00000000e200006dffffffff
+t=29136 led 00000000e2000072ffffffff
+t=29202 led 00000000e2000077ffffffff
+t=29281 led 00000000e200007cffffffff
+t=29340 led 00000000e2000081ffffffff
+t=29416 led 00000000e2000087ffffffff
+t=29467 led 00000000e200008bffffffff
+t=29547 led 00000000e2000091ffffffff
+t=29621 led 00000000e2000097ffffffff
+t=29699 led 00000000e200009cffffffff
+t=29755 led 00000000e20000a0ffffffff
+t=29814 led 00000000e20000a5ffffffff
+t=29887 led 00000000e20000aaffffffff
+t=29937 led 00000000e20000afffffffff
+t=30018 led 00000000e20000b2ffffffff
+t=30070 led 00000000e20000aeffffffff
+t=30148 led 00000000e20000a8ffffffff
+t=30209 led 00000000e20000a3ffffffff
+t=30275 led 00000000e200009effffffff
+t=30337 led 00000000e2000099ffffffff
+t=30396 led 00000000e2000095ffffffff
+t=30475 led 00000000e200008fffffffff
+t=30528 led 00000000e200008bffffffff
+t=30581 led 00000000e2000087ffffffff
+t=30640 led 00000000e2000083ffffffff
+t=30701 led 00000000e200007effffffff
+t=30757 led 00000000e200007affffffff
+t=30835 led 00000000e2000074ffffffff
+t=30913 led 00000000e200006effffffff
+t=30977 led 00000000e2000069ffffffff
+t=30989 apply backlight=60 rotation=0
+t=30989 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=31027 led 00000000e275b475ffffffff
+t=31077 led 00000000e270b470ffffffff
+t=31145 led 00000000e269b469ffffffff
+t=31201 led 00000000e263b463ffffffff
+t=31250 apply backlight=60 rotation=0
+t=31250 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=31270 led 00000000e25cb45cffffffff
+t=31331 led 00000000e256b456ffffffff
+t=31381 led 00000000e251b451ffffffff
+t=31447 led 00000000e24bb44bffffffff
+t=31513 apply backlight=60 rotation=0
+t=31513 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=31513 led 00000000e244b444ffffffff
+t=31593 led 00000000e23cb43cffffffff
+t=31643 led 00000000e237b437ffffffff
+t=31720 led 00000000e22fb42fffffffff
+t=31772 apply backlight=60 rotation=0
+t=31772 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=31772 led 00000000e22ab42affffffff
+t=31834 led 00000000e224b424ffffffff
+t=31888 led 00000000e21fb41fffffffff
+t=31951 led 00000000e218b418ffffffff
+t=32015 led 00000000e212b412ffffffff
+t=32028 apply backlight=60 rotation=0
+t=32028 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=32077 led 00000000e20cb40cffffffff
+t=32141 led 00000000e205b405ffffffff
+t=32195 led 00000000e200b400ffffffff
+t=32285 apply backlight=60 rotation=0
+t=32285 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=32556 apply backlight=60 rotation=0
+t=32556 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=32813 apply backlight=60 rotation=0
+t=32813 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=32844 led 00000000e27b6600ffffffff
+t=32901 led 00000000e2746100ffffffff
+t=32958 led 00000000e26d5b00ffffffff
+t=33018 led 00000000e2655400ffffffff
+t=33074 apply backlight=60 rotation=0
+t=33074 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=33074 led 00000000e25e4e00ffffffff
+t=33147 led 00000000e2554700ffffffff
+t=33205 led 00000000e24d4000ffffffff
+t=33259 led 00000000e2473b00ffffffff
+t=33322 led 00000000e23e3400ffffffff
+t=33360 apply backlight=60 rotation=0
+t=33360 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=33391 led 00000000e2430000ffffffff
+t=33444 led 00000000e2480000ffffffff
+t=33500 led 00000000e24e0000ffffffff
+t=33577 led 00000000e2560000ffffffff
+t=33627 apply backlight=60 rotation=0
+t=33627 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=33627 led 00000000e25b0000ffffffff
+t=33677 led 00000000e2600000ffffffff
+t=33732 led 00000000e2650000ffffffff
+t=33794 led 00000000e26c0000ffffffff
+t=33877 apply backlight=60 rotation=0
+t=33877 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=33877 led 00000000e2740000ffffffff
+t=33954 led 00000000e27c0000ffffffff
+t=34020 led 00000000e2830000ffffffff
+t=34070 led 00000000e2880000ffffffff
+t=34139 apply backlight=60 rotation=0
+t=34139 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=34139 led 00000000e28f0000ffffffff
+t=34196 led 00000000e2940000ffffffff
+t=34251 led 00000000e29a0000ffffffff
+t=34304 led 00000000e29f0000ffffffff
+t=34361 led 00000000e2a50000ffffffff
+t=34389 apply backlight=60 rotation=0
+t=34389 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=34417 led 00000000e2ab0000ffffffff
+t=34474 led 00000000e2b10000ffffffff
+t=34581 led 00000000e2ab0000ffffffff
+t=34640 apply backlight=60 rotation=0
+t=34640 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=34640 led 00000000e2a50000ffffffff
+t=34699 led 00000000e29f0000ffffffff
+t=34752 led 00000000e2990000ffffffff
+t=34806 led 00000000e2940000ffffffff
+t=34865 led 00000000e28e0000ffffffff
+t=34902 apply backlight=60 rotation=0
+t=34902 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=34924 led 00000000e2880000ffffffff
+t=34980 led 00000000e2830000ffffffff
+t=35047 led 00000000e27c0000ffffffff
+t=35101 led 00000000e2760000ffffffff
+t=35162 apply backlight=60 rotation=0
+t=35162 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=35162 led 00000000e2700000ffffffff
+t=35245 led 00000000e2680000ffffffff
+t=35304 led 00000000e2620000ffffffff
+t=35375 led 00000000e25b0000ffffffff
+t=35426 apply backlight=60 rotation=0
+t=35426 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=35426 led 00000000e2560000ffffffff
+t=35509 led 00000000e24d0000ffffffff
+t=35580 led 00000000e2460000ffffffff
+t=35634 led 00000000e2400000ffffffff
+t=35701 apply backlight=60 rotation=0
+t=35701 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=35701 led 00000000e2390000ffffffff
+t=35786 led 00000000e2310000ffffffff
+t=35840 led 00000000e22b0000ffffffff
+t=35893 led 00000000e2260000ffffffff
+t=35964 apply backlight=60 rotation=0
+t=35964 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=35964 led 00000000e21f0000ffffffff
+t=36026 led 00000000e21e0000ffffffff
+t=36095 led 00000000e2250000ffffffff
+t=36161 led 00000000e22c0000ffffffff
+t=36211 led 00000000e2310000ffffffff
+t=36238 apply backlight=60 rotation=0
+t=36238 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=36293 led 00000000e2390000ffffffff
+t=36351 led 00000000e23f0000ffffffff
+t=36407 led 00000000e2450000ffffffff
+t=36472 led 00000000e24b0000ffffffff
+t=36496 apply backlight=60 rotation=0
+t=36496 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=36527 led 00000000e2510000ffffffff
+t=36586 led 00000000e2560000ffffffff
+t=36640 led 00000000e25c0000ffffffff
+t=36696 led 00000000e2620000ffffffff
+t=36769 apply backlight=60 rotation=0
+t=36769 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=36769 led 00000000e2690000ffffffff
+t=36825 led 00000000e26f0000ffffffff
+t=36896 led 00000000e2760000ffffffff
+t=36950 led 00000000e27c0000ffffffff
+t=37015 led 00000000e2820000ffffffff
+t=37048 apply backlight=60 rotation=0
+t=37048 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=37065 led 00000000e2870000ffffffff
+t=37121 led 00000000e28d0000ffffffff
+t=37180 led 00000000e2930000ffffffff
+t=37238 led 00000000e2990000ffffffff
+t=37312 apply backlight=60 rotation=0
+t=37312 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=37312 led 00000000e2a00000ffffffff
+t=37399 led 00000000e2a90000ffffffff
+t=37449 led 00000000e2ae0000ffffffff
+t=37511 led 00000000e2b20000ffffffff
+t=37561 led 00000000e2ad0000ffffffff
+t=37585 apply backlight=60 rotation=0
+t=37585 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=37611 led 00000000e2a80000ffffffff
+t=37663 led 00000000e2a30000ffffffff
+t=37734 led 00000000e29c0000ffffffff
+t=37803 led 00000000e2940000ffffffff
+t=37857 apply backlight=60 rotation=0
+t=37857 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=37857 led 00000000e28f0000ffffffff
+t=37910 led 00000000e28a0000ffffffff
+t=37968 led 00000000e2840000ffffffff
+t=38020 led 00000000e27f0000ffffffff
+t=38098 led 00000000e2770000ffffffff
+t=38128 apply backlight=60 rotation=0
+t=38128 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=38163 led 00000000e2700000ffffffff
+t=38229 led 00000000e2690000ffffffff
+t=38299 led 00000000e2620000ffffffff
+t=38353 led 00000000e25d0000ffffffff
+t=38379 apply backlight=60 rotation=0
+t=38379 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=38424 led 00000000e2560000ffffffff
+t=38483 led 00000000e2500000ffffffff
+t=38538 led 00000000e24a0000ffffffff
+t=38600 led 00000000e2440000ffffffff
+t=38630 apply backlight=60 rotation=0
+t=38630 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=38651 led 00000000e23f0000ffffffff
+t=38722 led 00000000e2370000ffffffff
+t=38790 led 00000000e2310000ffffffff
+t=38843 led 00000000e22b0000ffffffff
+t=38886 apply backlight=60 rotation=0
+t=38886 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=38920 led 00000000e2240000ffffffff
+t=38960 apply backlight=60 rotation=0
+t=38960 show rows attention=0 |SETUP MENU |Factory reset... | |Short: next  Hold: select |
+t=38972 led 00000000e21f0000ffffffff
+t=39108 led 00000000e2260000ffffffff
+t=39184 led 00000000e22e0000ffffffff
+t=39220 apply backlight=60 rotation=0
+t=39220 show rows attention=0 |SETUP MENU |Factory reset... | |Short: next  Hold: select |
+t=39238 led 00000000e2340000ffffffff
+t=39288 led 00000000e2390000ffffffff
+t=39359 led 00000000e2400000ffffffff
+t=39414 led 00000000e2450000ffffffff
+t=39467 led 00000000e24a0000ffffffff
+t=39478 apply backlight=60 rotation=0
+t=39478 show rows attention=0 |SETUP MENU |Factory reset... | |Short: next  Hold: select |
+t=39525 led 00000000e2510000ffffffff
+t=39582 led 00000000e2560000ffffffff
+t=39653 apply backlight=60 rotation=0
+t=39653 show rows attention=0 |SETUP MENU |Exit menu | |Short: next  Hold: select |
+t=39653 led 00000000e25d0000ffffffff
+t=39722 led 00000000e2640000ffffffff
+t=39776 led 00000000e26a0000ffffffff
+t=39834 led 00000000e2700000ffffffff
+t=39889 led 00000000e2750000ffffffff
+t=39912 apply backlight=60 rotation=0
+t=39912 show rows attention=0 |SETUP MENU |Exit menu | |Short: next  Hold: select |
+t=39962 led 00000000e27c0000ffffffff
+t=40024 led 00000000e2830000ffffffff
+t=40106 led 00000000e28b0000ffffffff
+t=40160 led 00000000e2910000ffffffff
+t=40192 apply backlight=60 rotation=0
+t=40192 show rows attention=0 |SETUP MENU |Exit menu | |Short: next  Hold: select |
+t=40211 led 00000000e2960000ffffffff
+t=40273 led 00000000e29c0000ffffffff
+t=40324 led 00000000e2a10000ffffffff
+t=40389 led 00000000e2a80000ffffffff
+t=40445 apply backlight=60 rotation=0
+t=40445 show rows attention=0 |SETUP MENU |Exit menu | |Short: next  Hold: select |
+t=40445 led 00000000e2ae0000ffffffff
+t=40529 led 00000000e2b00000ffffffff
+t=40582 led 00000000e2ab0000ffffffff
+t=40636 led 00000000e2a50000ffffffff
+t=40699 apply backlight=60 rotation=0
+t=40699 show rows attention=0 |SETUP MENU |Exit menu | |Short: next  Hold: select |
+t=40699 led 00000000e29f0000ffffffff
+t=40759 led 00000000e2990000ffffffff
+t=40832 led 00000000e2920000ffffffff
+t=40896 led 00000000e28b0000ffffffff
+t=40947 led 00000000e2860000ffffffff
+t=40975 apply backlight=60 rotation=0
+t=40975 show rows attention=0 |SETUP MENU |Exit menu | |Short: next  Hold: select |
+t=40998 led 00000000e2810000ffffffff
+t=41058 led 00000000e27b0000ffffffff
+t=41115 led 00000000e2750000ffffffff
+t=41175 led 00000000e26f0000ffffffff
+t=41260 apply backlight=60 rotation=0
+t=41260 show rows attention=0 |SETUP MENU |Exit menu | |Short: next  Hold: select |
+t=41260 led 00000000e2670000ffffffff
+t=41326 led 00000000e2600000ffffffff
+t=41387 led 00000000e2590000ffffffff
+t=41443 led 00000000e2540000ffffffff
+t=41497 led 00000000e24f0000ffffffff
+t=41533 apply backlight=60 rotation=0
+t=41533 show rows attention=0 |SETUP MENU |Exit menu | |Short: next  Hold: select |
+t=41564 led 00000000e2480000ffffffff
+t=41617 led 00000000e2420000ffffffff
+t=41684 led 00000000e23c0000ffffffff
+t=41748 apply backlight=60 rotation=0
+t=41748 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=592 down_kbps=160 up_kbps=48 down_bytes=600940 up_bytes=163748 down_frames=391 up_frames=391 bars=0000000000000000000000030204030103020401030202030302050302040204 uptime_s=41 wifi_up_s=0 connects=0 last_reason=201 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=41748 led 00000000e2350000ffffffff
+t=41815 led 00000000e22e0000ffffffff
+t=41882 led 00000000e2270000ffffffff
+t=41936 led 00000000e2220000ffffffff
+t=41994 led 00000000e21c0000ffffffff
+t=42028 apply backlight=60 rotation=0
+t=42028 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=592 down_kbps=160 up_kbps=48 down_bytes=608464 up_bytes=165499 down_frames=394 up_frames=394 bars=0000000000000000000000030204030103020401030202030302050302040204 uptime_s=42 wifi_up_s=0 connects=0 last_reason=201 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=42065 led 00000000e2220000ffffffff
+t=42135 led 00000000e2290000ffffffff
+t=42208 led 00000000e2300000ffffffff
+t=42284 apply backlight=60 rotation=0
+t=42284 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=591 down_kbps=160 up_kbps=48 down_bytes=613447 up_bytes=166054 down_frames=396 up_frames=396 bars=0000000000000000000000030204030103020401030202030302050302040204 uptime_s=42 wifi_up_s=0 connects=0 last_reason=201 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=42284 led 00000000e2380000ffffffff
+t=42336 led 00000000e23e0000ffffffff
+t=42402 led 00000000e2440000ffffffff
+t=42469 led 00000000e24b0000ffffffff
+t=42521 led 00000000e2500000ffffffff
+t=42558 apply backlight=60 rotation=0
+t=42558 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=591 down_kbps=160 up_kbps=48 down_bytes=618368 up_bytes=168665 down_frames=400 up_frames=400 bars=0000000000000000000000030204030103020401030202030302050302040204 uptime_s=42 wifi_up_s=0 connects=0 last_reason=201 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=42600 led 00000000e2580000ffffffff
+t=42663 led 00000000e25f0000ffffffff
+t=42726 led 00000000e2650000ffffffff
+t=42801 led 00000000e26c0000ffffffff
+t=42830 apply backlight=60 rotation=0
+t=42830 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=591 down_kbps=128 up_kbps=36 down_bytes=618368 up_bytes=168665 down_frames=400 up_frames=400 bars=0000000000000000000003020403010302040103020203030205030204020403 uptime_s=42 wifi_up_s=0 connects=0 last_reason=201 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=42881 apply backlight=60 rotation=0
+t=42881 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=591 down_kbps=128 up_kbps=36 down_bytes=620595 up_bytes=168939 down_frames=401 up_frames=401 bars=0000000000000000000003020403010302040103020203030205030204020403 uptime_s=42 wifi_up_s=0 connects=0 last_reason=201 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=42881 led 00000000e2750000ffffffff
+t=42942 led 00000000e27b0000ffffffff
+t=43003 led 00000000e2810000ffffffff
+t=43058 led 00000000e2860000ffffffff
+t=43125 led 00000000e28d0000ffffffff
+t=43158 apply backlight=60 rotation=0
+t=43158 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=591 down_kbps=128 up_kbps=36 down_bytes=623720 up_bytes=170175 down_frames=403 up_frames=403 bars=0000000000000000000003020403010302040103020203030205030204020403 uptime_s=43 wifi_up_s=0 connects=0 last_reason=201 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=43181 led 00000000e2930000ffffffff
+t=43247 led 00000000e2990000ffffffff
+t=43305 led 00000000e2a00000ffffffff
+t=43379 led 00000000e2a70000ffffffff
+t=43415 apply backlight=60 rotation=0
+t=43415 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=590 down_kbps=128 up_kbps=36 down_bytes=628475 up_bytes=170239 down_frames=405 up_frames=405 bars=0000000000000000000003020403010302040103020203030205030204020403 uptime_s=43 wifi_up_s=0 connects=0 last_reason=201 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=43448 led 00000000e2ae0000ffffffff
+t=43514 apply backlight=60 rotation=0
+t=43514 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=3 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=590 down_kbps=128 up_kbps=36 down_bytes=629989 up_bytes=170612 down_frames=406 up_frames=406 bars=0000000000000000000003020403010302040103020203030205030204020403 uptime_s=43 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=43514 led 00000000e2b10000ffffffff
+t=43594 led 00000000e2aa0000ffffffff
+t=43653 led 00000000e2a40000ffffffff
+t=43718 led 00000000e29d0000ffffffff
+t=43768 apply backlight=60 rotation=0
+t=43768 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=3 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=590 down_kbps=128 up_kbps=36 down_bytes=639215 up_bytes=171413 down_frames=410 up_frames=410 bars=0000000000000000000003020403010302040103020203030205030204020403 uptime_s=43 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=43768 led 00000000e2980000ffffffff
+t=43805 apply backlight=60 rotation=0
+t=43805 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=590 down_kbps=128 up_kbps=36 down_bytes=639215 up_bytes=171413 down_frames=410 up_frames=410 bars=0000000000000000000003020403010302040103020203030205030204020403 uptime_s=43 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=43821 led 00000000e2920000ffffffff
+t=43886 led 00000000e28c0000ffffffff
+t=43942 led 00000000e2860000ffffffff
+t=44014 led 00000000e27f0000ffffffff
+t=44067 apply backlight=60 rotation=0
+t=44067 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=590 down_kbps=173 up_kbps=24 down_bytes=645213 up_bytes=172517 down_frames=413 up_frames=413 bars=0000000000000000000302040301030204010302020303020503020402040303 uptime_s=44 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=44067 led 00000000e27a0000ffffffff
+t=44117 led 00000000e2750000ffffffff
+t=44173 led 00000000e26f0000ffffffff
+t=44223 led 00000000e26a0000ffffffff
+t=44283 led 00000000e2640000ffffffff
+t=44322 apply backlight=60 rotation=0
+t=44322 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=589 down_kbps=173 up_kbps=24 down_bytes=648579 up_bytes=172933 down_frames=416 up_frames=416 bars=0000000000000000000302040301030204010302020303020503020402040303 uptime_s=44 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=44348 led 00000000e25d0000ffffffff
+t=44433 led 00000000e2550000ffffffff
+t=44485 led 00000000e24f0000ffffffff
+t=44550 led 00000000e2490000ffffffff
+t=44576 apply backlight=60 rotation=0
+t=44576 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=589 down_kbps=173 up_kbps=24 down_bytes=651312 up_bytes=173375 down_frames=418 up_frames=418 bars=0000000000000000000302040301030204010302020303020503020402040303 uptime_s=44 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=44610 led 00000000e2430000ffffffff
+t=44676 led 00000000e23c0000ffffffff
+t=44729 led 00000000e2370000ffffffff
+t=44792 led 00000000e2300000ffffffff
+t=44846 apply backlight=60 rotation=0
+t=44846 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=589 down_kbps=173 up_kbps=24 down_bytes=652667 up_bytes=173523 down_frames=420 up_frames=420 bars=0000000000000000000302040301030204010302020303020503020402040303 uptime_s=44 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=44846 led 00000000e22b0000ffffffff
+t=44916 led 00000000e2240000ffffffff
+t=44975 led 00000000e21e0000ffffffff
+t=45039 led 00000000e21f0000ffffffff
+t=45115 apply backlight=60 rotation=0
+t=45115 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=0 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=589 down_kbps=71 up_kbps=11 down_bytes=654562 up_bytes=173974 down_frames=421 up_frames=421 bars=0000000000000000030204030103020401030202030302050302040204030301 uptime_s=45 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=45115 led 00000000e2270000ffffffff
+t=45165 led 00000000e22c0000ffffffff
+t=45216 led 00000000e2310000ffffffff
+t=45235 apply backlight=60 rotation=0
+t=45235 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=589 down_kbps=71 up_kbps=11 down_bytes=654562 up_bytes=173974 down_frames=421 up_frames=421 bars=0000000000000000030204030103020401030202030302050302040204030301 uptime_s=45 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=45268 led 00000000e2370000ffffffff
+t=45325 led 00000000e23c0000ffffffff
+t=45381 led 00000000e2420000ffffffff
+t=45439 led 00000000e2480000ffffffff
+t=45501 apply backlight=60 rotation=0
+t=45501 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=588 down_kbps=71 up_kbps=11 down_bytes=656490 up_bytes=175463 down_frames=424 up_frames=424 bars=0000000000000000030204030103020401030202030302050302040204030301 uptime_s=45 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=45501 led 00000000e24e0000ffffffff
+t=45551 led 00000000e2530000ffffffff
+t=45608 led 00000000e2590000ffffffff
+t=45685 led 00000000e2610000ffffffff
+t=45745 led 00000000e2670000ffffffff
+t=45769 apply backlight=60 rotation=0
+t=45769 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=588 down_kbps=71 up_kbps=11 down_bytes=663089 up_bytes=177004 down_frames=427 up_frames=427 bars=0000000000000000030204030103020401030202030302050302040204030301 uptime_s=45 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=45802 led 00000000e26c0000ffffffff
+t=45868 led 00000000e2730000ffffffff
+t=45936 led 00000000e27a0000ffffffff
+t=45986 led 00000000e27f0000ffffffff
+t=46051 apply backlight=60 rotation=0
+t=46051 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=588 down_kbps=71 up_kbps=11 down_bytes=665615 up_bytes=177694 down_frames=428 up_frames=428 bars=0000000000000000030204030103020401030202030302050302040204030301 uptime_s=46 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=46051 led 00000000e2860000ffffffff
+t=46116 led 00000000e28c0000ffffffff
+t=46194 led 00000000e2940000ffffffff
+t=46253 led 00000000e29a0000ffffffff
+t=46321 apply backlight=60 rotation=0
+t=46321 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=587 down_kbps=87 up_kbps=29 down_bytes=667795 up_bytes=178423 down_frames=430 up_frames=430 bars=0000000000000003020403010302040103020203030205030204020403030102 uptime_s=46 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=46321 led 00000000e2a10000ffffffff
+t=46372 led 00000000e2a60000ffffffff
+t=46431 led 00000000e2ac0000ffffffff
+t=46485 led 00000000e2b10000ffffffff
+t=46555 led 00000000e2ae0000ffffffff
+t=46583 apply backlight=60 rotation=0
+t=46583 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=587 down_kbps=87 up_kbps=29 down_bytes=670104 up_bytes=180181 down_frames=433 up_frames=433 bars=0000000000000003020403010302040103020203030205030204020403030102 uptime_s=46 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=46632 led 00000000e2a60000ffffffff
+t=46688 led 00000000e2a00000ffffffff
+t=46742 led 00000000e29b0000ffffffff
+t=46816 led 00000000e2930000ffffffff
+t=46834 apply backlight=60 rotation=0
+t=46834 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=587 down_kbps=87 up_kbps=29 down_bytes=676754 up_bytes=181264 down_frames=437 up_frames=437 bars=0000000000000003020403010302040103020203030205030204020403030102 uptime_s=46 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=46901 led 00000000e28b0000ffffffff
+t=46965 led 00000000e2840000ffffffff
+t=47016 led 00000000e27f0000ffffffff
+t=47077 led 00000000e2790000ffffffff
+t=47113 apply backlight=60 rotation=0
+t=47113 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=587 down_kbps=87 up_kbps=29 down_bytes=682662 up_bytes=182375 down_frames=440 up_frames=440 bars=0000000000000003020403010302040103020203030205030204020403030102 uptime_s=47 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=47132 led 00000000e2730000ffffffff
+t=47197 led 00000000e26d0000ffffffff
+t=47275 led 00000000e2640000ffffffff
+t=47328 led 00000000e2600000ffffffff
+t=47372 apply backlight=60 rotation=0
+t=47372 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=586 down_kbps=138 up_kbps=35 down_bytes=685947 up_bytes=183149 down_frames=442 up_frames=442 bars=0000000000000302040301030204010302020303020503020402040303010203 uptime_s=47 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=47399 led 00000000e2580000ffffffff
+t=47458 led 00000000e2520000ffffffff
+t=47523 led 00000000e24c0000ffffffff
+t=47573 led 00000000e2470000ffffffff
+t=47643 apply backlight=60 rotation=0
+t=47643 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=586 down_kbps=138 up_kbps=35 down_bytes=692713 up_bytes=184621 down_frames=445 up_frames=445 bars=0000000000000302040301030204010302020303020503020402040303010203 uptime_s=47 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=47643 led 00000000e2400000ffffffff
+t=47693 led 00000000e23b0000ffffffff
+t=47751 led 00000000e2340000ffffffff
+t=47802 led 00000000e2300000ffffffff
+t=47860 led 00000000e22a0000ffffffff
+t=47899 apply backlight=60 rotation=0
+t=47899 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=586 down_kbps=138 up_kbps=35 down_bytes=696227 up_bytes=186697 down_frames=448 up_frames=448 bars=0000000000000302040301030204010302020303020503020402040303010203 uptime_s=47 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=47911 led 00000000e2240000ffffffff
+t=47972 led 00000000e21f0000ffffffff
+t=48048 led 00000000e2200000ffffffff
+t=48127 led 00000000e2280000ffffffff
+t=48164 apply backlight=60 rotation=0
+t=48164 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=586 down_kbps=138 up_kbps=35 down_bytes=699059 up_bytes=187854 down_frames=451 up_frames=451 bars=0000000000000302040301030204010302020303020503020402040303010203 uptime_s=48 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=48193 led 00000000e22f0000ffffffff
+t=48269 led 00000000e2370000ffffffff
+t=48346 led 00000000e23e0000ffffffff
+t=48397 led 00000000e2430000ffffffff
+t=48422 apply backlight=60 rotation=0
+t=48422 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=585 down_kbps=125 up_kbps=37 down_bytes=702457 up_bytes=188023 down_frames=454 up_frames=454 bars=0000000000030204030103020401030202030302050302040204030301020303 uptime_s=48 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=48479 led 00000000e24c0000ffffffff
+t=48550 led 00000000e2530000ffffffff
+t=48607 led 00000000e2590000ffffffff
+t=48686 apply backlight=60 rotation=0
+t=48686 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=585 down_kbps=125 up_kbps=37 down_bytes=706529 up_bytes=188619 down_frames=457 up_frames=457 bars=0000000000030204030103020401030202030302050302040204030301020303 uptime_s=48 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=48686 led 00000000e2610000ffffffff
+t=48742 led 00000000e2670000ffffffff
+t=48795 led 00000000e26c0000ffffffff
+t=48845 led 00000000e2710000ffffffff
+t=48932 led 00000000e27a0000ffffffff
+t=48945 apply backlight=60 rotation=0
+t=48945 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=585 down_kbps=125 up_kbps=37 down_bytes=712738 up_bytes=190235 down_frames=460 up_frames=460 bars=0000000000030204030103020401030202030302050302040204030301020303 uptime_s=48 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=48992 led 00000000e2800000ffffffff
+t=49061 led 00000000e2870000ffffffff
+t=49127 led 00000000e28d0000ffffffff
+t=49184 led 00000000e2930000ffffffff
+t=49212 apply backlight=60 rotation=0
+t=49212 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=585 down_kbps=125 up_kbps=37 down_bytes=717247 up_bytes=192241 down_frames=463 up_frames=463 bars=0000000000030204030103020401030202030302050302040204030301020303 uptime_s=49 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=49235 led 00000000e2990000ffffffff
+t=49295 led 00000000e29e0000ffffffff
+t=49356 led 00000000e2a50000ffffffff
+t=49417 led 00000000e2ab0000ffffffff
+t=49467 apply backlight=60 rotation=0
+t=49467 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=584 down_kbps=152 up_kbps=39 down_bytes=722344 up_bytes=193151 down_frames=465 up_frames=465 bars=0000000003020403010302040103020203030205030204020403030102030303 uptime_s=49 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=49467 led 00000000e2b00000ffffffff
+t=49522 led 00000000e2b10000ffffffff
+t=49589 led 00000000e2aa0000ffffffff
+t=49656 led 00000000e2a30000ffffffff
+t=49721 apply backlight=60 rotation=0
+t=49721 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=584 down_kbps=152 up_kbps=39 down_bytes=725236 up_bytes=193600 down_frames=466 up_frames=466 bars=0000000003020403010302040103020203030205030204020403030102030303 uptime_s=49 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=49721 led 00000000e29d0000ffffffff
+t=49777 led 00000000e2970000ffffffff
+t=49851 led 00000000e2900000ffffffff
+t=49917 led 00000000e2890000ffffffff
+t=49974 apply backlight=60 rotation=0
+t=49974 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=584 down_kbps=152 up_kbps=39 down_bytes=727174 up_bytes=193688 down_frames=467 up_frames=467 bars=0000000003020403010302040103020203030205030204020403030102030303 uptime_s=49 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=49974 led 00000000e2840000ffffffff
+t=50025 led 00000000e27e0000ffffffff
+t=50079 led 00000000e2790000ffffffff
+t=50136 led 00000000e2730000ffffffff
+t=50196 led 00000000e26d0000ffffffff
+t=50238 apply backlight=60 rotation=0
+t=50238 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=584 down_kbps=152 up_kbps=39 down_bytes=732203 up_bytes=194807 down_frames=470 up_frames=470 bars=0000000003020403010302040103020203030205030204020403030102030303 uptime_s=50 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=50248 led 00000000e2670000ffffffff
+t=50306 led 00000000e2620000ffffffff
+t=50356 led 00000000e25d0000ffffffff
+t=50417 led 00000000e2560000ffffffff
+t=50478 led 00000000e2500000ffffffff
+t=50515 apply backlight=60 rotation=0
+t=50515 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=583 down_kbps=146 up_kbps=26 down_bytes=741471 up_bytes=196570 down_frames=475 up_frames=475 bars=0000000302040301030204010302020303020503020402040303010203030303 uptime_s=50 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=50537 led 00000000e24a0000ffffffff
+t=50592 led 00000000e2450000ffffffff
+t=50643 led 00000000e2400000ffffffff
+t=50705 led 00000000e2390000ffffffff
+t=50768 apply backlight=60 rotation=0
+t=50768 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=583 down_kbps=146 up_kbps=26 down_bytes=744630 up_bytes=197667 down_frames=479 up_frames=479 bars=0000000302040301030204010302020303020503020402040303010203030303 uptime_s=50 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=50768 led 00000000e2330000ffffffff
+t=50842 led 00000000e22b0000ffffffff
+t=50914 led 00000000e2240000ffffffff
+t=50976 led 00000000e21e0000ffffffff
+t=51035 apply backlight=60 rotation=0
+t=51035 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=583 down_kbps=146 up_kbps=26 down_bytes=750518 up_bytes=199080 down_frames=482 up_frames=482 bars=0000000302040301030204010302020303020503020402040303010203030303 uptime_s=51 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=51035 led 00000000e21f0000ffffffff
+t=51095 led 00000000e2250000ffffffff
+t=51165 led 00000000e22c0000ffffffff
+t=51226 led 00000000e2320000ffffffff
+t=51295 apply backlight=60 rotation=0
+t=51295 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=582 down_kbps=146 up_kbps=26 down_bytes=754298 up_bytes=200075 down_frames=484 up_frames=484 bars=0000000302040301030204010302020303020503020402040303010203030303 uptime_s=51 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=51295 led 00000000e2390000ffffffff
+t=51358 led 00000000e2400000ffffffff
+t=51417 led 00000000e2450000ffffffff
+t=51483 led 00000000e24c0000ffffffff
+t=51535 led 00000000e2510000ffffffff
+t=51557 apply backlight=60 rotation=0
+t=51557 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=2 login=0 failed=0 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=582 down_kbps=162 up_kbps=38 down_bytes=762655 up_bytes=201619 down_frames=489 up_frames=489 bars=0000030204030103020401030202030302050302040204030301020303030304 uptime_s=51 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=51602 led 00000000e2580000ffffffff
+t=51665 led 00000000e25f0000ffffffff
+t=51732 led 00000000e2650000ffffffff
+t=51788 led 00000000e26b0000ffffffff
+t=51830 apply backlight=60 rotation=0
+t=51830 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=582 down_kbps=162 up_kbps=38 down_bytes=764913 up_bytes=201729 down_frames=490 up_frames=490 bars=0000030204030103020401030202030302050302040204030301020303030304 uptime_s=51 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=51853 led 00000000e2720000ffffffff
+t=51927 led 00000000e2790000ffffffff
+t=51991 led 00000000e2800000ffffffff
+t=52044 led 00000000e2850000ffffffff
+t=52109 apply backlight=60 rotation=0
+t=52109 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=582 down_kbps=162 up_kbps=38 down_bytes=765476 up_bytes=202293 down_frames=491 up_frames=491 bars=0000030204030103020401030202030302050302040204030301020303030304 uptime_s=52 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=52109 led 00000000e28b0000ffffffff
+t=52183 led 00000000e2930000ffffffff
+t=52237 led 00000000e2990000ffffffff
+t=52296 led 00000000e29e0000ffffffff
+t=52370 apply backlight=60 rotation=0
+t=52370 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=581 down_kbps=162 up_kbps=38 down_bytes=766103 up_bytes=202486 down_frames=492 up_frames=492 bars=0000030204030103020401030202030302050302040204030301020303030304 uptime_s=52 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=52370 led 00000000e2a60000ffffffff
+t=52451 led 00000000e2ae0000ffffffff
+t=52506 led 00000000e2b30000ffffffff
+t=52579 led 00000000e2ab0000ffffffff
+t=52624 apply backlight=60 rotation=0
+t=52624 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=581 down_kbps=88 up_kbps=15 down_bytes=774411 up_bytes=203648 down_frames=496 up_frames=496 bars=0003020403010302040103020203030205030204020403030102030303030402 uptime_s=52 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=52648 led 00000000e2a40000ffffffff
+t=52719 led 00000000e29d0000ffffffff
+t=52777 led 00000000e2970000ffffffff
+t=52845 led 00000000e2900000ffffffff
+t=52880 apply backlight=60 rotation=0
+t=52880 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=581 down_kbps=88 up_kbps=15 down_bytes=777184 up_bytes=204048 down_frames=498 up_frames=498 bars=0003020403010302040103020203030205030204020403030102030303030402 uptime_s=52 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=52898 led 00000000e28b0000ffffffff
+t=52965 led 00000000e2840000ffffffff
+t=53017 led 00000000e27f0000ffffffff
+t=53085 led 00000000e2780000ffffffff
+t=53138 apply backlight=60 rotation=0
+t=53138 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=581 down_kbps=88 up_kbps=15 down_bytes=780836 up_bytes=204556 down_frames=500 up_frames=500 bars=0003020403010302040103020203030205030204020403030102030303030402 uptime_s=53 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=53138 led 00000000e2730000ffffffff
+t=53199 led 00000000e26c0000ffffffff
+t=53273 led 00000000e2650000ffffffff
+t=53351 led 00000000e25d0000ffffffff
+t=53414 apply backlight=60 rotation=0
+t=53414 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=580 down_kbps=88 up_kbps=15 down_bytes=782387 up_bytes=205781 down_frames=502 up_frames=502 bars=0003020403010302040103020203030205030204020403030102030303030402 uptime_s=53 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=53414 led 00000000e2560000ffffffff
+t=53473 led 00000000e2510000ffffffff
+t=53538 led 00000000e24a0000ffffffff
+t=53606 led 00000000e2430000ffffffff
+t=53658 led 00000000e23e0000ffffffff
+t=53681 apply backlight=60 rotation=0
+t=53681 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=580 down_kbps=72 up_kbps=16 down_bytes=784007 up_bytes=205801 down_frames=503 up_frames=503 bars=0302040301030204010302020303020503020402040303010203030303040201 uptime_s=53 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=53720 led 00000000e2380000ffffffff
+t=53797 led 00000000e2300000ffffffff
+t=53850 led 00000000e22b0000ffffffff
+t=53917 led 00000000e2240000ffffffff
+t=53950 apply backlight=60 rotation=0
+t=53950 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=580 down_kbps=72 up_kbps=16 down_bytes=791050 up_bytes=208330 down_frames=507 up_frames=507 bars=0302040301030204010302020303020503020402040303010203030303040201 uptime_s=53 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=53984 led 00000000e21d0000ffffffff
+t=54050 led 00000000e2210000ffffffff
+t=54113 led 00000000e2270000ffffffff
+t=54169 led 00000000e22d0000ffffffff
+t=54207 apply backlight=60 rotation=0
+t=54207 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=580 down_kbps=72 up_kbps=16 down_bytes=798348 up_bytes=209827 down_frames=510 up_frames=510 bars=0302040301030204010302020303020503020402040303010203030303040201 uptime_s=54 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=54240 led 00000000e2340000ffffffff
+t=54293 led 00000000e2390000ffffffff
+t=54346 led 00000000e23e0000ffffffff
+t=54427 led 00000000e2470000ffffffff
+t=54478 apply backlight=60 rotation=0
+t=54478 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=579 down_kbps=72 up_kbps=16 down_bytes=800106 up_bytes=210134 down_frames=511 up_frames=511 bars=0302040301030204010302020303020503020402040303010203030303040201 uptime_s=54 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=54478 led 00000000e24c0000ffffffff
+t=54529 led 00000000e2510000ffffffff
+t=54599 led 00000000e2580000ffffffff
+t=54650 led 00000000e25d0000ffffffff
+t=54724 led 00000000e2640000ffffffff
+t=54739 apply backlight=60 rotation=0
+t=54739 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=579 down_kbps=163 up_kbps=45 down_bytes=805602 up_bytes=211767 down_frames=515 up_frames=515 bars=0204030103020401030202030302050302040204030301020303030304020104 uptime_s=54 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=54797 led 00000000e26c0000ffffffff
+t=54857 led 00000000e2720000ffffffff
+t=54907 led 00000000e2780000ffffffff
+t=54960 led 00000000e27c0000ffffffff
+t=55000 apply backlight=60 rotation=0
+t=55000 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=579 down_kbps=163 up_kbps=45 down_bytes=812659 up_bytes=213716 down_frames=520 up_frames=520 bars=0204030103020401030202030302050302040204030301020303030304020104 uptime_s=55 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=55011 led 00000000e2810000ffffffff
+t=55074 led 00000000e2880000ffffffff
+t=55126 led 00000000e28d0000ffffffff
+t=55187 led 00000000e2940000ffffffff
+t=55260 apply backlight=60 rotation=0
+t=55260 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=578 down_kbps=163 up_kbps=45 down_bytes=818706 up_bytes=215354 down_frames=524 up_frames=524 bars=0204030103020401030202030302050302040204030301020303030304020104 uptime_s=55 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=55260 led 00000000e29b0000ffffffff
+t=55310 led 00000000e2a00000ffffffff
+t=55360 led 00000000e2a50000ffffffff
+t=55416 led 00000000e2aa0000ffffffff
+t=55475 led 00000000e2b10000ffffffff
+t=55515 apply backlight=60 rotation=0
+t=55515 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=578 down_kbps=163 up_kbps=45 down_bytes=821956 up_bytes=215801 down_frames=526 up_frames=526 bars=0204030103020401030202030302050302040204030301020303030304020104 uptime_s=55 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=55549 led 00000000e2ae0000ffffffff
+t=55603 led 00000000e2a90000ffffffff
+t=55661 led 00000000e2a30000ffffffff
+t=55743 led 00000000e29b0000ffffffff
+t=55765 apply backlight=60 rotation=0
+t=55765 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=578 down_kbps=178 up_kbps=37 down_bytes=828490 up_bytes=216617 down_frames=529 up_frames=529 bars=0403010302040103020203030205030204020403030102030303030402010404 uptime_s=55 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=55798 led 00000000e2950000ffffffff
+t=55866 led 00000000e28e0000ffffffff
+t=55954 led 00000000e2850000ffffffff
+t=56010 led 00000000e27f0000ffffffff
+t=56033 apply backlight=60 rotation=0
+t=56033 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=578 down_kbps=178 up_kbps=37 down_bytes=837384 up_bytes=219244 down_frames=535 up_frames=535 bars=0403010302040103020203030205030204020403030102030303030402010404 uptime_s=56 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=56066 led 00000000e27a0000ffffffff
+t=56131 led 00000000e2730000ffffffff
+t=56189 led 00000000e26e0000ffffffff
+t=56257 led 00000000e2670000ffffffff
+t=56287 apply backlight=60 rotation=0
+t=56287 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=577 down_kbps=178 up_kbps=37 down_bytes=841762 up_bytes=220550 down_frames=538 up_frames=538 bars=0403010302040103020203030205030204020403030102030303030402010404 uptime_s=56 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=56324 led 00000000e2600000ffffffff
+t=56388 led 00000000e2590000ffffffff
+t=56441 led 00000000e2540000ffffffff
+t=56505 led 00000000e24d0000ffffffff
+t=56539 apply backlight=60 rotation=0
+t=56539 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=577 down_kbps=178 up_kbps=37 down_bytes=848093 up_bytes=222370 down_frames=542 up_frames=542 bars=0403010302040103020203030205030204020403030102030303030402010404 uptime_s=56 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=56565 led 00000000e2480000ffffffff
+t=56649 led 00000000e23f0000ffffffff
+t=56706 led 00000000e2390000ffffffff
+t=56767 led 00000000e2330000ffffffff
+t=56798 apply backlight=60 rotation=0
+t=56798 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=577 down_kbps=167 up_kbps=55 down_bytes=850138 up_bytes=223779 down_frames=544 up_frames=544 bars=0301030204010302020303020503020402040303010203030303040201040404 uptime_s=56 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=56824 led 00000000e22d0000ffffffff
+t=56877 led 00000000e2280000ffffffff
+t=56955 led 00000000e2200000ffffffff
+t=57016 led 00000000e21d0000ffffffff
+t=57050 apply backlight=60 rotation=0
+t=57050 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=577 down_kbps=167 up_kbps=55 down_bytes=855787 up_bytes=224592 down_frames=547 up_frames=547 bars=0301030204010302020303020503020402040303010203030303040201040404 uptime_s=57 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=57066 led 00000000e2220000ffffffff
+t=57116 led 00000000e2270000ffffffff
+t=57201 led 00000000e2300000ffffffff
+t=57255 led 00000000e2350000ffffffff
+t=57302 apply backlight=60 rotation=0
+t=57302 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=576 down_kbps=167 up_kbps=55 down_bytes=861098 up_bytes=225579 down_frames=550 up_frames=550 bars=0301030204010302020303020503020402040303010203030303040201040404 uptime_s=57 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=57315 led 00000000e23c0000ffffffff
+t=57394 led 00000000e2430000ffffffff
+t=57455 led 00000000e24a0000ffffffff
+t=57521 led 00000000e2500000ffffffff
+t=57581 apply backlight=60 rotation=0
+t=57581 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=576 down_kbps=167 up_kbps=55 down_bytes=861402 up_bytes=225831 down_frames=551 up_frames=551 bars=0301030204010302020303020503020402040303010203030303040201040404 uptime_s=57 wifi_up_s=0 connects=0 last_reason=8 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=57581 led 00000000e2560000ffffffff
+t=57662 led 00000000e25e0000ffffffff
+t=57716 led 00000000e2640000ffffffff
+t=57795 led 00000000e26c0000ffffffff
+t=57844 apply backlight=60 rotation=0
+t=57844 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=1 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=576 down_kbps=160 up_kbps=39 down_bytes=871093 up_bytes=228891 down_frames=557 up_frames=557 bars=0103020401030202030302050302040204030301020303030304020104040403 uptime_s=57 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=57856 led 00000000e2720000ffffffff
+t=57916 apply backlight=60 rotation=0
+t=57916 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=576 down_kbps=160 up_kbps=39 down_bytes=871093 up_bytes=228891 down_frames=557 up_frames=557 bars=0103020401030202030302050302040204030301020303030304020104040403 uptime_s=57 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=57916 led 00000000e2780000ffffffff
+t=57968 led 00000000e27d0000ffffffff
+t=58040 led 00000000e2850000ffffffff
+t=58105 led 00000000e28b0000ffffffff
+t=58181 apply backlight=60 rotation=0
+t=58181 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=576 down_kbps=160 up_kbps=39 down_bytes=874323 up_bytes=229299 down_frames=559 up_frames=559 bars=0103020401030202030302050302040204030301020303030304020104040403 uptime_s=58 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=58181 led 00000000e2930000ffffffff
+t=58234 led 00000000e2980000ffffffff
+t=58287 led 00000000e29e0000ffffffff
+t=58337 led 00000000e2a30000ffffffff
+t=58391 led 00000000e2a80000ffffffff
+t=58436 apply backlight=60 rotation=0
+t=58436 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=575 down_kbps=160 up_kbps=39 down_bytes=883239 up_bytes=230638 down_frames=564 up_frames=564 bars=0103020401030202030302050302040204030301020303030304020104040403 uptime_s=58 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=58447 led 00000000e2ae0000ffffffff
+t=58522 led 00000000e2b10000ffffffff
+t=58607 led 00000000e2a80000ffffffff
+t=58672 led 00000000e2a20000ffffffff
+t=58708 apply backlight=60 rotation=0
+t=58708 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=575 down_kbps=160 up_kbps=39 down_bytes=885748 up_bytes=231534 down_frames=566 up_frames=566 bars=0103020401030202030302050302040204030301020303030304020104040403 uptime_s=58 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=58747 led 00000000e29a0000ffffffff
+t=58814 led 00000000e2930000ffffffff
+t=58875 led 00000000e28d0000ffffffff
+t=58934 led 00000000e2870000ffffffff
+t=58981 apply backlight=60 rotation=0
+t=58981 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=575 down_kbps=108 up_kbps=20 down_bytes=886576 up_bytes=231762 down_frames=567 up_frames=567 bars=0302040103020203030205030204020403030102030303030402010404040302 uptime_s=58 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=59011 led 00000000e27f0000ffffffff
+t=59062 led 00000000e27a0000ffffffff
+t=59119 led 00000000e2750000ffffffff
+t=59169 led 00000000e2700000ffffffff
+t=59225 led 00000000e26a0000ffffffff
+t=59244 apply backlight=60 rotation=0
+t=59244 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=575 down_kbps=108 up_kbps=20 down_bytes=887245 up_bytes=232166 down_frames=568 up_frames=568 bars=0302040103020203030205030204020403030102030303030402010404040302 uptime_s=59 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=59290 led 00000000e2630000ffffffff
+t=59369 led 00000000e25b0000ffffffff
+t=59422 led 00000000e2560000ffffffff
+t=59483 led 00000000e2500000ffffffff
+t=59519 apply backlight=60 rotation=0
+t=59519 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=108 up_kbps=20 down_bytes=891669 up_bytes=233074 down_frames=570 up_frames=570 bars=0302040103020203030205030204020403030102030303030402010404040302 uptime_s=59 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=59551 led 00000000e2544600ffffffff
+t=59619 led 00000000e24c3f00ffffffff
+t=59671 led 00000000e2453900ffffffff
+t=59731 led 00000000e23e3300ffffffff
+t=59792 apply backlight=60 rotation=0
+t=59792 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=108 up_kbps=20 down_bytes=897324 up_bytes=235120 down_frames=573 up_frames=573 bars=0302040103020203030205030204020403030102030303030402010404040302 uptime_s=59 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=59792 led 00000000e2362d00ffffffff
+t=59846 apply backlight=60 rotation=0
+t=59846 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=59846 led 00000000e22f2700ffffffff
+t=59906 led 00000000e2272000ffffffff
+t=59969 led 00000000e21f1a00ffffffff
+t=60034 led 00000000e2201b00ffffffff
+t=60088 led 00000000e2262000ffffffff
+t=60121 apply backlight=60 rotation=0
+t=60121 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=60149 led 00000000e22e2600ffffffff
+t=60203 led 00000000e2352c00ffffffff
+t=60258 led 00000000e23c3200ffffffff
+t=60320 led 00000000e2443900ffffffff
+t=60399 apply backlight=60 rotation=0
+t=60399 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=60399 led 00000000e24e4100ffffffff
+t=60458 led 00000000e2564700ffffffff
+t=60516 led 00000000e25d4d00ffffffff
+t=60575 led 00000000e2645400ffffffff
+t=60645 led 00000000e26d5b00ffffffff
+t=60667 apply backlight=60 rotation=0
+t=60667 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=60719 led 00000000e2766200ffffffff
+t=60771 led 00000000e27d6800ffffffff
+t=60845 led 00000000e2867000ffffffff
+t=60928 apply backlight=60 rotation=0
+t=60928 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=60928 led 00000000e2917900ffffffff
+t=60986 led 00000000e2987f00ffffffff
+t=61047 led 00000000e2a08500ffffffff
+t=61109 led 00000000e2a88c00ffffffff
+t=61170 led 00000000e2af9200ffffffff
+t=61198 apply backlight=60 rotation=0
+t=61198 show rows attention=0 |SETUP MENU |Enter setup AP | |Short: next  Hold: select |
+t=61226 led 00000000e2b09300ffffffff
+t=61289 led 00000000e2a88c00ffffffff
+t=61369 led 00000000e29e8300ffffffff
+t=61400 apply backlight=60 rotation=0
+t=61400 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=61423 led 00000000e2977e00ffffffff
+t=61479 led 00000000e2907800ffffffff
+t=61551 led 00000000e2877000ffffffff
+t=61620 led 00000000e27e6900ffffffff
+t=61668 apply backlight=60 rotation=0
+t=61668 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=61698 led 00000000e2746100ffffffff
+t=61771 led 00000000e26b5900ffffffff
+t=61824 led 00000000e2645400ffffffff
+t=61884 led 00000000e25d4d00ffffffff
+t=61945 apply backlight=60 rotation=0
+t=61945 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=61945 led 00000000e2554700ffffffff
+t=62012 led 00000000e24c4000ffffffff
+t=62085 led 00000000e2433800ffffffff
+t=62151 led 00000000e23b3100ffffffff
+t=62201 apply backlight=60 rotation=0
+t=62201 show rows attention=0 |SETUP MENU |1 Net1 | |Short: next  Hold: select |
+t=62201 led 00000000e2342c00ffffffff
+t=62231 apply backlight=60 rotation=0
+t=62231 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=62264 led 00000000e22d2500ffffffff
+t=62350 led 00000000e2211c00ffffffff
+t=62400 led 00000000e21c1700ffffffff
+t=62452 led 00000000e2221c00ffffffff
+t=62483 apply backlight=60 rotation=0
+t=62483 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=62505 led 00000000e2282200ffffffff
+t=62570 led 00000000e2312900ffffffff
+t=62626 led 00000000e2382f00ffffffff
+t=62687 led 00000000e2403500ffffffff
+t=62763 apply backlight=60 rotation=0
+t=62763 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=62763 led 00000000e24a3d00ffffffff
+t=62820 led 00000000e2514300ffffffff
+t=62895 led 00000000e25a4b00ffffffff
+t=62958 led 00000000e2625100ffffffff
+t=63014 apply backlight=60 rotation=0
+t=63014 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=63014 led 00000000e2695800ffffffff
+t=63074 led 00000000e2705e00ffffffff
+t=63144 led 00000000e27a6500ffffffff
+t=63199 led 00000000e2816b00ffffffff
+t=63271 apply backlight=60 rotation=0
+t=63271 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=63271 led 00000000e28a7300ffffffff
+t=63326 led 00000000e2907800ffffffff
+t=63381 led 00000000e2977e00ffffffff
+t=63438 led 00000000e29e8400ffffffff
+t=63497 led 00000000e2a68a00ffffffff
+t=63541 apply backlight=60 rotation=0
+t=63541 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=63552 led 00000000e2ad9000ffffffff
+t=63611 led 00000000e2b29400ffffffff
+t=63669 led 00000000e2aa8e00ffffffff
+t=63733 led 00000000e2a38700ffffffff
+t=63798 apply backlight=60 rotation=0
+t=63798 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=63798 led 00000000e29a8000ffffffff
+t=63862 led 00000000e2927a00ffffffff
+t=63929 led 00000000e28a7300ffffffff
+t=63991 led 00000000e2816c00ffffffff
+t=64051 apply backlight=60 rotation=0
+t=64051 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=64051 led 00000000e27a6600ffffffff
+t=64101 led 00000000e2746100ffffffff
+t=64162 led 00000000e26c5a00ffffffff
+t=64232 led 00000000e2635200ffffffff
+t=64299 led 00000000e25b4b00ffffffff
+t=64333 apply backlight=60 rotation=0
+t=64333 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=64373 led 00000000e2514400ffffffff
+t=64438 led 00000000e2493d00ffffffff
+t=64492 led 00000000e2433700ffffffff
+t=64549 led 00000000e23b3100ffffffff
+t=64584 apply backlight=60 rotation=0
+t=64584 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=64623 led 00000000e2322900ffffffff
+t=64693 led 00000000e2292200ffffffff
+t=64774 led 00000000e21f1900ffffffff
+t=64851 apply backlight=60 rotation=0
+t=64851 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=64851 led 00000000e2221c00ffffffff
+t=64905 led 00000000e2282200ffffffff
+t=64961 led 00000000e2302800ffffffff
+t=65038 led 00000000e2393000ffffffff
+t=65107 apply backlight=60 rotation=0
+t=65107 show rows attention=0 |SETUP MENU |2 Net2 | |Short: next  Hold: select |
+t=65107 led 00000000e2433700ffffffff
+t=65160 apply backlight=60 rotation=0
+t=65160 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=123 up_kbps=37 down_bytes=980318 up_bytes=257209 down_frames=624 up_frames=624 bars=0202030302050302040204030301020303030304020104040403020203030103 uptime_s=65 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=65160 led 00000000e2493d00ffffffff
+t=65160 cmd use 2
+t=65223 led 00000000e2514300ffffffff
+t=65297 led 00000000e25b4b00ffffffff
+t=65349 led 00000000e2615100ffffffff
+t=65417 apply backlight=60 rotation=0
+t=65417 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=200 up_kbps=41 down_bytes=989524 up_bytes=258955 down_frames=629 up_frames=629 bars=0203030205030204020403030102030303030402010404040302020303010304 uptime_s=65 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=65417 led 00000000e2695800ffffffff
+t=65492 led 00000000e2735f00ffffffff
+t=65558 led 00000000e27b6600ffffffff
+t=65623 led 00000000e2846e00ffffffff
+t=65692 apply backlight=60 rotation=0
+t=65692 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=200 up_kbps=41 down_bytes=999556 up_bytes=261048 down_frames=634 up_frames=634 bars=0203030205030204020403030102030303030402010404040302020303010304 uptime_s=65 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=65692 led 00000000e28c7500ffffffff
+t=65755 led 00000000e2947c00ffffffff
+t=65814 led 00000000e29c8200ffffffff
+t=65870 led 00000000e2a38700ffffffff
+t=65928 led 00000000e2aa8e00ffffffff
+t=65947 apply backlight=60 rotation=0
+t=65947 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=200 up_kbps=41 down_bytes=1003450 up_bytes=261226 down_frames=636 up_frames=636 bars=0203030205030204020403030102030303030402010404040302020303010304 uptime_s=65 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=65981 led 00000000e2b19300ffffffff
+t=66044 led 00000000e2ae9100ffffffff
+t=66101 led 00000000e2a68a00ffffffff
+t=66173 led 00000000e29e8300ffffffff
+t=66210 apply backlight=60 rotation=0
+t=66210 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=200 up_kbps=41 down_bytes=1012696 up_bytes=263004 down_frames=641 up_frames=641 bars=0203030205030204020403030102030303030402010404040302020303010304 uptime_s=66 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=66234 led 00000000e2967d00ffffffff
+t=66301 led 00000000e28d7600ffffffff
+t=66385 led 00000000e2836d00ffffffff
+t=66465 apply backlight=60 rotation=0
+t=66465 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=0 ap_ssid=[] setup_seconds_left=0 down_kbps=210 up_kbps=39 down_bytes=1017050 up_bytes=264164 down_frames=644 up_frames=644 bars=0303020503020402040303010203030303040201040404030202030301030404 uptime_s=66 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=66465 led 00000000e2786400ffffffff
+t=66541 led 00000000e26f5c00ffffffff
+t=66609 led 00000000e2665500ffffffff
+t=66662 led 00000000e2605000ffffffff
+t=66736 apply backlight=60 rotation=0
+t=66736 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=600 down_kbps=210 up_kbps=39 down_bytes=1017714 up_bytes=264681 down_frames=645 up_frames=645 bars=0303020503020402040303010203030303040201040404030202030301030404 uptime_s=66 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=66736 led 00000000e2660000ffffffff
+t=66811 led 00000000e26e0000ffffffff
+t=66885 led 00000000e2750000ffffffff
+t=66951 led 00000000e27c0000ffffffff
+t=67011 apply backlight=60 rotation=0
+t=67011 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=600 down_kbps=210 up_kbps=39 down_bytes=1021071 up_bytes=265870 down_frames=648 up_frames=648 bars=0303020503020402040303010203030303040201040404030202030301030404 uptime_s=67 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=67011 led 00000000e2810000ffffffff
+t=67068 led 00000000e2880000ffffffff
+t=67129 led 00000000e28d0000ffffffff
+t=67186 led 00000000e2930000ffffffff
+t=67240 led 00000000e2990000ffffffff
+t=67267 apply backlight=60 rotation=0
+t=67267 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=600 down_kbps=210 up_kbps=39 down_bytes=1025534 up_bytes=266537 down_frames=650 up_frames=650 bars=0303020503020402040303010203030303040201040404030202030301030404 uptime_s=67 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=67299 led 00000000e29f0000ffffffff
+t=67355 led 00000000e2a50000ffffffff
+t=67410 led 00000000e2aa0000ffffffff
+t=67469 led 00000000e2b00000ffffffff
+t=67517 apply backlight=60 rotation=0
+t=67517 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=600 down_kbps=85 up_kbps=20 down_bytes=1028260 up_bytes=266816 down_frames=651 up_frames=651 bars=0302050302040204030301020303030304020104040403020203030103040402 uptime_s=67 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=67527 led 00000000e2b10000ffffffff
+t=67589 led 00000000e2aa0000ffffffff
+t=67658 led 00000000e2a30000ffffffff
+t=67729 led 00000000e29c0000ffffffff
+t=67798 apply backlight=60 rotation=0
+t=67798 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=599 down_kbps=85 up_kbps=20 down_bytes=1029971 up_bytes=268041 down_frames=653 up_frames=653 bars=0302050302040204030301020303030304020104040403020203030103040402 uptime_s=67 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=1 active_slot=0 active_name=[]
+t=67798 led 00000000e2950000ffffffff
+t=67826 apply backlight=60 rotation=0
+t=67826 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=67882 led 00000000e28d0000ffffffff
+t=67932 led 00000000e2880000ffffffff
+t=68009 led 00000000e2800000ffffffff
+t=68067 led 00000000e27a0000ffffffff
+t=68103 apply backlight=60 rotation=0
+t=68103 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=68128 led 00000000e2730000ffffffff
+t=68186 led 00000000e26e0000ffffffff
+t=68255 led 00000000e2670000ffffffff
+t=68321 led 00000000e2600000ffffffff
+t=68353 apply backlight=60 rotation=0
+t=68353 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=68377 led 00000000e25b0000ffffffff
+t=68437 led 00000000e2540000ffffffff
+t=68512 led 00000000e24c0000ffffffff
+t=68571 led 00000000e2470000ffffffff
+t=68609 apply backlight=60 rotation=0
+t=68609 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=68632 led 00000000e2400000ffffffff
+t=68690 led 00000000e23b0000ffffffff
+t=68750 led 00000000e2340000ffffffff
+t=68818 led 00000000e22e0000ffffffff
+t=68877 apply backlight=60 rotation=0
+t=68877 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=68877 led 00000000e2280000ffffffff
+t=68943 led 00000000e2210000ffffffff
+t=68997 led 00000000e21c0000ffffffff
+t=69047 led 00000000e2200000ffffffff
+t=69132 apply backlight=60 rotation=0
+t=69132 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=69132 led 00000000e2280000ffffffff
+t=69201 led 00000000e2300000ffffffff
+t=69268 led 00000000e2370000ffffffff
+t=69338 led 00000000e23e0000ffffffff
+t=69404 apply backlight=60 rotation=0
+t=69404 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=69404 led 00000000e2440000ffffffff
+t=69463 led 00000000e24a0000ffffffff
+t=69522 led 00000000e2500000ffffffff
+t=69572 led 00000000e2550000ffffffff
+t=69622 led 00000000e25b0000ffffffff
+t=69666 apply backlight=60 rotation=0
+t=69666 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=69690 led 00000000e2610000ffffffff
+t=69765 led 00000000e2690000ffffffff
+t=69823 led 00000000e26e0000ffffffff
+t=69897 led 00000000e2760000ffffffff
+t=69930 apply backlight=60 rotation=0
+t=69930 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=69949 led 00000000e27c0000ffffffff
+t=70010 led 00000000e2810000ffffffff
+t=70073 led 00000000e2880000ffffffff
+t=70152 led 00000000e2900000ffffffff
+t=70189 apply backlight=60 rotation=0
+t=70189 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=70202 led 00000000e2950000ffffffff
+t=70259 led 00000000e29b0000ffffffff
+t=70318 led 00000000e2a00000ffffffff
+t=70374 led 00000000e2a60000ffffffff
+t=70440 apply backlight=60 rotation=0
+t=70440 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=70440 led 00000000e2ad0000ffffffff
+t=70494 led 00000000e2b30000ffffffff
+t=70568 led 00000000e2ac0000ffffffff
+t=70633 led 00000000e2a50000ffffffff
+t=70685 led 00000000e2a00000ffffffff
+t=70724 apply backlight=60 rotation=0
+t=70724 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=70742 led 00000000e29b0000ffffffff
+t=70815 led 00000000e2930000ffffffff
+t=70874 led 00000000e28d0000ffffffff
+t=70947 led 00000000e2860000ffffffff
+t=70983 apply backlight=60 rotation=0
+t=70983 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=70997 led 00000000e2810000ffffffff
+t=71059 led 00000000e27a0000ffffffff
+t=71132 led 00000000e2730000ffffffff
+t=71206 led 00000000e26c0000ffffffff
+t=71240 apply backlight=60 rotation=0
+t=71240 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=71261 led 00000000e2660000ffffffff
+t=71322 led 00000000e2600000ffffffff
+t=71374 led 00000000e25b0000ffffffff
+t=71432 led 00000000e2550000ffffffff
+t=71499 apply backlight=60 rotation=0
+t=71499 show rows attention=0 |SETUP MENU |Cancel setup AP | |Short: next  Hold: select |
+t=71499 led 00000000e24e0000ffffffff
+t=71555 apply backlight=60 rotation=0
+t=71555 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=596 down_kbps=121 up_kbps=43 down_bytes=1091348 up_bytes=286284 down_frames=696 up_frames=696 bars=0302040204030301020303030304020104040403020203030103040402030403 uptime_s=71 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=71555 led 00000000e2480000ffffffff
+t=71555 cmd cancel
+t=71615 led 00000000e2430000ffffffff
+t=71665 led 00000000e23e0000ffffffff
+t=71740 led 00000000e2360000ffffffff
+t=71795 led 00000000e2300000ffffffff
+t=71830 apply backlight=60 rotation=0
+t=71830 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=595 down_kbps=102 up_kbps=31 down_bytes=1097657 up_bytes=287563 down_frames=699 up_frames=699 bars=0204020403030102030303030402010404040302020303010304040203040302 uptime_s=71 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=2 active_slot=0 active_name=[]
+t=71865 led 00000000e2290000ffffffff
+t=71920 led 00000000e2240000ffffffff
+t=71988 led 00000000e21c0000ffffffff
+t=72051 led 00000000e2210000ffffffff
+t=72083 apply backlight=60 rotation=0
+t=72083 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=595 down_kbps=102 up_kbps=31 down_bytes=1103754 up_bytes=289246 down_frames=703 up_frames=703 bars=0204020403030102030303030402010404040302020303010304040203040302 uptime_s=72 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=72105 led 00000000e2260000ffffffff
+t=72155 led 00000000e22b0000ffffffff
+t=72222 led 00000000e2320000ffffffff
+t=72293 led 00000000e2390000ffffffff
+t=72343 apply backlight=60 rotation=0
+t=72343 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=2 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=595 down_kbps=102 up_kbps=31 down_bytes=1107442 up_bytes=291079 down_frames=706 up_frames=706 bars=0204020403030102030303030402010404040302020303010304040203040302 uptime_s=72 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=72343 led 00000000e23e0000ffffffff
+t=72426 apply backlight=60 rotation=0
+t=72426 show status bridge=0 wifi=1 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=3 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=595 down_kbps=102 up_kbps=31 down_bytes=1110153 up_bytes=291200 down_frames=707 up_frames=707 bars=0204020403030102030303030402010404040302020303010304040203040302 uptime_s=72 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=72426 led 00000000e2470000ffffffff
+t=72483 led 00000000e24c0000ffffffff
+t=72542 led 00000000e2520000ffffffff
+t=72601 led 00000000e2580000ffffffff
+t=72652 led 00000000e25d0000ffffffff
+t=72689 apply backlight=60 rotation=0
+t=72689 show status bridge=0 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=3 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=594 down_kbps=102 up_kbps=31 down_bytes=1112270 up_bytes=293618 down_frames=711 up_frames=711 bars=0204020403030102030303030402010404040302020303010304040203040302 uptime_s=72 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=72722 led 00000000e2640000ffffffff
+t=72781 led 00000000e26a0000ffffffff
+t=72847 led 00000000e2710000ffffffff
+t=72919 led 00000000e2780000ffffffff
+t=72952 apply backlight=60 rotation=0
+t=72952 show status bridge=0 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=3 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=594 down_kbps=137 up_kbps=44 down_bytes=1116925 up_bytes=293786 down_frames=713 up_frames=713 bars=0402040303010203030303040201040404030202030301030404020304030203 uptime_s=72 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=72987 led 00000000e27f0000ffffffff
+t=73055 led 00000000e2860000ffffffff
+t=73105 led 00000000e28b0000ffffffff
+t=73170 led 00000000e2920000ffffffff
+t=73206 apply backlight=60 rotation=0
+t=73206 show status bridge=0 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=3 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=594 down_kbps=137 up_kbps=44 down_bytes=1121463 up_bytes=295213 down_frames=716 up_frames=716 bars=0402040303010203030303040201040404030202030301030404020304030203 uptime_s=73 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=73227 led 00000000e2970000ffffffff
+t=73296 led 00000000e29e0000ffffffff
+t=73378 led 00000000e2a70000ffffffff
+t=73458 apply backlight=60 rotation=0
+t=73458 show status bridge=0 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=3 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=594 down_kbps=137 up_kbps=44 down_bytes=1127731 up_bytes=297405 down_frames=721 up_frames=721 bars=0402040303010203030303040201040404030202030301030404020304030203 uptime_s=73 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=73458 led 00000000e2af0000ffffffff
+t=73511 led 00000000e2b20000ffffffff
+t=73575 led 00000000e2ac0000ffffffff
+t=73636 led 00000000e2a50000ffffffff
+t=73690 led 00000000e2a00000ffffffff
+t=73728 apply backlight=60 rotation=0
+t=73728 show status bridge=0 wifi=0 saved_wifi=1 recovery=0 starting=0 installing=0 usb=1 usb_configured=0 usb_suspended=0 saved=0 enabled=0 ready=1 login=1 failed=1 page=3 rssi_valid=0 rssi=0 ssid=[] setup=1 ap_ssid=[TDongle-AB0CF9] setup_seconds_left=593 down_kbps=137 up_kbps=44 down_bytes=1131461 up_bytes=298846 down_frames=724 up_frames=724 bars=0402040303010203030303040201040404030202030301030404020304030203 uptime_s=73 wifi_up_s=0 connects=0 last_reason=202 usb_resets=0 heap_free=0 heap_min=0 heap_largest=0 reset_reason=0 boots=0 watchdogs=0 panics=0 health_view=0 active_slot=0 active_name=[]
+t=73752 led 00000000e2990000ffffffff
+t=73804 led 00000000e2940000ffffffff
+t=73873 led 00000000e28d0000ffffffff
+t=73925 led 00000000e2880000ffffffff
