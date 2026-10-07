@@ -137,6 +137,8 @@ impl Gateway {
         // the heap the runtime draws from: everything it holds is in the pool now (socket windows, TLS records, the control workspace of a negotiation), so the
         // model heap is the pool's `in_use`; the elastic floor must still hold at the minimum
         heap.set_model(move || sh.pool.in_use());
+        // the largest free block shrinks by the control workspace of a negotiation in flight (the one big block the model has), not by the pool's many small ones
+        heap.set_block_model(move || sh.stats.neg_now.load(Ordering::SeqCst) as usize * core::mem::size_of::<tdongle_tailnet_ctl::Bulk>());
         let ctl = Arc::new(NetControl::default());
         for (slot, a) in opts.control_routes.iter().enumerate() {
             ctl.route_control(slot, a.parse().expect("control route"));

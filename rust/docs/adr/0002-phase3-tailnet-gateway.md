@@ -193,8 +193,8 @@ The heap must hold, and a `const` assert in `tailnet::budget` says so: the Wi-Fi
 
 | | before | after |
 |---|---:|---:|
-| TCP through the tunnel, DERP down / up (Mbit/s) | 155.1 / 7.5 | 148 to 170 / 7.5 to 7.7 |
-| direct down / up | 186.8 / 14.8 | 194 to 203 / 14.6 to 14.9 |
+| TCP through the tunnel, DERP down / up (Mbit/s) | 155.1 / 7.5 | 138 to 170 / 7.5 to 7.7 (six runs) |
+| direct down / up | 186.8 / 14.8 | 191 to 211 / 14.6 to 14.9 |
 | join to routing (loopback; the first map is due within 30 s) | n/a | 1.07 to 1.12 s |
 | soak, two tailnets | min free 92,500 | min free 87,792 (model heap now includes the pool), no floor crossing, pool back to 0 |
 

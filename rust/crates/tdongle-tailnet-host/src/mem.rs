@@ -18,6 +18,9 @@ pub struct ModelHeap {
     min_free: AtomicUsize,
     readings: AtomicU64,
     dynamic: Mutex<Option<Box<dyn Fn() -> usize + Send + Sync>>>,
+    /// What the modelled firmware has as one big block in flight (the control workspace of a negotiation): it takes the largest free block, the many small
+    /// blocks of the pool do not.
+    dynamic_block: Mutex<Option<Box<dyn Fn() -> usize + Send + Sync>>>,
 }
 
 impl std::fmt::Debug for ModelHeap {
@@ -36,6 +39,7 @@ impl ModelHeap {
             min_free: AtomicUsize::new(baseline),
             readings: AtomicU64::new(0),
             dynamic: Mutex::new(None),
+            dynamic_block: Mutex::new(None),
         }
     }
     /// Charge `bytes` (a transient allocation of the modelled firmware).
@@ -55,6 +59,10 @@ impl ModelHeap {
     pub fn set_model(&self, f: impl Fn() -> usize + Send + Sync + 'static) {
         *self.dynamic.lock().unwrap() = Some(Box::new(f));
     }
+    /// Model the block in flight as a function of the runtime's state: [`ModelHeap::largest_block`] shrinks by it, not by everything [`ModelHeap::set_model`] charges.
+    pub fn set_block_model(&self, f: impl Fn() -> usize + Send + Sync + 'static) {
+        *self.dynamic_block.lock().unwrap() = Some(Box::new(f));
+    }
     /// How many times the runtime read the heap.
     pub fn readings(&self) -> u64 {
         self.readings.load(Ordering::Relaxed)
@@ -69,7 +77,9 @@ impl HeapProbe for ModelHeap {
         f
     }
     fn largest_block(&self) -> usize {
-        self.largest.saturating_sub(self.charged())
+        // the test's explicit charges are blocks too; the model function's charge is many small blocks, only the in-flight big one counts
+        let blocks = self.charged.load(Ordering::SeqCst) + self.dynamic_block.lock().unwrap().as_ref().map_or(0, |f| f());
+        self.largest.saturating_sub(blocks)
     }
     fn minimum_free(&self) -> usize {
         self.min_free.load(Ordering::SeqCst)
