@@ -86,7 +86,7 @@ fn ram_per_membership_to_the_byte() {
     assert!(total > 30_000 && total < 250_000, "{total}");
     assert_eq!(st.lease, 16_640);
     // the point of the pool: a membership's slot holds neither the workspace nor its sockets' windows
-    assert!(slot < bulk / 2 && slot >= UDP_Q + DERP_Q + sess, "slot {slot}, bulk {bulk}");
+    assert!(slot < bulk && slot >= UDP_Q + DERP_Q + sess, "slot {slot}, bulk {bulk}");
     assert!(sess < 2_000, "{sess}");
 }
 

@@ -404,6 +404,39 @@ where
                 s[0], s[1], s[2], s[3], d[0], d[1], d[2], d[3], ac.0, ac.1, flows, held
             );
         }
+        {
+            use core::sync::atomic::Ordering::Relaxed;
+            let h = self.host_q.stats();
+            let d: u32 = self.slots.iter().map(|s| s.derp_q.stats().refused).sum();
+            let u = self.slots.iter().map(|s| s.udp_q.stats()).fold((0, 0, 0, 0), |a, q| (a.0 + q.pushed, a.1 + q.refused, a.2 + q.popped, a.3.max(q.high_water)));
+            let g = crate::shared::RtStats::get;
+            let _ = write!(
+                out,
+                "tn_rx host_q={{pushed:{} refused:{} popped:{} high:{}/{}}} udp_q={{pushed:{} refused:{} popped:{} high:{}/{}}} derp_q_refused={} backpressure_waits={} usb_tx={} usb_tx_refused={} to_engine={} rx_budget_refused={} rx_heap_refused={}\r\n",
+                h.pushed, h.refused, h.popped, h.high_water, crate::shared::HOST_Q, u.0, u.1, u.2, u.3, crate::shared::UDP_Q, d,
+                crate::udp::BACKPRESSURE.load(Relaxed), g(&self.stats.usb_tx), g(&self.stats.usb_tx_refused), g(&self.stats.to_engine), g(&self.stats.rx_budget_refused), g(&self.stats.rx_heap_refused)
+            );
+        }
+        {
+            let bad = self.with_engine(|e, _| *e.router().bad());
+            let _ = write!(out, "tn_bad");
+            for (dir, v) in [("host", &bad.host), ("tunnel", &bad.tunnel)] {
+                let _ = write!(out, " {dir}={{");
+                for (i, w) in tdongle_tailnet_router::packet::Invalid::ALL.iter().enumerate() {
+                    if v[i] != 0 {
+                        let _ = write!(out, "{}:{} ", w.name(), v[i]);
+                    }
+                }
+                let _ = write!(out, "}}");
+            }
+            if bad.last_len != 0 {
+                let _ = write!(out, " last={} total={} hex=", tdongle_tailnet_router::packet::Invalid::ALL[bad.last_why as usize].name(), bad.last_total);
+                for b in &bad.last[..usize::from(bad.last_len)] {
+                    let _ = write!(out, "{b:02x}");
+                }
+            }
+            let _ = write!(out, "\r\n");
+        }
         for slot in 0..snap.members.len() {
             self.with_engine(|e, _| {
                 e.directory_lines(slot, |l| {

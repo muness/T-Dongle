@@ -109,6 +109,7 @@ impl<const N: usize> Ring<N> {
 pub struct ByteQueue<R: RawMutex, const N: usize> {
     ring: Mutex<R, RefCell<Ring<N>>>,
     ready: Signal<R, ()>,
+    room: Signal<R, ()>,
 }
 
 impl<R: RawMutex, const N: usize> core::fmt::Debug for ByteQueue<R, N> {
@@ -127,7 +128,7 @@ impl<R: RawMutex, const N: usize> ByteQueue<R, N> {
     /// An empty queue.
     #[inline(always)]
     pub const fn new() -> Self {
-        Self { ring: Mutex::new(RefCell::new(Ring::new())), ready: Signal::new() }
+        Self { ring: Mutex::new(RefCell::new(Ring::new())), ready: Signal::new(), room: Signal::new() }
     }
     /// Bytes of the queue's own storage.
     pub const CAPACITY: usize = N;
@@ -141,7 +142,11 @@ impl<R: RawMutex, const N: usize> ByteQueue<R, N> {
     }
     /// Take the oldest record into `out` (a record longer than `out` is truncated; callers size `out` for the largest record they push).
     pub fn try_pop(&self, out: &mut [u8]) -> Option<(u8, usize)> {
-        self.ring.lock(|r| r.borrow_mut().pop(out))
+        let r = self.ring.lock(|r| r.borrow_mut().pop(out));
+        if r.is_some() {
+            self.room.signal(());
+        }
+        r
     }
     /// Copy the oldest record into `out` without taking it (see [`ByteQueue::discard_front`]): a consumer that may not be able to use it yet leaves it
     /// queued instead of holding it in a buffer of its own across a wait. One consumer per queue.
@@ -151,6 +156,7 @@ impl<R: RawMutex, const N: usize> ByteQueue<R, N> {
     /// Take the oldest record away (after [`ByteQueue::try_peek`] showed it).
     pub fn discard_front(&self) {
         self.ring.lock(|r| r.borrow_mut().discard());
+        self.room.signal(());
     }
     /// Wait for a record. Cancel-safe.
     pub async fn pop(&self, out: &mut [u8]) -> (u8, usize) {
@@ -168,6 +174,15 @@ impl<R: RawMutex, const N: usize> ByteQueue<R, N> {
                 return;
             }
             self.ready.wait().await;
+        }
+    }
+    /// Wait until at least `n` bytes are free (woken by every pop, not by polling). Cancel-safe.
+    pub async fn wait_free(&self, n: usize) {
+        loop {
+            if self.free_bytes() >= n {
+                return;
+            }
+            self.room.wait().await;
         }
     }
     /// Bytes free now (a record needs its payload plus three bytes of header).

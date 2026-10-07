@@ -20,6 +20,8 @@ use tdongle_tailnet_fw::{Platform, Storage};
 pub const DATAGRAM_MAX: usize = 1600;
 /// Room the host queue must have before a datagram is read: one tunnel packet and its record header.
 pub const HOST_ROOM: usize = 1600;
+/// Times the UDP task had to wait for the host queue to drain before reading the next datagram (the socket's own buffer is what absorbs the burst).
+pub static BACKPRESSURE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// Bytes of the egress staging buffer (a record is `ep meta (18) + datagram`).
 pub const STAGE_MAX: usize = 18 + DATAGRAM_MAX;
 const _: () = assert!(STAGE_MAX <= SCRATCH);
@@ -184,8 +186,9 @@ where
         }
         // back-pressure towards the network: no datagram is read while the host queue cannot take the packet it may turn into (ADR 0023)
         let recv = async {
-            while sh.host_q.free_bytes() < HOST_ROOM {
-                Timer::after_millis(2).await;
+            if sh.host_q.free_bytes() < HOST_ROOM {
+                BACKPRESSURE.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                sh.host_q.wait_free(HOST_ROOM).await;
             }
             sock.wait_readable().await
         };

@@ -39,10 +39,10 @@ use zeroize::Zeroize;
 /// Memberships that can run at once (the engine's `M`). The registry may hold more saved ones ([`tdongle_tailnet_members::MAX_MEMBERS`]); a saved membership
 /// without a free slot waits in the supervisor's list with the error "Cannot allocate another membership".
 pub const MAX_RUN: usize = tdongle_tailnet_engine::GATEWAY_M;
-/// Capacity of a slot's UDP egress queue (DISCO, STUN, WireGuard datagrams: records of up to 1,536 + 21 bytes; one full packet always fits an empty queue).
-pub const UDP_Q: usize = 3072;
+/// Capacity of a slot's UDP egress queue (DISCO, STUN, WireGuard datagrams: records of up to 1,536 + 21 bytes; one full packet always fits an empty queue; two and a half of them in a burst: `out_refused` on the board was this queue full).
+pub const UDP_Q: usize = 4096;
 /// Capacity of a slot's DERP egress queue (one full relay packet: 3-byte header, 32-byte key, 1,500 bytes; the link has its own transmit ring behind it).
-pub const DERP_Q: usize = 2048;
+pub const DERP_Q: usize = 1792;
 /// Bytes of the one scratch buffer every task shares: a datagram with its endpoint record (UDP and DNS ingress and egress, a DERP packet on its way into the
 /// engine), the USB side's two frame buffers, the registry's JSON. It is held only inside synchronous code (never across an `.await`), so tasks never
 /// contend for it in a single-executor image; the order of locks is registry, scratch, engine, leaf queues.
