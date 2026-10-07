@@ -42,3 +42,7 @@ The final serial workspace run passed 1,601 tests, with zero failures and 8 igno
 ## Owner qualification
 
 The strict temperature gate still blocks declaring all 12 board gates passed. The owner also needs to test the setup AP from a phone, the Android app, and [the web UI checklist](../../docs/webui-checklist.md). Package Android hardware qualification remains false pending that review. Tag 0.4.0 only after the owner explicitly says go.
+
+## Setup-AP handoff
+
+Setup AP was entered only after the completed gateway soak. The fresh setup boot reports stage `running`, rescue `healthy`, safe mode false, and recovery false. Serial status confirms `setup active=1 ap=TDongle-D788BC`. Join that open network from the phone and open `http://192.168.4.1/`. The setup session lasts ten minutes and then returns to the saved tailnet-gateway mode; it does not extend when a client connects. This AP handoff is separate from the 30-minute state-4 gateway soak.

@@ -57,5 +57,14 @@
     "directory_count_min": 18,
     "heap_free_min_bytes": 46236,
     "heap_no_neg_min_bytes": 46132
+  },
+  "setup_handoff": {
+    "after_gateway_soak": true,
+    "ssid": "TDongle-D788BC",
+    "portal": "http://192.168.4.1/",
+    "stage": "running",
+    "rescue": "healthy",
+    "safe_mode": false,
+    "session_seconds": 600
   }
 }
