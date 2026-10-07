@@ -1021,7 +1021,8 @@ fn derp_only_bulk_is_paced_by_the_relay_not_dropped() {
 /// (The host's tokio sockets have no windows to resize: this checks the decision and the reconnects, and that a transfer survives them.)
 #[test]
 fn the_relay_windows_are_big_while_it_carries_data_and_idle_after() {
-    use tdongle_tailnet_runtime::derp::{WIN_STATS, WIN_TIMING};
+    use tdongle_tailnet_runtime::derp::{WIN_ENABLED, WIN_STATS, WIN_TIMING};
+    WIN_ENABLED.store(true, Ordering::Relaxed);
     let mut go = go_or_skip!();
     let (gw, _id, alias) = up(&mut go, "gopeer");
     gw.net.udp_blocked.store(true, Ordering::SeqCst);
@@ -1043,6 +1044,7 @@ fn the_relay_windows_are_big_while_it_carries_data_and_idle_after() {
     wait_until("the windows to go big at the lull", 15, || WIN_STATS[0].load(Ordering::Relaxed) > to_big0);
     wait_until("the windows to go back to idle", 30, || WIN_STATS[3].load(Ordering::Relaxed) == 0);
     assert_eq!(gw.host.echo(alias, 7, b"after", Duration::from_secs(30)).unwrap(), b"after", "the relay still works on the idle windows");
+    WIN_ENABLED.store(false, Ordering::Relaxed);
     gw.check_engine();
 }
 
@@ -1051,7 +1053,8 @@ fn the_relay_windows_are_big_while_it_carries_data_and_idle_after() {
 #[test]
 fn window_switches_under_relay_load_do_not_starve_the_executor() {
     use std::sync::atomic::Ordering::Relaxed;
-    use tdongle_tailnet_runtime::derp::{WIN_FORCE, WIN_STATS, WIN_TIMING};
+    use tdongle_tailnet_runtime::derp::{WIN_ENABLED, WIN_FORCE, WIN_STATS, WIN_TIMING};
+    WIN_ENABLED.store(true, Relaxed);
     let mut go = go_or_skip!();
     let (gw, _id, alias) = up(&mut go, "gopeer");
     gw.net.udp_blocked.store(true, Ordering::SeqCst);
@@ -1086,6 +1089,7 @@ fn window_switches_under_relay_load_do_not_starve_the_executor() {
     let switches = WIN_STATS[0].load(Relaxed) + WIN_STATS[1].load(Relaxed) - switches0;
     println!("window switches during the transfers: {switches}; fewest heartbeat ticks in 500 ms: {worst} (10 expected)");
     assert!(switches >= 1, "the windows switched under load");
+    WIN_ENABLED.store(false, Relaxed);
     assert!(worst >= 5, "the executor kept running through the switches: {worst} ticks in the worst 500 ms");
     gw.check_engine();
 }

@@ -1313,7 +1313,7 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             use tdongle_tailnet_runtime::derp::WIN_STATS;
             let _ = write!(
                 out,
-                "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={} waited_for_lull={} waited_for_heap={} force_derp={}\r\n",
+                "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={} waited_for_lull={} waited_for_heap={} force_derp={} dynamic_windows_enabled={}\r\n",
                 WIN_STATS[3].load(Relaxed),
                 tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_rx,
                 tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_tx,
@@ -1324,7 +1324,8 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 WIN_STATS[2].load(Relaxed),
                 WIN_STATS[4].load(Relaxed),
                 WIN_STATS[5].load(Relaxed),
-                tdongle_tailnet_engine::shared::FORCE_DERP.load(Relaxed) as u8
+                tdongle_tailnet_engine::shared::FORCE_DERP.load(Relaxed) as u8,
+                tdongle_tailnet_runtime::derp::WIN_ENABLED.load(Relaxed) as u8
             );
         }
         // the link's visits to the regions peers are homed on, and the moves of its home region

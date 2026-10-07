@@ -301,6 +301,8 @@ pub static WIN_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomic:
 /// Switches to the big windows, switches back, falls back because the pool refused the big ones, whether the connection has them now, and windows in which big ones were wanted
 /// but the relay was busy (no lull).
 pub static WIN_STATS: [core::sync::atomic::AtomicU32; 6] = [const { core::sync::atomic::AtomicU32::new(0) }; 6];
+/// Dynamic relay windows are **parked** (off): the board's heap does not afford them (ADR 0002). The code and its host tests stay; the tests enable it.
+pub static WIN_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 /// A request for a window mode from outside the traffic (`tn force-derp`): 1 big, 2 idle, 0 none.
 pub static WIN_FORCE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
@@ -315,6 +317,11 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
     /// (both ways) of each [`WIN_TIMING`] window, with hysteresis. `true`: reconnect to get them.
     fn window_mode(&mut self) -> bool {
         use core::sync::atomic::Ordering::Relaxed;
+        // parked: this heap cannot afford the big windows (board: the floor was broken underneath them); the host tests switch it on
+        if !WIN_ENABLED.load(Relaxed) {
+            WIN_FORCE.store(0, Relaxed);
+            return false;
+        }
         let now = self.sh.now();
         let win = u64::from(WIN_TIMING[0].load(Relaxed));
         if now.saturating_sub(self.act_t0) < win {
