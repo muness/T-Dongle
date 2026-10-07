@@ -1052,6 +1052,7 @@ where
     };
     d.dg().stage.store(3, core::sync::atomic::Ordering::Relaxed);
     d.call(Event::TlsDone(true));
+    let mut gate_since: Option<u64> = None;
     loop {
         crate::optag::set(crate::optag::RELAY_STREAM);
         // the connection's windows follow the relay's traffic: a reconnect when they should change
@@ -1086,22 +1087,31 @@ where
         if d.acts.send.is_some() {
             continue;
         }
-        // back-pressure towards the network: a record (the relay's writes are about 2 KB, up to 16 KB) is read only when the host queue can take what it
-        // carries, so a slow USB side slows the TCP connection instead of dropping packets the relay already delivered
-        // (not in the middle of a relay frame: the link's 5 s record timer runs from its first byte, and a full host queue during a download held it past that)
-        if !d.link.rx_in_frame() && sh.host_q.free_bytes() < crate::derp::HOST_ROOM {
-            RELAY_RX[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-            RELAY_RX[3].fetch_add(2, core::sync::atomic::Ordering::Relaxed);
-            if let Either::Second(()) = select(Timer::after_millis(2), d.wait(true)).await
-                && d.must_abort()
-            {
-                return;
-            }
-            continue;
-        }
         // wait for the server or for the link
-        match select(conn.wait_record(), d.wait(true)).await {
-            Either::First(Ok(())) => {
+        match select(conn.wait_record_len(), d.wait(true)).await {
+            Either::First(Ok(len)) => {
+                // back-pressure towards the network: the record is read only when the host queue can take what it carries (its length is known from the header), so a slow
+                // USB side slows the TCP connection instead of dropping packets the relay already delivered. (A frame in the record is at least ~80 bytes of IP packet; the
+                // host queue adds 3 bytes of header to each, 1/16 covers that; plus one packet of slack for the other producers.) A frame often straddles two records (the
+                // relay writes 2 KB at a time), so the gate holds mid-frame too, but for at most 3 s: the link's 5 s record timer runs from the frame's first byte.
+                //
+                // The wait is **one bounded sleep, then back to the top of the loop**: the writes the link has staged, its timers and the visit manager's requests run there. A
+                // wait that looped here would starve them, and `d.wait(true)` returns at once while the relay queue is non-empty, so it must not be the thing that waits.
+                let need = (len + len / 16 + 32 + 1600).min(crate::shared::HOST_Q - 64);
+                if sh.host_q.free_bytes() < need {
+                    let since = *gate_since.get_or_insert_with(|| sh.now());
+                    if !d.link.rx_in_frame() || sh.now().saturating_sub(since) < 3000 {
+                        RELAY_RX[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                        RELAY_RX[3].fetch_add(2, core::sync::atomic::Ordering::Relaxed);
+                        if let Either::Second(()) = select(Timer::after_millis(2), d.wait(false)).await
+                            && d.must_abort()
+                        {
+                            return;
+                        }
+                        continue;
+                    }
+                }
+                gate_since = None;
                 RELAY_RX[0].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 let stall = d.link_timing_rx_frame();
                 let r = conn

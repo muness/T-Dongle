@@ -1002,9 +1002,12 @@ fn derp_only_bulk_is_paced_by_the_relay_not_dropped() {
     let (n, d) = gw.host.upload(alias, 9, 192 * 1024, Duration::from_secs(90)).expect("upload over a slow relay");
     assert_eq!(n, 192 * 1024);
     let up = mbit(n, d);
+    let host_refused0 = gw.sh.host_q.stats().refused;
     let (n, d) = gw.host.get_bytes(alias, 80, 192 * 1024, Duration::from_secs(90)).expect("download over a slow relay");
     assert_eq!(n, 192 * 1024);
     let down = mbit(n, d);
+    // the relay reader holds a record back until the host queue has room for it: nothing the relay delivered is refused by the host queue
+    assert_eq!(gw.sh.host_q.stats().refused - host_refused0, 0, "no relay frame refused by the host queue during the download");
     let dropped = refused(&gw) - before;
     let hold = &tdongle_tailnet_runtime::usb::HOLD_STATS;
     println!(

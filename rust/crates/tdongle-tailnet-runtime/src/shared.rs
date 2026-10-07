@@ -52,7 +52,7 @@ pub const SCRATCH: usize = REGISTRY_SCRATCH;
 /// control workspace, a few TLS records.
 pub const POOL_CAP: usize = 3 * 23_552 + 2 * 17_744 + 4 * 16_640;
 /// Capacity of the queue towards the USB host (tunnel packets and DNS answers).
-pub const HOST_Q: usize = 8192;
+pub const HOST_Q: usize = 10240;
 /// Capacity of the queue of DNS queries for the upstream resolver.
 pub const DNS_Q: usize = 1024;
 
