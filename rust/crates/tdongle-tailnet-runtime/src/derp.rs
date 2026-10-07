@@ -303,7 +303,7 @@ pub const RELAY_RX_BIG: usize = 6144;
 /// See [`RELAY_RX_BIG`].
 pub const RELAY_TX_BIG: usize = 6144;
 /// The idle relay windows' bytes (`Windows::GATEWAY.derp_rx + derp_tx`).
-const IDLE_WINDOW_BYTES: usize = 5760 + 6144;
+const IDLE_WINDOW_BYTES: usize = 12288 + 6144;
 
 /// The relay link's time out of the ready state: `[times it left ready (or failed to connect), milliseconds not ready in all, since when it is not ready (0: ready)]`. The
 /// engine's `no_route` (a packet for the relay while the link is down) is read against it.
@@ -327,6 +327,10 @@ pub fn admit_box<F: core::future::Future>(heap: &dyn tdongle_tailnet_admission::
     }
     Some(alloc::boxed::Box::pin(f))
 }
+
+/// The relay's receive side: `[TLS records read, bytes of them, times the reader held a record back for want of host-queue room, milliseconds held in all (2 ms steps)]`.
+/// Against the engine's receive fates and the host queue's refusals they say where a download loses packets: in the host queue gate, past it, or not here at all.
+pub static RELAY_RX: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
 
 /// TLS handshakes (relay and control) that were not started for want of heap for their boxed state.
 pub static HANDSHAKE_NOMEM: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
@@ -1086,6 +1090,8 @@ where
         // carries, so a slow USB side slows the TCP connection instead of dropping packets the relay already delivered
         // (not in the middle of a relay frame: the link's 5 s record timer runs from its first byte, and a full host queue during a download held it past that)
         if !d.link.rx_in_frame() && sh.host_q.free_bytes() < crate::derp::HOST_ROOM {
+            RELAY_RX[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            RELAY_RX[3].fetch_add(2, core::sync::atomic::Ordering::Relaxed);
             if let Either::Second(()) = select(Timer::after_millis(2), d.wait(true)).await
                 && d.must_abort()
             {
@@ -1096,11 +1102,13 @@ where
         // wait for the server or for the link
         match select(conn.wait_record(), d.wait(true)).await {
             Either::First(Ok(())) => {
+                RELAY_RX[0].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 let stall = d.link_timing_rx_frame();
                 let r = conn
                     .read_with(
                         || Timer::after_millis(stall),
                         |chunk| {
+                            RELAY_RX[1].fetch_add(chunk.len() as u32, core::sync::atomic::Ordering::Relaxed);
                             d.call(Event::Bytes(chunk));
                         },
                     )

@@ -1377,6 +1377,32 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             );
         }
         {
+            // where a download loses packets: the relay window and the reader's hold-back, then the host queue, the USB ring and the engine's own receive fates (`tn_eng rx`)
+            use tdongle_tailnet_runtime::derp::RELAY_RX;
+            let h = sh.host_q.stats();
+            let _ = write!(
+                out,
+                "tn_dl relay_rx_window={} rx_window_peak_relay={} control={} records={} record_bytes={} reader_held[times,ms]={},{} relay_frames_in={} relay_rx_refused={} host_q[pushed,refused,high]={},{},{}/{} usb_ring[enq,full,high]={},{},{} usb_tx_refused={}\r\n",
+                tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_rx,
+                tdongle_tailnet_runtime::net_embassy::TCP_RX_PEAK[1].load(Relaxed),
+                tdongle_tailnet_runtime::net_embassy::TCP_RX_PEAK[0].load(Relaxed),
+                RELAY_RX[0].load(Relaxed),
+                RELAY_RX[1].load(Relaxed),
+                RELAY_RX[2].load(Relaxed),
+                RELAY_RX[3].load(Relaxed),
+                sh.slots[0].status().derp.frames_rx.get(),
+                sh.slots[0].status().derp.rx_refused.get(),
+                h.pushed,
+                h.refused,
+                h.high_water,
+                tdongle_tailnet_runtime::shared::HOST_Q,
+                ld(&crate::RING_ENQ),
+                ld(&crate::RING_FULL),
+                ld(&crate::RING_HIGH),
+                tdongle_tailnet_runtime::shared::RtStats::get(&sh.stats.usb_tx_refused)
+            );
+        }
+        {
             use tdongle_tailnet_runtime::net_embassy::TCP_DIAG as T;
             let _ = write!(
                 out,

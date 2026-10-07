@@ -72,7 +72,7 @@ pub struct Windows {
 
 impl Windows {
     /// The sizes the firmware starts with.
-    pub const GATEWAY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 5760, derp_tx: 6144, udp_rx: 9600, udp_tx: 3200, dns: 1536 };
+    pub const GATEWAY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 12288, derp_tx: 6144, udp_rx: 9600, udp_tx: 3200, dns: 1536 };
     /// Bytes one membership's sockets hold (windows only: the packet metadata is static).
     pub const fn per_member(&self) -> usize {
         self.ctl_rx + self.ctl_tx + self.derp_rx + self.derp_tx + self.udp_rx + self.udp_tx
@@ -91,7 +91,7 @@ pub const DERP_RX_BIG: usize = crate::derp::RELAY_RX_BIG;
 /// See [`DERP_RX_BIG`].
 pub const DERP_TX_BIG: usize = crate::derp::RELAY_TX_BIG;
 
-const _: () = assert!(Windows::GATEWAY.derp_rx + Windows::GATEWAY.derp_tx == 5760 + 6144, "derp::IDLE_WINDOW_BYTES follows the idle relay windows");
+const _: () = assert!(Windows::GATEWAY.derp_rx + Windows::GATEWAY.derp_tx == 12288 + 6144, "derp::IDLE_WINDOW_BYTES follows the idle relay windows");
 
 /// Datagrams a UDP socket can queue each way.
 pub const UDP_PKTS: usize = 8;
@@ -345,6 +345,8 @@ fn tcp_err(_: tcp::Error) -> NetError {
     NetError::Closed
 }
 
+/// The most bytes that waited in the receive window before a read, per role `[control, relay]`.
+pub static TCP_RX_PEAK: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
 /// Aborts by us (`close`) and connects, per role: `[control, relay]`: a `close` of a handle that never connected is an abort of nothing.
 pub static TCP_ABORTS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
 /// See [`TCP_ABORTS`].
@@ -404,6 +406,8 @@ impl Read for EmbTcp {
         let since = (embassy_time::Instant::now().as_millis() as u32).wrapping_sub(self.connected_at);
         match self.sock.as_mut() {
             Some(s) => {
+                // how full the receive window got (bytes waiting before this read), per role: a window that fills is a window too small
+                TCP_RX_PEAK[usize::from(self.role)].fetch_max(s.recv_queue() as u32, Ordering::Relaxed);
                 let r = s.read(buf).await;
                 if r.is_err() {
                     note_tcp_err(1, s, since);
