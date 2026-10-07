@@ -131,18 +131,28 @@ fn write_abs(addr: u32, data: &[u8]) -> bool {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EspDirFlash;
 
+/// Whether `len` bytes at partition offset `offset` lie inside the `peerstore` partition. The ROM routines take absolute addresses and check nothing, so this is the
+/// only bound between a directory offset and the rest of the chip (`FlashStorage` bounded by chip capacity, never by partition).
+fn inside(offset: usize, len: usize) -> bool {
+    len <= PEERSTORE_SIZE && offset <= PEERSTORE_SIZE - len
+}
+
 impl DirFlash for EspDirFlash {
     fn read(&mut self, offset: usize, buf: &mut [u8]) -> bool {
-        read_abs(PEERSTORE_OFFSET + offset as u32, buf)
+        inside(offset, buf.len()) && read_abs(PEERSTORE_OFFSET + offset as u32, buf)
     }
     fn erase_sector(&mut self, sector: usize) -> bool {
+        if !inside(sector.saturating_mul(SECTOR), SECTOR) {
+            ERRS.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
         crate::guard::op("dir_erase");
         let r = erase_abs(PEERSTORE_OFFSET + (sector * SECTOR) as u32);
         crate::guard::op("");
         r
     }
     fn write(&mut self, offset: usize, data: &[u8]) -> bool {
-        write_abs(PEERSTORE_OFFSET + offset as u32, data)
+        inside(offset, data.len()) && write_abs(PEERSTORE_OFFSET + offset as u32, data)
     }
     fn size(&self) -> usize {
         PEERSTORE_SIZE
@@ -166,7 +176,7 @@ pub fn selftest(out: &mut impl Write) {
     let id = rdid();
     // what esp-storage believes: a second FlashStorage is only made to ask its capacity
     let cap = esp_storage::FlashStorage::new(unsafe { esp_hal::peripherals::FLASH::steal() }).capacity();
-    let _ = write!(out, "selftest flash: jedec=0x{:06x} (manufacturer 0x{:02x} type 0x{:02x} capacity code 0x{:02x}) esp_storage_capacity={} B\r\n", id, id & 0xFF, (id >> 8) & 0xFF, (id >> 16) & 0xFF, cap);
+    let _ = write!(out, "selftest flash: jedec=0x{:06x} (manufacturer 0x{:02x} type 0x{:02x} capacity code 0x{:02x}) esp_storage_capacity={} B nvs_capacity={} B expected={} B\r\n", id, id & 0xFF, (id >> 8) & 0xFF, (id >> 16) & 0xFF, cap, crate::settings::NVS_CAPACITY.load(Ordering::Relaxed), crate::settings::EXPECTED_CAPACITY);
     let probe = PEERSTORE_OFFSET + (PEERSTORE_SIZE - SECTOR) as u32;
     // 1. does an address above 4 MB alias one below it? (the app starts at 0x20000)
     let mut hi = [0u8; 64];

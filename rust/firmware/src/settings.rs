@@ -25,6 +25,11 @@ pub const NVS_SIZE: u32 = 0x1_0000;
 
 type Flash = NorPartition<FlashStorage<'static>>;
 
+/// The T-Dongle-S3's flash (W25Q128, JEDEC 0x1840ef).
+pub const EXPECTED_CAPACITY: usize = 16 * 1024 * 1024;
+/// The capacity the NVS's `FlashStorage` decoded when it was made (0 until mounted); `selftest flash` prints it.
+pub static NVS_CAPACITY: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 /// The mounted store; `None` until the init task has mounted it (or when it could not).
 pub static STORE: Mutex<CriticalSectionRawMutex, Option<Store<Flash>>> = Mutex::new(None);
 static RESET_ARM: critical_section::Mutex<core::cell::Cell<ResetArm>> = critical_section::Mutex::new(core::cell::Cell::new(ResetArm::new()));
@@ -40,7 +45,13 @@ pub struct Stored {
 
 /// Mount the NVS and read every setting (`Store::load_all`: the C load rules, v0.1.x import included, writes nothing). `Err` is the text for the `init` command.
 pub async fn mount(flash: esp_hal::peripherals::FLASH<'static>) -> Result<(Loaded, Stored), &'static str> {
-    let part = NorPartition::new(FlashStorage::new(flash), NVS_OFFSET);
+    let fs = FlashStorage::new(flash);
+    // esp-storage bounds every operation by the capacity it decoded from a JEDEC read at construction; keep it so a bad read (0 or 4 MB on this 16 MB chip) shows
+    NVS_CAPACITY.store(fs.capacity() as u32, Ordering::Relaxed);
+    if fs.capacity() != EXPECTED_CAPACITY {
+        esp_println::println!("nvs: esp-storage capacity {} B, expected {} B (bad JEDEC read?)", fs.capacity(), EXPECTED_CAPACITY);
+    }
+    let part = NorPartition::new(fs, NVS_OFFSET);
     let mut store = Store::mount(part, NVS_SIZE).map_err(|_| "nvs mount failed")?;
     let loaded = store.load_all();
     *STORE.lock().await = Some(store);
