@@ -911,35 +911,41 @@ async fn scan_all(controller: &mut WifiController<'static>) -> Result<alloc::vec
         Err(_) => Err("scan timed out"),
     };
     if let Ok(aps) = &result {
-        critical_section::with(|cs| {
-            let mut t = SCAN_TABLE.borrow_ref_mut(cs);
-            let mut order: heapless_order::Order = heapless_order::Order::new();
-            for (i, a) in aps.iter().enumerate() {
-                order.push(i, a.signal_strength);
-            }
-            t.count = 0;
-            t.seen = aps.len();
-            t.seq = t.seq.wrapping_add(1);
-            for &i in order.sorted() {
-                if t.count == BSS_TABLE {
-                    break;
-                }
-                let a = &aps[i];
-                let mut row = NO_ROW;
-                let name = a.ssid.as_str().as_bytes();
-                row.ssid[..name.len()].copy_from_slice(name);
-                row.ssid_len = name.len() as u8;
-                row.bss = Bss { bssid: a.bssid, channel: a.channel, rssi: a.signal_strength };
-                row.auth = a.auth_method.map_or(0xff, |m| m as u8);
-                let n = t.count;
-                t.rows[n] = row;
-                t.count += 1;
-            }
-        });
+        record_scan(aps);
         SCAN_SEEN.store(aps.len() as u32, Ordering::Relaxed);
     }
     SCAN_DONE.signal(());
     result
+}
+
+// Scan sorting uses a fixed scratch array; isolate it from the supervisor poll.
+#[inline(never)]
+fn record_scan(aps: &[esp_radio::wifi::ap::AccessPointInfo]) {
+    critical_section::with(|cs| {
+        let mut t = SCAN_TABLE.borrow_ref_mut(cs);
+        let mut order: heapless_order::Order = heapless_order::Order::new();
+        for (i, a) in aps.iter().enumerate() {
+            order.push(i, a.signal_strength);
+        }
+        t.count = 0;
+        t.seen = aps.len();
+        t.seq = t.seq.wrapping_add(1);
+        for &i in order.sorted() {
+            if t.count == BSS_TABLE {
+                break;
+            }
+            let a = &aps[i];
+            let mut row = NO_ROW;
+            let name = a.ssid.as_str().as_bytes();
+            row.ssid[..name.len()].copy_from_slice(name);
+            row.ssid_len = name.len() as u8;
+            row.bss = Bss { bssid: a.bssid, channel: a.channel, rssi: a.signal_strength };
+            row.auth = a.auth_method.map_or(0xff, |m| m as u8);
+            let n = t.count;
+            t.rows[n] = row;
+            t.count += 1;
+        }
+    });
 }
 
 /// Indices of up to 64 scan results ordered strongest first, without allocating.

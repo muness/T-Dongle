@@ -53,8 +53,16 @@ pub async fn mount(flash: esp_hal::peripherals::FLASH<'static>) -> Result<Stored
     }
     let part = NorPartition::new(fs, NVS_OFFSET);
     let mut store = Store::mount(part, NVS_SIZE).map_err(|_| "nvs mount failed")?;
-    let loaded = store.load_all();
+    let loaded = load_boot(&mut store);
     *STORE.lock().await = Some(store);
+    loaded
+}
+
+// The decoded profile value is large; consume it synchronously here instead
+// of retaining it across the STORE mutex await in the initialization future.
+#[inline(never)]
+fn load_boot(store: &mut Store<Flash>) -> Result<Stored, &'static str> {
+    let loaded = store.load_all();
     match loaded {
         Ok(s) => {
             // Publish the profiles here; returning their 5 KB value through the
