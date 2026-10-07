@@ -31,6 +31,11 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - uses: actions/setup-node@v4
         with: {node-version: 22}
+      - name: Flash script safety (mocked ports only)
+        run: |
+          bash -n tools/flash.sh
+          python3 tools/test_flash_console.py
+          python3 tools/test_flash_script.py
       - name: Web UI transport contracts
         run: node webui/test.mjs
       - run: cargo test --workspace
