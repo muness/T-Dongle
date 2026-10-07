@@ -274,3 +274,41 @@ pub async fn task() -> ! {
         RESP.signal(resp);
     }
 }
+
+/// The last recorded failure, kept in flash (`rust_diag/last`) because the RTC record does not survive a power cycle or a trip through ROM download mode: what the previous boot
+/// died of (`previous_hang`, `previous_op`, panic), written once at the next boot when there is one, and printed by `status` (`last_diag`) until a newer one replaces it.
+pub static LAST_DIAG: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::RefCell<String>> = embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(String::new()));
+
+/// Persist this boot's view of the previous failure (if it was one) and load the one on flash for `status`.
+pub async fn persist_diagnosis(state: &crate::guard::State) {
+    use core::fmt::Write;
+    let p = &state.boot.previous;
+    let mut now = String::new();
+    if !p.hang.as_str().is_empty() || !p.op.as_str().is_empty() || !p.panic_text().is_empty() {
+        let _ = write!(
+            now,
+            "reset={} stage={} hang={} op={} panic={} unstable={}",
+            state.reset.as_str(),
+            p.stage.map_or("none", tdongle_boot_guard::Stage::name),
+            p.hang.as_str(),
+            p.op.as_str(),
+            p.panic_text(),
+            p.unstable_boots
+        );
+        now.truncate(240);
+    }
+    let mut g = STORE.lock().await;
+    let Some(store) = g.as_mut() else { return };
+    if !now.is_empty() {
+        let mut old = [0u8; 256];
+        let same = matches!(store.nvs().get_str("rust_diag", "last", &mut old), Ok(Some(n)) if &old[..n.min(256)] == now.as_bytes());
+        if !same && store.nvs().set_str("rust_diag", "last", &now).is_err() {
+            let _ = store.remount();
+        }
+    }
+    let mut buf = [0u8; 256];
+    if let Ok(Some(n)) = store.nvs().get_str("rust_diag", "last", &mut buf) {
+        let text = core::str::from_utf8(&buf[..n.min(256)]).unwrap_or("").trim_end_matches('\0');
+        LAST_DIAG.lock(|c| *c.borrow_mut() = String::from(text));
+    }
+}

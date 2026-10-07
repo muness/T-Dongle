@@ -97,6 +97,44 @@ impl UsbWatch {
     }
 }
 
+/// The rules plus the decision to act on them. **Shadow by default**: the first image with these rules reset a healthy board about eight seconds after every boot (a1b8f4e,
+/// board run): the `OutNotArmed` input (`DOEPCTL.EPENA`) is not what the driver keeps set while it waits (the stock one-packet endpoint re-arms with DOEPTSIZ and CNAK, and the core
+/// clears EPENA), so an idle console with the port open tripped it at once. A rule's trips are counted and reported (`usb_live trips=`) whether or not they are enforced; they
+/// reset the chip only when `enforce` is on (the `selftest usb` command turns it on; the console's `usbwatch enforce on|off` flips it) until the board has shown that no rule trips
+/// on a healthy idle device.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Policy {
+    watch: UsbWatch,
+    /// Reset on a fault (otherwise only count it).
+    pub enforce: bool,
+    /// Trips per rule: not configured, interrupt not serviced, OUT not armed.
+    pub trips: [u32; 3],
+    /// The most recent fault, enforced or not.
+    pub last: Option<Fault>,
+}
+
+impl Policy {
+    /// Shadow mode.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { watch: UsbWatch::new(), enforce: false, trips: [0; 3], last: None }
+    }
+
+    /// Look at a sample; `Some` only when a rule tripped **and** `enforce` is on. A tripped rule starts its clock again, so it is counted once per limit, not once per tick.
+    pub fn decide(&mut self, now_ms: u64, s: &Sample) -> Option<Fault> {
+        let fault = self.watch.check(now_ms, s)?;
+        let i = match fault {
+            Fault::NotConfigured => 0,
+            Fault::IrqNotServiced => 1,
+            Fault::OutNotArmed => 2,
+        };
+        self.trips[i] = self.trips[i].saturating_add(1);
+        self.last = Some(fault);
+        self.watch = UsbWatch::new();
+        self.enforce.then_some(fault)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +239,45 @@ mod tests {
         let (t, f) = found.unwrap();
         assert_eq!(f, Fault::IrqNotServiced);
         assert!(t <= 4_000, "{t}");
+    }
+
+    /// The board's healthy idle device (a1b8f4e run): configured, a host sending frames, nothing pending, the console waiting in a read, and `EPENA` clear. Sixty seconds of that
+    /// must not reset the chip under the shipped policy; the rule that would have (and did) is counted, which is how the next board run finds out.
+    #[test]
+    fn the_boards_idle_samples_survive_sixty_seconds_in_shadow_mode_and_the_regression_is_visible() {
+        let board = Sample { host_active: true, suspended: false, configured: true, pending: 0, reader_waiting: true, out_armed: false };
+        let mut p = Policy::new();
+        for t in (0..=600_000u64).step_by(500) {
+            assert_eq!(p.decide(t, &board), None, "reset at {t} ms");
+        }
+        assert!(p.trips[2] > 0, "the OUT-not-armed rule must have tripped on this input (that was the regression)");
+        assert_eq!(p.trips[0] + p.trips[1], 0);
+        // enforced, the same input resets after the limit: this is why enforcement is off until the board agrees
+        let mut p = Policy::new();
+        p.enforce = true;
+        let mut at = None;
+        for t in (0..=60_000u64).step_by(500) {
+            if let Some(f) = p.decide(t, &board) {
+                at = Some((t, f));
+                break;
+            }
+        }
+        assert_eq!(at.map(|(_, f)| f), Some(Fault::OutNotArmed));
+    }
+
+    /// The whole supervisor on the host model for 60 s of idle uptime: both heartbeats advance, the USB samples are the board's, the verdict stays healthy and nothing resets.
+    #[test]
+    fn sixty_seconds_idle_whole_supervisor_model() {
+        use crate::watch::{Verdict, Watch};
+        let board = Sample { host_active: true, suspended: false, configured: true, pending: 0, reader_waiting: true, out_armed: false };
+        let mut watch = Watch::new(["thread", "console"], [8_000, 3_000], 0);
+        let mut policy = Policy::new();
+        let (mut thread, mut console) = (0u32, 0u32);
+        for t in (0..=60_000u64).step_by(500) {
+            thread += 1;
+            console += 1;
+            assert_eq!(watch.check(t, [thread, console]), Verdict::Healthy, "stalled at {t}");
+            assert_eq!(policy.decide(t, &board), None, "usb reset at {t}");
+        }
     }
 }

@@ -740,7 +740,7 @@ async fn main(spawner: Spawner) -> ! {
         })
         .unwrap(),
     );
-    spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, peripherals.RNG, peripherals.ADC1, spawner, bridge, worker, state.boot.safe_mode).unwrap());
+    spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, peripherals.RNG, peripherals.ADC1, spawner, bridge, worker, state.boot.safe_mode, *state).unwrap());
     loop {
         Timer::after_secs(3600).await;
     }
@@ -757,6 +757,7 @@ async fn init_task(
     bridge: &'static Bridge<FwEnv>,
     worker: tdongle_bridge::Worker<'static, FwEnv>,
     safe_mode: bool,
+    state: guard::State,
 ) {
     // Let the USB device enumerate before the first long step.
     Timer::after_millis(300).await;
@@ -770,6 +771,7 @@ async fn init_task(
     let loaded = match settings::mount(flash).await {
         Ok((l, stored)) => {
             critical_section::with(|cs| STORED.borrow(cs).set(Some(stored)));
+            settings::persist_diagnosis(&state).await;
             if l.saved.list().is_empty() {
                 init_note("no saved networks");
             }
@@ -1654,6 +1656,10 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
     );
     ui::write_status_line(out);
     supervise::write_usb_live(out);
+    let diag = settings::LAST_DIAG.lock(|c| c.borrow().clone());
+    if !diag.is_empty() {
+        let _ = write!(out, "last_diag {}\r\n", diag);
+    }
 }
 
 fn tdongle_traffic_reading() -> tdongle_traffic::Reading {
@@ -1762,6 +1768,10 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             }
             _ => s.push_str("usage: ui press short|long\r\n"),
         },
+        u if u == "usbwatch enforce on" || u == "usbwatch enforce off" => {
+            supervise::USB_ENFORCE.store(u.ends_with("on"), Ordering::Relaxed);
+            let _ = write!(s, "usbwatch enforce {} (resets on a USB fault; trips are counted either way, see `usb_live`)\r\n", if u.ends_with("on") { "on" } else { "off" });
+        }
         #[cfg(feature = "diagnostics")]
         r if r.starts_with("ring max ") => match r["ring max ".len()..].trim().parse::<u32>() {
             Ok(n) if (8..=tdongle_usb_out::elastic::STORAGE_SLOTS as u32).contains(&n) => {

@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use embassy_executor::SendSpawner;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Instant, Timer};
-use tdongle_boot_guard::usb_watch::{Fault, Sample, UsbWatch};
+use tdongle_boot_guard::usb_watch::{Fault, Policy, Sample};
 use tdongle_boot_guard::watch::{Verdict, Watch};
 use tdongle_rescue::{HealthyTimer, Selftest};
 
@@ -132,7 +132,7 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
     let mut watch = Watch::new(["thread", "console"], [8_000, 3_000], Instant::now().as_millis());
     let mut healthy = HealthyTimer::new();
     let mut marked = false;
-    let mut usb_watch = UsbWatch::new();
+    let mut usb_policy = Policy::new();
     let mut last_frame = otg::dsts().0;
     loop {
         let now = Instant::now().as_millis();
@@ -150,7 +150,12 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
                     out_armed: otg::out2_armed(),
                 };
                 last_frame = frame;
-                if let Some(fault) = usb_watch.check(now, &sample) {
+                usb_policy.enforce = USB_ENFORCE.load(Ordering::Relaxed);
+                let decision = usb_policy.decide(now, &sample);
+                for (cell, n) in USB_TRIPS.iter().zip(usb_policy.trips) {
+                    cell.store(n, Ordering::Relaxed);
+                }
+                if let Some(fault) = decision {
                     USB_FAULT.store(match fault { Fault::NotConfigured => 1, Fault::IrqNotServiced => 2, Fault::OutNotArmed => 3 }, Ordering::Relaxed);
                     healthy.observe(now, false);
                     guard::hang(Fault::HANG);
@@ -176,6 +181,10 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
 }
 
 /// Which USB fault the supervisor saw (1 not configured, 2 interrupt not serviced, 3 OUT endpoint not armed), for the log line of the next boot's `boot-status` neighbours.
+/// Reset on a USB fault (`selftest usb` and the console's `usbwatch enforce on` set it; off at every boot until the board shows no rule trips on a healthy idle device).
+pub static USB_ENFORCE: AtomicBool = AtomicBool::new(false);
+/// Trips per USB rule (not configured, interrupt not serviced, OUT not armed), enforced or not.
+pub static USB_TRIPS: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
 pub static USB_FAULT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 /// `selftest NAME`: deliberately break the image so the rescue is proven on the board. Returns only for `console` (the console task parks itself at its next turn).
@@ -192,7 +201,10 @@ pub fn selftest(kind: Selftest) {
         Selftest::IrqOff => tdongle_rescue::irqoff(),
         Selftest::Panic => panic!("selftest panic"),
         Selftest::Console => CONSOLE_FROZEN.store(true, Ordering::Relaxed),
-        Selftest::Usb => otg::stop_servicing(),
+        Selftest::Usb => {
+            USB_ENFORCE.store(true, Ordering::Relaxed); // the self-test proves the enforced path
+            otg::stop_servicing()
+        }
     }
 }
 
@@ -202,7 +214,7 @@ pub fn write_usb_live(out: &mut alloc::string::String) {
     let (frame, suspended) = otg::dsts();
     let _ = write!(
         out,
-        "usb_live configured={} frame={} suspended={} pending={:#x} out2_armed={} reader_waiting={} reattaches={} fault={}\r\n",
+        "usb_live configured={} frame={} suspended={} pending={:#x} out2_armed={} reader_waiting={} reattaches={} fault={} enforce={} trips={}/{}/{}\r\n",
         u8::from(USB_CONFIGURED.load(Ordering::Relaxed)),
         frame,
         u8::from(suspended),
@@ -210,6 +222,10 @@ pub fn write_usb_live(out: &mut alloc::string::String) {
         u8::from(otg::out2_armed()),
         u8::from(READER_WAITING.load(Ordering::Relaxed)),
         REATTACHES.load(Ordering::Relaxed),
-        USB_FAULT.load(Ordering::Relaxed)
+        USB_FAULT.load(Ordering::Relaxed),
+        u8::from(USB_ENFORCE.load(Ordering::Relaxed)),
+        USB_TRIPS[0].load(Ordering::Relaxed),
+        USB_TRIPS[1].load(Ordering::Relaxed),
+        USB_TRIPS[2].load(Ordering::Relaxed)
     );
 }
