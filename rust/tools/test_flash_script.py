@@ -53,10 +53,10 @@ exit 0
             calls = (root / "log").read_text() if (root / "log").exists() else ""
             return result, calls
 
-    def test_success_checks_firmware_twice_without_hard_reset(self):
+    def test_success_checks_sustained_health_without_hard_reset(self):
         result, calls = self.run_flash()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(calls.count("ready\n"), 2)
+        self.assertEqual(calls.count("ready\n"), 1)
         self.assertNotIn("hard_reset", calls)
         self.assertIn("--before no_reset --after watchdog_reset write_flash", calls)
         self.assertNotIn("/dev/", calls)

@@ -40,6 +40,51 @@ class ConsoleTests(unittest.TestCase):
             self.assertEqual(console.exchange("FAKE-PORT", b"status"), b"")
             close.assert_called_once_with(123)
 
+    @staticmethod
+    def report(uptime, healthy=False, stage="running", count=0):
+        return {"schema": 1, "elf": "abc", "reset_reason": "Software", "rescue": {"state": "healthy" if healthy else "armed", "count": count}, "safe_mode": False, "recovery": False, "stage": stage, "uptime_ms": uptime}
+
+    def test_early_replies_then_crash_never_ready(self):
+        progress = console.BootProgress()
+        self.assertFalse(progress.observe(self.report(1000)))
+        self.assertFalse(progress.observe(self.report(2000)))
+        self.assertFalse(progress.observe(self.report(10000)))
+        with self.assertRaisesRegex(RuntimeError, "reset"):
+            progress.observe(self.report(1000, count=1))
+
+    def test_health_requires_running_not_recovery_and_advancing_uptime(self):
+        progress = console.BootProgress()
+        self.assertFalse(progress.observe(self.report(1000, healthy=True)))
+        self.assertFalse(progress.observe(self.report(31000, healthy=True, stage="wifi")))
+        recovery = self.report(32000, healthy=True)
+        recovery["recovery"] = True
+        self.assertFalse(progress.observe(recovery))
+        self.assertFalse(progress.observe(self.report(33000, healthy=True)))
+        self.assertFalse(progress.observe(self.report(33000, healthy=True)))
+        self.assertTrue(progress.observe(self.report(34000, healthy=True)))
+
+    def test_boot_json_is_complete_and_not_console_noise(self):
+        encoded = console.json.dumps(self.report(35000, healthy=True)).encode()
+        self.assertEqual(console.boot_report(b"boot-status\r\n" + encoded + b"\r\ndone>"), self.report(35000, healthy=True))
+        self.assertIsNone(console.boot_report(encoded[:-1]))
+        self.assertIsNone(console.boot_report(b"ESP-ROM:esp32s3"))
+
+    def test_wait_healthy_early_responses_disappear(self):
+        clock = [0]
+        samples = iter([self.report(1000), self.report(2000), None])
+        def sleep(seconds):
+            clock[0] += seconds
+        self.assertFalse(console.wait_healthy("FAKE-PORT", timeout=5, sample=lambda: next(samples, None), sleep=sleep, now=lambda: clock[0]))
+        self.assertEqual(clock[0], 5)
+
+    def test_wait_healthy_requires_consecutive_fresh_health_after_disconnect(self):
+        clock = [0]
+        samples = iter([self.report(1000), self.report(31000, True), None, self.report(34000, True), self.report(35000, True)])
+        def sleep(seconds):
+            clock[0] += seconds
+        self.assertTrue(console.wait_healthy("FAKE-PORT", timeout=10, sample=lambda: next(samples, None), sleep=sleep, now=lambda: clock[0]))
+        self.assertEqual(clock[0], 4)
+
 
 if __name__ == "__main__":
     # The patch target needs this name even when launched as a script.

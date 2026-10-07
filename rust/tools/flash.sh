@@ -93,19 +93,13 @@ for attempt in 1 2 3 4 5; do
 done
 
 echo "waiting for the firmware to come up..."
-deadline=$((SECONDS + 60))
-ready=0
-while (( SECONDS < deadline )); do
-  # Port enumeration and ICMP alone also occur during a crash loop or may refer
-  # to another host. Require two fresh console status replies from this dongle.
-  if [[ -e "$APP_PORT" ]] && "$ESPTOOL_PYTHON" "$TOOLS_DIR/flash_console.py" ready "$APP_PORT"; then
-    ready=$((ready + 1))
-    if (( ready >= 2 )); then echo "UP: $APP_PORT (two fresh firmware status replies)"; exit 0; fi
-  else
-    ready=0
-  fi
-  sleep 1
-done
-echo "flashed, but the firmware did not come up within 60 s (boot crash?). Recover with a known-good image:" >&2
+# Rescue health requires 30 continuous seconds of advancing heartbeats with
+# USB configured. Early console replies or a briefly enumerated port are not
+# proof of a healthy boot. The helper closes the port between every exchange.
+if "$ESPTOOL_PYTHON" "$TOOLS_DIR/flash_console.py" ready "$APP_PORT"; then
+  echo "UP: $APP_PORT (running, rescue healthy, advancing uptime)"
+  exit 0
+fi
+echo "flashed, but the firmware did not come up within 120 s (boot crash?). Recover with a known-good image:" >&2
 echo "  tools/flash.sh --recover <known-good app.bin or package>" >&2
 exit 2
