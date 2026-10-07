@@ -92,6 +92,13 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> 
         self.with_engine(|e, now| e.status(now))
     }
 
+    /// `stack_free[]` in the C's key order (`net_io`, `derp_tx`, `derp_rx`, `coord`, `wg_mgr`; `derp_rx` has not existed since the I/O tasks merged): every task of the
+    /// Rust image runs on the one stack, so each existing key reports its high-water mark.
+    fn stack_free_keys(&self) -> [u32; 5] {
+        let f = self.platform.stack_free_bytes().unwrap_or(u32::MAX);
+        [f, f, u32::MAX, f, f]
+    }
+
     fn fill_status(&self, f: &mut dyn FnMut(&si::Status<'_>) -> bool) -> bool {
         let snap = self.snapshot();
         let (entries, n_entries, damaged) = self.registry_entries();
@@ -152,7 +159,7 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> 
                     derp_tls_verify_failures: s.tls_untrusted,
                     derp_tls_deferred: s.tls_deferred,
                     control_key_auth: u32::from(s.ctl.challenge_seen),
-                    stack_free: [u32::MAX; 5],
+                    stack_free: self.stack_free_keys(),
                     ..si::Client::default()
                 };
                 c.diagnostics[0] = s.sessions;
@@ -188,6 +195,16 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> 
         let status = si::Status {
             firmware: self.cfg.firmware.as_bytes(),
             mode: b"tailnet",
+            chip_temperature: self.platform.chip_temperature().map_or_else(si::Temperature::default, |t| si::Temperature {
+                valid: t.valid,
+                current_tenths: t.current_tenths,
+                peak_tenths: t.peak_tenths,
+                sampled_at_ms: t.sampled_at_ms,
+                samples: t.samples,
+                changed_at_ms: t.changed_at_ms,
+                age_ms: t.age_ms,
+                errors: t.errors,
+            }),
             recovery: damaged,
             membership_start_budget: budget.required as u64,
             membership_context_bytes: params.context as u64,

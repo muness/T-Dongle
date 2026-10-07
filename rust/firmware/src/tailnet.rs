@@ -232,6 +232,22 @@ impl Platform for FwPlatform {
     fn heap(&self) -> &dyn HeapProbe {
         &FwHeap
     }
+    fn chip_temperature(&self) -> Option<tdongle_tailnet_fw::ChipTemperature> {
+        let t = crate::temperature::snapshot();
+        Some(tdongle_tailnet_fw::ChipTemperature {
+            valid: t.valid,
+            current_tenths: t.current_tenths,
+            peak_tenths: t.peak_tenths,
+            sampled_at_ms: t.sampled_at_ms,
+            errors: t.errors,
+            samples: t.samples,
+            changed_at_ms: t.changed_at_ms,
+            age_ms: t.age_ms,
+        })
+    }
+    fn stack_free_bytes(&self) -> Option<u32> {
+        Some(crate::stackmark::free_bytes()).filter(|&b| b != u32::MAX)
+    }
     fn console_line(&self, line: &str) {
         let b = line.as_bytes();
         let n = b.len().min(240);

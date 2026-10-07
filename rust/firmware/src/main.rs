@@ -11,6 +11,8 @@ extern crate alloc;
 mod ops;
 mod guard;
 mod supervise;
+mod stackmark;
+mod temperature;
 mod settings;
 mod l2;
 mod dhcp;
@@ -653,6 +655,7 @@ async fn main(spawner: Spawner) -> ! {
     let state: &'static guard::State = STATE.init(guard::begin());
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     tdongle_rescue::arm();
+    stackmark::paint();
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: HEAP_RECLAIMED);
     #[cfg(feature = "tailnet")]
     esp_alloc::heap_allocator!(#[esp_hal::ram(unstable(dcache_reclaimed))] size: tailnet::budget::HEAP_DCACHE);
@@ -749,6 +752,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(ring_housekeeping_task().unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
     spawner.spawn(settings::task().unwrap());
+    spawner.spawn(temperature::task(peripherals.TSENS).unwrap());
     spawner.spawn(
         ui::ui_task(ui::Hardware {
             spi: peripherals.SPI2,
@@ -1618,7 +1622,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         usb_ready: ALT.load(Ordering::Relaxed) != 0,
         uptime_ms: Instant::now().as_millis(),
         free_heap: esp_alloc::HEAP.free() as u32,
-        temperature: Default::default(),
+        temperature: temperature::snapshot(),
         clock: clock_for_status().0,
         clock_valid: clock_for_status().1,
         link: {
@@ -1647,7 +1651,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
             down_kbps: 0,
             up_kbps: 0,
             usb_resets: RESETS.load(Ordering::Relaxed),
-            control_stack_free_bytes: 0,
+            control_stack_free_bytes: stackmark::free_bytes(),
         },
         memory: &none,
     };
