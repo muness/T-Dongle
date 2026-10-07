@@ -982,38 +982,3 @@ fn a_peer_homed_on_the_fifth_region_of_the_map_is_reached_through_the_index() {
         5,
     );
 }
-
-/// A relay that writes at about 1.4 Mbit/s (8 ms per 1.4 KB frame): a bulk transfer over DERP only, one relay link, must run at the relay's pace without the engine refusing
-/// or dropping anything (the sender is held back by the full relay queue, as the bridge NAKs the host), in both directions.
-#[test]
-fn derp_only_bulk_is_paced_by_the_relay_not_dropped() {
-    let mut go = go_or_skip!();
-    let (gw, _id, alias) = up(&mut go, "gopeer");
-    gw.net.udp_blocked.store(true, Ordering::SeqCst);
-    assert_eq!(gw.host.echo(alias, 7, b"warm", Duration::from_secs(30)).unwrap(), b"warm");
-    gw.net.derp_write_delay_ms.store(8, Ordering::Relaxed);
-    let refused = |gw: &Gateway| {
-        gw.sh.with_engine(|e, _| e.stats().tx_count(tdongle_tailnet_engine::TxFate::TxRefused))
-            + tdongle_tailnet_runtime::shared::RtStats::get(&gw.sh.stats.out_refused)
-            + tdongle_tailnet_runtime::shared::RtStats::get(&gw.sh.stats.usb_tx_refused)
-    };
-    let before = refused(&gw);
-    let (n, d) = gw.host.upload(alias, 9, 192 * 1024, Duration::from_secs(90)).expect("upload over a slow relay");
-    assert_eq!(n, 192 * 1024);
-    let up = mbit(n, d);
-    let (n, d) = gw.host.get_bytes(alias, 80, 192 * 1024, Duration::from_secs(90)).expect("download over a slow relay");
-    assert_eq!(n, 192 * 1024);
-    let down = mbit(n, d);
-    let dropped = refused(&gw) - before;
-    println!("slow relay (8 ms per frame): up {up:.2} down {down:.2} Mbit/s, refused or dropped {dropped}");
-    let (txr, outr, usbr, hostr) = (
-        gw.sh.with_engine(|e, _| e.stats().tx_count(tdongle_tailnet_engine::TxFate::TxRefused)),
-        tdongle_tailnet_runtime::shared::RtStats::get(&gw.sh.stats.out_refused),
-        tdongle_tailnet_runtime::shared::RtStats::get(&gw.sh.stats.usb_tx_refused),
-        gw.sh.with_engine(|e, _| e.stats().rx_count(tdongle_tailnet_engine::RxFate::HostTxRefused)),
-    );
-    assert_eq!(dropped, 0, "nothing refused or dropped at steady state: tx_refused {txr} out_refused {outr} usb_tx_refused {usbr} host_tx_refused {hostr}\n{}", gw.dump());
-    assert!(up >= 0.8, "upload {up:.2} Mbit/s over a ~1 Mbit/s relay");
-    // (the download direction is paced by the peer's relay writes, which this knob does not slow: it only has to complete)
-    gw.check_engine();
-}

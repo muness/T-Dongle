@@ -59,7 +59,7 @@ use crate::{ALT, CONFIGURED, CONNECTS, FIRMWARE, FwEnv, USB_GEN};
 /// Memberships that can run at once in this build (the `members-N` features).
 pub const MEMBERS: usize = MAX_RUN;
 /// NAT flows (the C's `IP_NAPT_MAX` is 512; see the memory notes in the report).
-pub const NAPT_FLOWS: usize = 272;
+pub const NAPT_FLOWS: usize = 320;
 /// Mux queue slots (1,500 bytes each): towards the radio (NAT traffic) and towards the USB host.
 pub const MUX_TXQ: usize = 4;
 /// See [`MUX_TXQ`].
@@ -120,7 +120,7 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 126 * 1024;
+    pub const HEAP_REGULAR: usize = 124 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
@@ -1300,7 +1300,7 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             use tdongle_tailnet_runtime::derp::{HOME_MOVES, VISITING, X_COUNTS, X_LAST_END};
             let _ = write!(
                 out,
-                "tn_derp_visit visiting={} queued={} sent={} no_room_waits={} heap_refused_waits={} region_unknown_dropped={} visits={} refused_home_busy={} expired={} dropped_on_leave={} link_refused={} rx_to_engine={} last_leave={} (6 idle, 8 others starving) home_moves={} (last {} -> {})\r\n",
+                "tn_derp_visit visiting={} queued={} sent={} dropped[queue_full,heap,region_unknown]={},{},{} visits={} refused_home_busy={} expired={} dropped_on_leave={} link_refused={} rx_to_engine={} last_leave={} (6 idle, 8 others starving) home_moves={} (last {} -> {})\r\n",
                 VISITING.load(Relaxed),
                 X_COUNTS[0].load(Relaxed),
                 X_COUNTS[1].load(Relaxed),

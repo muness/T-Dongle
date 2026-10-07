@@ -207,12 +207,6 @@ impl<'a, IO: Read + Write> LeasedTlsDerp<'a, IO> {
         self.conn.wait_record().await.map(|_| ())
     }
 
-    /// [`LeasedTlsDerp::wait_record`], returning the length of the record whose header has arrived (its plaintext is at most that many bytes): what a reader that must
-    /// hold the record back until its consumer has room needs to know. Cancel-safe like `wait_record`.
-    pub async fn wait_record_len(&mut self) -> Result<usize, TlsError> {
-        self.conn.wait_record().await
-    }
-
     /// Receive one TLS record's plaintext and pass it to `f` (in one or more slices, in order). Returns the plaintext length (0 for a
     /// post-handshake message such as a session ticket: call again). Cancel-safe only while waiting for the header.
     ///

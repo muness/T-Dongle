@@ -42,9 +42,7 @@ pub const MAX_RUN: usize = tdongle_tailnet_engine::GATEWAY_M;
 /// Capacity of a slot's UDP egress queue (DISCO, STUN, WireGuard datagrams: records of up to 1,536 + 21 bytes; one full packet always fits an empty queue; two and a half of them in a burst: `out_refused` on the board was this queue full).
 pub const UDP_Q: usize = 4096;
 /// Capacity of a slot's DERP egress queue (one full relay packet: 3-byte header, 32-byte key, 1,500 bytes; the link has its own transmit ring behind it).
-pub const DERP_Q: usize = 12288;
-/// What the slot's relay egress queue pins statically: its header (the records are heap blocks, admitted one by one above the elastic floor).
-pub const DERP_Q_STATIC: usize = 64;
+pub const DERP_Q: usize = 2560;
 /// Bytes of the one scratch buffer every task shares: a datagram with its endpoint record (UDP and DNS ingress and egress, a DERP packet on its way into the
 /// engine), the USB side's two frame buffers, the registry's JSON. It is held only inside synchronous code (never across an `.await`), so tasks never
 /// contend for it in a single-executor image; the order of locks is registry, scratch, engine, leaf queues.
@@ -370,7 +368,7 @@ pub struct Slot<R: RawMutex> {
     /// DISCO / STUN / WireGuard datagrams to send (record = `[ep: 18][data]`, kind 0 = datagram, 1 = STUN).
     pub udp_q: ByteQueue<R, UDP_Q>,
     /// DERP packets to relay (record = `[dst key: 32][data]`).
-    pub derp_q: crate::queue::ElasticQueue<R, DERP_Q>,
+    pub derp_q: ByteQueue<R, DERP_Q>,
     /// The latest connect / close the engine asked of the DERP link.
     pub derp_cmd: Signal<R, DerpCmd>,
     /// Published state.
@@ -402,7 +400,7 @@ impl<R: RawMutex> Slot<R> {
             ident: Mutex::new(RefCell::new(Ident::empty())),
             ws: AsyncMutex::new(SessionBuf::new()),
             udp_q: ByteQueue::new(),
-            derp_q: crate::queue::ElasticQueue::new(),
+            derp_q: ByteQueue::new(),
             derp_cmd: Signal::new(),
             st: Mutex::new(RefCell::new(SlotStatus::new())),
             ctl_kick: Signal::new(),
@@ -774,7 +772,7 @@ pub fn member_charges<D: PeerDirectory>() -> [(tdongle_tailnet_admission::ledger
     use tdongle_tailnet_admission::ledger::Owner;
     [
         (Owner::Noise, core::mem::size_of::<SessionBuf>()),
-        (Owner::Packet, UDP_Q + DERP_Q_STATIC),
+        (Owner::Packet, UDP_Q + DERP_Q),
         (Owner::WireGuard, GatewayEngine::<D>::per_member_bytes().in_engine),
         (Owner::Other, core::mem::size_of::<Ident>() + core::mem::size_of::<SlotStatus>()),
     ]
@@ -981,7 +979,7 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Output for OutSink<
                 let mut meta = [0u8; 34];
                 meta[..32].copy_from_slice(dst);
                 meta[32..].copy_from_slice(&region.to_be_bytes());
-                s.derp_q.push_admit(0, &meta, data, sh.mem().heap.free())
+                s.derp_q.push(0, &meta, data)
             }),
             Out::HostPacket { data } => sh.host_q.push(HOST_IP, &[], data),
             Out::DnsAnswer { client, data } => {
@@ -1167,8 +1165,7 @@ mod tests {
         let (k, n) = sh.slots[1].udp_q.try_pop(&mut buf).unwrap();
         assert_eq!((k, ep_from_meta(&buf[..n]), &buf[18..n]), (UDP_DATAGRAM, Some(Ep::v4([1, 1, 1, 1], 1)), &b"disco"[..]));
         assert_eq!(sh.slots[1].udp_q.try_pop(&mut buf).unwrap().0, UDP_STUN);
-        let (_, n) = sh.slots[1].derp_q.try_peek(&mut buf).unwrap();
-        sh.slots[1].derp_q.discard_front();
+        let (_, n) = sh.slots[1].derp_q.try_pop(&mut buf).unwrap();
         assert_eq!((&buf[..32], u16::from_be_bytes([buf[32], buf[33]]), &buf[34..n]), (&[9u8; 32][..], 0, &b"relay"[..]));
         // host packets and DNS
         assert!(sink.emit(Out::HostPacket { data: &[0x45; 28] }));

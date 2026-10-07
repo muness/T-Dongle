@@ -72,7 +72,7 @@ pub struct Windows {
 
 impl Windows {
     /// The sizes the firmware starts with.
-    pub const GATEWAY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 5760, derp_tx: 6144, udp_rx: 9600, udp_tx: 3200, dns: 1536 };
+    pub const GATEWAY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 5760, derp_tx: 2048, udp_rx: 9600, udp_tx: 3200, dns: 1536 };
     /// Bytes one membership's sockets hold (windows only: the packet metadata is static).
     pub const fn per_member(&self) -> usize {
         self.ctl_rx + self.ctl_tx + self.derp_rx + self.derp_tx + self.udp_rx + self.udp_tx
@@ -368,12 +368,8 @@ impl Write for EmbTcp {
         }
     }
     async fn flush(&mut self) -> Result<(), NetError> {
-        // The data is in the socket's send buffer (`write` waited for room), which is all a stream needs. embassy-net's own flush waits until the peer has ACKed everything
-        // queued, so every TLS record would cost a round trip: one relay frame per RTT (1.4 KB in 80 ms is 0.14 Mbit/s), whatever the window. The connection is closed with a
-        // reset (`close`, `release`), which has no use for a drained buffer.
-        match self.sock.as_ref() {
-            Some(s) if s.state() != tcp::State::Closed => Ok(()),
-            Some(_) => Err(NetError::Closed),
+        match self.sock.as_mut() {
+            Some(s) => s.flush().await.map_err(tcp_err),
             None => Err(NetError::Closed),
         }
     }
