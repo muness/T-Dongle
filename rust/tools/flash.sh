@@ -53,8 +53,14 @@ if ! find_rom_port; then
 fi
 echo "download mode on $ROM_PORT ($MAC)"
 
-"$ESPTOOL" --chip esp32s3 --port "$ROM_PORT" --before no_reset --after watchdog_reset \
-  write_flash --flash_mode dio --flash_freq 40m --flash_size 16MB "${images[@]}"
+# macOS needs a moment to release the port after the MAC probe; retry transient "busy" errors.
+for attempt in 1 2 3 4 5; do
+  sleep 1
+  if "$ESPTOOL" --chip esp32s3 --port "$ROM_PORT" --before no_reset --after watchdog_reset \
+      write_flash --flash_mode dio --flash_freq 40m --flash_size 16MB "${images[@]}"; then break; fi
+  (( attempt < 5 )) || { echo "flash failed after 5 attempts" >&2; exit 1; }
+  echo "retrying ($attempt)..."; free_port
+done
 
 echo "waiting for the firmware to come up..."
 for _ in $(seq 60); do
