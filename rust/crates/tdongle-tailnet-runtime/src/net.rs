@@ -71,6 +71,8 @@ pub enum TcpRole {
     Control,
     /// The DERP relay connection (TLS inside).
     Derp,
+    /// A membership's extra relay connection, to the region a peer is homed on when that is not the member's home region.
+    DerpExtra,
 }
 
 /// What a UDP handle is for.

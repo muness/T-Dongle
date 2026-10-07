@@ -79,6 +79,7 @@ pub fn emit_route(
     derp_ready: bool,
     route: Route,
     dst_key: &[u8; 32],
+    region: u16,
     data: &[u8],
 ) -> Sent {
     let route = if matches!(route, Route::Direct(_)) && FORCE_DERP.load(core::sync::atomic::Ordering::Relaxed) { Route::Derp } else { route };
@@ -100,7 +101,7 @@ pub fn emit_route(
                 hb.refuse(HbSite::DerpTx);
                 return Sent::HeapRefused;
             }
-            if cx.out.emit(Out::DerpSend { member, dst: dst_key, data }) {
+            if cx.out.emit(Out::DerpSend { member, dst: dst_key, region, data }) {
                 st.derp_tx.bump();
                 Sent::Derp
             } else {

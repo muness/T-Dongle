@@ -207,6 +207,9 @@ pub enum Out<'a> {
         member: MemberId,
         /// The peer's node key.
         dst: &'a [u8; 32],
+        /// The peer's home DERP region (0: not known; the member's own relay then). A relay server only forwards to clients connected to it, so the packet has to go to the region
+        /// the peer is homed on.
+        region: u16,
         /// The packet.
         data: &'a [u8],
     },

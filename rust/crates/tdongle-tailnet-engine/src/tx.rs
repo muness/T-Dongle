@@ -19,6 +19,11 @@ use tdongle_tailnet_peers::record::DirRecord;
 use tdongle_tailnet_types::Key32;
 use tdongle_tailnet_wg::{Actions, PeerCold, TxError, TxKind};
 
+/// The region the peer is homed on (0 when the map did not say): where a relayed packet for it has to go.
+pub(crate) fn peer_region<const P: usize>(m: &Member<P>, idx: usize) -> u16 {
+    m.mship.table.get(idx).map_or(0, |p| p.meta.derp_region)
+}
+
 impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: usize, const JB: usize> Shared<D, M, K, A, F, JB> {
     /// Give the peer at table index `idx` a pool slot (`peer_alloc`): its cold record (one X25519: the precomputed static DH) and a zeroed hot state.
     /// `Err` is counted by the caller as `NoSlot`.
@@ -60,7 +65,7 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
     pub(crate) fn send_ctl<const P: usize>(&mut self, m: &Member<P>, idx: usize, n: usize, cx: &mut Cx<'_>) -> Sent {
         let key = Self::peer_key(m, idx);
         let route = m.rt.paths[idx].route(cx.now);
-        emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.ctl[..n])
+        emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, peer_region(m, idx), &self.ctl[..n])
     }
 
     /// The shared DISCO key with the peer, derived once per peer disco key (`NaCl box beforenm`).
@@ -104,7 +109,7 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
                 Ok(n) => {
                     let key = Self::peer_key(m, idx);
                     let route = m.rt.paths[idx].route(cx.now);
-                    let sent = emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.tx[..n]);
+                    let sent = emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, peer_region(m, idx), &self.tx[..n]);
                     if matches!(sent, Sent::Direct | Sent::Derp) {
                         m.rt.wg_bytes[idx][0] = m.rt.wg_bytes[idx][0].saturating_add(len as u32);
                     }
@@ -157,7 +162,7 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
                 Ok(n) => {
                     let key = Self::peer_key(m, idx);
                     let route = m.rt.paths[idx].route(cx.now);
-                    let sent = emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.tx[..n]);
+                    let sent = emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, peer_region(m, idx), &self.tx[..n]);
                     if matches!(sent, Sent::Direct | Sent::Derp) {
                         m.rt.wg_bytes[idx][0] = m.rt.wg_bytes[idx][0].saturating_add(len as u32);
                     }
@@ -234,7 +239,7 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
         let Ok(n) = ticket.seal(&mut self.tx, 0) else { return };
         let key = Self::peer_key(m, idx);
         let route = m.rt.paths[idx].route(cx.now);
-        if matches!(emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.tx[..n]), Sent::Direct | Sent::Derp) {
+        if matches!(emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, peer_region(m, idx), &self.tx[..n]), Sent::Direct | Sent::Derp) {
             self.stats.keepalive_tx.bump();
         }
     }
@@ -299,7 +304,7 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
             Via::Derp => Route::Derp,
         };
         let key = Self::peer_key(m, idx);
-        if matches!(emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.ctl[..n]), Sent::Direct | Sent::Derp) {
+        if matches!(emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, peer_region(m, idx), &self.ctl[..n]), Sent::Direct | Sent::Derp) {
             self.stats.disco_tx.bump();
         }
     }

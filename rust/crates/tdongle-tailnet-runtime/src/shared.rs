@@ -974,7 +974,13 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Output for OutSink<
         let ok = match o {
             Out::SendUdp { member, dst, data } => sh.slot_of(member).is_some_and(|(_, s)| s.udp_q.push(UDP_DATAGRAM, &ep_meta(&dst), data)),
             Out::SendStun { member, dst, data, .. } => sh.slot_of(member).is_some_and(|(_, s)| s.udp_q.push(UDP_STUN, &ep_meta(&dst), data)),
-            Out::DerpSend { member, dst, data } => sh.slot_of(member).is_some_and(|(_, s)| s.derp_q.push(0, dst, data)),
+            // the record's meta is the peer's key and its home region (0 = not known): the member's home link sends what is homed with it and hands the rest to its other links
+            Out::DerpSend { member, dst, region, data } => sh.slot_of(member).is_some_and(|(_, s)| {
+                let mut meta = [0u8; 34];
+                meta[..32].copy_from_slice(dst);
+                meta[32..].copy_from_slice(&region.to_be_bytes());
+                s.derp_q.push(0, &meta, data)
+            }),
             Out::HostPacket { data } => sh.host_q.push(HOST_IP, &[], data),
             Out::DnsAnswer { client, data } => {
                 let mut meta = [0u8; 6];
@@ -1142,7 +1148,7 @@ mod tests {
         let mut sink = OutSink { sh: &sh, now: 0 };
         // no membership 7: its datagrams and relay packets are refused (the engine counts them), nothing blocks
         assert!(!sink.emit(Out::SendUdp { member: 7, dst: Ep::v4([1, 1, 1, 1], 1), data: b"x" }));
-        assert!(!sink.emit(Out::DerpSend { member: 7, dst: &[9; 32], data: b"x" }));
+        assert!(!sink.emit(Out::DerpSend { member: 7, dst: &[9; 32], region: 0, data: b"x" }));
         // a membership in slot 1
         sh.slots[1].id.store(7, Ordering::SeqCst);
         assert!(sink.emit(Out::SendUdp { member: 7, dst: Ep::v4([1, 1, 1, 1], 1), data: b"disco" }));
@@ -1152,13 +1158,13 @@ mod tests {
             data: &[0; 20],
             sock: tdongle_tailnet_disco::stun_sched::SockKind::Disco4
         }));
-        assert!(sink.emit(Out::DerpSend { member: 7, dst: &[9; 32], data: b"relay" }));
+        assert!(sink.emit(Out::DerpSend { member: 7, dst: &[9; 32], region: 0, data: b"relay" }));
         let mut buf = [0u8; 64];
         let (k, n) = sh.slots[1].udp_q.try_pop(&mut buf).unwrap();
         assert_eq!((k, ep_from_meta(&buf[..n]), &buf[18..n]), (UDP_DATAGRAM, Some(Ep::v4([1, 1, 1, 1], 1)), &b"disco"[..]));
         assert_eq!(sh.slots[1].udp_q.try_pop(&mut buf).unwrap().0, UDP_STUN);
         let (_, n) = sh.slots[1].derp_q.try_pop(&mut buf).unwrap();
-        assert_eq!((&buf[..32], &buf[32..n]), (&[9u8; 32][..], &b"relay"[..]));
+        assert_eq!((&buf[..32], u16::from_be_bytes([buf[32], buf[33]]), &buf[34..n]), (&[9u8; 32][..], 0, &b"relay"[..]));
         // host packets and DNS
         assert!(sink.emit(Out::HostPacket { data: &[0x45; 28] }));
         assert!(sink.emit(Out::DnsAnswer { client: Client { addr: 0xc0a8_4d02, port: 5353 }, data: b"answer" }));

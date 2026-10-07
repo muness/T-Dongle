@@ -233,7 +233,11 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
         let Some(m) = self.members[slot].as_ref() else { return };
         let ok = match from {
             From::Udp(ep) => cx.out.emit(Out::SendUdp { member: m.rt.id, dst: *ep, data: &self.sh.ctl[..n] }),
-            From::Derp(k) => cx.out.emit(Out::DerpSend { member: m.rt.id, dst: k, data: &self.sh.ctl[..n] }),
+            From::Derp(k) => {
+                // the answer goes to the region the peer is homed on, which is not necessarily the one its packet came in by
+                let region = m.mship.table.iter().find(|(_, p)| p.public_key == **k).map_or(0, |(i, _)| crate::tx::peer_region(m, i));
+                cx.out.emit(Out::DerpSend { member: m.rt.id, dst: k, region, data: &self.sh.ctl[..n] })
+            }
         };
         match (ok, from) {
             (true, From::Udp(_)) => self.sh.stats.udp_tx.bump(),

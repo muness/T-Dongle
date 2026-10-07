@@ -155,6 +155,17 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
     pub fn jit_store(&self) -> &crate::jit::JitStore<JB> {
         &self.sh.store
     }
+    /// Where to dial relay region `region` of the member's DERP map (host and port of its first node): the relay links a membership opens besides its home one, for peers
+    /// that are homed elsewhere.
+    pub fn derp_target(&self, id: MemberId, region: u16) -> Option<(tdongle_tailnet_types::FixedStr<64>, u16)> {
+        let m = self.member(id)?;
+        let r = m.rt.derp_map.region_list().iter().find(|r| r.region_id == region)?;
+        let n = r.node_list().first()?;
+        let mut h = tdongle_tailnet_types::FixedStr::new();
+        h.set(n.hostname.as_str());
+        Some((h, if n.derp_port != 0 { n.derp_port } else { 443 }))
+    }
+
     /// Membership by id.
     pub fn member(&self, id: MemberId) -> Option<&Member<P>> {
         self.members.iter().flatten().find(|m| m.rt.id == id)

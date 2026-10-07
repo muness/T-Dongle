@@ -74,6 +74,27 @@ func main() {
 		Nodes: []*tailcfg.DERPNode{{Name: "900a", RegionID: 900, HostName: "127.0.0.1", IPv4: "127.0.0.1", DERPPort: dport, STUNPort: stunPort, InsecureForTests: true,
 			CertName: "sha256-raw:" + hex.EncodeToString(pin[:])}},
 	}}}
+	// INTEROP_DERP2=1: a second, unmeshed DERP server as region 901 (a packet sent to one region is not forwarded to a client connected to the other: a peer homed on
+	// 901 is reachable only through 901). The `nohome <region>` command marks a region NoMeasureNoHome so that nodes started afterwards cannot choose it as their home.
+	var d2port int
+	if os.Getenv("INTEROP_DERP2") != "" {
+		ds2 := derpserver.New(key.NewNode(), func(f string, a ...any) { log.Printf("derp2: "+f, a...) })
+		mux2 := http.NewServeMux()
+		mux2.Handle("/derp", derpserver.Handler(ds2))
+		mux2.HandleFunc("/generate_204", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+		dsrv2 := httptest.NewUnstartedServer(mux2)
+		dsrv2.Listener.Close()
+		dsrv2.Listener = listenOn("INTEROP_DERP2_PORT")
+		dsrv2.TLS = &tls.Config{NextProtos: []string{"http/1.1"}}
+		dsrv2.StartTLS()
+		fmt.Sscanf(dsrv2.Listener.Addr().String()[strings.LastIndex(dsrv2.Listener.Addr().String(), ":")+1:], "%d", &d2port)
+		pin2 := sha256.Sum256(dsrv2.Certificate().Raw)
+		dm.Regions[901] = &tailcfg.DERPRegion{
+			RegionID: 901, RegionCode: "tsu", RegionName: "Test 2",
+			Nodes: []*tailcfg.DERPNode{{Name: "901a", RegionID: 901, HostName: "127.0.0.1", IPv4: "127.0.0.1", DERPPort: d2port, STUNPort: stunPort, InsecureForTests: true,
+				CertName: "sha256-raw:" + hex.EncodeToString(pin2[:])}},
+		}
+	}
 	ctl := &testcontrol.Server{DERPMap: dm, AllOnline: true, Verbose: false, MagicDNSDomain: "tailnet.test"}
 	csrv := httptest.NewUnstartedServer(ctl)
 	csrv.Listener.Close()
@@ -83,7 +104,7 @@ func main() {
 	defer csrv.Close()
 
 	out := bufio.NewWriter(os.Stdout)
-	hello, _ := json.Marshal(map[string]any{"control": ctl.BaseURL(), "derp_host": "127.0.0.1", "derp_port": dport, "stun_port": stunPort, "derp_pub": ds.PublicKey().UntypedHexString()})
+	hello, _ := json.Marshal(map[string]any{"control": ctl.BaseURL(), "derp_host": "127.0.0.1", "derp_port": dport, "derp2_port": d2port, "stun_port": stunPort, "derp_pub": ds.PublicKey().UntypedHexString()})
 	fmt.Fprintln(out, string(hello))
 	out.Flush()
 
@@ -104,6 +125,19 @@ func main() {
 				fmt.Fprintf(out, " %s", n.Key.String())
 			}
 			fmt.Fprintln(out)
+		case "nohome":
+			var id int
+			if len(f) < 2 {
+				fmt.Fprintln(out, "ERR usage")
+				break
+			}
+			fmt.Sscanf(f[1], "%d", &id)
+			if r, ok := dm.Regions[tailcfg.DERPRegionID(id)]; ok {
+				r.NoMeasureNoHome = true
+				fmt.Fprintln(out, "OK")
+			} else {
+				fmt.Fprintln(out, "ERR no region")
+			}
 		case "inmap":
 			fmt.Fprintf(out, "INMAP %d\n", ctl.InServeMap())
 		case "await":

@@ -887,3 +887,56 @@ fn derp_survives_idle_then_carries_traffic() {
     assert!(down_after > down_before * 0.25, "relay throughput collapsed after {idle} s idle: {down_after:.2} against {down_before:.2} Mbit/s\n{}", gw.dump());
     gw.check_engine();
 }
+
+/// Two unmeshed DERP servers (regions 900 and 901) and a peer homed on the region the gateway is **not** homed on: a relay server only forwards to clients connected to it, so
+/// the gateway must send the peer's packets to the peer's home region, through a second link of its own, and still receive what the peer sends to the gateway's home region.
+/// With one link (before) every packet for the peer was dropped by the wrong server and the flow carried nothing.
+#[test]
+fn a_peer_homed_on_another_derp_region_is_reached_through_a_second_link() {
+    let bin = match go_binary() {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("SKIP: the Go interop server is not available: {e}");
+            return;
+        }
+    };
+    let mut go = tdongle_tailnet_host::server::GoServer::spawn_with(&bin, &[("INTEROP_DERP2", "1".to_string())]).expect("go server with two regions");
+    let gw = Gateway::start(GatewayOpts::new(&go.control_addr));
+    gw.net.udp_blocked.store(true, Ordering::SeqCst);
+    let id = gw.add("lab", "tskey-fake");
+    wait_until("the membership to be routing", 60, || gw.is_ready(id));
+    // the region the gateway's own link is on; the peer is started afterwards and may not choose that region as its home
+    wait_until("the home link to be ready", 30, || gw.sh.slots[0].status().derp_state.name() == "ready");
+    let home = tdongle_tailnet_runtime::derp::DERP_DIAG.region.load(Ordering::Relaxed);
+    assert!(home == 900 || home == 901, "home region {home}");
+    assert_eq!(go.cmd(&format!("nohome {home}")), "OK");
+    let (_, _) = go.peer("gopeer").expect("peer");
+    gw.host.wait_dhcp(Duration::from_secs(10)).expect("dhcp");
+    let alias = gw.host.resolve("gopeer.lab.tailnet", Duration::from_secs(30)).expect("dns");
+    let echoed = gw.host.echo(alias, 7, b"across regions", Duration::from_secs(40));
+    if echoed.is_err() {
+        use tdongle_tailnet_runtime::derp::{X_COUNTS, X_DIAG};
+        eprintln!("{}", gw.dump());
+        let mut extra = String::new();
+        TailnetApi::serial_status_extra(&*gw.sh, &mut extra);
+        eprintln!("{extra}");
+        eprintln!(
+            "home {home}; extra link counts {:?} diag region {} stage {} end {}; peers {:?}",
+            X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect::<Vec<_>>(),
+            X_DIAG.region.load(Ordering::Relaxed),
+            X_DIAG.stage.load(Ordering::Relaxed),
+            X_DIAG.end.load(Ordering::Relaxed),
+            go.ids()
+        );
+    }
+    assert_eq!(echoed.expect("echo to a peer homed on the other region"), b"across regions");
+    let (n, d) = gw.host.get_bytes(alias, 80, 256 * 1024, Duration::from_secs(60)).expect("download from a peer on the other region");
+    assert_eq!(n, 256 * 1024);
+    let (n2, d2) = gw.host.upload(alias, 9, 128 * 1024, Duration::from_secs(60)).expect("upload to a peer on the other region");
+    assert_eq!(n2, 128 * 1024);
+    use tdongle_tailnet_runtime::derp::X_COUNTS;
+    let (queued, sent, starts) = (X_COUNTS[0].load(Ordering::Relaxed), X_COUNTS[1].load(Ordering::Relaxed), X_COUNTS[5].load(Ordering::Relaxed));
+    println!("home region {home}; extra link: queued {queued} sent {sent} starts {starts}; down {:.1} up {:.1} Mbit/s", mbit(n, d), mbit(n2, d2));
+    assert!(queued > 100 && sent * 100 >= queued * 95, "the packets for the peer went through the extra link (a few may wait or drop while it connects): queued {queued} sent {sent}");
+    gw.check_engine();
+}

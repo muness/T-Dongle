@@ -137,7 +137,7 @@ impl<const M: usize, const TXQ: usize> DerpLinks<M, TXQ> {
                 (*member, Some(Event::Connect))
             }
             Out::DerpClose { member } => (*member, Some(Event::Close)),
-            Out::DerpSend { member, dst, data } => {
+            Out::DerpSend { member, dst, data, .. } => {
                 let Some((_, l)) = self.links.iter_mut().flatten().find(|(id, _)| id == member) else { return true };
                 let mut g = Glue { member: *member, io, out, input, rx: &mut self.rx };
                 let _ = l.send_packet(now, dst, data, &mut g);
@@ -237,7 +237,7 @@ mod tests {
         links.event(400, 7, Event::TokenGranted, &mut rng, &mut io, &mut out, &mut inp);
         assert_eq!(io.dials, [(7, 3, "derp3.example".into(), 443)]);
         // not ready: the packet is the link's counted drop, not a panic
-        assert!(links.on_out(500, &Out::DerpSend { member: 7, dst: &[1; 32], data: &[0; 40] }, &mut rng, &mut io, &mut out, &mut inp));
+        assert!(links.on_out(500, &Out::DerpSend { member: 7, dst: &[1; 32], region: 0, data: &[0; 40] }, &mut rng, &mut io, &mut out, &mut inp));
         assert_eq!(links.link(7).unwrap().stats().tx_drop_not_ready.get(), 1);
         assert!(!links.on_out(500, &Out::Wake(None), &mut rng, &mut io, &mut out, &mut inp));
         // close releases the token and closes the transport

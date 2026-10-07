@@ -39,6 +39,7 @@ where
 {
     let ctl: [_; MAX_RUN] = core::array::from_fn(|i| control_slot(sh, i, net));
     let derp: [_; MAX_RUN] = core::array::from_fn(|i| derp_slot(sh, i, net));
+    let derpx: [_; MAX_RUN] = core::array::from_fn(|i| crate::derp::derp_extra(sh, i, net));
     let udp: [_; MAX_RUN] = core::array::from_fn(|i| udp_slot(sh, i, net));
     let usb_f = usb_pump(sh, usb, wifi);
     let sup = crate::members::supervisor(sh);
@@ -55,7 +56,7 @@ where
     set(FUT_LINK, core::mem::size_of_val(&link));
     set(FUT_DNS, core::mem::size_of_val(&dns));
     sh.net_member_bytes.store(net.member_buffer_bytes() as u32, Ordering::Relaxed);
-    let all = join5(join_array(ctl), join_array(derp), join_array(udp), embassy_futures::join::join5(usb_f, sup, timer, link, dns), async {});
+    let all = join5(join_array(ctl), join_array(derp), join_array(udp), embassy_futures::join::join5(usb_f, sup, timer, link, dns), join_array(derpx));
     set(FUT_RUN, core::mem::size_of_val(&all));
     all
 }

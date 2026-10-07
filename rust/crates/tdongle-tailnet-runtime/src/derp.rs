@@ -75,7 +75,9 @@ pub const END_WRITE: u32 = 4;
 /// See [`DerpDiag`].
 pub const END_LINK: u32 = 5;
 /// The relay's diagnostics (one membership's relay; a second membership overwrites it).
-pub static DERP_DIAG: DerpDiag = DerpDiag {
+impl DerpDiag {
+    const fn new() -> DerpDiag {
+        DerpDiag {
     region: core::sync::atomic::AtomicU32::new(0),
     port: core::sync::atomic::AtomicU32::new(0),
     ip: core::sync::atomic::AtomicU32::new(0),
@@ -85,10 +87,16 @@ pub static DERP_DIAG: DerpDiag = DerpDiag {
     end_after_ms: core::sync::atomic::AtomicU32::new(0),
     ends: [const { core::sync::atomic::AtomicU32::new(0) }; 6],
     text: embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(([0; 64], [0; 64]))),
-};
+        }
+    }
+}
+/// The relay's diagnostics (the member's home link).
+pub static DERP_DIAG: DerpDiag = DerpDiag::new();
+/// The same for the member's extra link (the region a peer is homed on, when it is not the member's home).
+pub static X_DIAG: DerpDiag = DerpDiag::new();
 
-fn diag_text(slot: usize, s: &str) {
-    DERP_DIAG.text.lock(|t| {
+fn diag_text(dg: &DerpDiag, slot: usize, s: &str) {
+    dg.text.lock(|t| {
         let mut t = t.borrow_mut();
         let dst = if slot == 0 { &mut t.0 } else { &mut t.1 };
         dst.fill(0);
@@ -97,18 +105,18 @@ fn diag_text(slot: usize, s: &str) {
     });
 }
 
-fn diag_end(sh_now: u64, cause: u32, err: Option<&dyn core::fmt::Debug>) {
+fn diag_end(dg: &DerpDiag, sh_now: u64, cause: u32, err: Option<&dyn core::fmt::Debug>) {
     use core::sync::atomic::Ordering::Relaxed;
-    let ready_at = DERP_DIAG.ready_at_ms.swap(0, Relaxed);
-    DERP_DIAG.end.store(cause, Relaxed);
-    DERP_DIAG.end_after_ms.store(if ready_at == 0 { 0 } else { (sh_now as u32).wrapping_sub(ready_at) }, Relaxed);
-    DERP_DIAG.ends[(cause as usize).min(5)].fetch_add(1, Relaxed);
+    let ready_at = dg.ready_at_ms.swap(0, Relaxed);
+    dg.end.store(cause, Relaxed);
+    dg.end_after_ms.store(if ready_at == 0 { 0 } else { (sh_now as u32).wrapping_sub(ready_at) }, Relaxed);
+    dg.ends[(cause as usize).min(5)].fetch_add(1, Relaxed);
     if let Some(e) = err {
         let mut b = [0u8; 64];
         let mut w = Cursor(&mut b, 0);
         let _ = core::fmt::write(&mut w, format_args!("{e:?}"));
         let n = w.1;
-        diag_text(1, core::str::from_utf8(&b[..n]).unwrap_or(""));
+        diag_text(dg, 1, core::str::from_utf8(&b[..n]).unwrap_or(""));
     }
 }
 
@@ -119,6 +127,167 @@ impl core::fmt::Write for Cursor<'_> {
         self.0[self.1..self.1 + n].copy_from_slice(&s.as_bytes()[..n]);
         self.1 += n;
         Ok(())
+    }
+}
+
+
+/// Relay packets for peers homed on a region other than the member's home one, waiting for the member's extra link: heap blocks (a packet is up to 1.5 KB), at most
+/// [`XQ_MAX`], admitted above the elastic floor like every other consumer.
+struct XPacket {
+    slot: u8,
+    region: u16,
+    dst: [u8; 32],
+    data: alloc::vec::Vec<u8>,
+}
+/// See [`XPacket`].
+static XQ: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, RefCell<alloc::vec::Vec<XPacket>>> =
+    embassy_sync::blocking_mutex::Mutex::new(RefCell::new(alloc::vec::Vec::new()));
+static X_SIG: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
+/// Packets the extra link may hold waiting.
+pub const XQ_MAX: usize = 8;
+/// How long the extra link stays up with nothing to send before it is closed and its memory given back.
+pub const X_IDLE_MS: u32 = 60_000;
+/// The extra link's last activity (a packet queued for it or sent by it), ms clock.
+static X_LAST_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// `[queued, sent, dropped (queue full), dropped (heap), dropped (region not in the map), link starts]`.
+pub static X_COUNTS: [core::sync::atomic::AtomicU32; 6] = [const { core::sync::atomic::AtomicU32::new(0) }; 6];
+/// State and counts of the extra link's last run, for `tn_derp`.
+pub static X_STATS: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, RefCell<(State, tdongle_tailnet_derp::link::Stats)>> =
+    embassy_sync::blocking_mutex::Mutex::new(RefCell::new((State::Idle, tdongle_tailnet_derp::link::Stats::new())));
+
+fn push_x<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>, idx: usize, region: u16, dst: &[u8], data: &[u8]) {
+    use core::sync::atomic::Ordering::Relaxed;
+    let mut v = alloc::vec::Vec::new();
+    if !tdongle_tailnet_admission::heap::hb_ok(sh.mem().heap.free(), data.len() + 64) || v.try_reserve_exact(data.len()).is_err() {
+        X_COUNTS[3].fetch_add(1, Relaxed);
+        return;
+    }
+    v.extend_from_slice(data);
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&dst[..32]);
+    let ok = XQ.lock(|q| {
+        let mut q = q.borrow_mut();
+        if q.len() >= XQ_MAX {
+            return false;
+        }
+        q.push(XPacket { slot: idx as u8, region, dst: key, data: v });
+        true
+    });
+    if ok {
+        X_COUNTS[0].fetch_add(1, Relaxed);
+        X_LAST_MS.store((sh.now() as u32).max(1), Relaxed);
+        X_SIG.signal(());
+    } else {
+        X_COUNTS[2].fetch_add(1, Relaxed);
+    }
+}
+
+impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S, D> {
+    /// The extra link's egress: the packets queued for its region, handed to the link while it has room.
+    fn pump_x(&mut self, region: u16) {
+        use core::sync::atomic::Ordering::Relaxed;
+        let idx = self.idx as u8;
+        loop {
+            let Some(pkt) = XQ.lock(|q| {
+                let mut q = q.borrow_mut();
+                let i = q.iter().position(|p| p.slot == idx && p.region == region)?;
+                Some(q.remove(i))
+            }) else {
+                break;
+            };
+            let now = self.sh.now();
+            let Drv { sh, idx, member, link, acts, stage, x, .. } = self;
+            let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage, x: x.is_some() };
+            match link.send_packet(now, &pkt.dst, &pkt.data, &mut sink) {
+                Err(tdongle_tailnet_derp::txq::TxDrop::NoSpace | tdongle_tailnet_derp::txq::TxDrop::OverBudget) => {
+                    // the link's ring is full: back to the front, sent after the frame being written
+                    XQ.lock(|q| q.borrow_mut().insert(0, pkt));
+                    break;
+                }
+                Ok(()) => {
+                    X_COUNTS[1].fetch_add(1, Relaxed);
+                    X_LAST_MS.store((now as u32).max(1), Relaxed);
+                }
+                Err(_) => {}
+            }
+        }
+        self.after();
+    }
+}
+
+/// The member's extra relay link, for peers homed on a region other than the member's home: not started until a packet needs it, closed after [`X_IDLE_MS`] without
+/// one, one region at a time. The link future is a heap block (about 10 KB) for as long as the link exists: nothing of it is static. Never returns.
+pub async fn derp_extra<R, P, S, D, N>(sh: &Shared<R, P, S, D>, idx: usize, net: &N)
+where
+    R: RawMutex,
+    P: Platform,
+    S: Storage,
+    D: PeerDirectory,
+    N: Net,
+{
+    use core::sync::atomic::Ordering::Relaxed;
+    let slot = &sh.slots[idx];
+    let mut tcp = net.tcp(crate::net::TcpRole::DerpExtra, idx).expect("the Net has no extra DERP TCP handle for this slot");
+    loop {
+        // the region of the first packet waiting for this slot
+        let region = loop {
+            if let Some(r) = XQ.lock(|q| q.borrow().iter().find(|p| p.slot == idx as u8).map(|p| p.region)) {
+                break r;
+            }
+            X_SIG.wait().await;
+        };
+        let member = slot.id.load(core::sync::atomic::Ordering::Acquire);
+        let Some((host, port)) = sh.with_engine(|e, _| e.derp_target(member, region)) else {
+            // a region the member's map does not have: nothing to dial
+            let n = XQ.lock(|q| {
+                let mut q = q.borrow_mut();
+                let before = q.len();
+                q.retain(|p| !(p.slot == idx as u8 && p.region == region));
+                before - q.len()
+            });
+            X_COUNTS[4].fetch_add(n as u32, Relaxed);
+            continue;
+        };
+        // the link future is a heap block of about the size of the home link's (measured at start-up): admitted above the elastic floor, or the packets wait for the next try
+        let fut_bytes = sh.fut_bytes[crate::sizes::FUT_DERP].load(Relaxed) as usize;
+        if !tdongle_tailnet_admission::heap::hb_ok(sh.mem().heap.free(), fut_bytes + 4096) {
+            X_COUNTS[3].fetch_add(1, Relaxed);
+            XQ.lock(|q| q.borrow_mut().retain(|p| p.slot != idx as u8));
+            Timer::after_secs(2).await;
+            continue;
+        }
+        X_COUNTS[5].fetch_add(1, Relaxed);
+        X_LAST_MS.store((sh.now() as u32).max(1), Relaxed);
+        let key = slot.ident.lock(|i| i.borrow().wg.clone());
+        // the link runs as a heap future; the watcher ends it when the home link is gone or the link has been idle
+        let link = alloc::boxed::Box::pin(async {
+            let mem = sh.mem();
+            let wbuf = mem.alloc_wait(Class::Socket, WRITE_RECORD_BYTES).await;
+            let stage = mem.alloc_wait(Class::Socket, MAX_SEND_FRAME).await;
+            let (mut wbuf, stage) = (wbuf, RefCell::new(stage));
+            relay(sh, idx, member, key, &mut tcp, &stage, &mut wbuf[..], Some((region, host, port))).await;
+        });
+        let watch = async {
+            loop {
+                Timer::after_secs(5).await;
+                let idle = (sh.now() as u32).wrapping_sub(X_LAST_MS.load(Relaxed)) > X_IDLE_MS;
+                let home_gone = slot.status().derp_state != State::Ready;
+                // another region's packets are waiting and this one has had its turn (two seconds idle): switch
+                let other = XQ.lock(|q| q.borrow().iter().any(|p| p.slot == idx as u8 && p.region != region));
+                let quiet = (sh.now() as u32).wrapping_sub(X_LAST_MS.load(Relaxed)) > 2000 && !XQ.lock(|q| q.borrow().iter().any(|p| p.slot == idx as u8 && p.region == region));
+                if idle || home_gone || (other && quiet) {
+                    break;
+                }
+            }
+        };
+        select(link, watch).await;
+        // the link future is dropped: its socket's windows go back to the pool, the reset reaches the server
+        tcp.release().await;
+        X_STATS.lock(|c| c.borrow_mut().0 = State::Idle);
+        X_DIAG.ready_at_ms.store(0, Relaxed);
+        if slot.status().derp_state != State::Ready {
+            XQ.lock(|q| q.borrow_mut().retain(|p| p.slot != idx as u8));
+        }
     }
 }
 
@@ -151,6 +320,8 @@ struct Drv<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     stage: &'a RefCell<PoolBuf<'p>>,
     holds_token: bool,
     clock_fed: Option<bool>,
+    /// `Some(region)`: this is the member's extra link to that region, not its home link (no engine link events, no commands, its packets come from [`XQ`]).
+    x: Option<u16>,
 }
 
 struct DrvSink<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
@@ -159,6 +330,7 @@ struct DrvSink<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     member: u32,
     acts: &'a mut Acts,
     stage: &'a RefCell<PoolBuf<'p>>,
+    x: bool,
 }
 
 impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_, '_, R, P, S, D> {
@@ -166,17 +338,25 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_
         let member = self.member;
         match a {
             Action::Notify(LinkEvent::Connected) => {
-                DERP_DIAG.stage.store(4, core::sync::atomic::Ordering::Relaxed);
-                DERP_DIAG.ready_at_ms.store((self.sh.now() as u32).max(1), core::sync::atomic::Ordering::Relaxed);
-                let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::Connected });
+                let dg = if self.x { &X_DIAG } else { &DERP_DIAG };
+                dg.stage.store(4, core::sync::atomic::Ordering::Relaxed);
+                dg.ready_at_ms.store((self.sh.now() as u32).max(1), core::sync::atomic::Ordering::Relaxed);
+                // the engine's `derp_ready` is about the home link only
+                if !self.x {
+                    let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::Connected });
+                }
             }
             Action::Notify(LinkEvent::Disconnected | LinkEvent::RxStale) => {
-                self.sh.slots[self.idx].derp_q.clear();
-                let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::Disconnected });
+                if !self.x {
+                    self.sh.slots[self.idx].derp_q.clear();
+                    let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::Disconnected });
+                }
             }
             Action::Notify(LinkEvent::ConnectFailed) => {
-                self.sh.slots[self.idx].derp_q.clear();
-                let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::ConnectFailed });
+                if !self.x {
+                    self.sh.slots[self.idx].derp_q.clear();
+                    let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::ConnectFailed });
+                }
             }
             Action::Notify(LinkEvent::ClockDeferred) => self.sh.slots[self.idx].update(|st| st.tls_deferred = st.tls_deferred.wrapping_add(1)),
             Action::WantToken => self.acts.want_token = true,
@@ -225,15 +405,20 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
             stage,
             holds_token: false,
             clock_fed: None,
+            x: None,
         }
+    }
+
+    fn dg(&self) -> &'static DerpDiag {
+        if self.x.is_some() { &X_DIAG } else { &DERP_DIAG }
     }
 
     fn call(&mut self, ev: Event<'_>) {
         let now = self.sh.now();
         let mut rng = crate::shared::PlatformRng(&self.sh.platform);
         {
-            let Drv { sh, idx, member, link, acts, stage, .. } = self;
-            let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage };
+            let Drv { sh, idx, member, link, acts, stage, x, .. } = self;
+            let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage, x: x.is_some() };
             link.handle(now, ev, &mut rng, &mut sink);
         }
         self.after();
@@ -246,6 +431,10 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
             self.release_token(now);
         }
         let (state, stats) = (self.link.state(), *self.link.stats());
+        if self.x.is_some() {
+            X_STATS.lock(|c| *c.borrow_mut() = (state, stats));
+            return;
+        }
         self.sh.slots[self.idx].update(|st| {
             st.derp_state = state;
             st.derp = stats;
@@ -253,8 +442,10 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
     }
 
     fn release_token(&mut self, now: u64) {
-        // idempotent: also takes a waiting (not yet granted) request out of the queue
-        self.sh.token.release(now, key_derp(self.member));
+        // idempotent: also takes a waiting (not yet granted) request out of the queue (the extra link does not use the token: it would take the home link's)
+        if self.x.is_none() {
+            self.sh.token.release(now, key_derp(self.member));
+        }
         self.holds_token = false;
     }
 
@@ -286,7 +477,11 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
     fn on_timer(&mut self) {
         self.sync_clock();
         self.call(Event::Timer);
-        if self.link.state() == State::Token && self.link.want_token() && !self.holds_token {
+        if self.x.is_some() && self.link.state() == State::Token && self.link.want_token() && !self.holds_token {
+            // the extra link takes no turn at the negotiation token (the home link's key is the member's); its TLS handshake is admitted by the pool and the lease like any other
+            self.holds_token = true;
+            self.call(Event::TokenGranted);
+        } else if self.link.state() == State::Token && self.link.want_token() && !self.holds_token {
             let now = self.sh.now();
             match self.sh.token.request(now, key_derp(self.member), Prio::Relay, Phase::Derp) {
                 Grant::Granted => {
@@ -300,20 +495,30 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
 
     /// Move the engine's relay packets into the link (which counts the ones it cannot send).
     fn pump_egress(&mut self) {
+        if let Some(region) = self.x {
+            return self.pump_x(region);
+        }
         let mut eg = [0u8; 32 + MAX_PACKET + 32];
         // a packet leaves the egress queue only when the link took it: the link's ring holds the frame being written and little else, so the rest waits here (before, every
         // packet after the first was popped, refused by the link and lost, which TCP in the tunnel cannot live with)
         while let Some((_k, n)) = self.sh.slots[self.idx].derp_q.try_peek(&mut eg) {
-            if n < 32 {
+            if n < 34 {
+                self.sh.slots[self.idx].derp_q.discard_front();
+                continue;
+            }
+            // a packet for a peer homed on another region: a relay server only forwards to clients connected to it, so it goes to the member's link to that region
+            let region = u16::from_be_bytes([eg[32], eg[33]]);
+            if region != 0 && region != self.link.target().region {
+                push_x(self.sh, self.idx, region, &eg[..32], &eg[34..n]);
                 self.sh.slots[self.idx].derp_q.discard_front();
                 continue;
             }
             let now = self.sh.now();
             let mut dst = [0u8; 32];
             dst.copy_from_slice(&eg[..32]);
-            let Drv { sh, idx, member, link, acts, stage, .. } = self;
-            let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage };
-            match link.send_packet(now, &dst, &eg[32..n], &mut sink) {
+            let Drv { sh, idx, member, link, acts, stage, x, .. } = self;
+            let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage, x: x.is_some() };
+            match link.send_packet(now, &dst, &eg[34..n], &mut sink) {
                 Err(tdongle_tailnet_derp::txq::TxDrop::NoSpace | tdongle_tailnet_derp::txq::TxDrop::OverBudget) => {
                     DERP_EGRESS_HELD.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                     break;
@@ -337,14 +542,24 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
                 None => pending::<()>().await,
             }
         };
+        let is_x = self.x.is_some();
         let eg = async {
-            if egress {
+            if egress && is_x {
+                X_SIG.wait().await;
+            } else if egress {
                 slot.derp_q.wait_nonempty().await;
             } else {
                 pending::<()>().await;
             }
         };
-        match select3(slot.derp_cmd.wait(), timer, eg).await {
+        let cmd = async {
+            if is_x {
+                pending::<DerpCmd>().await
+            } else {
+                slot.derp_cmd.wait().await
+            }
+        };
+        match select3(cmd, timer, eg).await {
             Either3::First(cmd) => self.on_cmd(cmd),
             Either3::Second(()) => self.on_timer(),
             Either3::Third(()) => self.pump_egress(),
@@ -358,7 +573,7 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
 
 impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drop for Drv<'_, '_, R, P, S, D> {
     fn drop(&mut self) {
-        if self.holds_token || self.link.want_token() {
+        if self.x.is_none() && (self.holds_token || self.link.want_token()) {
             self.sh.token.release(self.sh.now(), key_derp(self.member));
         }
     }
@@ -415,7 +630,7 @@ where
         .await;
         if let Either::First((mut wbuf, stage)) = taken {
             let stage = RefCell::new(stage);
-            select(relay(sh, idx, run.id, key, &mut tcp, &stage, &mut wbuf[..]), wait_changed(&mut run_rx, run)).await;
+            select(relay(sh, idx, run.id, key, &mut tcp, &stage, &mut wbuf[..], None), wait_changed(&mut run_rx, run)).await;
         }
         // the membership stopped (or changed): the socket's windows go back to the pool, the reset reaches the server
         tcp.release().await;
@@ -437,6 +652,7 @@ async fn relay<'p, R, P, S, D, T>(
     tcp: &mut T,
     stage: &RefCell<PoolBuf<'p>>,
     wbuf: &mut [u8],
+    x: Option<(u16, FixedStr<64>, u16)>,
 ) where
     R: RawMutex,
     P: Platform,
@@ -445,6 +661,13 @@ async fn relay<'p, R, P, S, D, T>(
     T: TcpConn,
 {
     let mut d = Drv::new(sh, idx, member, key, stage);
+    if let Some((region, host, port)) = x {
+        // an extra link knows its target from the start and asks to connect at once
+        d.x = Some(region);
+        d.link.set_target(Target::new(region, host.as_str(), port));
+        d.sync_clock();
+        d.call(Event::Connect);
+    }
     d.sync_clock();
     loop {
         // ---- down: serve the link until it asks for a connection
@@ -457,15 +680,15 @@ async fn relay<'p, R, P, S, D, T>(
             d.wait(true).await;
         };
         // ---- dial: resolve and connect in one
-        DERP_DIAG.stage.store(1, core::sync::atomic::Ordering::Relaxed);
-        DERP_DIAG.region.store(u32::from(d.link.target().region), core::sync::atomic::Ordering::Relaxed);
-        DERP_DIAG.port.store(u32::from(port), core::sync::atomic::Ordering::Relaxed);
-        diag_text(0, host.as_str());
+        d.dg().stage.store(1, core::sync::atomic::Ordering::Relaxed);
+        d.dg().region.store(u32::from(d.link.target().region), core::sync::atomic::Ordering::Relaxed);
+        d.dg().port.store(u32::from(port), core::sync::atomic::Ordering::Relaxed);
+        diag_text(d.dg(), 0, host.as_str());
         let connected = drive(&mut d, true, pin!(tcp.connect(host.as_str(), port))).await;
         match connected {
             Some(Ok(())) => {
-                DERP_DIAG.stage.store(2, core::sync::atomic::Ordering::Relaxed);
-                DERP_DIAG.ip.store(tcp.remote_ip(), core::sync::atomic::Ordering::Relaxed);
+                d.dg().stage.store(2, core::sync::atomic::Ordering::Relaxed);
+                d.dg().ip.store(tcp.remote_ip(), core::sync::atomic::Ordering::Relaxed);
                 d.call(Event::Dns(true));
                 d.call(Event::Connected(true));
             }
@@ -532,7 +755,7 @@ where
             return;
         }
     };
-    DERP_DIAG.stage.store(3, core::sync::atomic::Ordering::Relaxed);
+    d.dg().stage.store(3, core::sync::atomic::Ordering::Relaxed);
     d.call(Event::TlsDone(true));
     loop {
         // transmit what the link staged (the upgrade request, ClientInfo, a relay frame, a pong)
@@ -545,7 +768,7 @@ where
             match drive(d, false, pin!(write)).await {
                 Some(Ok(())) => d.call(Event::TxDone),
                 Some(Err(e)) => {
-                    diag_end(sh.now(), END_WRITE, Some(&e));
+                    diag_end(d.dg(),sh.now(), END_WRITE, Some(&e));
                     DERP_RECONNECT[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                     d.call(Event::Reconnect);
                     return;
@@ -554,7 +777,7 @@ where
             }
         }
         if d.acts.close {
-            diag_end(sh.now(), END_LINK, None);
+            diag_end(d.dg(),sh.now(), END_LINK, None);
             return;
         }
         d.pump_egress();
@@ -587,7 +810,7 @@ where
                 match r {
                     Ok(_) => {}
                     Err(e) => {
-                        diag_end(sh.now(), if matches!(e, ReadError::Tls(_)) { END_TLS_READ } else { END_LEASE }, Some(&e));
+                        diag_end(d.dg(),sh.now(), if matches!(e, ReadError::Tls(_)) { END_TLS_READ } else { END_LEASE }, Some(&e));
                         DERP_RECONNECT[usize::from(matches!(e, ReadError::Tls(_)))].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                         d.call(Event::Reconnect);
                         return;
@@ -595,7 +818,7 @@ where
                 }
             }
             Either::First(Err(e)) => {
-                diag_end(sh.now(), END_WAIT, Some(&e));
+                diag_end(d.dg(),sh.now(), END_WAIT, Some(&e));
                 DERP_RECONNECT[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 d.call(Event::Reconnect);
                 return;

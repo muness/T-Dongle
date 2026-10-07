@@ -43,7 +43,7 @@ use tdongle_tailnet_runtime::shared::{Config as RtConfig, MAX_RUN, PlatformRng, 
 use tdongle_tailnet_runtime::wifi_mux::MuxWifi;
 use tdongle_tailnet_runtime::control::control_slot;
 use tdongle_tailnet_runtime::net::Net;
-use tdongle_tailnet_runtime::derp::derp_slot;
+use tdongle_tailnet_runtime::derp::{derp_extra, derp_slot};
 use tdongle_tailnet_runtime::members::supervisor;
 use tdongle_tailnet_runtime::sizes::{FUT_CONTROL, FUT_DERP, FUT_DNS, FUT_LINK, FUT_SUPERVISOR, FUT_TIMER, FUT_UDP, FUT_USB};
 use tdongle_tailnet_runtime::tasks::{dns_upstream, engine_timer, link_watch};
@@ -78,8 +78,8 @@ pub const USB_RX_FRAMES: usize = 2;
 pub const DIR_PEERS: usize = 24;
 /// Staged directory updates per membership.
 pub const DIR_STAGED: usize = 32;
-/// Sockets of the embassy-net stack: 3 per membership (control, DERP, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + one for the lookup in flight (the dials and SNTP take turns on it) + 1 spare.
-const STACK_SOCKETS: usize = 3 * MEMBERS + 6;
+/// Sockets of the embassy-net stack: 4 per membership (control, DERP, the extra DERP link, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + one for the lookup in flight (the dials and SNTP take turns on it) + 1 spare.
+const STACK_SOCKETS: usize = 4 * MEMBERS + 6;
 
 /// The stack's interrupt-free lock (see the module docs).
 #[derive(Debug)]
@@ -120,12 +120,12 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 125 * 1024;
+    pub const HEAP_REGULAR: usize = 124 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
     /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 12 KB of margin (a 62 KB try measured heap_min 29,284 B, 600 B under the floor, with the UDP receive ring at 9,600 B; the 4 KB came back from the NAT table: 384 flows, 4.8 KB less static, given to the regular heap). `tn_in heap_min_over_floor` on the board settles it.
-    pub const WIFI_AND_USB: usize = 65 * 1024;
+    pub const WIFI_AND_USB: usize = 64 * 1024;
     /// The bridge's permanent ring slots (8 x 1,514 + header), allocated at boot.
     pub const RING_BASE: usize = 8 * 1_536;
 
@@ -861,6 +861,9 @@ pub fn start(spawner: Spawner) -> Result<(), StartError> {
         if let Ok(t) = tn_derp(sh, idx, net) {
             spawner.spawn(t);
         }
+        if let Ok(t) = tn_derp_x(sh, idx, net) {
+            spawner.spawn(t);
+        }
         if let Ok(t) = tn_udp(sh, idx, net) {
             spawner.spawn(t);
         }
@@ -962,6 +965,12 @@ async fn tn_derp(sh: &'static Sh, idx: usize, net: &'static EmbassyNet) {
     let f = core::pin::pin!(derp_slot(sh, idx, net));
     note_future(sh, FUT_DERP, &*f);
     f.await
+}
+
+#[embassy_executor::task(pool_size = MEMBERS)]
+async fn tn_derp_x(sh: &'static Sh, idx: usize, net: &'static EmbassyNet) {
+    // the extra relay link's manager: a small future; the link it runs is a heap block while it exists
+    derp_extra(sh, idx, net).await
 }
 
 #[embassy_executor::task(pool_size = MEMBERS)]
@@ -1284,6 +1293,37 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 D.ends[5].load(Relaxed),
                 err,
                 st.tls_untrusted
+            );
+        }
+        // the extra link: the region a peer is homed on when it is not ours; up only while a packet needs it
+        {
+            use tdongle_tailnet_runtime::derp::{X_COUNTS, X_DIAG, X_STATS};
+            let (xs, d) = X_STATS.lock(|c| *c.borrow());
+            let ready_at = X_DIAG.ready_at_ms.load(Relaxed);
+            let xip = X_DIAG.ip.load(Relaxed).to_be_bytes();
+            let xhost = X_DIAG.text.lock(|t| {
+                let t = t.borrow();
+                String::from_utf8_lossy(&t.0[..t.0.iter().position(|&c| c == 0).unwrap_or(64)]).into_owned()
+            });
+            let _ = write!(
+                out,
+                "tn_derp_x state={} region={} host={} ip={}.{}.{}.{} stage={} uptime_ms={} connects={} frames_rx={} frames_tx={} queued={} sent={} dropped[queue_full,heap,region_unknown]={},{},{} starts={} last_end={}\r\n",
+                xs.name(),
+                X_DIAG.region.load(Relaxed),
+                xhost,
+                xip[0], xip[1], xip[2], xip[3],
+                X_DIAG.stage.load(Relaxed),
+                if ready_at == 0 { 0 } else { now.wrapping_sub(ready_at) },
+                d.connects.get(),
+                d.frames_rx.get(),
+                d.frames_tx.get(),
+                X_COUNTS[0].load(Relaxed),
+                X_COUNTS[1].load(Relaxed),
+                X_COUNTS[2].load(Relaxed),
+                X_COUNTS[3].load(Relaxed),
+                X_COUNTS[4].load(Relaxed),
+                X_COUNTS[5].load(Relaxed),
+                X_DIAG.end.load(Relaxed)
             );
         }
     }
