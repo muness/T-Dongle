@@ -130,6 +130,9 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
             }
             Verdict::Stalled(task) => {
                 healthy.observe(now, false);
+                // the last thing a gateway task started names where a stalled thread executor is (`previous_op` of the next boot)
+                #[cfg(feature = "tailnet")]
+                guard::op(tdongle_tailnet_runtime::optag::name());
                 guard::hang(task);
                 esp_hal::system::software_reset()
             }

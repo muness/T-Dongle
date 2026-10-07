@@ -297,6 +297,7 @@ where
     // the frame the pump holds for room (see `Held`)
     let mut held: Option<Held> = None;
     loop {
+        crate::optag::set(crate::optag::USB_PUMP);
         // ---- everything that is ready for the host, bounded
         PUMP_WAKES.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
         let mut pass = 0u32;
@@ -465,6 +466,7 @@ fn hold_needed<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shar
 async fn hold_wait<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>, h: Held) -> bool {
     let slot = &sh.slots[h.slot];
     loop {
+        crate::optag::set(crate::optag::HOLD);
         if slot.derp_q.free_bytes() >= ROOM_BYTES && slot.udp_q.free_bytes() >= ROOM_BYTES {
             return false;
         }

@@ -1016,7 +1016,8 @@ fn derp_only_bulk_is_paced_by_the_relay_not_dropped() {
     gw.check_engine();
 }
 
-/// The relay connection's windows follow its traffic: idle windows while it idles, the big ones (a round trip's worth) while it carries a transfer, idle again afterwards.
+/// The relay connection's windows follow its traffic: idle windows while it idles, the big ones (a round trip's worth) once it has carried a transfer (at the first lull: the
+/// switch is a reconnect), idle again after a long quiet.
 /// (The host's tokio sockets have no windows to resize: this checks the decision and the reconnects, and that a transfer survives them.)
 #[test]
 fn the_relay_windows_are_big_while_it_carries_data_and_idle_after() {
@@ -1037,8 +1038,54 @@ fn the_relay_windows_are_big_while_it_carries_data_and_idle_after() {
     let (n, _) = gw.host.upload(alias, 9, 256 * 1024, Duration::from_secs(60)).expect("and the other way, across the reconnect");
     assert_eq!(n, 256 * 1024);
     gw.net.derp_write_delay_ms.store(0, Ordering::Relaxed);
-    assert!(WIN_STATS[0].load(Ordering::Relaxed) > to_big0, "the windows went big during the transfer");
+    // busy all along: the big windows were wanted but waited for a lull (a reconnect in the middle of a transfer is not worth it), and came with the first one
+    assert!(WIN_STATS[4].load(Ordering::Relaxed) > 0, "the switch waited for a lull while the transfer ran");
+    wait_until("the windows to go big at the lull", 15, || WIN_STATS[0].load(Ordering::Relaxed) > to_big0);
     wait_until("the windows to go back to idle", 30, || WIN_STATS[3].load(Ordering::Relaxed) == 0);
     assert_eq!(gw.host.echo(alias, 7, b"after", Duration::from_secs(30)).unwrap(), b"after", "the relay still works on the idle windows");
+    gw.check_engine();
+}
+
+/// The board's supervisor resets the chip when the thread executor makes no progress for 8 s. Window switches (reconnects of the relay connection) under load, with the host
+/// holding a bulk upload at a paced relay: a heartbeat task on the runtime's thread (one tick per 50 ms) must never go quiet for a second, and the transfers complete.
+#[test]
+fn window_switches_under_relay_load_do_not_starve_the_executor() {
+    use std::sync::atomic::Ordering::Relaxed;
+    use tdongle_tailnet_runtime::derp::{WIN_FORCE, WIN_STATS, WIN_TIMING};
+    let mut go = go_or_skip!();
+    let (gw, _id, alias) = up(&mut go, "gopeer");
+    gw.net.udp_blocked.store(true, Ordering::SeqCst);
+    assert_eq!(gw.host.echo(alias, 7, b"warm", Duration::from_secs(30)).unwrap(), b"warm");
+    // switch as often as the hysteresis allows, in the middle of the transfers: 300 ms windows, a forced switch (`tn force-derp`'s request) every second
+    WIN_TIMING[0].store(300, Relaxed);
+    WIN_TIMING[1].store(8, Relaxed);
+    WIN_TIMING[2].store(1000, Relaxed);
+    gw.net.derp_write_delay_ms.store(6, Relaxed);
+    let switches0 = WIN_STATS[0].load(Relaxed) + WIN_STATS[1].load(Relaxed);
+    let worst = std::thread::scope(|s| {
+        let up = s.spawn(|| gw.host.upload(alias, 9, 320 * 1024, Duration::from_secs(25)));
+        let down = s.spawn(|| gw.host.get_bytes(alias, 80, 320 * 1024, Duration::from_secs(25)));
+        let mut worst = u64::MAX;
+        let mut last = gw.heartbeat.load(Relaxed);
+        let mut flip = 1u8;
+        let mut ticks = 0;
+        while !(up.is_finished() && down.is_finished()) {
+            std::thread::sleep(Duration::from_millis(500));
+            ticks += 1;
+            if ticks % 4 == 0 {
+                WIN_FORCE.store(flip, Relaxed);
+                flip = 3 - flip;
+            }
+            let now = gw.heartbeat.load(Relaxed);
+            worst = worst.min(now - last);
+            last = now;
+        }
+        println!("upload {:?} download {:?}", up.join().unwrap().map(|(n, d)| (n, d.as_secs_f64())), down.join().unwrap().map(|(n, d)| (n, d.as_secs_f64())));
+        worst
+    });
+    let switches = WIN_STATS[0].load(Relaxed) + WIN_STATS[1].load(Relaxed) - switches0;
+    println!("window switches during the transfers: {switches}; fewest heartbeat ticks in 500 ms: {worst} (10 expected)");
+    assert!(switches >= 1, "the windows switched under load");
+    assert!(worst >= 5, "the executor kept running through the switches: {worst} ticks in the worst 500 ms");
     gw.check_engine();
 }

@@ -225,6 +225,8 @@ pub enum Req {
     Reset,
     /// `confirm-reset`
     ConfirmReset,
+    /// `tn force-derp on|off`, kept in flash.
+    ForceDerp(bool),
 }
 
 /// The reply text and whether to restart after sending it.
@@ -265,6 +267,10 @@ pub async fn task() -> ! {
                     (String::from(reply::MODE_NOT_SAVED), false)
                 }
             }
+            Req::ForceDerp(on) => {
+                set_force_derp(on).await;
+                (String::new(), false)
+            }
             Req::Reset => (String::from(reset()), false),
             Req::ConfirmReset => {
                 let (t, restart) = confirm_reset().await;
@@ -272,6 +278,16 @@ pub async fn task() -> ! {
             }
         };
         RESP.signal(resp);
+    }
+}
+
+/// `tn force-derp` (a diagnostic, in `rust_diag/force_derp`): kept until `off`, so that a reset does not turn a relay measurement into a direct one.
+pub async fn set_force_derp(on: bool) {
+    let mut g = STORE.lock().await;
+    if let Some(store) = g.as_mut()
+        && store.nvs().set_str("rust_diag", "force_derp", if on { "1" } else { "0" }).is_err()
+    {
+        let _ = store.remount();
     }
 }
 
@@ -310,5 +326,13 @@ pub async fn persist_diagnosis(state: &crate::guard::State) {
     if let Ok(Some(n)) = store.nvs().get_str("rust_diag", "last", &mut buf) {
         let text = core::str::from_utf8(&buf[..n.min(256)]).unwrap_or("").trim_end_matches('\0');
         LAST_DIAG.lock(|c| *c.borrow_mut() = String::from(text));
+    }
+    // `tn force-derp on` is a diagnostic that survives a reset until `off`: a reset must not silently turn a relay measurement into a direct one
+    #[cfg(feature = "tailnet")]
+    {
+        let mut b = [0u8; 4];
+        if matches!(store.nvs().get_str("rust_diag", "force_derp", &mut b), Ok(Some(n)) if n >= 1 && b[0] == b'1') {
+            tdongle_tailnet_engine::shared::FORCE_DERP.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
     }
 }

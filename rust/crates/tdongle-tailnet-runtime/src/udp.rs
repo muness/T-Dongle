@@ -152,6 +152,7 @@ where
     publish_endpoints(sh, idx, member, &[Ep::v4(v4.addr, port)]);
     let sock = &*sock;
     loop {
+        crate::optag::set(crate::optag::UDP);
         // egress first, so a flood of arrivals cannot starve what the engine wants sent. The record is copied into the shared scratch only for the
         // moment it is handed to the socket; if the socket has no room it stays in the queue and this task waits for room (no buffer of its own).
         let mut spins = 0u32;

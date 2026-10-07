@@ -291,8 +291,11 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
 
 /// Relay window mode, `[window ms, frames per window that make it big, quiet windows that make it small again]`. Tests shorten them.
 pub static WIN_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomic::AtomicU32::new(2000), core::sync::atomic::AtomicU32::new(50), core::sync::atomic::AtomicU32::new(15)];
-/// Switches to the big windows, switches back, falls back because the pool refused the big ones, and whether the connection has them now.
-pub static WIN_STATS: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
+/// Switches to the big windows, switches back, falls back because the pool refused the big ones, whether the connection has them now, and windows in which big ones were wanted
+/// but the relay was busy (no lull).
+pub static WIN_STATS: [core::sync::atomic::AtomicU32; 5] = [const { core::sync::atomic::AtomicU32::new(0) }; 5];
+/// A request for a window mode from outside the traffic (`tn force-derp`): 1 big, 2 idle, 0 none.
+pub static WIN_FORCE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S, D> {
     /// Does the connection need other windows? The relay's windows are small while it idles (the heap is short) and big while it carries data: judged on the relay frames
@@ -310,30 +313,42 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
         let first = self.act_t0 == 0;
         self.act_t0 = now;
         self.act_frames = frames;
-        if first || now.saturating_sub(self.last_switch) < 4 * win {
+        if first {
             return false;
         }
         let busy = delta >= WIN_TIMING[1].load(Relaxed);
-        if !self.win_big {
-            if busy {
-                self.win_big = true;
-                self.quiet_windows = 0;
-                self.last_switch = now;
-                WIN_STATS[0].fetch_add(1, Relaxed);
-                WIN_STATS[3].store(1, Relaxed);
-                return true;
-            }
-        } else {
+        // what the traffic wants: big windows once it is busy, idle ones again after a long quiet; a switch is a reconnect (a TLS handshake: seconds of CPU), so it is made when the
+        // relay is in a lull, not in the middle of a transfer, and not within a few windows of the last one. `force-derp on/off` asks for it directly (nothing is flowing yet).
+        let forced = WIN_FORCE.swap(0, Relaxed);
+        if forced != 0 {
+            self.want_big = forced == 1;
+        } else if !self.win_big && busy {
+            self.want_big = true;
+        } else if self.win_big {
             self.quiet_windows = if delta < WIN_TIMING[1].load(Relaxed) / 8 { self.quiet_windows + 1 } else { 0 };
             if self.quiet_windows >= WIN_TIMING[2].load(Relaxed) {
-                self.win_big = false;
-                self.last_switch = now;
-                WIN_STATS[1].fetch_add(1, Relaxed);
-                WIN_STATS[3].store(0, Relaxed);
-                return true;
+                self.want_big = false;
             }
         }
-        false
+        if self.want_big == self.win_big || now.saturating_sub(self.last_switch) < 4 * win {
+            return false;
+        }
+        let lull = delta <= 4;
+        if !lull && forced == 0 && self.want_big {
+            // wanted, but the relay is busy: wait for a lull (counted, to see on the board whether one ever comes)
+            WIN_STATS[4].fetch_add(1, Relaxed);
+            return false;
+        }
+        self.win_big = self.want_big;
+        self.quiet_windows = 0;
+        self.last_switch = now;
+        if self.win_big {
+            WIN_STATS[0].fetch_add(1, Relaxed);
+        } else {
+            WIN_STATS[1].fetch_add(1, Relaxed);
+        }
+        WIN_STATS[3].store(u32::from(self.win_big), Relaxed);
+        true
     }
 }
 
@@ -497,6 +512,7 @@ struct Drv<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     home_target: Target,
     /// The connection has the big windows, and the bookkeeping of the traffic that decides it (see `window_mode`).
     win_big: bool,
+    want_big: bool,
     act_t0: u64,
     act_frames: u32,
     quiet_windows: u32,
@@ -581,6 +597,7 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
             visiting: None,
             home_target: Target::new(0, "", 443),
             win_big: false,
+            want_big: false,
             act_t0: 0,
             act_frames: 0,
             quiet_windows: 0,
@@ -679,6 +696,7 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
 
     /// Move the engine's relay packets into the link (which counts the ones it cannot send).
     fn pump_egress(&mut self) {
+        crate::optag::set(crate::optag::RELAY_PUMP);
         // packets that waited for the link to reach their region (a visit, see `derp_extra`)
         self.pump_xq();
         let mut eg = [0u8; 32 + MAX_PACKET + 32];
@@ -849,6 +867,7 @@ async fn relay<'p, R, P, S, D, T>(
                 break x;
             }
             d.acts.close = false;
+            crate::optag::set(crate::optag::RELAY_DOWN);
             d.wait(true).await;
         };
         // ---- dial: resolve and connect in one
@@ -856,8 +875,10 @@ async fn relay<'p, R, P, S, D, T>(
         d.dg().region.store(u32::from(d.link.target().region), core::sync::atomic::Ordering::Relaxed);
         d.dg().port.store(u32::from(port), core::sync::atomic::Ordering::Relaxed);
         diag_text(d.dg(), 0, host.as_str());
+        crate::optag::set(crate::optag::RELAY_DIAL);
         tcp.set_big_windows(d.win_big);
         let connected = drive(&mut d, true, pin!(tcp.connect(host.as_str(), port))).await;
+        crate::optag::set(crate::optag::RELAY_TLS);
         match connected {
             Some(Ok(())) => {
                 d.dg().stage.store(2, core::sync::atomic::Ordering::Relaxed);
@@ -875,6 +896,7 @@ async fn relay<'p, R, P, S, D, T>(
                 if d.win_big && matches!(e, crate::net::NetError::NoMem) {
                     // the pool would not take the big windows (heap short): back to the idle ones
                     d.win_big = false;
+                    d.want_big = false;
                     WIN_STATS[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                     WIN_STATS[3].store(0, core::sync::atomic::Ordering::Relaxed);
                 }
@@ -941,8 +963,10 @@ where
     d.dg().stage.store(3, core::sync::atomic::Ordering::Relaxed);
     d.call(Event::TlsDone(true));
     loop {
+        crate::optag::set(crate::optag::RELAY_STREAM);
         // the connection's windows follow the relay's traffic: a reconnect when they should change
         if d.window_mode() {
+            crate::optag::set(crate::optag::RELAY_WINDOWS);
             d.call(Event::Reconnect);
             return;
         }

@@ -1162,6 +1162,18 @@ async fn console_worker() -> ! {
             Some(sh) => handle(sh, &line, &mut out),
             None => false,
         };
+        // `tn force-derp on|off` is kept in flash until `off` (see `settings::set_force_derp`), and asks the relay for the matching window mode at once (nothing is flowing yet)
+        if let Some(arg) = line.strip_prefix("tn force-derp") {
+            let on = match arg.trim() {
+                "on" => Some(true),
+                "off" => Some(false),
+                _ => None,
+            };
+            if let Some(on) = on {
+                let _ = crate::settings::call(crate::settings::Req::ForceDerp(on)).await;
+                tdongle_tailnet_runtime::derp::WIN_FORCE.store(if on { 1 } else { 2 }, Ordering::Relaxed);
+            }
+        }
         CON_RESP.signal(handled.then_some(out));
     }
 }
@@ -1299,7 +1311,7 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             use tdongle_tailnet_runtime::derp::WIN_STATS;
             let _ = write!(
                 out,
-                "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={}\r\n",
+                "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={} waited_for_lull={} force_derp={}\r\n",
                 WIN_STATS[3].load(Relaxed),
                 tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_rx,
                 tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_tx,
@@ -1307,7 +1319,9 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 tdongle_tailnet_runtime::net_embassy::DERP_TX_BIG,
                 WIN_STATS[0].load(Relaxed),
                 WIN_STATS[1].load(Relaxed),
-                WIN_STATS[2].load(Relaxed)
+                WIN_STATS[2].load(Relaxed),
+                WIN_STATS[4].load(Relaxed),
+                tdongle_tailnet_engine::shared::FORCE_DERP.load(Relaxed) as u8
             );
         }
         // the link's visits to the regions peers are homed on, and the moves of its home region
