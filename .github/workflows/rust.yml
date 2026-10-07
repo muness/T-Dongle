@@ -37,6 +37,7 @@ jobs:
           python3 tools/test_flash_console.py
           python3 tools/test_flash_script.py
           python3 tools/test_check_stack.py
+          python3 tools/test_package.py
       - name: Web UI transport contracts
         run: node webui/test.mjs
       - name: Vendored TLS cancellation regressions

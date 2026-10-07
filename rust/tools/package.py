@@ -2,8 +2,12 @@
 """Package the Rust image in the C package's layout (bootloader.bin 0x0, partition-table.bin 0x8000, app.bin 0x20000, manifest.json, SHA256SUMS, tar.gz). Never flashes.
 
 Usage: package.py VERSION APP_BIN ELF [OUT_DIR]   (the rescue bootloader is rust/bootloader/bootloader-rescue.bin, checked against rust/bootloader/SHA256)
+TDONGLE_FIRMWARE_SOURCE selects the commit used to build the supplied image (defaults to HEAD).
+Example: TDONGLE_FIRMWARE_SOURCE=fb43561 python3 rust/tools/package.py 0.4.0-rc2 APP_BIN ELF OUT_DIR
+manifest.json records firmware_git_commit separately from git_commit, the packaging checkout.
+This records the declared build source; the caller must supply the corresponding image and ELF.
 """
-import gzip, hashlib, json, struct, subprocess, sys, tarfile
+import gzip, hashlib, json, os, struct, subprocess, sys, tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -27,6 +31,13 @@ def partition_table(csv: Path) -> bytes:
 def main():
     version, app, elf = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
     out = Path(sys.argv[4]) if len(sys.argv) > 4 else ROOT / 'dist' / f'tdongle-rust-{version}-package' / f'tdongle-{version}'
+    # Resolve provenance before writing any package files. Pin Git to this
+    # checkout, even when packaging is invoked from another working directory.
+    git = ['git', '-C', str(ROOT.parent)]
+    rev = subprocess.check_output(git + ['rev-parse', '--verify', 'HEAD^{commit}'], text=True).strip()
+    source = os.environ.get('TDONGLE_FIRMWARE_SOURCE', 'HEAD')
+    firmware_rev = subprocess.check_output(git + ['rev-parse', '--verify', '--end-of-options', source + '^{commit}'], text=True).strip()
+    dirty = bool(subprocess.check_output(git + ['status', '--porcelain'], text=True).strip())
     boot = ROOT / 'bootloader' / 'bootloader-rescue.bin'
     assert hashlib.sha256(boot.read_bytes()).hexdigest() == (ROOT / 'bootloader' / 'SHA256').read_text().split()[0], 'bootloader hash is not the recorded one'
     for name, data in (('bootloader', boot.read_bytes()), ('app', app.read_bytes())):
@@ -41,9 +52,7 @@ def main():
         src = ROOT.parent / f
         if src.exists():
             (out / f).write_bytes(src.read_bytes())
-    rev = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-    dirty = bool(subprocess.check_output(['git', 'status', '--porcelain'], text=True).strip())
-    (out / 'manifest.json').write_text(json.dumps({'version': version, 'variant': 'rust', 'git_commit': rev, 'dirty': dirty, 'target': 'esp32s3', 'flash_bytes': 16 * 1024 * 1024,
+    (out / 'manifest.json').write_text(json.dumps({'version': version, 'variant': 'rust', 'git_commit': rev, 'firmware_git_commit': firmware_rev, 'dirty': dirty, 'target': 'esp32s3', 'flash_bytes': 16 * 1024 * 1024,
         'flash_mode': 'dio', 'flash_freq': '40m', 'default_mode': 'wifi_bridge', 'firmware': 'rust-no_std',
         'offsets': {'bootloader.bin': '0x0', 'partition-table.bin': '0x8000', 'app.bin': '0x20000'}, 'hardware_tested': False}, indent=2) + '\n')
     images = [dict(name=n, offset=o, sha256=hashlib.sha256((out / n).read_bytes()).hexdigest()) for n, o in (('bootloader.bin', 0), ('partition-table.bin', 0x8000), ('app.bin', 0x20000))]
