@@ -1307,7 +1307,7 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             });
             let _ = write!(
                 out,
-                "tn_derp_x state={} region={} host={} ip={}.{}.{}.{} stage={} uptime_ms={} connects={} frames_rx={} frames_tx={} queued={} sent={} dropped[queue_full,heap,region_unknown]={},{},{} starts={} last_end={}\r\n",
+                "tn_derp_x state={} region={} host={} ip={}.{}.{}.{} stage={} uptime_ms={} connects={} frames_rx={} frames_tx={} queued={} sent={} dropped[queue_full,heap,region_unknown]={},{},{} starts={} expired={} dropped_on_close={} link_refused={} rx_to_engine={} last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close,6 idle,7 home_gone,8 other_region)\r\n",
                 xs.name(),
                 X_DIAG.region.load(Relaxed),
                 xhost,
@@ -1323,6 +1323,10 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 X_COUNTS[3].load(Relaxed),
                 X_COUNTS[4].load(Relaxed),
                 X_COUNTS[5].load(Relaxed),
+                X_COUNTS[6].load(Relaxed),
+                X_COUNTS[7].load(Relaxed),
+                X_COUNTS[8].load(Relaxed),
+                X_COUNTS[9].load(Relaxed),
                 X_DIAG.end.load(Relaxed)
             );
         }

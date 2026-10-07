@@ -902,6 +902,9 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
     let mut go = tdongle_tailnet_host::server::GoServer::spawn_with(&bin, env).expect("go server with two regions");
     let gw = Gateway::start(GatewayOpts::new(&go.control_addr));
     gw.net.udp_blocked.store(true, Ordering::SeqCst);
+    // the extra link takes two seconds to come up, as a slow TLS start on the board does: the peer's first packets (the handshake, then the flow's SYNs) arrive before it
+    // is ready and must wait for it, not be lost
+    gw.net.extra_connect_delay_ms.store(2000, Ordering::Relaxed);
     let id = gw.add("lab", "tskey-fake");
     wait_until("the membership to be routing", 60, || gw.is_ready(id));
     // the region the gateway's own link is on; the peer is started afterwards and may not choose that region as its home
@@ -939,7 +942,11 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
     let (n2, d2) = gw.host.upload(alias, 9, 128 * 1024, Duration::from_secs(60)).expect("upload to a peer on the other region");
     assert_eq!(n2, 128 * 1024);
     use tdongle_tailnet_runtime::derp::X_COUNTS;
-    let (queued, sent, starts) = (X_COUNTS[0].load(Ordering::Relaxed), X_COUNTS[1].load(Ordering::Relaxed), X_COUNTS[5].load(Ordering::Relaxed));
+    let c: Vec<u32> = X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect();
+    let (queued, sent, starts) = (c[0], c[1], c[5]);
+    println!("counts [queued, sent, full, heap, unknown, starts, expired, closed, refused, rx_to_engine] {c:?}");
+    assert!(c[9] > 0, "frames from the extra link's region reach the engine: {c:?}");
+    assert_eq!(c[6] + c[2] + c[3] + c[4] + c[8], 0, "nothing was dropped or expired while the link came up: {c:?}");
     println!("home region {home}; extra link: queued {queued} sent {sent} starts {starts}; down {:.1} up {:.1} Mbit/s", mbit(n, d), mbit(n2, d2));
     assert!(queued > 100 && sent * 100 >= queued * 95, "the packets for the peer went through the extra link (a few may wait or drop while it connects): queued {queued} sent {sent}");
     let indexed = gw.sh.with_engine(|e, _| e.member(id).map_or(0, |m| m.rt.derp_index.count));

@@ -138,6 +138,8 @@ struct XPacket {
     region: u16,
     dst: [u8; 32],
     data: alloc::vec::Vec<u8>,
+    /// When it was queued (ms clock): a packet that waited longer than [`X_EXPIRE_MS`] for the link is dropped, counted.
+    at_ms: u32,
 }
 /// See [`XPacket`].
 static XQ: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, RefCell<alloc::vec::Vec<XPacket>>> =
@@ -149,8 +151,11 @@ pub const XQ_MAX: usize = 8;
 pub const X_IDLE_MS: u32 = 60_000;
 /// The extra link's last activity (a packet queued for it or sent by it), ms clock.
 static X_LAST_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-/// `[queued, sent, dropped (queue full), dropped (heap), dropped (region not in the map), link starts]`.
-pub static X_COUNTS: [core::sync::atomic::AtomicU32; 6] = [const { core::sync::atomic::AtomicU32::new(0) }; 6];
+/// How long a packet waits for the extra link to come up before it is dropped (TCP in the tunnel retransmits).
+pub const X_EXPIRE_MS: u32 = 10_000;
+/// `[queued, sent, dropped (queue full), dropped (heap), dropped (region not in the map), link starts, expired waiting for the link, dropped when the link was closed,
+/// refused by the link, relayed packets from the extra link's region handed to the engine]`.
+pub static X_COUNTS: [core::sync::atomic::AtomicU32; 10] = [const { core::sync::atomic::AtomicU32::new(0) }; 10];
 /// The certificate policy of the region the extra link dials (its map entry's).
 static X_CERT: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, RefCell<Option<tdongle_tailnet_tls::DerpCert>>> =
     embassy_sync::blocking_mutex::Mutex::new(RefCell::new(None));
@@ -173,7 +178,7 @@ fn push_x<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R,
         if q.len() >= XQ_MAX {
             return false;
         }
-        q.push(XPacket { slot: idx as u8, region, dst: key, data: v });
+        q.push(XPacket { slot: idx as u8, region, dst: key, data: v, at_ms: (sh.now() as u32).max(1) });
         true
     });
     if ok {
@@ -190,6 +195,20 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
     fn pump_x(&mut self, region: u16) {
         use core::sync::atomic::Ordering::Relaxed;
         let idx = self.idx as u8;
+        let now_ms = self.sh.now() as u32;
+        // packets that have waited too long for the link are dropped, counted
+        let expired = XQ.lock(|q| {
+            let mut q = q.borrow_mut();
+            let before = q.len();
+            q.retain(|p| !(p.slot == idx && now_ms.wrapping_sub(p.at_ms) > X_EXPIRE_MS));
+            before - q.len()
+        });
+        X_COUNTS[6].fetch_add(expired as u32, Relaxed);
+        // nothing leaves for a link that is not relaying yet (the link would refuse and count it): the packets wait here, and the loop of `stream` pumps again as soon as
+        // the link is ready
+        if self.link.state() != State::Ready {
+            return;
+        }
         loop {
             let Some(pkt) = XQ.lock(|q| {
                 let mut q = q.borrow_mut();
@@ -211,7 +230,9 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
                     X_COUNTS[1].fetch_add(1, Relaxed);
                     X_LAST_MS.store((now as u32).max(1), Relaxed);
                 }
-                Err(_) => {}
+                Err(_) => {
+                    X_COUNTS[8].fetch_add(1, Relaxed);
+                }
             }
         }
         self.after();
@@ -276,14 +297,19 @@ where
             relay(sh, idx, member, key, &mut tcp, &stage, &mut wbuf[..], Some((region, host, port))).await;
         });
         let watch = async {
+            let mut home_down = 0u32;
             loop {
                 Timer::after_secs(5).await;
                 let idle = (sh.now() as u32).wrapping_sub(X_LAST_MS.load(Relaxed)) > X_IDLE_MS;
-                let home_gone = slot.status().derp_state != State::Ready;
-                // another region's packets are waiting and this one has had its turn (two seconds idle): switch
+                // the home link flaps now and then (it reconnects in seconds): the extra link outlives one poll of that, two in a row end it
+                home_down = if slot.status().derp_state != State::Ready { home_down + 1 } else { 0 };
+                // another region's packets are waiting and this one has had its turn (idle for a poll): switch
                 let other = XQ.lock(|q| q.borrow().iter().any(|p| p.slot == idx as u8 && p.region != region));
                 let quiet = (sh.now() as u32).wrapping_sub(X_LAST_MS.load(Relaxed)) > 2000 && !XQ.lock(|q| q.borrow().iter().any(|p| p.slot == idx as u8 && p.region == region));
-                if idle || home_gone || (other && quiet) {
+                // why the link ends, for `tn_derp_x last_end`: 6 idle, 7 the home link is gone, 8 another region's packets wait
+                let why = if idle { 6 } else if home_down >= 2 { 7 } else if other && quiet { 8 } else { 0 };
+                if why != 0 {
+                    X_DIAG.end.store(why, Relaxed);
                     break;
                 }
             }
@@ -293,8 +319,15 @@ where
         tcp.release().await;
         X_STATS.lock(|c| c.borrow_mut().0 = State::Idle);
         X_DIAG.ready_at_ms.store(0, Relaxed);
+        // what the closed link did not send: gone with it when the home link is gone too, otherwise left for the next start
         if slot.status().derp_state != State::Ready {
-            XQ.lock(|q| q.borrow_mut().retain(|p| p.slot != idx as u8));
+            let n = XQ.lock(|q| {
+                let mut q = q.borrow_mut();
+                let before = q.len();
+                q.retain(|p| p.slot != idx as u8);
+                before - q.len()
+            });
+            X_COUNTS[7].fetch_add(n as u32, Relaxed);
         }
     }
 }
@@ -391,6 +424,9 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_
             Action::DeliverPacket { src_key, payload } => {
                 // the engine takes the packet in a buffer it may change: the shared scratch, for this call only
                 let sh = self.sh;
+                if self.x {
+                    X_COUNTS[9].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                }
                 sh.with_scratch(|buf| {
                     let n = payload.len().min(MAX_FRAME).min(buf.len());
                     buf[..n].copy_from_slice(&payload[..n]);
