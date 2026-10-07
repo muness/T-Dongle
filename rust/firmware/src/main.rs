@@ -35,6 +35,7 @@ use embassy_futures::yield_now;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_hal::interrupt::Priority;
 use esp_rtos::embassy::InterruptExecutor;
+use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
@@ -1424,6 +1425,37 @@ async fn ring_housekeeping_task() -> ! {
 // Console (CDC-ACM)
 // ======================================================================================================================
 
+/// Where a command's reply goes: the CDC-ACM console, or the buffer of the USB-side `POST /serial` (tailnet mode). **One dispatcher** ([`handle`]) serves both: the
+/// HTTP endpoint hands its line to the console task over [`HTTP_LINE`] and streams the pieces the dispatcher emits from [`HTTP_OUT`].
+#[derive(Clone, Copy)]
+enum Sink {
+    Console(&'static Mutex<CriticalSectionRawMutex, AcmWriter>),
+    Http,
+}
+
+/// A command line from `POST /serial`, for the console task (one at a time; the HTTP side serialises callers).
+pub static HTTP_LINE: Channel<CriticalSectionRawMutex, String, 1> = Channel::new();
+/// The reply pieces of the command in [`HTTP_LINE`], in order; an empty piece ends the reply. (A restarting command's last piece is the last thing sent: the chip resets right after.)
+pub static HTTP_OUT: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
+
+async fn emit(sink: Sink, s: &str, timeout_ms: u64) {
+    match sink {
+        Sink::Console(w) => out(w, s, timeout_ms).await,
+        // a full channel means the HTTP side gave up: drop, never wait (the console must not wedge)
+        Sink::Http => {
+            if !s.is_empty() {
+                let _ = HTTP_OUT.try_send(String::from(s));
+            }
+        }
+    }
+}
+
+/// Run one `POST /serial` line through the dispatcher and end its reply.
+async fn http_line(bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
+    handle(Sink::Http, bridge, state, line).await;
+    let _ = HTTP_OUT.try_send(String::new());
+}
+
 async fn out(w: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, s: &str, timeout_ms: u64) {
     let mut g = w.lock().await;
     // Do not wedge the console if nobody reads the port.
@@ -1765,16 +1797,25 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
     loop {
         // every wait has a 500 ms timer so the loop proves it is being polled (`supervise::console_alive`) even with no host attached
         supervise::console_alive().await;
-        if matches!(select(rd.wait_connection(), Timer::after_millis(500)).await, Either::Second(())) {
-            continue;
+        match select3(rd.wait_connection(), Timer::after_millis(500), HTTP_LINE.receive()).await {
+            Either3::First(_) => {}
+            Either3::Second(()) => continue,
+            Either3::Third(line) => {
+                http_line(bridge, state, &line).await;
+                continue;
+            }
         }
         loop {
             supervise::console_alive().await;
             let mut pkt = [0u8; 64];
-            let len = match select(rd.read_packet(&mut pkt), Timer::after_millis(500)).await {
-                Either::First(Ok(len)) => len,
-                Either::First(Err(_)) => break,
-                Either::Second(()) => continue,
+            let len = match select3(rd.read_packet(&mut pkt), Timer::after_millis(500), HTTP_LINE.receive()).await {
+                Either3::First(Ok(len)) => len,
+                Either3::First(Err(_)) => break,
+                Either3::Second(()) => continue,
+                Either3::Third(line) => {
+                    http_line(bridge, state, &line).await;
+                    continue;
+                }
             };
             for &c in &pkt[..len] {
                 let Some(ev) = reader.feed(c) else { continue };
@@ -1785,18 +1826,18 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
                 let Event::Line(line) = ev else { continue };
                 let mut owned = String::new();
                 let _ = owned.write_str(line);
-                handle(wr, bridge, state, &owned).await;
+                handle(Sink::Console(wr), bridge, state, &owned).await;
             }
         }
     }
 }
 
-async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
+async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
     let mut s = String::new();
     #[cfg(feature = "tailnet")]
     if let Some(reply) = tailnet::console(line).await {
         // a command the tailnet gateway owns (route, members, memory, inbound, member ..., tn-mem, tailnet-status)
-        out(wr, &reply, 3000).await;
+        emit(wr, &reply, 3000).await;
         return;
     }
     match line {
@@ -1842,7 +1883,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
         }
         st if st.starts_with("selftest ") => match tdongle_rescue::Selftest::parse(&st["selftest ".len()..]) {
             Some(kind) => {
-                out(wr, "selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)\r\n", 300).await;
+                emit(wr, "selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)\r\n", 300).await;
                 supervise::selftest(kind);
             }
             None => s.push_str("usage: selftest spin|irqoff|panic|console\r\n"),
@@ -1877,13 +1918,13 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
         }
         "normal" => {
             guard::leave_safe_mode();
-            out(wr, "leaving safe mode: resetting\r\n", 500).await;
+            emit(wr, "leaving safe mode: resetting\r\n", 500).await;
             Timer::after(Duration::from_millis(200)).await;
             crate::guard::planned_reset()
         }
         "bootloader" => {
             guard::leave_safe_mode(); // a deliberate reset is not a failed boot
-            out(wr, "rebooting to ROM download mode\r\n", 500).await;
+            emit(wr, "rebooting to ROM download mode\r\n", 500).await;
             Timer::after(Duration::from_millis(200)).await;
             ops::enter_bootloader()
         }
@@ -1948,7 +1989,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             Command::ConfirmReset => {
                 let (text, restart) = settings::call(settings::Req::ConfirmReset).await;
                 if restart {
-                    out(wr, &text, 500).await;
+                    emit(wr, &text, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
                     setup::restart(tdongle_setup::boot::Request::Enter, 0)
                 }
@@ -1961,7 +2002,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             Command::Mode(Some(mode)) => {
                 let (text, restart) = settings::call(settings::Req::Mode(mode)).await;
                 if restart {
-                    out(wr, &text, 500).await;
+                    emit(wr, &text, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
                     crate::guard::planned_reset()
                 }
@@ -1982,7 +2023,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                         s.push_str(reply::SETUP_ALREADY_OPEN);
                     }
                     Some(n) => {
-                        out(wr, reply::SETUP_RESTARTING, 500).await;
+                        emit(wr, reply::SETUP_RESTARTING, 500).await;
                         Timer::after(Duration::from_millis(300)).await;
                         setup::restart(tdongle_setup::boot::Request::Enter, u32::from(n))
                     }
@@ -1990,7 +2031,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             }
             Command::Cancel => {
                 if setup::ACTIVE.load(Ordering::Relaxed) {
-                    out(wr, reply::CANCEL_LEAVING, 500).await;
+                    emit(wr, reply::CANCEL_LEAVING, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
                     setup::restart(tdongle_setup::boot::Request::Leave, 0)
                 }
@@ -1998,7 +2039,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             }
             Command::Reboot => {
                 guard::leave_safe_mode();
-                out(wr, reply::REBOOT_OK, 500).await;
+                emit(wr, reply::REBOOT_OK, 500).await;
                 Timer::after(Duration::from_millis(200)).await;
                 crate::guard::planned_reset()
             }
@@ -2007,7 +2048,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             }
         },
     }
-    out(wr, &s, 3000).await;
+    emit(wr, &s, 3000).await;
 }
 
 /// `heap` line every 5 s: to the console when the host holds DTR (`heap off` silences it) and to esp-println.

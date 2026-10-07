@@ -33,3 +33,4 @@ pub mod response;
 pub mod router;
 pub mod scan;
 mod tailnet;
+pub mod usb;
