@@ -69,7 +69,7 @@ pub const RX_RING: usize = 32;
 /// Bytes of received frames the radio callback may hold in the ring whatever the elastic floor says (ADR 0022 exception: the receive ring is the driver's own
 /// buffering, which the C pins under no floor either). Bounded: a flood costs at most this much of the floor, for the milliseconds a frame waits. Above it,
 /// frames need the heap above the floor like every other consumer. 16 KB is ten full frames, held only for the milliseconds before the stack takes them.
-pub const RX_RESERVE: usize = 16 * 1024;
+pub const RX_RESERVE: usize = 14 * 1024;
 /// Bytes of frames now in the ring.
 static RX_BYTES: AtomicU32 = AtomicU32::new(0);
 /// Ethernet frames the USB side can hold between the NCM receiver task and the runtime (backpressure beyond that: the OUT endpoint is not re-armed).
@@ -120,7 +120,7 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 126 * 1024;
+    pub const HEAP_REGULAR: usize = 127 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
@@ -1286,6 +1286,16 @@ fn handle(sh: &'static Sh, line: &str, out: &mut String) -> bool {
         api.serial_status_extra(out);
         sta_report(sh, out);
         let _ = write!(out, "tailnet_rust members={} napt_flows={} mux_tx={} mux_rx={} wifi_rx={} wifi_rx_dropped={} wifi_tx_refused={} usb_rx_queue={}\r\n", MEMBERS, NAPT_FLOWS, MUX_TXQ, MUX_RXQ, RX_FRAMES.load(Ordering::Relaxed), RX_DROPPED.load(Ordering::Relaxed), TX_REFUSED.load(Ordering::Relaxed), USB_RX_FRAMES);
+        return true;
+    }
+    if let Some(arg) = line.strip_prefix("tn force-derp") {
+        use tdongle_tailnet_engine::shared::{FORCE_DERP, FORCE_DERP_DROPPED};
+        match arg.trim() {
+            "on" => FORCE_DERP.store(true, Ordering::Relaxed),
+            "off" => FORCE_DERP.store(false, Ordering::Relaxed),
+            _ => {}
+        }
+        let _ = write!(out, "tn_force_derp on={} dropped_udp={} (peers fall back to the relay within about 10 s of `on`; `off` lets disco find the direct path again)\r\n", FORCE_DERP.load(Ordering::Relaxed) as u8, FORCE_DERP_DROPPED.load(Ordering::Relaxed));
         return true;
     }
     if line == "tn-wg" {

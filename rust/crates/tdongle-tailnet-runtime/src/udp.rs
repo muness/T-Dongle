@@ -214,7 +214,9 @@ where
                     let got = sh.with_scratch(|buf| match sock.try_recv_from(&mut buf[..DATAGRAM_MAX]) {
                         Ok(Some((n, src))) => {
                             slot.update(|st| st.udp_rx = st.udp_rx.wrapping_add(1));
-                            if sh.rx_admit(n) {
+                            if tdongle_tailnet_engine::shared::FORCE_DERP.load(core::sync::atomic::Ordering::Relaxed) {
+                                tdongle_tailnet_engine::shared::FORCE_DERP_DROPPED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                            } else if sh.rx_admit(n) {
                                 let _ = sh.feed(Input::Udp { member, src, data: &mut buf[..n] });
                                 sh.rx_done(n);
                             }

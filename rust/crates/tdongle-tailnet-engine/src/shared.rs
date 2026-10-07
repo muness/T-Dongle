@@ -62,6 +62,12 @@ pub enum Sent {
     Refused,
 }
 
+/// Diagnostics: no direct UDP to or from peers (`tn force-derp on`). Outbound data that DISCO would send direct goes through DERP, and the runtime discards every datagram
+/// the member socket receives (disco pings included, so no pong is sent and the peer's direct path expires and falls back to its relay).
+pub static FORCE_DERP: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// Datagrams discarded while [`FORCE_DERP`] was on.
+pub static FORCE_DERP_DROPPED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 /// Send `data` along `route` (free function: the caller passes disjoint fields, so `data` may borrow a scratch buffer of the same struct).
 #[allow(clippy::too_many_arguments)]
 pub fn emit_route(
@@ -75,6 +81,7 @@ pub fn emit_route(
     dst_key: &[u8; 32],
     data: &[u8],
 ) -> Sent {
+    let route = if matches!(route, Route::Direct(_)) && FORCE_DERP.load(core::sync::atomic::Ordering::Relaxed) { Route::Derp } else { route };
     match route {
         Route::Direct(ep) => {
             if cx.out.emit(Out::SendUdp { member, dst: ep, data }) {
