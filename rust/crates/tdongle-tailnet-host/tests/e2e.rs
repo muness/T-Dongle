@@ -58,6 +58,47 @@ fn derp_only_end_to_end() {
     gw.check_engine();
 }
 
+/// The coordinator's board symptom: counters all zero and no per-peer state. A USB-side echo to a real tsnet peer through the full router path
+/// (alias -> router -> engine -> WireGuard -> DERP) must show up in `route`, `inbound`, and the per-peer line, and raw 100.x (not an alias) must not.
+#[test]
+fn usb_ping_through_the_router_is_visible_in_every_counter() {
+    use tdongle_tailnet_fw::TailnetApi;
+    let mut go = go_or_skip!();
+    let (gw, _id, alias) = up(&mut go, "gopeer");
+    gw.net.udp_blocked.store(true, Ordering::SeqCst);
+    let cmd = |c: &str| {
+        let mut o = String::new();
+        let _ = gw.sh.serial_command(c, &mut o);
+        o
+    };
+    let num = |j: &str, k: &str| -> u64 {
+        let pat = format!("\"{k}\":");
+        let i = j.find(&pat).unwrap_or_else(|| panic!("no {k} in {j}")) + pat.len();
+        j[i..].chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap()
+    };
+    assert_eq!(num(&cmd("route"), "forwarded_out"), 0);
+    assert_eq!(gw.host.echo(alias, 7, b"through the router", Duration::from_secs(30)).unwrap(), b"through the router");
+    let route = cmd("route");
+    assert!(num(&route, "forwarded_out") >= 1, "{route}");
+    assert!(num(&route, "forwarded_in") >= 1, "{route}");
+    let inbound = cmd("inbound");
+    assert!(num(&inbound, "udp_wg") + num(&inbound, "derp_rx_wg") >= 1, "{inbound}");
+    assert!(num(&inbound, "wg_delivered") >= 1, "{inbound}");
+    let mut extra = String::new();
+    gw.sh.serial_status_extra(&mut extra);
+    let wg = extra.lines().find(|l| l.starts_with("tn_wg ")).unwrap_or_else(|| panic!("no tn_wg line in {extra}"));
+    assert!(wg.contains("session=true") && wg.contains("path=derp"), "{wg}");
+    assert!(!wg.contains("hs_ms=None"), "handshake time missing: {wg}");
+    assert!(!wg.contains("tx_bytes=0 ") && !wg.contains("rx_bytes=0 "), "{wg}");
+    let eng = extra.lines().find(|l| l.starts_with("tn_eng ")).unwrap();
+    assert!(!eng.contains("hs_init=0 "), "the first packet must start a handshake: {eng}");
+    // a raw tailnet address is not an alias: it is NAT traffic by design (C `gateway_alias`), so the tunnel counters do not move
+    let before = num(&cmd("route"), "forwarded_out");
+    let _ = gw.host.udp_echo([100, 90, 1, 2], 7, b"raw", Duration::from_secs(2));
+    assert_eq!(num(&cmd("route"), "forwarded_out"), before);
+    gw.check_engine();
+}
+
 #[test]
 fn direct_path_is_discovered_and_traffic_moves_to_it() {
     let mut go = go_or_skip!();

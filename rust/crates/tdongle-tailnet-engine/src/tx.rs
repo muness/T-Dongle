@@ -104,7 +104,11 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
                 Ok(n) => {
                     let key = Self::peer_key(m, idx);
                     let route = m.rt.paths[idx].route(cx.now);
-                    match emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.tx[..n]) {
+                    let sent = emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.tx[..n]);
+                    if matches!(sent, Sent::Direct | Sent::Derp) {
+                        m.rt.wg_bytes[idx][0] = m.rt.wg_bytes[idx][0].saturating_add(len as u32);
+                    }
+                    match sent {
                         Sent::Direct => TxFate::SentDirect,
                         Sent::Derp => TxFate::SentDerp,
                         Sent::NoRoute => TxFate::NoRoute,
@@ -153,7 +157,11 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
                 Ok(n) => {
                     let key = Self::peer_key(m, idx);
                     let route = m.rt.paths[idx].route(cx.now);
-                    emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.tx[..n])
+                    let sent = emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, &self.tx[..n]);
+                    if matches!(sent, Sent::Direct | Sent::Derp) {
+                        m.rt.wg_bytes[idx][0] = m.rt.wg_bytes[idx][0].saturating_add(len as u32);
+                    }
+                    sent
                 }
                 Err(_) => Sent::Refused,
             };

@@ -56,6 +56,8 @@ pub struct Rt<const P: usize> {
     pub ip_of: [u32; P],
     /// Until when a failed initiation keeps the peer's handshake timer quiet.
     pub hs_backoff: [Millis; P],
+    /// Authenticated data bytes per table index: `[sent, received]` (status only; reset when the peer leaves).
+    pub wg_bytes: [[u32; 2]; P],
     /// Per-peer DISCO path state, by table index.
     pub paths: [PathState<8>; P],
     /// Outstanding pings (`pending_probes[32]` in the C; sixteen here).
@@ -150,6 +152,7 @@ impl<const P: usize> Member<P> {
                 slot_of: [None; P],
                 ip_of: [0; P],
                 hs_backoff: [0; P],
+                wg_bytes: [[0; 2]; P],
                 paths: core::array::from_fn(|_| PathState::new()),
                 probes: ProbeTable::new(),
                 pcounters: PathCounters::default(),

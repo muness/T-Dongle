@@ -92,11 +92,11 @@ pub use status::{MemberBytes, MemberStatus, PoolStatus, StatusSnapshot};
 // A growth past these fails the build of the firmware, so the memory ledger and this crate cannot drift apart unnoticed.
 #[cfg(target_arch = "xtensa")]
 const _: () = {
-    assert!(core::mem::size_of::<member::Member<8>>() == 9560);
+    assert!(core::mem::size_of::<member::Member<8>>() == 9624);
     assert!(core::mem::size_of::<slot::WgSlot>() == 944);
     assert!(core::mem::size_of::<jit::ParkQueue>() == 328);
     assert!(core::mem::size_of::<jit::JitStore<24>>() == 6176);
     assert!(core::mem::size_of::<alias::AliasBook>() == 1544);
     assert!(core::mem::size_of::<tdongle_tailnet_peers::pool::Pool<slot::WgSlot, 12>>() == 11472);
-    assert!(core::mem::size_of::<Engine<RamDirectory<1, 1, 1>, 3, 8, 12, 64, 64, 24>>() - core::mem::size_of::<RamDirectory<1, 1, 1>>() == 58960);
+    assert!(core::mem::size_of::<Engine<RamDirectory<1, 1, 1>, 3, 8, 12, 64, 64, 24>>() - core::mem::size_of::<RamDirectory<1, 1, 1>>() == 59152);
 };

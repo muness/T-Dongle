@@ -1240,6 +1240,11 @@ fn handle(sh: &'static Sh, line: &str, out: &mut String) -> bool {
         let _ = write!(out, "tailnet_rust members={} napt_flows={} mux_tx={} mux_rx={} wifi_rx={} wifi_rx_dropped={} wifi_tx_refused={} usb_rx_queue={}\r\n", MEMBERS, NAPT_FLOWS, MUX_TXQ, MUX_RXQ, RX_FRAMES.load(Ordering::Relaxed), RX_DROPPED.load(Ordering::Relaxed), TX_REFUSED.load(Ordering::Relaxed), USB_RX_FRAMES);
         return true;
     }
+    if line == "tn-wg" {
+        // engine fates and per-peer WireGuard state (handshake time, bytes, path)
+        api.serial_status_extra(out);
+        return true;
+    }
     if line == "tn-mem" || line == "tn-sta" {
         if line == "tn-sta" {
             sta_report(sh, out);

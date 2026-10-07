@@ -214,3 +214,106 @@ impl<D: crate::dir::PeerDirectory, const M: usize, const P: usize, const K: usiz
         }
     }
 }
+
+/// The engine's own counters, flattened for the diagnostics reports (the fate arrays follow the `ALL` order of their enums).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EngineCounters {
+    /// Packets from the USB host / datagrams from sockets and DERP / of those via DERP.
+    pub host_in: u32,
+    /// Datagrams received (sockets and DERP).
+    pub rx_in: u32,
+    /// Of `rx_in`: through DERP.
+    pub rx_in_derp: u32,
+    /// [`crate::stats::HostFate`] counts.
+    pub host: [u32; 5],
+    /// [`crate::stats::TxFate`] counts.
+    pub tx: [u32; 13],
+    /// [`crate::stats::RxFate`] counts.
+    pub rx: [u32; 19],
+    /// Handshake initiations created / of those without a route / responses / keepalives sent.
+    pub hs_init_tx: u32,
+    /// Initiations that had no route.
+    pub hs_init_noroute: u32,
+    /// Responses created.
+    pub hs_resp_tx: u32,
+    /// Keepalives sent.
+    pub keepalive_tx: u32,
+    /// Datagrams handed to the output for UDP / for DERP / refused.
+    pub udp_tx: u32,
+    /// Datagrams handed to the output for DERP.
+    pub derp_tx: u32,
+    /// Refused by the output.
+    pub out_refused: u32,
+}
+
+/// One resident peer's WireGuard state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeerWg {
+    /// The peer's tailnet address.
+    pub ip: u32,
+    /// A transport session exists.
+    pub session: bool,
+    /// Handshake attempts in the current series.
+    pub attempts: u8,
+    /// When a handshake last completed (ms, engine clock).
+    pub last_handshake: Option<Millis>,
+    /// Last authenticated receive / send.
+    pub last_rx: Option<Millis>,
+    /// Last send.
+    pub last_tx: Option<Millis>,
+    /// Data bytes sent / received (plaintext).
+    pub tx_bytes: u32,
+    /// Data bytes received.
+    pub rx_bytes: u32,
+    /// A trusted direct path is in use (otherwise DERP).
+    pub direct: bool,
+    /// The direct endpoint (ipv4, port) when one is known.
+    pub endpoint: Option<(u32, u16)>,
+}
+
+impl<D: crate::dir::PeerDirectory, const M: usize, const P: usize, const K: usize, const A: usize, const F: usize, const JB: usize>
+    Engine<D, M, P, K, A, F, JB>
+{
+    /// The engine's counters.
+    pub fn counters(&self) -> EngineCounters {
+        use crate::stats::{HostFate, RxFate, TxFate};
+        let s = &self.sh.stats;
+        EngineCounters {
+            host_in: s.host_in.get(),
+            rx_in: s.rx_in.get(),
+            rx_in_derp: s.rx_in_derp.get(),
+            host: HostFate::ALL.map(|f| s.host_count(f)),
+            tx: TxFate::ALL.map(|f| s.tx_count(f)),
+            rx: RxFate::ALL.map(|f| s.rx_count(f)),
+            hs_init_tx: s.hs_init_tx.get(),
+            hs_init_noroute: s.hs_init_noroute.get(),
+            hs_resp_tx: s.hs_resp_tx.get(),
+            keepalive_tx: s.keepalive_tx.get(),
+            udp_tx: s.udp_tx.get(),
+            derp_tx: s.derp_tx.get(),
+            out_refused: s.out_refused.get(),
+        }
+    }
+
+    /// Visit each resident peer of membership `slot` with its WireGuard state.
+    pub fn peers_wg(&self, slot: usize, now: Millis, mut f: impl FnMut(PeerWg)) {
+        let Some(m) = self.members.get(slot).and_then(|m| m.as_ref()) else { return };
+        let owner = tdongle_tailnet_peers::pool::OwnerId(m.rt.slot);
+        for (idx, _) in m.mship.table.iter() {
+            let hot = m.rt.slot_of[idx].and_then(|s| self.sh.pool.get(owner, s)).map(|sl| &sl.hot);
+            let ps = m.rt.paths[idx].status(now);
+            f(PeerWg {
+                ip: m.rt.ip_of[idx],
+                session: hot.is_some_and(|h| h.has_session()),
+                attempts: hot.map_or(0, |h| h.handshake_attempts()),
+                last_handshake: hot.and_then(|h| h.last_handshake()),
+                last_rx: hot.and_then(|h| h.last_rx()),
+                last_tx: hot.and_then(|h| h.last_tx()),
+                tx_bytes: m.rt.wg_bytes[idx][0],
+                rx_bytes: m.rt.wg_bytes[idx][1],
+                direct: ps.has_direct,
+                endpoint: if ps.has_direct { ps.best.v4_u32().map(|ip| (ip, ps.best.port())) } else { None },
+            });
+        }
+    }
+}

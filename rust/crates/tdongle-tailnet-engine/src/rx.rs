@@ -382,6 +382,9 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
         if let Some(p) = m.mship.table.get_mut(idx) {
             p.jit_used_ms = now;
         }
+        if !out.keepalive {
+            m.rt.wg_bytes[idx][1] = m.rt.wg_bytes[idx][1].saturating_add(out.plain_len as u32);
+        }
         if out.confirmed {
             // a responder session just came up: send what waited for it
             self.sh.flush_peer(m, idx, cx);

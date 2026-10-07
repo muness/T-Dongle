@@ -280,6 +280,7 @@ pub fn release_peer_state<const P: usize, const K: usize, const JB: usize>(
         rt.paths[idx] = PathState::new();
         rt.probes.forget_peer(idx as u8);
         rt.hs_backoff[idx] = 0;
+        rt.wg_bytes[idx] = [0; 2];
         let ip = core::mem::take(&mut rt.ip_of[idx]);
         if ip != 0 {
             for _ in 0..rt.park.drop_peer(store, ip) {

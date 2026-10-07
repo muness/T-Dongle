@@ -284,11 +284,33 @@ where
                 diag::write_admission(&mut w, ML_HB_FLOOR as u32, false, self.snapshot().arbiter.0, &recs[..n]);
             }
             Command::Inbound => {
-                let (queued, peak) = self.with_engine(|e, _| (e.rx_budget().queued(), e.rx_budget().peak()));
+                let (queued, peak, c, router) = self.with_engine(|e, now| (e.rx_budget().queued(), e.rx_budget().peak(), e.counters(), e.status(now).router));
+                use tdongle_tailnet_engine::RxFate as R;
+                let rx = |f: R| c.rx[f as usize];
+                let mut ml = [0u32; 23];
+                ml[0] = c.rx_in.saturating_sub(c.rx_in_derp);
+                ml[2] = rx(R::Garbage);
+                ml[5] = [R::WgInitiation, R::WgResponse, R::WgCookie, R::WgHandshakeDropped, R::WgKeepalive, R::WgDelivered, R::WgRouterDrop, R::WgNotAllowed, R::WgDataDropped]
+                    .iter()
+                    .fold(0u32, |a, f| a.saturating_add(rx(*f)));
+                ml[6] = rx(R::DiscoOk).saturating_add(rx(R::DiscoDropped));
+                ml[7] = rx(R::StunMatched).saturating_add(rx(R::StunUnmatched));
+                ml[11] = c.rx_in_derp;
+                ml[14] = rx(R::HeapRefused);
+                ml[18] = rx(R::WgDelivered).saturating_add(rx(R::WgRouterDrop)).saturating_add(rx(R::WgNotAllowed));
+                ml[19] = rx(R::UnknownSender);
+                // the engine's own receive fates, by name (the C's `wg_rx` list)
+                let mut wg = [("", 0u32); 19];
+                for (i, f) in R::ALL.iter().enumerate() {
+                    wg[i] = (f.name(), c.rx[i]);
+                }
                 let i = diag::Inbound {
                     wg_rx_queue_bytes: tdongle_tailnet_admission::wg_rx::ML_WG_RX_QUEUE_BYTES,
                     wg_rx_bytes_queued: queued,
                     wg_rx_bytes_peak: peak,
+                    ml,
+                    wg: &wg,
+                    route: diag::INBOUND_ROUTE_REASONS.map(|r| router[r]),
                     ..diag::Inbound::default()
                 };
                 diag::write_inbound(&mut w, &i);
@@ -338,6 +360,30 @@ where
             neg.grants,
             neg.waiting
         );
+        let c = self.with_engine(|e, _| e.counters());
+        let _ = write!(
+            out,
+            "tn_eng host_in={} host={:?} tx={:?} rx_in={} rx_derp={} rx={:?} hs_init={} hs_noroute={} hs_resp={} ka_tx={} udp_tx={} derp_tx={} out_refused={}\r\n",
+            c.host_in, c.host, c.tx, c.rx_in, c.rx_in_derp, c.rx, c.hs_init_tx, c.hs_init_noroute, c.hs_resp_tx, c.keepalive_tx, c.udp_tx, c.derp_tx, c.out_refused
+        );
+        for slot in 0..snap.members.len() {
+            self.with_engine(|e, now| {
+                e.peers_wg(slot, now, |p| {
+                    let ip = p.ip.to_be_bytes();
+                    let _ = write!(
+                        out,
+                        "tn_wg member_slot={} peer={}.{}.{}.{} session={} attempts={} hs_ms={:?} rx_ms={:?} tx_ms={:?} tx_bytes={} rx_bytes={} path={}",
+                        slot, ip[0], ip[1], ip[2], ip[3], p.session, p.attempts, p.last_handshake, p.last_rx, p.last_tx, p.tx_bytes, p.rx_bytes,
+                        if p.direct { "direct" } else { "derp" }
+                    );
+                    if let Some((ep, port)) = p.endpoint {
+                        let o = ep.to_be_bytes();
+                        let _ = write!(out, " endpoint={}.{}.{}.{}:{}", o[0], o[1], o[2], o[3], port);
+                    }
+                    let _ = write!(out, " now_ms={}\r\n", now);
+                });
+            });
+        }
         for st in self.slots.iter().map(|s| s.status()).filter(|s| s.state != SlotState::Free) {
             let _ = write!(
                 out,
