@@ -302,6 +302,32 @@ async fn control_task(portal: &'static Portal) -> ! {
     }
 }
 
+// Keep config/list scratch storage out of the async setup future and the
+// enclosing init_task frame. These helpers do not retain state across awaits.
+#[inline(never)]
+fn configure_ap(controller: &mut WifiController<'static>, name: &[u8]) -> bool {
+    let ssid = core::str::from_utf8(name).unwrap_or("TDongle");
+    let ap = match ssid.try_into() {
+        Ok(s) => AccessPointConfig::default().with_ssid(s).with_authentication(AuthenticationMethodConfig::Open).with_channel(1).with_max_connections(2),
+        Err(_) => {
+            crate::init_note("setup: bad access point name");
+            return false;
+        }
+    };
+    if controller.set_config(&Config::AccessPointStation(StationConfig::default(), ap)).is_err() {
+        crate::init_note("setup: access point did not start");
+        return false;
+    }
+    true
+}
+
+#[inline(never)]
+fn publish_scan() {
+    let mut list = ScanList::new();
+    crate::scan_rows(|ssid, rssi, auth| list.offer(ssid, rssi, auth != 0));
+    critical_section::with(|cs| *SCAN_LIST.borrow_ref_mut(cs) = list);
+}
+
 /// The setup boot. Does not return: the radio and the scans stay in this task until the control task restarts the chip.
 pub async fn run(
     boot: SetupBoot,
@@ -350,19 +376,7 @@ pub async fn run(
             }
         }
     };
-    let name = portal.ap_name();
-    let ssid = core::str::from_utf8(name).unwrap_or("TDongle");
-    let ap = match ssid.try_into() {
-        Ok(s) => AccessPointConfig::default().with_ssid(s).with_authentication(AuthenticationMethodConfig::Open).with_channel(1).with_max_connections(2),
-        Err(_) => {
-            crate::init_note("setup: bad access point name");
-            loop {
-                Timer::after_secs(3600).await;
-            }
-        }
-    };
-    if controller.set_config(&Config::AccessPointStation(StationConfig::default(), ap)).is_err() {
-        crate::init_note("setup: access point did not start");
+    if !configure_ap(&mut controller, portal.ap_name()) {
         loop {
             Timer::after_secs(3600).await;
         }
@@ -390,14 +404,15 @@ pub async fn run(
         });
     }
     AP_UP.store(true, Ordering::Relaxed);
+    // Radio configuration and portal tasks are ready. Setup is a complete
+    // running boot too; flash readiness checks the same stage in every mode.
+    crate::guard::stage(tdongle_boot_guard::Stage::Running);
 
     // The scans: the page asks over HTTP, the console over serial; both read the table `scan_all` fills.
     loop {
         embassy_futures::select::select(SCAN_REQ.wait(), crate::SCAN_REQ.wait()).await;
         let _ = crate::scan_all(&mut controller).await;
-        let mut list = ScanList::new();
-        crate::scan_rows(|ssid, rssi, auth| list.offer(ssid, rssi, auth != 0));
-        critical_section::with(|cs| *SCAN_LIST.borrow_ref_mut(cs) = list);
+        publish_scan();
         SCANNED.store(true, Ordering::Relaxed);
         SCANNING.store(false, Ordering::Relaxed);
     }
