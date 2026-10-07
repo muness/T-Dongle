@@ -498,8 +498,36 @@ fn state_sizes() {
     std::println!("Neighbors<4> = {}", tdongle_tailnet_usbnet::arp::Neighbors::<4>::STATE_BYTES);
     std::println!("UsbNet<512,8,4> = {}", tdongle_tailnet_usbnet::UsbNet::<512, 8, 4>::STATE_BYTES);
     // within lwIP's own table (512 x 40 = 20,480 B)
-    const { assert!(Napt::<512>::STATE_BYTES < 21_000) };
-    const { assert!(Napt::<512>::STATE_BYTES >= 512 * 32) };
+    // the flows are on the heap, as they come: the table itself is the two bucket arrays and the bookkeeping
+    const { assert!(Napt::<512>::STATE_BYTES < 4_000) };
+}
+
+#[test]
+fn the_flows_take_heap_as_they_come_and_give_it_back_when_idle() {
+    let mut n = new_napt::<512>();
+    assert_eq!(n.heap_bytes(), 0, "an empty table holds nothing");
+    for i in 0..40u16 {
+        let _ = syn_out(&mut n, 1, 40_000 + i);
+    }
+    let forty = n.heap_bytes();
+    assert!(forty > 0 && forty < 4_000, "forty flows take about two chunks: {forty}");
+    for i in 40..512u16 {
+        let _ = syn_out(&mut n, 1, 40_000 + i);
+    }
+    let full = n.heap_bytes();
+    assert!((512 * 32..21_000).contains(&full), "a full table is within lwIP's own 20,480 B: {full}");
+    assert_eq!(n.active(), 512);
+    // a refusal of the heap evicts instead of growing (a table of 512 is full anyway: test the guard on a fresh one)
+    let mut g = new_napt::<512>();
+    g.set_grow_guard(|_| false);
+    let mut p = tcp_pkt(HOST, 41_000, REMOTE, 443, 1000, 0, SYN, &[]);
+    assert!(!matches!(g.outbound(1, &mut p), Verdict::Forward { .. }), "no heap and no flow to evict: no new flow");
+    assert_eq!(g.heap_bytes(), 0, "a guard that says no grows nothing");
+    // idle: everything expires and the memory goes back
+    n.expire(10_000_000);
+    assert_eq!(n.active(), 0);
+    assert_eq!(n.heap_bytes(), 0, "an idle table holds nothing");
+    n.check_invariants().unwrap();
 }
 
 // ---- timers ----

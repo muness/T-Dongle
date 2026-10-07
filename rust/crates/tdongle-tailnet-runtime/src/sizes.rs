@@ -157,5 +157,5 @@ const _: () = {
     // the ring plus its two signals (records ready, room freed)
     assert!(core::mem::size_of::<crate::queue::ByteQueue<NoopRawMutex, { crate::shared::HOST_Q }>>() <= 8_232 + 24);
     assert!(core::mem::size_of::<crate::shared::RegistryCell>() <= 2_232);
-    assert!(core::mem::size_of::<crate::usb::UsbSide>() == 1_472);
+    assert!(core::mem::size_of::<crate::usb::UsbSide>() == 1_456);
 };

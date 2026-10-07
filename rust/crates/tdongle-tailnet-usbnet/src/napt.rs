@@ -632,11 +632,18 @@ struct Reserved {
     port: u16,
 }
 
-/// The NAT. `N` is the table size (`IP_NAPT_MAX` is 512 in the C).
+/// Flows added to the table at a time.
+const GROW_CHUNK: usize = 16;
+
+/// The NAT. `N` is the table size (`IP_NAPT_MAX` is 512 in the C): its capacity; the flows' memory is taken from the heap as they come.
 pub struct Napt<const N: usize> {
     cfg: NaptConfig,
     wifi: Option<WifiAddr>,
-    entries: [Entry; N],
+    /// The flows, grown on demand ([`GROW_CHUNK`] at a time, to at most `N`) and given back when the table is idle or flushed: a table of `N` flows costs what the flows in
+    /// it cost, not what it could hold.
+    entries: alloc::vec::Vec<Entry>,
+    /// May the table take heap for this many more bytes? (The firmware's elastic floor.) `None`: always.
+    grow_ok: Option<fn(usize) -> bool>,
     out_heads: [u16; N],
     in_heads: [u16; N],
     free: u16,
@@ -674,19 +681,14 @@ impl<const N: usize> Napt<N> {
     /// before it is used.
     pub const fn new_unseeded(cfg: NaptConfig) -> Self {
         const { assert!(N > 0 && N < NIL as usize) };
-        let mut entries = [Entry::EMPTY; N];
-        let mut i = 0;
-        while i < N {
-            entries[i].out_next = if i + 1 < N { (i + 1) as u16 } else { NIL };
-            i += 1;
-        }
         Napt {
             cfg,
             wifi: None,
-            entries,
+            entries: alloc::vec::Vec::new(),
+            grow_ok: None,
             out_heads: [NIL; N],
             in_heads: [NIL; N],
-            free: 0,
+            free: NIL,
             used: 0,
             salt: 0,
             rng: 0x9e37_79b9_7f4a_7c15,
@@ -744,17 +746,51 @@ impl<const N: usize> Napt<N> {
         self.wifi = wifi;
     }
 
+    /// Let the table take heap only when `ok(bytes)` says so (the elastic floor); a refusal evicts a flow instead, as a full table does.
+    pub fn set_grow_guard(&mut self, ok: fn(usize) -> bool) {
+        self.grow_ok = Some(ok);
+    }
+
+    /// Bytes of flows the table holds now (what it has taken from the heap).
+    pub fn heap_bytes(&self) -> usize {
+        self.entries.capacity() * core::mem::size_of::<Entry>()
+    }
+
+    /// Add [`GROW_CHUNK`] flows to the free list if the table may and the heap allows. `false`: it could not.
+    fn grow(&mut self) -> bool {
+        let len = self.entries.len();
+        if len >= N {
+            return false;
+        }
+        let n = GROW_CHUNK.min(N - len);
+        if let Some(ok) = self.grow_ok
+            && !ok(n * core::mem::size_of::<Entry>())
+        {
+            return false;
+        }
+        if self.entries.try_reserve(n).is_err() {
+            return false;
+        }
+        for k in 0..n {
+            let mut e = Entry::EMPTY;
+            e.out_next = if k + 1 < n { (len + k + 1) as u16 } else { self.free };
+            self.entries.push(e);
+        }
+        self.free = len as u16;
+        true
+    }
+
     fn flush(&mut self) {
-        for i in 0..N {
-            if self.entries[i].proto != 0 {
+        for e in &self.entries {
+            if e.proto != 0 {
                 self.stats.flushed.bump();
             }
-            self.entries[i] = Entry::EMPTY;
-            self.entries[i].out_next = if i + 1 < N { (i + 1) as u16 } else { NIL };
         }
+        // everything goes, and the heap with it
+        self.entries = alloc::vec::Vec::new();
         self.out_heads = [NIL; N];
         self.in_heads = [NIL; N];
-        self.free = 0;
+        self.free = NIL;
         self.used = 0;
         self.rst_len = 0;
     }
@@ -914,7 +950,7 @@ impl<const N: usize> Napt<N> {
         Self::chain_remove(&mut self.in_heads[ib], &mut self.entries, idx, false);
     }
 
-    fn chain_remove(head: &mut u16, entries: &mut [Entry; N], idx: u16, out: bool) {
+    fn chain_remove(head: &mut u16, entries: &mut [Entry], idx: u16, out: bool) {
         let next_of = |e: &Entry| if out { e.out_next } else { e.in_next };
         if *head == idx {
             *head = next_of(&entries[usize::from(idx)]);
@@ -979,7 +1015,7 @@ impl<const N: usize> Napt<N> {
     pub fn expire(&mut self, now: Millis) -> usize {
         let now = now as u32;
         let mut gone = 0;
-        for i in 0..N {
+        for i in 0..self.entries.len() {
             let e = self.entries[i];
             if e.proto == 0 {
                 continue;
@@ -994,13 +1030,18 @@ impl<const N: usize> Napt<N> {
                 gone += 1;
             }
         }
+        if self.used == 0 && !self.entries.is_empty() {
+            // idle: the flows' memory goes back (every chain is empty, so nothing points into it)
+            self.entries = alloc::vec::Vec::new();
+            self.free = NIL;
+        }
         gone
     }
 
     /// Make room in a full table: the first expired flow, else the oldest (`ip_napt_gc(force)`).
     fn make_room(&mut self, now: u32) {
         let mut oldest: Option<(u16, u32)> = None;
-        for i in 0..N {
+        for i in 0..self.entries.len() {
             let e = self.entries[i];
             if e.proto == 0 {
                 continue;
@@ -1024,7 +1065,7 @@ impl<const N: usize> Napt<N> {
     #[allow(clippy::too_many_arguments)]
     fn create(&mut self, now: u32, proto: Proto, host_ip: u32, host_port: u16, remote_ip: u32, remote_port: u16, host_seq: u32) -> Option<u16> {
         let mport = self.alloc_port(proto, host_port)?;
-        if self.free == NIL {
+        if self.free == NIL && !self.grow() {
             self.make_room(now);
         }
         let idx = self.free;
@@ -1264,7 +1305,7 @@ impl<const N: usize> Napt<N> {
         let mut seen_free = 0usize;
         let mut i = self.free;
         while i != NIL {
-            if seen_free > N {
+            if seen_free > self.entries.len() {
                 return Err("free list loops");
             }
             if self.entries[usize::from(i)].proto != 0 {
@@ -1274,7 +1315,7 @@ impl<const N: usize> Napt<N> {
             i = self.entries[usize::from(i)].out_next;
         }
         let used = self.entries.iter().filter(|e| e.proto != 0).count();
-        if used != usize::from(self.used) || used + seen_free != N {
+        if used != usize::from(self.used) || used + seen_free != self.entries.len() {
             return Err("used/free count mismatch");
         }
         for (i, e) in self.entries.iter().enumerate() {

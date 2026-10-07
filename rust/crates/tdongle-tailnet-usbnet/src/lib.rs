@@ -32,6 +32,8 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+extern crate alloc;
+
 #[cfg(test)]
 extern crate std;
 

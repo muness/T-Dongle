@@ -59,7 +59,7 @@ use crate::{ALT, CONFIGURED, CONNECTS, FIRMWARE, FwEnv, USB_GEN};
 /// Memberships that can run at once in this build (the `members-N` features).
 pub const MEMBERS: usize = MAX_RUN;
 /// NAT flows (the C's `IP_NAPT_MAX` is 512; see the memory notes in the report).
-pub const NAPT_FLOWS: usize = 320;
+pub const NAPT_FLOWS: usize = 512;
 /// Mux queue slots (1,500 bytes each): towards the radio (NAT traffic) and towards the USB host.
 pub const MUX_TXQ: usize = 4;
 /// See [`MUX_TXQ`].
@@ -123,7 +123,7 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 128 * 1024;
+    pub const HEAP_REGULAR: usize = 137 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
@@ -821,6 +821,8 @@ pub fn start(spawner: Spawner) -> Result<(), StartError> {
 
     let mut rng = PlatformRng(&platform);
     NAPT.seed(&mut rng);
+    // the flows take heap as they come, above the elastic floor (a refusal evicts a flow, as a full table does)
+    NAPT.with(|n| n.set_grow_guard(|bytes| hb_ok(FwHeap.free(), bytes + 64)));
     let napt: &'static SharedNapt<NAPT_FLOWS> = &NAPT;
     let mux: &'static mut Mux = MUX.take();
     let mac = platform.sta_mac();
