@@ -51,7 +51,7 @@ fn sta(lan: &mut Lan) -> Sta {
     let napt: &'static SharedNapt<64> = leak(SharedNapt::new(NaptConfig::C, &mut TestRng(7)));
     let mux: &'static mut Mux = leak(WifiMux::new(FakeRadio { h: radio.clone(), mac: STA_MAC }, NaptTap::new(napt)).unwrap());
     let (drv, port) = mux.split();
-    let res = leak(StackResources::<6>::new());
+    let res = leak(StackResources::<8>::new());
     let (stack, runner): (Stack<'static>, Runner<'static, StackDriver<'static, FakeRadio, NaptTap<'static, 64>, TXQ, RXQ>>) =
         embassy_net::new(drv, Config::dhcpv4(Default::default()), res, 0x5eed);
     lan.tasks.push(Box::pin(run(runner)));
@@ -645,4 +645,51 @@ fn sntp_exchange_through_the_stack_and_the_mux() {
     assert!(lan.run_until(move |_| r2.borrow().len() == 3, 40_000), "no answer: {:?}", result.borrow());
     assert_eq!(*result.borrow(), vec![Ok(1_800_000_000); 3]);
     assert!(s.port.stats().rx_to_host.get() == 0, "the answer went to the stack, not to the USB host");
+}
+
+/// DNS through the real stack and the mux with the firmware's own socket set alive (`STACK_SOCKETS` = 8 at one membership: DHCP and the DNS client inside the stack, then the
+/// control and relay TCP sockets, the WireGuard UDP socket, the DNS forwarder's and SNTP's), the resolver of the lease answering from the gateway, queries repeated: a lookup
+/// that is sent and answered must come back every time, and the sockets must not push each other out.
+#[test]
+fn dns_lookups_work_with_the_firmwares_whole_socket_set() {
+    fn dns_answer(q: &[u8]) -> Vec<u8> {
+        let mut r = q.to_vec();
+        r[2] = 0x81;
+        r[3] = 0x80; // response, recursion available, no error
+        r[6..8].copy_from_slice(&1u16.to_be_bytes()); // one answer
+        r.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 203, 0, 113, 7]);
+        r
+    }
+    let mut lan = Lan::new(RadioHandle::new());
+    lan.gw.internet_reply = Some(dns_answer);
+    let s = sta(&mut lan);
+    bring_up(&mut lan, &s);
+    let stack = s.stack;
+    // the other sockets, alive for the whole test
+    let (c_rx, c_tx, d_rx, d_tx) = (leak(vec![0u8; 4096]), leak(vec![0u8; 1024]), leak(vec![0u8; 5760]), leak(vec![0u8; 2048]));
+    let mut control = TcpSocket::new(stack, c_rx, c_tx);
+    let mut derp = TcpSocket::new(stack, d_rx, d_tx);
+    let mut udps = Vec::new();
+    for (i, rxlen) in [9600usize, 1536, 1536].into_iter().enumerate() {
+        let (rm, rb, tm, tb) = (leak([PacketMetadata::EMPTY; 8]), leak(vec![0u8; rxlen]), leak([PacketMetadata::EMPTY; 8]), leak(vec![0u8; 3200]));
+        let mut u = UdpSocket::new(stack, rm, rb, tm, tb);
+        u.bind(41_000 + i as u16).unwrap();
+        udps.push(u);
+    }
+    let _ = (&mut control, &mut derp);
+    let got = Rc::new(RefCell::new(Vec::new()));
+    {
+        let got = got.clone();
+        lan.tasks.push(Box::pin(async move {
+            for host in ["pool.ntp.org", "time.cloudflare.com", "controlplane.tailscale.com", "login.tailscale.com", "pool.ntp.org"] {
+                let r = embassy_time::with_timeout(embassy_time::Duration::from_secs(5), stack.dns_query(host, embassy_net::dns::DnsQueryType::A)).await;
+                got.borrow_mut().push(r.ok().and_then(Result::ok).and_then(|v| v.first().copied()));
+            }
+        }));
+    }
+    let g2 = got.clone();
+    assert!(lan.run_until(move |_| g2.borrow().len() == 5, 60_000), "lookups done: {:?}", got.borrow());
+    for a in got.borrow().iter() {
+        assert_eq!(*a, Some(embassy_net::IpAddress::v4(203, 0, 113, 7)), "{:?}", got.borrow());
+    }
 }

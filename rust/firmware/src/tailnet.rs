@@ -519,6 +519,13 @@ static DHCP_RX: AtomicU32 = AtomicU32::new(0);
 static DHCP_TX: AtomicU32 = AtomicU32::new(0);
 static ARP_RX: AtomicU32 = AtomicU32::new(0);
 static ARP_TX: AtomicU32 = AtomicU32::new(0);
+/// UDP frames by well-known port seen at the driver, each way: DNS (53) and NTP (123), and the driver's polls (`tn_dns` line).
+static DNS_FRAMES: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4]; // dns tx, dns rx, ntp tx, ntp rx
+static DRV_TX_POLLS: AtomicU32 = AtomicU32::new(0);
+static DRV_TX_NOROOM: AtomicU32 = AtomicU32::new(0);
+static DRV_RX_POLLS: AtomicU32 = AtomicU32::new(0);
+/// DNS lookups of the SNTP task: started, answered with an address, answered empty or with an error, no answer in 5 s.
+static SNTP_DNS: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
 /// The stack handle for the diagnostics. `Stack` is not `Sync` (it is a reference to a `RefCell`); it is only ever used from the thread executor (the stack's runner and the
 /// console worker are both tasks of it), which is why the wrapper may be shared.
 struct ThreadOnly<T>(T);
@@ -542,6 +549,13 @@ fn note_frame(frame: &[u8], rx: bool) {
                 let (sp, dp) = (u16::from_be_bytes([frame[14 + ihl], frame[15 + ihl]]), u16::from_be_bytes([frame[16 + ihl], frame[17 + ihl]]));
                 if (sp == 67 && dp == 68) || (sp == 68 && dp == 67) {
                     (if rx { &DHCP_RX } else { &DHCP_TX }).fetch_add(1, Ordering::Relaxed);
+                }
+                // a request leaves for port 53 / 123, an answer arrives from it
+                let (want, i) = if rx { (sp, 1) } else { (dp, 0) };
+                if want == 53 {
+                    DNS_FRAMES[i].fetch_add(1, Ordering::Relaxed);
+                } else if want == 123 {
+                    DNS_FRAMES[i + 2].fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
@@ -651,6 +665,7 @@ impl Driver for L2Driver {
 
     fn receive(&mut self, cx: &mut core::task::Context<'_>) -> Option<(L2Rx, L2Tx)> {
         RX_WAKER.register(cx.waker());
+        DRV_RX_POLLS.fetch_add(1, Ordering::Relaxed);
         let mut buf = [0u8; crate::MTU];
         let len = pop_rx(&mut buf)?;
         crate::pm::note_activity(); // decrypt and routing follow
@@ -659,7 +674,12 @@ impl Driver for L2Driver {
     }
     fn transmit(&mut self, cx: &mut core::task::Context<'_>) -> Option<L2Tx> {
         TX_WAKER.register(cx.waker());
-        crate::l2::room().then_some(L2Tx)
+        DRV_TX_POLLS.fetch_add(1, Ordering::Relaxed);
+        let room = crate::l2::room();
+        if !room {
+            DRV_TX_NOROOM.fetch_add(1, Ordering::Relaxed);
+        }
+        room.then_some(L2Tx)
     }
     fn link_state(&mut self, cx: &mut core::task::Context<'_>) -> LinkState {
         LINK_WAKER.register(cx.waker());
@@ -1010,7 +1030,15 @@ static SNTP_PORT: AtomicU32 = AtomicU32::new(0);
 
 async fn sntp_once(stack: Stack<'static>, sock: &mut embassy_net::udp::UdpSocket<'_>, host: &str) -> Result<u64, u32> {
     use embassy_net::dns::DnsQueryType;
-    let addrs = with_timeout(Duration::from_secs(5), stack.dns_query(host, DnsQueryType::A)).await.ok().and_then(Result::ok).ok_or(1u32)?;
+    SNTP_DNS[0].fetch_add(1, Ordering::Relaxed);
+    let answer = with_timeout(Duration::from_secs(5), stack.dns_query(host, DnsQueryType::A)).await;
+    SNTP_DNS[match &answer {
+        Ok(Ok(a)) if !a.is_empty() => 1,
+        Ok(_) => 2,
+        Err(_) => 3,
+    }]
+    .fetch_add(1, Ordering::Relaxed);
+    let addrs = answer.ok().and_then(Result::ok).ok_or(1u32)?;
     let embassy_net::IpAddress::Ipv4(ip) = *addrs.first().ok_or(1u32)?;
     SNTP_IP.store(u32::from_be_bytes(ip.octets()), Ordering::Relaxed);
     tdongle_tailnet_runtime::sntp::exchange(sock, ip, Duration::from_secs(4)).await
@@ -1241,6 +1269,27 @@ fn sta_report(sh: &Sh, out: &mut String) {
             DIR_STAGED
         );
         let _ = write!(out, "tn_ctl slot={} stage={} connected={} end=\"{}\" error=\"{}\"\r\n", i, st.control_stage, st.connected as u8, st.last_end.as_str(), st.last_error.as_str());
+    }
+    {
+        // is the DNS query leaving the driver, does the answer come back to it, and does the stack poll the driver at all
+        let servers = STACK_REF.try_get().and_then(|ThreadOnly(st)| st.config_v4()).map(|c| c.dns_servers);
+        let _ = write!(
+            out,
+            "tn_dns frames[dns_tx,dns_rx,ntp_tx,ntp_rx]={},{},{},{} sntp_dns[started,answered,empty_or_error,timeout]={},{},{},{} drv[tx_polls,tx_noroom,rx_polls]={},{},{} tx_refused={} servers={:?}\r\n",
+            ld(&DNS_FRAMES[0]),
+            ld(&DNS_FRAMES[1]),
+            ld(&DNS_FRAMES[2]),
+            ld(&DNS_FRAMES[3]),
+            ld(&SNTP_DNS[0]),
+            ld(&SNTP_DNS[1]),
+            ld(&SNTP_DNS[2]),
+            ld(&SNTP_DNS[3]),
+            ld(&DRV_TX_POLLS),
+            ld(&DRV_TX_NOROOM),
+            ld(&DRV_RX_POLLS),
+            ld(&TX_REFUSED),
+            servers
+        );
     }
     let _ = write!(
         out,
