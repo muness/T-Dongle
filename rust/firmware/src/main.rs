@@ -752,7 +752,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(ring_housekeeping_task().unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
     spawner.spawn(settings::task().unwrap());
-    spawner.spawn(temperature::task(peripherals.TSENS).unwrap());
+    spawner.spawn(temperature::task().unwrap());
     spawner.spawn(
         ui::ui_task(ui::Hardware {
             spi: peripherals.SPI2,

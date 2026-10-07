@@ -25,9 +25,9 @@ fn bounds() -> (usize, usize) {
 #[inline(never)]
 pub fn paint() {
     let (bottom, top) = bounds();
-    let sp: usize;
-    // SAFETY: reads the stack pointer register.
-    unsafe { core::arch::asm!("mov {0}, a1", out(reg) sp) };
+    // the address of a local is as good as the stack pointer here (inline assembly is not stable on this architecture)
+    let marker = 0u32;
+    let sp = core::hint::black_box(&marker) as *const u32 as usize;
     // leave a margin under the live frame (this function's own and what the caller still has to call)
     let end = sp.saturating_sub(256).min(top) & !3;
     let mut p = bottom;

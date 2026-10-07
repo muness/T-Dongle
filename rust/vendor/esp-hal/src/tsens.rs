@@ -168,18 +168,6 @@ impl<'d> TemperatureSensor<'d> {
         Ok(())
     }
 
-    /// The DAC range register (`I2C_SARADC_TSENS_DAC`): which of the sensor's five ranges is selected.
-    #[cfg(esp32s3)]
-    pub fn dac(&self) -> u8 {
-        crate::soc::regi2c::I2C_SARADC_TSENS_DAC.read()
-    }
-
-    /// Select a range by its DAC register value (ESP-IDF's `temperature_sensor_attributes[].reg_val`).
-    #[cfg(esp32s3)]
-    pub fn set_dac(&self, reg_val: u8) {
-        crate::soc::regi2c::I2C_SARADC_TSENS_DAC.write_field(reg_val);
-    }
-
     /// Returns the raw temperature value.
     #[inline]
     pub fn get_temperature(&self) -> Temperature {
