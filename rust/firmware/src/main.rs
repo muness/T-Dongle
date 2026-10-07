@@ -1007,13 +1007,45 @@ fn link_hook(bridge: &'static Bridge<FwEnv>, up: bool, ctx: &TaskContext) {
     bridge.link(up, ctx);
 }
 
+#[inline(never)]
+fn saved_for_join() -> Option<tdongle_nvs_format::load::Loaded> {
+    SAVED.lock(|c| c.borrow().as_ref().filter(|l| !l.saved.list().is_empty()).copied())
+}
+
+// Keep the station configuration temporaries out of the long-running async
+// supervisor's frame (which also owns its saved-profile snapshot).
+#[inline(never)]
+fn configure_station(controller: &mut WifiController<'static>, ssid: &[u8], pass: &[u8], best_bss: Option<Bss>) -> bool {
+        let auth = match pass.try_into() {
+            Ok(p) if !pass.is_empty() => AuthenticationMethodConfig::Wpa2Personal(p),
+            _ => AuthenticationMethodConfig::Open,
+        };
+        let Ok(ssid_t) = ssid.try_into() else {
+            return false;
+        };
+        // The C station configuration (`wifi_fill_station`): all-channel scan, join by signal. esp-radio's default is the FAST scan, which joins the first access point
+        // that answers: on the board that was a far BSS of the right SSID (-88 dBm, channel 1) while the C joined -50 on channel 11.
+        let mut station = StationConfig::default().with_ssid(ssid_t).with_authentication(auth).with_scan_method(ScanMethod::AllChannels);
+        if let (true, Some(b)) = (PIN_BSS.load(Ordering::Relaxed), best_bss.filter(Bss::usable)) {
+            station = station.with_bssid(b.bssid).with_channel(b.channel);
+        }
+        if controller.set_config(&Config::Station(station)).is_err() {
+            init_note("set_config failed");
+            return false;
+        }
+        if controller.set_protocols(Protocols::default()).is_err() {
+            init_note("set_protocols failed"); // default is b/g/n: never LR
+        }
+        true
+}
+
 async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>) -> ! {
     // SAFETY: this is the link supervisor task; it may block and is not a driver callback.
     let ctx = unsafe { TaskContext::assume() };
     let mut next = 0usize;
     loop {
         // The list as it is now (a console `profile`, `del` or reset replaces it): nothing saved means nothing to join.
-        let Some(loaded) = SAVED.lock(|c| *c.borrow()).filter(|l| !l.saved.list().is_empty()) else {
+        let Some(loaded) = saved_for_join() else {
             let _ = with_timeout(Duration::from_secs(2), USE_REQ.wait()).await;
             continue;
         };
@@ -1055,28 +1087,10 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
             Timer::after_secs(2).await;
             continue;
         };
-        let auth = match pass.try_into() {
-            Ok(p) if !pass.is_empty() => AuthenticationMethodConfig::Wpa2Personal(p),
-            _ => AuthenticationMethodConfig::Open,
-        };
-        let Ok(ssid_t) = ssid.try_into() else {
-            Timer::after_secs(2).await;
-            continue;
-        };
         println!("joining saved network slot {}", slot);
-        // The C station configuration (`wifi_fill_station`): all-channel scan, join by signal. esp-radio's default is the FAST scan, which joins the first access point
-        // that answers: on the board that was a far BSS of the right SSID (-88 dBm, channel 1) while the C joined -50 on channel 11.
-        let mut station = StationConfig::default().with_ssid(ssid_t).with_authentication(auth).with_scan_method(ScanMethod::AllChannels);
-        if let (true, Some(b)) = (PIN_BSS.load(Ordering::Relaxed), best_bss.filter(Bss::usable)) {
-            station = station.with_bssid(b.bssid).with_channel(b.channel);
-        }
-        if controller.set_config(&Config::Station(station)).is_err() {
-            init_note("set_config failed");
+        if !configure_station(controller, ssid, pass, best_bss) {
             Timer::after_secs(2).await;
             continue;
-        }
-        if controller.set_protocols(Protocols::default()).is_err() {
-            init_note("set_protocols failed"); // default is b/g/n: never LR
         }
         if !tailnet_active() {
             guard::op("roaming_assist");
