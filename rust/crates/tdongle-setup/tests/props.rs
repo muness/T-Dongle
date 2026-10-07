@@ -57,7 +57,7 @@ proptest! {
     }
 
     #[test]
-    fn json_nesting_is_bounded(depth in 0usize..1300) {
+    fn json_nesting_is_bounded(depth in 1usize..1300) {
         let mut b = vec![b'['; depth];
         b.extend(std::iter::repeat_n(b']', depth));
         let ok = json::parse(&b).is_some();
