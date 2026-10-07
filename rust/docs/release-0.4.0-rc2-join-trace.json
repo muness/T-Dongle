@@ -1,0 +1,650 @@
+{
+  "probe_commit": "4043d3453248ab44b6cb116dd1241299c1a33207",
+  "temporary_probe_only": true,
+  "attempts": [
+    {
+      "attempt": 1,
+      "joined": true,
+      "phases": [
+        {
+          "event": "session_start",
+          "up_ms": 5039,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 7334,
+          "elapsed_ms": 2293,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 7334,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 8135,
+          "elapsed_ms": 800,
+          "count": 1
+        },
+        {
+          "event": "key_done",
+          "up_ms": 8295,
+          "elapsed_ms": 3256,
+          "count": 0
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 8457,
+          "elapsed_ms": 161,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 8457,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 9316,
+          "elapsed_ms": 858,
+          "count": 1
+        },
+        {
+          "event": "connect_done",
+          "up_ms": 9316,
+          "elapsed_ms": 4277,
+          "count": 0
+        },
+        {
+          "event": "noise_done",
+          "up_ms": 9606,
+          "elapsed_ms": 4567,
+          "count": 0
+        },
+        {
+          "event": "early_done",
+          "up_ms": 9630,
+          "elapsed_ms": 1,
+          "count": 0
+        },
+        {
+          "event": "register_sent",
+          "up_ms": 9659,
+          "elapsed_ms": 30,
+          "count": 327
+        },
+        {
+          "event": "register_done",
+          "up_ms": 9807,
+          "elapsed_ms": 148,
+          "count": 466
+        },
+        {
+          "event": "map_request_sent",
+          "up_ms": 9812,
+          "elapsed_ms": 183,
+          "count": 374
+        },
+        {
+          "event": "map_headers",
+          "up_ms": 9942,
+          "elapsed_ms": 134,
+          "count": 200
+        },
+        {
+          "event": "first_map_bytes",
+          "up_ms": 10087,
+          "elapsed_ms": 279,
+          "count": 4068
+        },
+        {
+          "event": "engine_feed",
+          "up_ms": 12054,
+          "elapsed_ms": 56,
+          "count": 59
+        },
+        {
+          "event": "map_network_read",
+          "up_ms": 12055,
+          "elapsed_ms": 2073,
+          "count": 42997
+        },
+        {
+          "event": "map_noise",
+          "up_ms": 12055,
+          "elapsed_ms": 33,
+          "count": 0
+        },
+        {
+          "event": "map_h2",
+          "up_ms": 12055,
+          "elapsed_ms": 4,
+          "count": 22
+        },
+        {
+          "event": "map_parse_and_feed",
+          "up_ms": 12055,
+          "elapsed_ms": 99,
+          "count": 42333
+        },
+        {
+          "event": "first_map_applied",
+          "up_ms": 12055,
+          "elapsed_ms": 2247,
+          "count": 1
+        }
+      ],
+      "primary_resolver_failures": 1,
+      "secondary_resolver_successes": 3,
+      "pool_floor_denials": 0
+    },
+    {
+      "attempt": 2,
+      "joined": true,
+      "phases": [
+        {
+          "event": "tcp_done",
+          "up_ms": 8407,
+          "elapsed_ms": 2280,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 8408,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 9407,
+          "elapsed_ms": 999,
+          "count": 1
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 9729,
+          "elapsed_ms": 165,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 9730,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 10508,
+          "elapsed_ms": 778,
+          "count": 1
+        },
+        {
+          "event": "connect_done",
+          "up_ms": 10508,
+          "elapsed_ms": 4382,
+          "count": 0
+        },
+        {
+          "event": "register_sent",
+          "up_ms": 10832,
+          "elapsed_ms": 27,
+          "count": 327
+        },
+        {
+          "event": "register_done",
+          "up_ms": 10968,
+          "elapsed_ms": 136,
+          "count": 466
+        },
+        {
+          "event": "map_request_sent",
+          "up_ms": 10973,
+          "elapsed_ms": 168,
+          "count": 374
+        },
+        {
+          "event": "map_headers",
+          "up_ms": 11108,
+          "elapsed_ms": 139,
+          "count": 200
+        },
+        {
+          "event": "first_map_bytes",
+          "up_ms": 11254,
+          "elapsed_ms": 285,
+          "count": 4068
+        },
+        {
+          "event": "engine_feed",
+          "up_ms": 13215,
+          "elapsed_ms": 59,
+          "count": 59
+        },
+        {
+          "event": "map_network_read",
+          "up_ms": 13216,
+          "elapsed_ms": 2066,
+          "count": 42995
+        },
+        {
+          "event": "map_noise",
+          "up_ms": 13216,
+          "elapsed_ms": 37,
+          "count": 0
+        },
+        {
+          "event": "map_h2",
+          "up_ms": 13216,
+          "elapsed_ms": 6,
+          "count": 22
+        },
+        {
+          "event": "map_parse_and_feed",
+          "up_ms": 13216,
+          "elapsed_ms": 108,
+          "count": 42332
+        },
+        {
+          "event": "first_map_applied",
+          "up_ms": 13216,
+          "elapsed_ms": 2247,
+          "count": 1
+        }
+      ],
+      "primary_resolver_failures": 1,
+      "secondary_resolver_successes": 3,
+      "pool_floor_denials": 0
+    },
+    {
+      "attempt": 3,
+      "joined": true,
+      "phases": [
+        {
+          "event": "session_start",
+          "up_ms": 6164,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 8381,
+          "elapsed_ms": 2215,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 8381,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 9273,
+          "elapsed_ms": 891,
+          "count": 1
+        },
+        {
+          "event": "key_done",
+          "up_ms": 9422,
+          "elapsed_ms": 3257,
+          "count": 0
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 9587,
+          "elapsed_ms": 165,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 9588,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "noise_done",
+          "up_ms": 10734,
+          "elapsed_ms": 4570,
+          "count": 0
+        },
+        {
+          "event": "early_done",
+          "up_ms": 10759,
+          "elapsed_ms": 1,
+          "count": 0
+        },
+        {
+          "event": "register_sent",
+          "up_ms": 10786,
+          "elapsed_ms": 28,
+          "count": 327
+        },
+        {
+          "event": "register_done",
+          "up_ms": 10928,
+          "elapsed_ms": 142,
+          "count": 466
+        },
+        {
+          "event": "map_request_sent",
+          "up_ms": 10933,
+          "elapsed_ms": 175,
+          "count": 374
+        },
+        {
+          "event": "map_headers",
+          "up_ms": 11081,
+          "elapsed_ms": 152,
+          "count": 200
+        },
+        {
+          "event": "first_map_bytes",
+          "up_ms": 11254,
+          "elapsed_ms": 325,
+          "count": 4068
+        },
+        {
+          "event": "engine_feed",
+          "up_ms": 13341,
+          "elapsed_ms": 60,
+          "count": 59
+        },
+        {
+          "event": "map_noise",
+          "up_ms": 13341,
+          "elapsed_ms": 35,
+          "count": 0
+        },
+        {
+          "event": "map_h2",
+          "up_ms": 13341,
+          "elapsed_ms": 2,
+          "count": 22
+        },
+        {
+          "event": "map_parse_and_feed",
+          "up_ms": 13341,
+          "elapsed_ms": 109,
+          "count": 42333
+        },
+        {
+          "event": "first_map_applied",
+          "up_ms": 13341,
+          "elapsed_ms": 2412,
+          "count": 1
+        }
+      ],
+      "primary_resolver_failures": 1,
+      "secondary_resolver_successes": 3,
+      "pool_floor_denials": 0
+    },
+    {
+      "attempt": 4,
+      "joined": true,
+      "phases": [
+        {
+          "event": "session_start",
+          "up_ms": 4998,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 7164,
+          "elapsed_ms": 2165,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 7165,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 7953,
+          "elapsed_ms": 787,
+          "count": 1
+        },
+        {
+          "event": "key_done",
+          "up_ms": 8094,
+          "elapsed_ms": 3096,
+          "count": 0
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 8282,
+          "elapsed_ms": 187,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 8283,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 9189,
+          "elapsed_ms": 906,
+          "count": 1
+        },
+        {
+          "event": "connect_done",
+          "up_ms": 9189,
+          "elapsed_ms": 4191,
+          "count": 0
+        },
+        {
+          "event": "register_done",
+          "up_ms": 9667,
+          "elapsed_ms": 150,
+          "count": 466
+        },
+        {
+          "event": "map_request_sent",
+          "up_ms": 9673,
+          "elapsed_ms": 184,
+          "count": 374
+        },
+        {
+          "event": "map_headers",
+          "up_ms": 9850,
+          "elapsed_ms": 182,
+          "count": 200
+        },
+        {
+          "event": "engine_feed",
+          "up_ms": 12059,
+          "elapsed_ms": 59,
+          "count": 59
+        },
+        {
+          "event": "map_network_read",
+          "up_ms": 12060,
+          "elapsed_ms": 2215,
+          "count": 42998
+        },
+        {
+          "event": "map_noise",
+          "up_ms": 12060,
+          "elapsed_ms": 32,
+          "count": 0
+        },
+        {
+          "event": "map_h2",
+          "up_ms": 12060,
+          "elapsed_ms": 4,
+          "count": 22
+        },
+        {
+          "event": "map_parse_and_feed",
+          "up_ms": 12060,
+          "elapsed_ms": 107,
+          "count": 42333
+        },
+        {
+          "event": "first_map_applied",
+          "up_ms": 12060,
+          "elapsed_ms": 2392,
+          "count": 1
+        }
+      ],
+      "primary_resolver_failures": 1,
+      "secondary_resolver_successes": 3,
+      "pool_floor_denials": 0
+    },
+    {
+      "attempt": 5,
+      "joined": true,
+      "phases": [
+        {
+          "event": "session_start",
+          "up_ms": 6176,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 8465,
+          "elapsed_ms": 2287,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 8465,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 9289,
+          "elapsed_ms": 823,
+          "count": 1
+        },
+        {
+          "event": "key_done",
+          "up_ms": 9447,
+          "elapsed_ms": 3271,
+          "count": 0
+        },
+        {
+          "event": "tcp_done",
+          "up_ms": 9622,
+          "elapsed_ms": 174,
+          "count": 0
+        },
+        {
+          "event": "clock_ready",
+          "up_ms": 9622,
+          "elapsed_ms": 0,
+          "count": 0
+        },
+        {
+          "event": "tls_done",
+          "up_ms": 10393,
+          "elapsed_ms": 770,
+          "count": 1
+        },
+        {
+          "event": "connect_done",
+          "up_ms": 10394,
+          "elapsed_ms": 4218,
+          "count": 0
+        },
+        {
+          "event": "register_sent",
+          "up_ms": 10711,
+          "elapsed_ms": 26,
+          "count": 327
+        },
+        {
+          "event": "register_done",
+          "up_ms": 10849,
+          "elapsed_ms": 138,
+          "count": 466
+        },
+        {
+          "event": "map_request_sent",
+          "up_ms": 10854,
+          "elapsed_ms": 168,
+          "count": 374
+        },
+        {
+          "event": "map_headers",
+          "up_ms": 10991,
+          "elapsed_ms": 142,
+          "count": 200
+        },
+        {
+          "event": "first_map_bytes",
+          "up_ms": 11121,
+          "elapsed_ms": 272,
+          "count": 4068
+        },
+        {
+          "event": "engine_feed",
+          "up_ms": 13085,
+          "elapsed_ms": 61,
+          "count": 59
+        },
+        {
+          "event": "map_network_read",
+          "up_ms": 13086,
+          "elapsed_ms": 2061,
+          "count": 42997
+        },
+        {
+          "event": "map_noise",
+          "up_ms": 13086,
+          "elapsed_ms": 36,
+          "count": 0
+        },
+        {
+          "event": "map_h2",
+          "up_ms": 13086,
+          "elapsed_ms": 6,
+          "count": 22
+        },
+        {
+          "event": "map_parse_and_feed",
+          "up_ms": 13086,
+          "elapsed_ms": 104,
+          "count": 42333
+        },
+        {
+          "event": "first_map_applied",
+          "up_ms": 13086,
+          "elapsed_ms": 2237,
+          "count": 1
+        }
+      ],
+      "primary_resolver_failures": 1,
+      "secondary_resolver_successes": 3,
+      "pool_floor_denials": 0
+    }
+  ],
+  "interpretation": "Five passive-console traces joined without retries. First-map parsing/feed ~0.1s, Noise ~0.03s and H2 ~0.005s; read time ~2.1s includes network waiting AND TLS work. Every boot fell back from primary to secondary DNS, costing about2s. Prior51.8s boot recordedMap(Deadline), but its cause was not reproduced in these five traces. Code audit found unsafe cancellation/duplicate carry allocation; pending deterministic regression tests, not claimed as proven cause of prior timeout.",
+  "host_dns_cross_check": {
+    "utc": "2026-10-07T20:47:46Z",
+    "hostname": "controlplane.tailscale.com",
+    "query_type": "A",
+    "resolvers": [
+      {
+        "address": "45.90.28.159",
+        "response_ms": 33
+      },
+      {
+        "address": "45.90.30.159",
+        "response_ms": 33
+      }
+    ],
+    "interpretation": "Both servers replied promptly to the Mac; this is a different client path and does not explain the dongle first-query failure or establish a general primary-server outage."
+  }
+}

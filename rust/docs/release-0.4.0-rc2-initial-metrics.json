@@ -1,0 +1,112 @@
+{
+  "measured_utc_date": "2026-10-07",
+  "board_mac": "30:ed:a0:d7:88:bc",
+  "firmware_source": "c7fbe28",
+  "firmware_version": "0.4.0-rc2",
+  "app_sha256": "5bbe01a3abf79baa8b815729dc0deb67fb89eab992c89d34b3dd09753d7b42e0",
+  "elf_sha256": "d44c4e4e21053084ba9d0b69ccb580779f43dc8cccec1312d44bac5eeb50e08d",
+  "selftest_flash_capacity_bytes": 16777216,
+  "join_uptime_ms": 14236,
+  "directory_restored_count": 20,
+  "directory_restored_generation": 30,
+  "directory_errors": 0,
+  "iperf_duration_s": 15,
+  "iperf_received_mbps": {
+    "direct-up": 1.2396028645734989,
+    "direct-down": 1.2578767715330057,
+    "relay-up": 0.46228466382982153,
+    "relay-down": 0.629101227393428
+  },
+  "traffic_sample_kbps": {
+    "down": 210,
+    "up": 926
+  },
+  "temperature": {
+    "valid": true,
+    "traffic_peak_c": 74.9,
+    "gate_max_c": 70,
+    "gate_pass": false,
+    "owner_acceptance": {
+      "accepted": true,
+      "date": "2026-10-07",
+      "statement": "temp is fine, not something we control."
+    }
+  },
+  "heap": {
+    "floor_bytes": 29884,
+    "load_min_without_control_negotiation_bytes": 32688,
+    "raw_global_min_during_control_negotiation_bytes": 23852
+  },
+  "control_stack_free_observed_bytes": 15296,
+  "panic_recovery_observed_s_after_command_completion": 6.078,
+  "panic_recovery_replug": false,
+  "workspace_tests": {
+    "passed": 1601,
+    "failed": 0,
+    "ignored": 8
+  },
+  "soak": {
+    "status": "passed",
+    "duration_s": 1800,
+    "samples": 61,
+    "first_utc": "2026-10-07T19:01:59.398823+00:00",
+    "last_utc": "2026-10-07T19:31:59.382199+00:00",
+    "trips": "0/0",
+    "reset_counter_start": 1,
+    "reset_counter_end": 1,
+    "tailnet_states": [
+      4
+    ],
+    "directory_errors": 0,
+    "directory_count_min": 18,
+    "heap_free_min_bytes": 46236,
+    "heap_no_neg_min_bytes": 46132
+  },
+  "setup_handoff": {
+    "after_gateway_soak": true,
+    "ssid": "TDongle-D788BC",
+    "portal": "http://192.168.4.1/",
+    "stage": "running",
+    "rescue": "healthy",
+    "safe_mode": false,
+    "session_seconds": 600
+  },
+  "join_comparison": {
+    "rc1": {
+      "first_state4_uptime_ms": [
+        12102,
+        12582,
+        12549
+      ],
+      "median_ms": 12549
+    },
+    "rc2_first_set": {
+      "first_state4_uptime_ms": [
+        18923,
+        51827,
+        13285
+      ],
+      "median_ms": 18923
+    },
+    "rc2_after_baseline": {
+      "first_state4_uptime_ms": [
+        12593,
+        18552,
+        13252
+      ],
+      "median_ms": 13252
+    },
+    "rc1_source": "c03e868",
+    "probe_source": "eaddc36850bb6b7dc716b95e59b70d14ac51c619",
+    "probe_is_in_release": false,
+    "probe_map_parse_and_feed_ms": [
+      110,
+      102
+    ],
+    "probe_engine_feed_ms": [
+      59,
+      61
+    ],
+    "interpretation": "The historic ~8 s rc1 baseline did not reproduce. Current rc1 12.1\u201312.6 s overlaps rc2 fast joins. No consistent six-second firmware regression established; intermittent slow rc2 attempts remain recorded. Map parse/engine feed measured about 0.1 s, including ~0.06 s engine/flash work, too small to explain multi-second delays. Specific location/time/server cause is not proven."
+  }
+}
