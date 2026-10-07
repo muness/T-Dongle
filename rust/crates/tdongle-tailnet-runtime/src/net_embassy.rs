@@ -4,8 +4,8 @@
 //! # Buffers and what they cost
 //!
 //! A [`SockMem`] hands out zeroed windows as `&'static mut [u8]` (embassy-net's sockets want that; the firmware's implementation takes them from the heap
-//! through the shared [`tdongle_tailnet_pool::Pool`], so a refusal is a counted [`NetError::NoMem`] and the caller backs off). Nothing is static but the
-//! UDP sockets' packet *metadata* ([`NetMeta`], 4 entries each way, a few hundred bytes). The window sizes follow the C where they matter and shrink them
+//! through the shared [`tdongle_tailnet_pool::Pool`], so a refusal is a counted [`NetError::NoMem`] and the caller backs off). Nothing is static: the
+//! UDP sockets' packet *metadata* (4 entries each way, a few hundred bytes) is taken the same way. The window sizes follow the C where they matter and shrink them
 //! where the C's lwIP windows were dynamic ([`Windows`]): the control connection carries a map stream (a few KiB at a time, `rx 4,096`); the DERP
 //! connection's receive window is the relay's throughput (`rx 5,760`, the C's baseline `TCP_WND`; the C's 8,640 is `tcp_window::SDKCONFIG.tcp_wnd`); the
 //! DERP transmit buffer holds one TLS record's worth (`2,048`) and the control transmit buffer `1,024` (its writes are single requests, a few hundred bytes

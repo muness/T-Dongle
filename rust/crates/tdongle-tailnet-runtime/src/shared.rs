@@ -1148,3 +1148,69 @@ mod tests {
         assert!(c.iter().all(|(_, b)| *b > 0));
     }
 }
+
+/// The shared state must stay constructible at compile time: the firmware keeps it as a `const` item and copies it from flash into a heap block, because a value of
+/// that size built at run time is a stack frame the board does not have (`rust/tools/check_stack.py`). A constructor that stops being `const` fails here, on the host.
+#[cfg(test)]
+mod const_build {
+    use super::*;
+    use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+    use tdongle_tailnet_engine::RamDirectory;
+    use tdongle_tailnet_fw::{HeapProbe, Platform, Storage, StorageError};
+
+    struct Heap;
+    impl HeapProbe for Heap {
+        fn free(&self) -> usize {
+            100_000
+        }
+        fn largest_block(&self) -> usize {
+            24_576
+        }
+        fn minimum_free(&self) -> usize {
+            100_000
+        }
+    }
+    struct Plat;
+    impl Platform for Plat {
+        fn now_ms(&self) -> Millis {
+            0
+        }
+        fn unix_seconds(&self) -> Option<u64> {
+            None
+        }
+        fn fill_random(&self, buf: &mut [u8]) {
+            buf.fill(0)
+        }
+        fn sta_mac(&self) -> [u8; 6] {
+            [0; 6]
+        }
+        fn heap(&self) -> &dyn HeapProbe {
+            &Heap
+        }
+        fn console_line(&self, _: &str) {}
+    }
+    struct Store;
+    impl Storage for Store {
+        fn get(&mut self, _: &str, _: &str, _: &mut [u8]) -> Result<usize, StorageError> {
+            Err(StorageError::NotFound)
+        }
+        fn set(&mut self, _: &str, _: &str, _: &[u8]) -> Result<(), StorageError> {
+            Ok(())
+        }
+        fn erase_namespace(&mut self, _: &str) -> Result<(), StorageError> {
+            Ok(())
+        }
+    }
+    type Sh = Shared<CriticalSectionRawMutex, Plat, Store, RamDirectory<MAX_RUN, 24, 32>>;
+
+    #[allow(clippy::declare_interior_mutable_const)]
+    const BUILT_AT_COMPILE_TIME: Sh = Shared::new(Config::tailscale(), Plat, Store, RamDirectory::new());
+
+    #[test]
+    fn the_shared_state_is_a_compile_time_value_and_starts_empty() {
+        let sh: std::boxed::Box<Sh> = std::boxed::Box::new(BUILT_AT_COMPILE_TIME);
+        assert_eq!(sh.pool.in_use(), 0);
+        assert!(sh.slots.iter().all(|s| s.status().state == SlotState::Free));
+        assert_eq!(sh.registry.lock(|r| r.borrow().reg.len()), 0);
+    }
+}

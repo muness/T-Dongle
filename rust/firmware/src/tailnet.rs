@@ -105,8 +105,8 @@ unsafe impl RawMutex for TaskLock {
 
 /// What the image's DRAM is divided into, and the inequalities that must hold (each a build error, like the C's `_Static_assert`s on the heap budget).
 pub mod budget {
-    use super::{RxRing, Sh, TAILNET_HEAP_BYTES};
-    use tdongle_tailnet_admission::heap::{ML_HB_FLOOR, hb_ok};
+    use super::{Sh, TAILNET_HEAP_BYTES};
+    use tdongle_tailnet_admission::heap::ML_HB_FLOOR;
 
     /// All of dram2, given to the heap (the bridge image uses 64 KB of it).
     pub const HEAP_RECLAIMED: usize = 73_728;
@@ -973,7 +973,7 @@ fn memory_report(sh: &Sh, out: &mut String) {
     );
     let _ = write!(
         out,
-        "tn_statics shared={} pooled_windows_per_member={} napt={} mux={} stack_res={} rx_ring={} usb_rx={} runtime_future={}\r\n",
+        "tn_statics shared_heap={} pooled_windows_per_member={} napt={} mux={} stack_res={} rx_ring_max={} usb_rx_max={} futures={}\r\n",
         core::mem::size_of::<Sh>(),
         Windows::PER_MEMBER,
         core::mem::size_of::<SharedNapt<NAPT_FLOWS>>(),
@@ -982,6 +982,20 @@ fn memory_report(sh: &Sh, out: &mut String) {
         RX_RING * (crate::MTU + 2),
         USB_RX_FRAMES * (crate::MTU + 2),
         (0..tdongle_tailnet_runtime::sizes::FUT_RUN).map(|i| tdongle_tailnet_runtime::sizes::future_bytes(sh, i)).sum::<usize>()
+    );
+    let _ = write!(
+        out,
+        "tn_budget heap_total={} wifi_usb_assumed={} ring_base={} tailnet_state={} floor={} headroom={} stack={} start_refused={} rx_heap_refused={} usb_rx_waits={}\r\n",
+        budget::HEAP_TOTAL,
+        budget::WIFI_AND_USB,
+        budget::RING_BASE,
+        TAILNET_HEAP_BYTES,
+        ML_HB_FLOOR,
+        budget::HEADROOM,
+        st - se,
+        START_REFUSED.load(Ordering::Relaxed),
+        RX_HEAP_REFUSED.load(Ordering::Relaxed),
+        USB_RX_WAITS.load(Ordering::Relaxed)
     );
     let ps = sh.pool.stats();
     let _ = write!(
