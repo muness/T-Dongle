@@ -289,6 +289,54 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
     }
 }
 
+/// Relay window mode, `[window ms, frames per window that make it big, quiet windows that make it small again]`. Tests shorten them.
+pub static WIN_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomic::AtomicU32::new(2000), core::sync::atomic::AtomicU32::new(50), core::sync::atomic::AtomicU32::new(15)];
+/// Switches to the big windows, switches back, falls back because the pool refused the big ones, and whether the connection has them now.
+pub static WIN_STATS: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
+
+impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S, D> {
+    /// Does the connection need other windows? The relay's windows are small while it idles (the heap is short) and big while it carries data: judged on the relay frames
+    /// (both ways) of each [`WIN_TIMING`] window, with hysteresis. `true`: reconnect to get them.
+    fn window_mode(&mut self) -> bool {
+        use core::sync::atomic::Ordering::Relaxed;
+        let now = self.sh.now();
+        let win = u64::from(WIN_TIMING[0].load(Relaxed));
+        if now.saturating_sub(self.act_t0) < win {
+            return false;
+        }
+        let st = self.link.stats();
+        let frames = st.frames_rx.get().wrapping_add(st.frames_tx.get());
+        let delta = frames.wrapping_sub(self.act_frames);
+        let first = self.act_t0 == 0;
+        self.act_t0 = now;
+        self.act_frames = frames;
+        if first || now.saturating_sub(self.last_switch) < 4 * win {
+            return false;
+        }
+        let busy = delta >= WIN_TIMING[1].load(Relaxed);
+        if !self.win_big {
+            if busy {
+                self.win_big = true;
+                self.quiet_windows = 0;
+                self.last_switch = now;
+                WIN_STATS[0].fetch_add(1, Relaxed);
+                WIN_STATS[3].store(1, Relaxed);
+                return true;
+            }
+        } else {
+            self.quiet_windows = if delta < WIN_TIMING[1].load(Relaxed) / 8 { self.quiet_windows + 1 } else { 0 };
+            if self.quiet_windows >= WIN_TIMING[2].load(Relaxed) {
+                self.win_big = false;
+                self.last_switch = now;
+                WIN_STATS[1].fetch_add(1, Relaxed);
+                WIN_STATS[3].store(0, Relaxed);
+                return true;
+            }
+        }
+        false
+    }
+}
+
 /// The last packet the link sent to the region it is visiting, ms clock.
 static VISIT_LAST_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
@@ -447,6 +495,12 @@ struct Drv<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     /// The region the link is visiting (see [`derp_extra`]), and the target the engine last commanded (where it returns to).
     visiting: Option<u16>,
     home_target: Target,
+    /// The connection has the big windows, and the bookkeeping of the traffic that decides it (see `window_mode`).
+    win_big: bool,
+    act_t0: u64,
+    act_frames: u32,
+    quiet_windows: u32,
+    last_switch: u64,
 }
 
 struct DrvSink<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
@@ -526,6 +580,11 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
             clock_fed: None,
             visiting: None,
             home_target: Target::new(0, "", 443),
+            win_big: false,
+            act_t0: 0,
+            act_frames: 0,
+            quiet_windows: 0,
+            last_switch: 0,
         }
     }
 
@@ -797,6 +856,7 @@ async fn relay<'p, R, P, S, D, T>(
         d.dg().region.store(u32::from(d.link.target().region), core::sync::atomic::Ordering::Relaxed);
         d.dg().port.store(u32::from(port), core::sync::atomic::Ordering::Relaxed);
         diag_text(d.dg(), 0, host.as_str());
+        tcp.set_big_windows(d.win_big);
         let connected = drive(&mut d, true, pin!(tcp.connect(host.as_str(), port))).await;
         match connected {
             Some(Ok(())) => {
@@ -810,8 +870,14 @@ async fn relay<'p, R, P, S, D, T>(
                 d.call(Event::Dns(false));
                 continue;
             }
-            Some(Err(_)) => {
+            Some(Err(e)) => {
                 tcp.close();
+                if d.win_big && matches!(e, crate::net::NetError::NoMem) {
+                    // the pool would not take the big windows (heap short): back to the idle ones
+                    d.win_big = false;
+                    WIN_STATS[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                    WIN_STATS[3].store(0, core::sync::atomic::Ordering::Relaxed);
+                }
                 d.call(Event::Dns(true));
                 d.call(Event::Connected(false));
                 continue;
@@ -875,6 +941,11 @@ where
     d.dg().stage.store(3, core::sync::atomic::Ordering::Relaxed);
     d.call(Event::TlsDone(true));
     loop {
+        // the connection's windows follow the relay's traffic: a reconnect when they should change
+        if d.window_mode() {
+            d.call(Event::Reconnect);
+            return;
+        }
         // transmit what the link staged (the upgrade request, ClientInfo, a relay frame, a pong)
         while let Some(n) = d.acts.send.take() {
             let write = async {

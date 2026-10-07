@@ -85,6 +85,12 @@ impl Windows {
     pub const PER_MEMBER: usize = Self::GATEWAY.per_member();
 }
 
+/// The relay connection's windows while it carries data (idle: [`Windows::GATEWAY`]'s `derp_rx` / `derp_tx`): 6 KB in, 6 KB out. Taken from the pool at the connect, above
+/// the elastic floor like every window; a refusal falls back to the idle ones.
+pub const DERP_RX_BIG: usize = 6144;
+/// See [`DERP_RX_BIG`].
+pub const DERP_TX_BIG: usize = 6144;
+
 /// Datagrams a UDP socket can queue each way.
 pub const UDP_PKTS: usize = 8;
 
@@ -254,7 +260,9 @@ impl Net for EmbassyNet {
             TcpRole::Control => (self.win.ctl_rx, self.win.ctl_tx),
             TcpRole::Derp => (self.win.derp_rx, self.win.derp_tx),
         };
-        Some(EmbTcp { stack: self.stack, mem: self.mem, rx_len: rx, tx_len: tx, sock: None, held: [(0, 0); 2] })
+        // the relay's big windows (see `TcpConn::set_big_windows`): a round trip's worth of bytes at about 1 Mbit/s, only while it carries data
+        let big = if matches!(role, TcpRole::Derp) { (DERP_RX_BIG, DERP_TX_BIG) } else { (rx, tx) };
+        Some(EmbTcp { stack: self.stack, mem: self.mem, rx_len: rx, tx_len: tx, big, base: (rx, tx), sock: None, held: [(0, 0); 2] })
     }
 
     fn udp(&self, role: UdpRole, slot: usize) -> Option<EmbUdp> {
@@ -313,6 +321,9 @@ pub struct EmbTcp {
     mem: &'static dyn SockMem,
     rx_len: usize,
     tx_len: usize,
+    /// The windows of the next connect when it is asked for the big ones (`set_big_windows`), and the idle ones.
+    big: (usize, usize),
+    base: (usize, usize),
     sock: Option<TcpSocket<'static>>,
     /// Address and length of the two windows the socket holds (receive, transmit); `(0, 0)` when none.
     held: [(usize, usize); 2],
@@ -379,6 +390,11 @@ impl Write for EmbTcp {
 }
 
 impl TcpConn for EmbTcp {
+    fn set_big_windows(&mut self, big: bool) {
+        let (rx, tx) = if big { self.big } else { self.base };
+        self.rx_len = rx;
+        self.tx_len = tx;
+    }
     async fn connect(&mut self, host: &str, port: u16) -> Result<(), NetError> {
         self.release().await;
         DIAL.attempts.fetch_add(1, Ordering::Relaxed);

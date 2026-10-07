@@ -1015,3 +1015,30 @@ fn derp_only_bulk_is_paced_by_the_relay_not_dropped() {
     assert!(up >= 0.8, "upload {up:.2} Mbit/s over a ~1.4 Mbit/s relay");
     gw.check_engine();
 }
+
+/// The relay connection's windows follow its traffic: idle windows while it idles, the big ones (a round trip's worth) while it carries a transfer, idle again afterwards.
+/// (The host's tokio sockets have no windows to resize: this checks the decision and the reconnects, and that a transfer survives them.)
+#[test]
+fn the_relay_windows_are_big_while_it_carries_data_and_idle_after() {
+    use tdongle_tailnet_runtime::derp::{WIN_STATS, WIN_TIMING};
+    let mut go = go_or_skip!();
+    let (gw, _id, alias) = up(&mut go, "gopeer");
+    gw.net.udp_blocked.store(true, Ordering::SeqCst);
+    assert_eq!(gw.host.echo(alias, 7, b"warm", Duration::from_secs(30)).unwrap(), b"warm");
+    // windows of 500 ms, big at 20 frames in one, idle again after 3 quiet ones
+    WIN_TIMING[0].store(500, Ordering::Relaxed);
+    WIN_TIMING[1].store(20, Ordering::Relaxed);
+    WIN_TIMING[2].store(3, Ordering::Relaxed);
+    // a relay at about 2.8 Mbit/s (4 ms per frame) so that a transfer lasts seconds, as on the board
+    gw.net.derp_write_delay_ms.store(4, Ordering::Relaxed);
+    let to_big0 = WIN_STATS[0].load(Ordering::Relaxed);
+    let (n, _) = gw.host.get_bytes(alias, 80, 1024 * 1024, Duration::from_secs(60)).expect("a transfer over the relay");
+    assert_eq!(n, 1024 * 1024);
+    let (n, _) = gw.host.upload(alias, 9, 256 * 1024, Duration::from_secs(60)).expect("and the other way, across the reconnect");
+    assert_eq!(n, 256 * 1024);
+    gw.net.derp_write_delay_ms.store(0, Ordering::Relaxed);
+    assert!(WIN_STATS[0].load(Ordering::Relaxed) > to_big0, "the windows went big during the transfer");
+    wait_until("the windows to go back to idle", 30, || WIN_STATS[3].load(Ordering::Relaxed) == 0);
+    assert_eq!(gw.host.echo(alias, 7, b"after", Duration::from_secs(30)).unwrap(), b"after", "the relay still works on the idle windows");
+    gw.check_engine();
+}

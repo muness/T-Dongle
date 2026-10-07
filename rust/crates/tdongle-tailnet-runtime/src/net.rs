@@ -90,6 +90,9 @@ pub trait TcpConn: Read + Write {
     async fn connect(&mut self, host: &str, port: u16) -> Result<(), NetError>;
     /// Abort the connection (a reset, no lingering) and return the handle to the unconnected state. Idempotent, never blocks.
     fn close(&mut self);
+    /// Use the larger socket windows (`true`) or the idle ones at the next connect: the relay's connection is big only while it carries data (a transfer needs a window of a
+    /// round trip's worth of bytes, which the idle relay does not hold). Default: one size.
+    fn set_big_windows(&mut self, _big: bool) {}
     /// The connected peer's IPv4 address (big endian), 0 when not connected or unknown. Diagnostics.
     fn remote_ip(&self) -> u32 {
         0

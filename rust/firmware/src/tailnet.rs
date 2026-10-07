@@ -1295,6 +1295,21 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 st.tls_untrusted
             );
         }
+        {
+            use tdongle_tailnet_runtime::derp::WIN_STATS;
+            let _ = write!(
+                out,
+                "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={}\r\n",
+                WIN_STATS[3].load(Relaxed),
+                tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_rx,
+                tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_tx,
+                tdongle_tailnet_runtime::net_embassy::DERP_RX_BIG,
+                tdongle_tailnet_runtime::net_embassy::DERP_TX_BIG,
+                WIN_STATS[0].load(Relaxed),
+                WIN_STATS[1].load(Relaxed),
+                WIN_STATS[2].load(Relaxed)
+            );
+        }
         // the link's visits to the regions peers are homed on, and the moves of its home region
         {
             use tdongle_tailnet_runtime::derp::{HOME_MOVES, VISITING, X_COUNTS, X_LAST_END};
