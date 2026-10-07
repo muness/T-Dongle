@@ -6,10 +6,11 @@
 //! # Persistent socket handles
 //!
 //! A socket is a long-lived **handle** that the runtime takes once per (role, membership slot) and keeps for the life of the program; it is connected,
-//! closed and connected again. This is what lets the embassy-net implementation own its buffers as `&'static mut [u8]` ("caller-supplied static
-//! buffers": the firmware hands the buffers to [`crate::net_embassy::EmbassyNet::new`] once) without any `unsafe` and without a self-referential
-//! stream type: a `TcpSocket<'static>` is created once from the buffers of its slot and re-used with `abort()` + `connect()`, the idiom of embassy-net.
-//! The sizes of those buffers are const generics of the buffer set ([`crate::net_embassy::NetBuffers`]) and are reported by [`crate::sizes`].
+//! closed and connected again. A handle is cheap: the embassy-net implementation creates the `TcpSocket` and takes its windows from the pool **when it
+//! connects** and gives them back when the handle is released ([`TcpConn::release`]) or connects again, so an idle membership holds no socket memory
+//! (ADR 0002, "RAM fit"). A refusal (the pool's floor or cap) is [`NetError::NoMem`] from `connect` / `bind`: the runtime backs off like for any failed
+//! connection. The windows are `&'static mut [u8]` for embassy-net's sake and come from the firmware's [`crate::net_embassy::SockMem`], which is where the
+//! one `unsafe` of the buffer path lives; this crate stays free of it.
 //!
 //! # Cancel safety
 //!
@@ -37,6 +38,8 @@ pub enum NetError {
     Bind,
     /// No network (link down, no address).
     NoRoute,
+    /// The pool refused the socket's windows (the heap floor or the pool's cap): back off and try again; counted by the pool.
+    NoMem,
 }
 
 impl core::fmt::Display for NetError {
@@ -55,6 +58,7 @@ impl embedded_io_async::Error for NetError {
             NetError::Closed => ErrorKind::ConnectionAborted,
             NetError::TooLarge => ErrorKind::InvalidInput,
             NetError::NoRoute => ErrorKind::AddrNotAvailable,
+            NetError::NoMem => ErrorKind::OutOfMemory,
             NetError::Io | NetError::Bind => ErrorKind::Other,
         }
     }
@@ -86,6 +90,11 @@ pub trait TcpConn: Read + Write {
     async fn connect(&mut self, host: &str, port: u16) -> Result<(), NetError>;
     /// Abort the connection (a reset, no lingering) and return the handle to the unconnected state. Idempotent, never blocks.
     fn close(&mut self);
+    /// [`TcpConn::close`], then give the socket and its windows back (the reset needs the stack's next turn to reach the peer, so this waits a moment). A
+    /// handle that is not connected again after this holds no memory. Default: [`TcpConn::close`] (an implementation with static buffers has nothing to give).
+    async fn release(&mut self) {
+        self.close();
+    }
 }
 
 /// A persistent UDP handle.

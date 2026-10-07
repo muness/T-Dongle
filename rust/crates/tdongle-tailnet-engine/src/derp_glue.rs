@@ -80,6 +80,7 @@ impl Sink for Glue<'_, '_> {
 
 impl<const M: usize, const TXQ: usize> DerpLinks<M, TXQ> {
     /// No links.
+    #[inline(always)]
     pub fn new(timing: Timing) -> Self {
         Self { links: core::array::from_fn(|_| None), timing, rx: [0; MAX_FRAME] }
     }

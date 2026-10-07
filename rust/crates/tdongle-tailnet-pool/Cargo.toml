@@ -1,0 +1,22 @@
+[package]
+name = "tdongle-tailnet-pool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "The tailnet runtime's one dynamic buffer pool: socket windows, TLS record leases and the control session's big buffers are taken from the heap when they are needed, charged against the same elastic floor as the C's lwIP pbufs (ADR 0022), and refused (counted, never a panic) when the floor, the cap or the allocator says no."
+
+[lints]
+workspace = true
+
+[dependencies]
+tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }
+embassy-sync = "0.8"
+embassy-time = "0.5"
+embassy-futures = "0.1"
+
+[dev-dependencies]
+embassy-time = { version = "0.5", features = ["std", "generic-queue-64"] }
+critical-section = { version = "1.2", features = ["std"] }
+futures = { version = "0.3", default-features = false, features = ["std", "executor", "async-await"] }

@@ -96,8 +96,8 @@ pub trait RecordBufProvider {
     type Guard<'g>: core::ops::DerefMut<Target = [u8]>
     where
         Self: 'g;
-    /// Wait for and take the buffer.
-    fn lease(&mut self) -> impl core::future::Future<Output = Self::Guard<'_>>;
+    /// Wait for and take a buffer of exactly `len` bytes (PATCH(lease2): the length of the announced record body, 16,640 at most).
+    fn lease(&mut self, len: usize) -> impl core::future::Future<Output = Self::Guard<'_>>;
 }
 
 pub use flush_policy::*;

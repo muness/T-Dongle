@@ -2371,7 +2371,9 @@ dependencies = [
  "tdongle-tailnet-engine",
  "tdongle-tailnet-fw",
  "tdongle-tailnet-members",
+ "tdongle-tailnet-pool",
  "tdongle-tailnet-runtime",
+ "tdongle-tailnet-sockmem",
  "tdongle-tailnet-usbnet",
  "tdongle-tailnet-wifimux",
  "tdongle-traffic",
@@ -2574,6 +2576,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-tailnet-pool"
+version = "0.3.0-dev"
+dependencies = [
+ "embassy-futures",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "tdongle-tailnet-admission",
+]
+
+[[package]]
 name = "tdongle-tailnet-router"
 version = "0.3.0-dev"
 dependencies = [
@@ -2600,6 +2612,7 @@ dependencies = [
  "tdongle-tailnet-fw",
  "tdongle-tailnet-map",
  "tdongle-tailnet-members",
+ "tdongle-tailnet-pool",
  "tdongle-tailnet-router",
  "tdongle-tailnet-status",
  "tdongle-tailnet-tls",
@@ -2607,6 +2620,16 @@ dependencies = [
  "tdongle-tailnet-usbnet",
  "tdongle-tailnet-wifimux",
  "zeroize",
+]
+
+[[package]]
+name = "tdongle-tailnet-sockmem"
+version = "0.3.0-dev"
+dependencies = [
+ "embassy-net",
+ "embassy-sync 0.8.0",
+ "tdongle-tailnet-pool",
+ "tdongle-tailnet-runtime",
 ]
 
 [[package]]
@@ -2626,6 +2649,7 @@ dependencies = [
  "rand_core 0.6.4",
  "sha2 0.10.9",
  "subtle",
+ "tdongle-tailnet-pool",
  "tdongle-tailnet-types",
 ]
 

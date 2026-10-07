@@ -27,8 +27,10 @@ fn mbit(bytes: usize, d: Duration) -> f64 {
 fn up(go: &mut tdongle_tailnet_host::server::GoServer, peer: &str) -> (Gateway, u32, [u8; 4]) {
     let (_, _) = go.peer(peer).expect("peer");
     let gw = Gateway::start(GatewayOpts::new(&go.control_addr));
+    let t = std::time::Instant::now();
     let id = gw.add("lab", "tskey-fake");
     wait_until("the membership to be routing", 60, || gw.is_ready(id));
+    println!("JOIN: membership routing {:?} after add (the first map is due within 30 s); pool {:?}", t.elapsed(), gw.sh.pool.stats());
     gw.host.wait_dhcp(Duration::from_secs(10)).expect("dhcp");
     let alias = gw.host.resolve(&format!("{peer}.lab.tailnet"), Duration::from_secs(10)).expect("dns");
     (gw, id, alias)
@@ -62,8 +64,10 @@ fn direct_path_is_discovered_and_traffic_moves_to_it() {
     let reply = go.cmd("peer");
     assert!(reply.starts_with("PEER "), "{reply}");
     let gw = Gateway::start(GatewayOpts::new(&go.control_addr));
+    let t = std::time::Instant::now();
     let id = gw.add("lab", "tskey-fake");
     wait_until("the membership to be routing", 60, || gw.is_ready(id));
+    println!("JOIN: membership routing {:?} after add (the first map is due within 30 s); pool {:?}", t.elapsed(), gw.sh.pool.stats());
     gw.host.wait_dhcp(Duration::from_secs(10)).expect("dhcp");
     let alias = gw.host.resolve("gopeer.lab.tailnet", Duration::from_secs(10)).expect("dns");
     let mut direct_at = None;
@@ -499,13 +503,18 @@ fn soak_ten_minutes_with_two_tailnets() {
     let rss1 = rss_kib();
     println!(
         "SOAK {secs}s: {okn} ok / {badn} failed transactions; model heap min free {min_free} (floor {floor}); negotiations in flight at most {}; heap_low_events {}; out_refused {}; \
-         lease max holders {} timeouts {} leases {}; sessions {:?} -> {:?}; derp connects {:?} -> {:?}; rss {rss0} -> {rss1} KiB",
+         record leases max {} timeouts {} leases {}; pool high water {} B (denied: cap {} floor {} heap {}, waits {}); sessions {:?} -> {:?}; derp connects {:?} -> {:?}; rss {rss0} -> {rss1} KiB",
         gw.sh.stats.neg_max.load(Ordering::SeqCst),
         gw.sh.heap_low_events.load(Ordering::SeqCst),
         tdongle_tailnet_runtime::shared::RtStats::get(&gw.sh.stats.out_refused),
         gw.sh.lease.max_holders(),
         gw.sh.lease.timeouts(),
         gw.sh.lease.leases(),
+        gw.sh.pool.stats().high_water,
+        gw.sh.pool.stats().denied_cap,
+        gw.sh.pool.stats().denied_floor,
+        gw.sh.pool.stats().denied_heap,
+        gw.sh.pool.stats().waits,
         sessions0,
         sessions,
         connects0,
@@ -515,8 +524,11 @@ fn soak_ten_minutes_with_two_tailnets() {
     assert!(min_free >= floor, "the heap floor was crossed: {min_free} < {floor}");
     assert_eq!(gw.sh.heap_low_events.load(Ordering::SeqCst), 0, "no heap reading below the floor while a membership routed");
     assert_eq!(gw.sh.stats.neg_max.load(Ordering::SeqCst), 1, "negotiations never overlapped");
-    assert_eq!(gw.sh.lease.max_holders(), 1, "the shared TLS buffer was never held twice");
     assert_eq!(gw.sh.lease.timeouts(), 0);
+    // every pooled byte is accounted for: what the pool holds now is the live sockets' windows (and a record or workspace in flight), never more than the cap
+    let ps = gw.sh.pool.stats();
+    assert!(ps.high_water as usize <= tdongle_tailnet_runtime::shared::POOL_CAP, "{ps:?}");
+    assert_eq!((ps.denied_cap, ps.denied_heap), (0, 0), "the pool was never refused by its cap or the allocator: {ps:?}");
     assert!(badn * 100 <= (okn + badn) * 3, "transactions failed: {badn} of {}", okn + badn);
     assert!(sessions.iter().zip(&sessions0).all(|(n, o)| n <= &(o + 1)), "control sessions churned: {sessions0:?} -> {sessions:?}");
     assert!(connects.iter().zip(&connects0).all(|(n, o)| n <= &(o + 2)), "the relay link churned: {connects0:?} -> {connects:?}");

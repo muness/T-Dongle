@@ -58,6 +58,7 @@ impl<const BLOCKS: usize> JitStore<BLOCKS> {
     /// Bytes of the arena.
     pub const STATE_BYTES: usize = core::mem::size_of::<Self>();
     /// Empty arena.
+    #[inline(always)]
     pub const fn new() -> Self {
         Self { store: [[0; JIT_BLOCK]; BLOCKS], used: [false; BLOCKS], used_n: 0, peak: 0 }
     }
@@ -138,6 +139,7 @@ impl ParkQueue {
     /// Bytes of the queue's bookkeeping.
     pub const STATE_BYTES: usize = core::mem::size_of::<Self>();
     /// Empty.
+    #[inline(always)]
     pub const fn new() -> Self {
         Self { slot: [None; JIT_PENDING], seq: 0 }
     }

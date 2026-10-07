@@ -665,16 +665,20 @@ impl<const N: usize> Napt<N> {
 
     /// An empty table. `entropy` seeds the port allocator and the hash salt (lwIP's `LWIP_RAND`).
     pub fn new(cfg: NaptConfig, entropy: &mut dyn Entropy) -> Self {
+        let mut n = Self::new_unseeded(cfg);
+        n.seed(entropy);
+        n
+    }
+
+    /// An empty table with a fixed seed, built entirely at compile time (so a `static` holds it with no 19 KB value ever on a stack). Call [`Napt::seed`]
+    /// before it is used.
+    pub const fn new_unseeded(cfg: NaptConfig) -> Self {
         const { assert!(N > 0 && N < NIL as usize) };
-        let mut seed = [0u8; 12];
-        entropy.fill(&mut seed);
         let mut entries = [Entry::EMPTY; N];
-        for (i, e) in entries.iter_mut().enumerate() {
-            e.out_next = if i + 1 < N { (i + 1) as u16 } else { NIL };
-        }
-        let mut rng = u64::from_le_bytes([seed[0], seed[1], seed[2], seed[3], seed[4], seed[5], seed[6], seed[7]]);
-        if rng == 0 {
-            rng = 0x9e37_79b9_7f4a_7c15;
+        let mut i = 0;
+        while i < N {
+            entries[i].out_next = if i + 1 < N { (i + 1) as u16 } else { NIL };
+            i += 1;
         }
         Napt {
             cfg,
@@ -684,14 +688,26 @@ impl<const N: usize> Napt<N> {
             in_heads: [NIL; N],
             free: 0,
             used: 0,
-            salt: u32::from_le_bytes([seed[8], seed[9], seed[10], seed[11]]),
-            rng,
+            salt: 0,
+            rng: 0x9e37_79b9_7f4a_7c15,
             reserved: [None; RESERVED_PORTS],
             rst: [EMPTY_RST; RST_QUEUE],
             rst_head: 0,
             rst_len: 0,
             stats: NaptStats::ZERO,
         }
+    }
+
+    /// Seed the port allocator and the hash salt from `entropy` (what [`Napt::new`] does).
+    pub fn seed(&mut self, entropy: &mut dyn Entropy) {
+        let mut seed = [0u8; 12];
+        entropy.fill(&mut seed);
+        let mut rng = u64::from_le_bytes([seed[0], seed[1], seed[2], seed[3], seed[4], seed[5], seed[6], seed[7]]);
+        if rng == 0 {
+            rng = 0x9e37_79b9_7f4a_7c15;
+        }
+        self.rng = rng;
+        self.salt = u32::from_le_bytes([seed[8], seed[9], seed[10], seed[11]]);
     }
 
     /// The configuration.

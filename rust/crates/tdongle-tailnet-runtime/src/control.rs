@@ -214,7 +214,7 @@ where
         let run = wait_active(&mut run_rx).await;
         let alive = Alive::new(&slot.alive, ALIVE_CONTROL);
         select(member_control(sh, idx, run.id, &tcp, &mut link_rx), wait_changed(&mut run_rx, run)).await;
-        tcp.lock().await.close();
+        tcp.lock().await.release().await;
         sh.token.release(sh.now(), key_control(run.id));
         slot.update(|st| {
             st.connected = false;
@@ -286,7 +286,8 @@ async fn member_control<R, P, S, D, T>(
         let mut eps = SlotEndpoints { sh, idx, seen: None, derp_sent: home };
         let mut sink = NetmapSink::new(MapTee { sh, slot: idx, member, expired: false });
         let end = {
-            let session = run_session_leased(&mut connect, &mut clock, &cfg, &mut ws, &sh.bulk, &mut sink, &mut gate, &mut eps, &mut rng);
+            let bulk = crate::shared::BulkSource { stats: &sh.bulk, mem: sh.mem() };
+            let session = run_session_leased(&mut connect, &mut clock, &cfg, &mut ws, &bulk, &mut sink, &mut gate, &mut eps, &mut rng);
             match select(session, wait_link_change(link_rx, view)).await {
                 Either::First(e) => Some(e),
                 Either::Second(_) => None,

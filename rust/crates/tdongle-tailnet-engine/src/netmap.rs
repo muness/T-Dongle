@@ -27,6 +27,7 @@ pub struct NetmapSink<T> {
 
 impl<T: NetmapTarget> NetmapSink<T> {
     /// A sink delivering to `target`.
+    #[inline(always)]
     pub fn new(target: T) -> Self {
         Self { target }
     }

@@ -138,6 +138,7 @@ impl Default for Chaos {
 
 impl Chaos {
     /// Both nodes with three memberships each, every membership knowing the other node's same membership plus a few unreachable peers.
+    #[inline(always)]
     pub fn new() -> Chaos {
         let mk = |n: usize| Node {
             eng: Box::new(ChaosEngine::new(ChaosDir::new())),

@@ -202,6 +202,11 @@ impl<const TXQ: usize, const RXQ: usize> Core<TXQ, RXQ> {
         }
     }
 
+    pub(crate) fn set_mac(&mut self, mac: Mac) {
+        self.mac = mac;
+        self.neigh = Neighbors::new(ArpConfig { mac, ip: 0, mask: 0 });
+    }
+
     pub(crate) fn snapshot(&self) -> MuxStats {
         let mut s = self.stats;
         s.arp = *self.neigh.stats();

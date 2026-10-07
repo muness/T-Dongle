@@ -118,8 +118,8 @@ pub struct SessionBuf {
 
 impl SessionBuf {
     /// A fresh one.
-    pub fn new() -> Self {
-        Self { rx: [0; RX_BYTES], stats: SessionStats::default() }
+    pub const fn new() -> Self {
+        Self { rx: [0; RX_BYTES], stats: SessionStats::new() }
     }
 }
 

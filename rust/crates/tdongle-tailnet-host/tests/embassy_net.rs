@@ -12,7 +12,11 @@ use std::rc::Rc;
 use std::time::Duration;
 use tdongle_tailnet_disco::Ep;
 use tdongle_tailnet_runtime::net::{Net, TcpConn, TcpRole, UdpConn, UdpRole};
-use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, GatewayBuffers, LinkGen};
+use tdongle_tailnet_admission::heap::ML_HB_FLOOR;
+use tdongle_tailnet_admission::probe::{FixedProbe, HeapSnapshot};
+use tdongle_tailnet_pool::{Mem, Pool};
+use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, LinkGen, Windows};
+use tdongle_tailnet_sockmem::HeapSockMem;
 
 #[derive(Default)]
 struct Wire {
@@ -160,19 +164,25 @@ fn the_handle_life_cycle_over_a_real_embassy_stack() {
         });
 
         tokio::time::sleep(Duration::from_millis(100)).await; // let the server tasks reach their first accept / recv
-        let slots = Box::leak(Box::new(GatewayBuffers::new())).slots();
-        let net = EmbassyNet::new(sa, &Gen, slots);
+        let pool: &'static Pool = Box::leak(Box::new(Pool::new(1 << 20)));
+        let free = ML_HB_FLOOR + (1 << 20);
+        let probe: &'static FixedProbe = Box::leak(Box::new(FixedProbe(HeapSnapshot { free, largest: free, minimum: free })));
+        let sockmem: &'static HeapSockMem = Box::leak(Box::new(HeapSockMem::new(Mem { pool, heap: probe })));
+        let net = EmbassyNet::new(sa, &Gen, sockmem);
+        // nothing is held until a socket is made
+        assert_eq!(pool.in_use(), 0);
         assert_eq!(net.link_generation(), 7);
         assert!(net.link_up());
         let v4 = net.ipv4().expect("static configuration");
         assert_eq!((v4.addr, v4.prefix, v4.gateway, v4.dns), ([10, 0, 0, 1], 24, None, None));
-        assert_eq!(net.member_buffer_bytes(), GatewayBuffers::PER_MEMBER);
+        assert_eq!(net.member_buffer_bytes(), Windows::PER_MEMBER);
         assert_eq!(net.resolve("10.0.0.2").await, Ok([10, 0, 0, 2]), "a literal needs no resolver");
 
-        // a handle is taken once per (role, slot)
+        // a handle is a few words; a slot the runtime does not have gets none
         let mut tcp = net.tcp(TcpRole::Control, 0).expect("control handle of slot 0");
-        assert!(net.tcp(TcpRole::Control, 0).is_none() && net.tcp(TcpRole::Control, 3).is_none());
-        assert!(net.tcp(TcpRole::Derp, 0).is_some() && net.udp(UdpRole::DnsUpstream, 0).is_some() && net.udp(UdpRole::DnsUpstream, 0).is_none());
+        assert!(net.tcp(TcpRole::Control, tdongle_tailnet_runtime::shared::MAX_RUN).is_none() && net.udp(UdpRole::Member, tdongle_tailnet_runtime::shared::MAX_RUN).is_none());
+        assert!(net.tcp(TcpRole::Derp, 0).is_some() && net.udp(UdpRole::DnsUpstream, 0).is_some());
+        assert_eq!(pool.in_use(), 0, "handles hold no memory");
 
         // connect, echo, close, connect again on the same socket, echo again
         for round in 0..3 {
@@ -195,17 +205,28 @@ fn the_handle_life_cycle_over_a_real_embassy_stack() {
             let mut got = vec![0u8; msg.len()];
             tokio::time::timeout(Duration::from_secs(5), tcp.read_exact(&mut got)).await.expect("read timed out").unwrap();
             assert_eq!(got, msg.as_bytes());
+            // connected: exactly the control windows are held
+            let w = Windows::GATEWAY;
+            assert_eq!(pool.in_use(), w.ctl_rx + w.ctl_tx, "round {round}");
             tcp.close();
         }
+        // closed but not released: the socket still holds its windows until the handle is released (the reset needs the stack's turn first)
+        assert_ne!(pool.in_use(), 0);
+        tcp.release().await;
+        assert_eq!((pool.in_use(), sockmem.out()), (0, 0), "release gives every byte back");
         // a connect to a port nobody listens on fails (reset), and the handle is still usable
         assert!(tokio::time::timeout(Duration::from_secs(5), tcp.connect("10.0.0.2", 7999)).await.expect("refused connect timed out").is_err());
         tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(pool.in_use(), 0, "a connection that failed holds nothing");
         tokio::time::timeout(Duration::from_secs(5), tcp.connect("10.0.0.2", 7000)).await.unwrap().expect("reconnect after a refused connect");
-        tcp.close();
+        tcp.release().await;
+        assert_eq!(pool.in_use(), 0);
 
         // UDP: bind a chosen port, send, receive the reflection with the sender's endpoint
         let mut udp = net.udp(UdpRole::Member, 0).expect("udp handle");
         assert_eq!(udp.bind(5000), Ok(5000));
+        let w = Windows::GATEWAY;
+        assert_eq!(pool.in_use(), w.udp_rx + w.udp_tx + 2 * 4 * core::mem::size_of::<embassy_net::udp::PacketMetadata>());
         udp.send_to(b"disco?", Ep::v4([10, 0, 0, 2], 6000)).await.unwrap();
         let mut buf = [0u8; 64];
         let (n, from) = tokio::time::timeout(Duration::from_secs(5), udp.recv_from(&mut buf)).await.expect("udp reply timed out").unwrap();
@@ -214,13 +235,36 @@ fn the_handle_life_cycle_over_a_real_embassy_stack() {
         let p = udp.bind(0).unwrap();
         assert_ne!(p, 0);
         udp.close();
+        assert_eq!((pool.in_use(), sockmem.out(), sockmem.given_unknown()), (0, 0, 0), "closing the socket gives its rings and metadata back");
         let _ = IpEndpoint::new(embassy_net::IpAddress::v4(10, 0, 0, 2), 1);
     });
 }
 
 #[test]
-fn buffer_accounting_matches_the_const_generics() {
-    assert_eq!(GatewayBuffers::PER_MEMBER, 4096 + 1024 + 5760 + 2048 + 6400 + 3200 + 2 * 4 * core::mem::size_of::<embassy_net::udp::PacketMetadata>());
-    assert_eq!(GatewayBuffers::BYTES, tdongle_tailnet_runtime::shared::MAX_RUN * GatewayBuffers::PER_MEMBER + GatewayBuffers::GATEWAY);
-    assert!(core::mem::size_of::<GatewayBuffers>() >= GatewayBuffers::BYTES);
+fn a_pool_that_says_no_is_a_counted_refusal_not_a_panic() {
+    // the heap floor is the elastic floor: with only 5,000 bytes of room above it, neither the DERP windows (5,760 + 2,048) nor the UDP rings (6,400 + 3,200) fit
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&rt, async {
+        let wire = Rc::new(RefCell::new(Wire::default()));
+        let (sa, mut ra) = stack(End { wire: wire.clone(), me: 0, mac: [2, 0, 0, 0, 0, 1] }, [10, 0, 0, 1], 1);
+        tokio::task::spawn_local(async move { ra.run().await });
+        sa.wait_config_up().await;
+        let pool: &'static Pool = Box::leak(Box::new(Pool::new(1 << 20)));
+        let free = ML_HB_FLOOR + 5_000;
+        let probe: &'static FixedProbe = Box::leak(Box::new(FixedProbe(HeapSnapshot { free, largest: free, minimum: free })));
+        let sockmem: &'static HeapSockMem = Box::leak(Box::new(HeapSockMem::new(Mem { pool, heap: probe })));
+        let net = EmbassyNet::new(sa, &Gen, sockmem);
+        let mut tcp = net.tcp(TcpRole::Derp, 0).unwrap();
+        assert_eq!(tcp.connect("10.0.0.2", 7000).await, Err(tdongle_tailnet_runtime::net::NetError::NoMem));
+        let mut udp = net.udp(UdpRole::Member, 0).unwrap();
+        assert_eq!(udp.bind(5000), Err(tdongle_tailnet_runtime::net::NetError::NoMem));
+        // nothing leaked by the refusals (a pair is taken whole or not at all), and a socket that does not exist answers with an error, not a panic
+        assert_eq!((pool.in_use(), sockmem.out()), (0, 0));
+        assert!(pool.stats().denied_floor >= 2, "{:?}", pool.stats());
+        assert!(udp.try_send_to(b"x", Ep::v4([10, 0, 0, 2], 6000)).is_err());
+        assert!(udp.wait_readable().await.is_err());
+        let mut b = [0u8; 4];
+        assert!(embedded_io_async::Read::read(&mut tcp, &mut b).await.is_err());
+    });
 }

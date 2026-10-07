@@ -253,8 +253,9 @@ impl<'a> State {
             State::ServerHello | State::ServerVerify => {
                 // header first (no buffer held while the server thinks), then the lease for this one record
                 record_reader.wait_header(transport).await?;
+                let len = record_reader.header_len().ok_or(TlsError::InternalError)?;
                 let result = {
-                    let mut guard = lease.lease().await;
+                    let mut guard = lease.lease(len).await;
                     let record = record_reader
                         .read_with_lease(&mut guard, transport, key_schedule.read_state())
                         .await?;

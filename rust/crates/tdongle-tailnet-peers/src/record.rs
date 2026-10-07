@@ -23,6 +23,18 @@ pub struct Endpoint {
     pub is_ipv6: bool,
 }
 
+impl Endpoint {
+    /// All zero (`const`, so state built from it can live in a `static`).
+    pub const fn new() -> Self {
+        Self {
+            ip: 0,
+            port: 0,
+            is_ipv6: false,
+        }
+    }
+}
+
+
 /// A subnet route a peer advertises (`microlink_route_t`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Route {
@@ -31,6 +43,17 @@ pub struct Route {
     /// CIDR prefix length, 0..=32.
     pub prefix_len: u8,
 }
+
+impl Route {
+    /// All zero (`const`, so state built from it can live in a `static`).
+    pub const fn new() -> Self {
+        Self {
+            network: 0,
+            prefix_len: 0,
+        }
+    }
+}
+
 
 /// What the directory says about one peer (`ml_peer_update_t` without the action).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -64,6 +87,29 @@ pub struct DirRecord {
     /// Tailscale NodeID.
     pub node_id: u64,
 }
+
+impl DirRecord {
+    /// All zero (`const`, so state built from it can live in a `static`).
+    pub const fn new() -> Self {
+        Self {
+            vpn_ip: 0,
+            public_key: [0; 32],
+            disco_key: [0; 32],
+            hostname: FixedStr::<HOSTNAME_BYTES>::new(),
+            derp_region: 0,
+            endpoints: [const { Endpoint::new() }; ML_MAX_ENDPOINTS],
+            endpoint_count: 0,
+            is_exit_node: false,
+            subnet_routes: [const { Route::new() }; MICROLINK_MAX_PEER_ROUTES],
+            subnet_route_count: 0,
+            has_online: false,
+            online: false,
+            has_node_id: false,
+            node_id: 0,
+        }
+    }
+}
+
 
 impl DirRecord {
     /// `sizeof` of the in-RAM record.

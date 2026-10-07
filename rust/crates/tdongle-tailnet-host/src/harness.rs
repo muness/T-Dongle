@@ -134,9 +134,9 @@ impl Gateway {
             charge_static_bytes: false,
         };
         let sh: &'static Sh = Box::leak(Box::new(Shared::new(cfg, platform, storage.clone(), Dir::new())));
-        // the modelled firmware's transient demand: one negotiation peak (the C's 13,500 B TLS handshake) for every negotiation in flight; the token
-        // allows one, so the minimum free must stay above the elastic floor
-        heap.set_model(move || sh.stats.neg_now.load(Ordering::SeqCst) as usize * tdongle_tailnet_admission::adm::ML_ADM_NEG_PEAK_BYTES);
+        // the heap the runtime draws from: everything it holds is in the pool now (socket windows, TLS records, the control workspace of a negotiation), so the
+        // model heap is the pool's `in_use`; the elastic floor must still hold at the minimum
+        heap.set_model(move || sh.pool.in_use());
         let ctl = Arc::new(NetControl::default());
         for (slot, a) in opts.control_routes.iter().enumerate() {
             ctl.route_control(slot, a.parse().expect("control route"));

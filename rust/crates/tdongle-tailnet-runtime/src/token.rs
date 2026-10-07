@@ -62,6 +62,7 @@ impl<R: RawMutex> Drop for Waiting<'_, R> {
 
 impl<R: RawMutex> Token<R> {
     /// A free token with the C's lease, stale and aging periods.
+    #[inline(always)]
     pub const fn new() -> Self {
         Self { neg: Mutex::new(RefCell::new(Negotiation::new(0, 0, 0))) }
     }

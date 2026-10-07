@@ -1,12 +1,12 @@
 #![cfg(all(feature = "lease", feature = "p384"))]
-//! The shared record-buffer lease: three TLS connections, one 16,640 B buffer behind an embassy-sync mutex, records interleaved; a server that
-//! stalls inside a record; and (ignored) the throughput / CPU comparison with the stock connection.
+//! The per-record lease from the shared pool: three TLS connections reading records into buffers of exactly the announced length, interleaved; memory
+//! pressure turning into waiting (never a failed read); a server that stalls inside a record; and (ignored) the throughput / CPU comparison with the stock
+//! connection.
 use core::cell::RefCell;
 use core::future::{Future, poll_fn};
 use core::task::Poll;
 use embassy_futures::block_on;
 use embassy_futures::join::{join, join3};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embedded_io_async::{ErrorKind, ErrorType, Read, Write};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::server::{ClientHello, ResolvesServerCert};
@@ -15,6 +15,8 @@ use std::io::{Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tdongle_tailnet_admission::probe::{FixedProbe, HeapSnapshot};
+use tdongle_tailnet_pool::{Mem, Pool};
 use tdongle_tailnet_tls::lease::{LeasePool, LeasedTlsDerp, ReadError};
 use tdongle_tailnet_tls::transport::{TlsParams, Upgrade, UpgradeParser, upgrade_request};
 use tdongle_tailnet_tls::{DerpTransport, READ_RECORD_BYTES, TlsDerp, TrustAnchor, WRITE_RECORD_BYTES, parse_cert_name};
@@ -82,10 +84,18 @@ impl ResolvesServerCert for Fixed {
     }
 }
 
+/// A heap with room for everything the tests ask: the floor is what the pool is tested against, so the probe reports the floor plus `room`.
+fn heap(room: usize) -> FixedProbe {
+    let free = tdongle_tailnet_admission::heap::ML_HB_FLOOR + room;
+    FixedProbe(HeapSnapshot { free, largest: free, minimum: free })
+}
+
 #[derive(Clone, Copy)]
 struct Spec {
-    /// 16,384 byte records to send after the 101.
+    /// Records to send after the 101.
     records: usize,
+    /// Plaintext bytes of each record.
+    record: usize,
     /// Pause between records.
     gap: Duration,
     /// Wait this long after the 101 before the first record.
@@ -131,8 +141,8 @@ fn serve(spec: Spec) -> u16 {
         std::thread::sleep(spec.delay);
         let mut off = 0usize;
         for i in 0..spec.records {
-            let data: Vec<u8> = (0..16384).map(|k| ((off + k) % 251) as u8).collect();
-            off += 16384;
+            let data: Vec<u8> = (0..spec.record).map(|k| ((off + k) % 251) as u8).collect();
+            off += spec.record;
             c.writer().write_all(&data).unwrap();
             if let Some(cut) = spec.stall_in_last.filter(|_| i + 1 == spec.records) {
                 let mut v = Vec::new();
@@ -193,11 +203,27 @@ fn nb_connect(port: u16) -> NbSock {
     NbSock(s)
 }
 
+/// The counters, the pool and the heap one test runs against.
+struct Env {
+    stats: LeasePool,
+    pool: Pool,
+    probe: FixedProbe,
+}
+
+impl Env {
+    fn new(cap: usize) -> Env {
+        Env { stats: LeasePool::new(), pool: Pool::new(cap), probe: heap(1 << 20) }
+    }
+    fn mem(&self) -> Mem<'_> {
+        Mem { pool: &self.pool, heap: &self.probe }
+    }
+}
+
 /// Run one leased client: handshake, upgrade, read `want` payload bytes (checking the pattern). `order` records which client read each record.
 async fn leased_client(
     id: usize,
     port: u16,
-    pool: &LeasePool<NoopRawMutex>,
+    env: &Env,
     want: usize,
     stall: Duration,
     order: &RefCell<Vec<usize>>,
@@ -208,7 +234,7 @@ async fn leased_client(
     let params = TlsParams { hostname: H, cert: &cert, anchors: &anchors, now_unix: NOW };
     let mut wb = vec![0u8; WRITE_RECORD_BYTES];
     let mut rng = TestRng(0x1234 + id as u64);
-    let mut c = LeasedTlsDerp::connect(nb_connect(port), &mut wb, pool, &params, &mut rng).await.expect("leased handshake");
+    let mut c = LeasedTlsDerp::connect(nb_connect(port), &mut wb, &env.stats, env.mem(), &params, &mut rng).await.expect("leased handshake");
     let mut req = [0u8; 200];
     let n = upgrade_request(H, &mut req).unwrap();
     c.write_all(&req[..n]).await.unwrap();
@@ -245,59 +271,124 @@ async fn leased_client(
 }
 
 #[test]
-fn three_connections_share_one_lease() {
-    let spec = Spec { records: 12, gap: Duration::from_millis(3), delay: Duration::from_millis(0), stall_in_last: None };
+fn three_connections_read_records_into_exact_size_leases_and_hand_every_byte_back() {
+    let spec = Spec { records: 12, record: 16384, gap: Duration::from_millis(3), delay: Duration::from_millis(0), stall_in_last: None };
     let ports = [serve(spec), serve(spec), serve(spec)];
-    let pool = LeasePool::<NoopRawMutex>::new();
+    let env = Env::new(1 << 20);
     let order = RefCell::new(Vec::new());
     let want = 12 * 16384;
     let t = Instant::now();
     let (a, b, c) = block_on(join3(
-        leased_client(0, ports[0], &pool, want, Duration::from_secs(5), &order),
-        leased_client(1, ports[1], &pool, want, Duration::from_secs(5), &order),
-        leased_client(2, ports[2], &pool, want, Duration::from_secs(5), &order),
+        leased_client(0, ports[0], &env, want, Duration::from_secs(5), &order),
+        leased_client(1, ports[1], &env, want, Duration::from_secs(5), &order),
+        leased_client(2, ports[2], &env, want, Duration::from_secs(5), &order),
     ));
     assert_eq!((a.unwrap(), b.unwrap(), c.unwrap()), (want, want, want));
-    assert_eq!(pool.max_holders(), 1, "never two holders of the one buffer");
-    assert_eq!(pool.timeouts(), 0);
+    assert_eq!(env.stats.timeouts(), 0);
     // handshakes lease per record too: 3 connections x (ServerHello + 4 flight records) + 3 x 12 payload records at least
-    assert!(pool.leases() >= 3 * 12 + 3 * 3, "leases {}", pool.leases());
+    assert!(env.stats.leases() >= 3 * 12 + 3 * 3, "leases {}", env.stats.leases());
+    // every lease was given back: nothing is held between records, and nothing leaks
+    assert_eq!((env.stats.holders(), env.pool.in_use()), (0, 0));
+    // never more than one record per connection at a time: 3 x 16,640 at the very most
+    assert!(env.pool.stats().high_water as usize <= 3 * READ_RECORD_BYTES, "high water {}", env.pool.stats().high_water);
     // records of different connections really interleaved
     let order = order.borrow();
     let switches = order.windows(2).filter(|w| w[0] != w[1]).count();
     assert!(switches >= 12, "only {switches} switches in {order:?}");
-    println!(
-        "3 connections, {} KB each in {:?}: leases {}, record order switches {switches}, max holders {}",
-        want / 1024,
-        t.elapsed(),
-        pool.leases(),
-        pool.max_holders()
-    );
+    println!("3 connections, {} KB each in {:?}: leases {}, record order switches {switches}, pool high water {} B", want / 1024, t.elapsed(), env.stats.leases(), env.pool.stats().high_water);
 }
 
 #[test]
-fn a_stall_inside_a_record_times_out_and_the_others_continue() {
-    // Connection A sends 3,000 bytes of a 16 KB record and goes quiet; B starts talking while A holds the lease.
-    let a_spec = Spec { records: 2, gap: Duration::from_millis(1), delay: Duration::from_millis(0), stall_in_last: Some(3000) };
-    let b_spec = Spec { records: 6, gap: Duration::from_millis(5), delay: Duration::from_millis(150), stall_in_last: None };
+fn a_lease_is_as_long_as_the_record_not_as_long_as_the_biggest_record() {
+    // a Go derper writes through a 2 KiB bufio: records of about 2 KB. The old shared buffer was 16,640 B whatever the records were.
+    let spec = Spec { records: 40, record: 1500, gap: Duration::from_millis(0), delay: Duration::from_millis(0), stall_in_last: None };
+    let ports = [serve(spec), serve(spec)];
+    let env = Env::new(1 << 20);
+    let order = RefCell::new(Vec::new());
+    let want = 40 * 1500;
+    let (a, b) = block_on(join(leased_client(0, ports[0], &env, want, Duration::from_secs(5), &order), leased_client(1, ports[1], &env, want, Duration::from_secs(5), &order)));
+    assert_eq!((a.unwrap(), b.unwrap()), (want, want));
+    // the handshake's Certificate flight (about 4.5 KB per record) is the biggest lease; data records are 1,500 + 22 B each
+    let hw = env.pool.stats().high_water as usize;
+    assert!(hw < 2 * 6_000, "high water {hw} B: the leases are not sized by the records");
+    assert_eq!(env.pool.in_use(), 0);
+}
+
+#[test]
+fn memory_pressure_is_backpressure_not_a_failed_read() {
+    // The pool holds one maximal record. A stalls inside one (holding it), B and C start talking meanwhile: they must wait for memory (not fail, not drop
+    // bytes) and read everything once A's stall timeout gives the bytes back.
+    let a_spec = Spec { records: 2, record: 16384, gap: Duration::from_millis(1), delay: Duration::from_millis(0), stall_in_last: Some(3000) };
+    let bc = Spec { records: 6, record: 16384, gap: Duration::from_millis(2), delay: Duration::from_millis(200), stall_in_last: None };
+    let ports = [serve(a_spec), serve(bc), serve(bc)];
+    let env = Env::new(READ_RECORD_BYTES);
+    let order = RefCell::new(Vec::new());
+    let want = 6 * 16384;
+    let t = Instant::now();
+    let stall = Duration::from_millis(700);
+    let (a, b, c) = block_on(join3(
+        leased_client(0, ports[0], &env, 2 * 16384, stall, &order),
+        leased_client(1, ports[1], &env, want, Duration::from_secs(10), &order),
+        leased_client(2, ports[2], &env, want, Duration::from_secs(10), &order),
+    ));
+    assert!(matches!(a, Err(ReadError::LeaseTimeout)), "{a:?}");
+    assert_eq!((b.unwrap(), c.unwrap()), (want, want), "every byte arrived intact");
+    assert!(t.elapsed() >= stall, "B and C had to wait for A's bytes to come back: {:?}", t.elapsed());
+    let st = env.pool.stats();
+    assert!(st.high_water as usize <= READ_RECORD_BYTES, "the cap held: {}", st.high_water);
+    assert!(st.waits >= 2 && st.denied_cap > 0, "the pool must have said no and made B and C wait: {st:?}");
+    assert_eq!((env.stats.holders(), env.pool.in_use()), (0, 0));
+}
+
+#[test]
+fn a_stall_inside_a_record_times_out_gives_its_bytes_back_and_blocks_nobody() {
+    // Connection A sends 3,000 bytes of a 16 KB record and goes quiet; B starts talking while A holds its record buffer.
+    let a_spec = Spec { records: 2, record: 16384, gap: Duration::from_millis(1), delay: Duration::from_millis(0), stall_in_last: Some(3000) };
+    let b_spec = Spec { records: 6, record: 16384, gap: Duration::from_millis(5), delay: Duration::from_millis(150), stall_in_last: None };
     let (pa, pb) = (serve(a_spec), serve(b_spec));
-    let pool = LeasePool::<NoopRawMutex>::new();
+    let env = Env::new(1 << 20);
     let order = RefCell::new(Vec::new());
     let t = Instant::now();
     let stall = Duration::from_millis(600);
-    let (a, b) = block_on(join(leased_client(0, pa, &pool, 2 * 16384, stall, &order), leased_client(1, pb, &pool, 6 * 16384, Duration::from_secs(5), &order)));
+    let (a, (b, b_done)) = block_on(join(leased_client(0, pa, &env, 2 * 16384, stall, &order), async {
+        let r = leased_client(1, pb, &env, 6 * 16384, Duration::from_secs(5), &order).await;
+        (r, t.elapsed())
+    }));
     assert!(matches!(a, Err(ReadError::LeaseTimeout)), "{a:?}");
     assert_eq!(b.unwrap(), 6 * 16384, "the other connection finishes");
-    assert_eq!(pool.timeouts(), 1);
-    assert_eq!(pool.max_holders(), 1);
-    // B waited for A's timeout (it was ready at ~150 ms and A holds the lease for 600 ms): the head-of-line cost is bounded by the timeout
-    assert!(t.elapsed() >= stall && t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
-    // After the timeout the lease is free again (a third connection can lease at once)
-    let spec = Spec { records: 2, gap: Duration::from_millis(0), delay: Duration::from_millis(0), stall_in_last: None };
-    let pc = serve(spec);
-    let c = block_on(leased_client(2, pc, &pool, 2 * 16384, Duration::from_secs(5), &order));
-    assert_eq!(c.unwrap(), 2 * 16384);
-    println!("stall test: A timed out, B done, total {:?}, lease holders max {}", t.elapsed(), pool.max_holders());
+    assert_eq!(env.stats.timeouts(), 1);
+    // B no longer waits for A (the old shared buffer made it wait for A's timeout): it was done well before A gave up
+    assert!(b_done < stall, "B finished at {b_done:?}, A's stall bound is {stall:?}");
+    // and A's record buffer went back when it timed out
+    assert_eq!((env.stats.holders(), env.pool.in_use()), (0, 0));
+    println!("stall test: A timed out, B done at {b_done:?}, total {:?}", t.elapsed());
+}
+
+#[test]
+fn a_record_longer_than_the_protocol_allows_is_refused_before_any_allocation() {
+    // RFC 8446 5.2: ciphertext over 2^14 + 256 is a record_overflow. A server announcing 64 KB must not make the gateway ask the heap for 64 KB.
+    use std::io::Write as _;
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let h = std::thread::spawn(move || {
+        let (mut s, _) = l.accept().unwrap();
+        let mut sink = [0u8; 2048];
+        let _ = std::io::Read::read(&mut s, &mut sink);
+        // a ServerHello-shaped record header announcing 65,000 bytes
+        let _ = s.write_all(&[0x16, 0x03, 0x03, 0xFD, 0xE8]);
+        std::thread::sleep(Duration::from_millis(300));
+    });
+    let env = Env::new(1 << 20);
+    let (s, k) = test_anchor();
+    let anchors = [TrustAnchor { subject: &s, spki: &k }];
+    let cert = parse_cert_name(Some(H), None);
+    let params = TlsParams { hostname: H, cert: &cert, anchors: &anchors, now_unix: NOW };
+    let mut wb = vec![0u8; WRITE_RECORD_BYTES];
+    let mut rng = TestRng(9);
+    let r = block_on(LeasedTlsDerp::connect(nb_connect(port), &mut wb, &env.stats, env.mem(), &params, &mut rng));
+    assert!(r.is_err());
+    assert_eq!(env.pool.stats().takes, [0, 0, 0], "nothing was allocated for an impossible record");
+    h.join().unwrap();
 }
 
 async fn stock_client(id: usize, port: u16, want: usize) -> usize {
@@ -334,7 +425,7 @@ async fn stock_client(id: usize, port: u16, want: usize) -> usize {
 fn throughput_and_cpu_stock_vs_lease() {
     let records = 400; // 6.5 MB per connection
     let want = records * 16384;
-    let spec = Spec { records, gap: Duration::from_millis(0), delay: Duration::from_millis(0), stall_in_last: None };
+    let spec = Spec { records, record: 16384, gap: Duration::from_millis(0), delay: Duration::from_millis(0), stall_in_last: None };
     for conns in [1usize, 3] {
         // stock
         let ports: Vec<u16> = (0..conns).map(|_| serve(spec)).collect();
@@ -356,36 +447,34 @@ fn throughput_and_cpu_stock_vs_lease() {
         );
         // leased
         let ports: Vec<u16> = (0..conns).map(|_| serve(spec)).collect();
-        let pool = LeasePool::<NoopRawMutex>::new();
+        let env = Env::new(1 << 20);
         let order = RefCell::new(Vec::new());
         let t = Instant::now();
         let s = Duration::from_secs(10);
         match conns {
             1 => {
-                block_on(leased_client(0, ports[0], &pool, want, s, &order)).unwrap();
+                block_on(leased_client(0, ports[0], &env, want, s, &order)).unwrap();
             }
             _ => {
                 let (a, b, c) = block_on(join3(
-                    leased_client(0, ports[0], &pool, want, s, &order),
-                    leased_client(1, ports[1], &pool, want, s, &order),
-                    leased_client(2, ports[2], &pool, want, s, &order),
+                    leased_client(0, ports[0], &env, want, s, &order),
+                    leased_client(1, ports[1], &env, want, s, &order),
+                    leased_client(2, ports[2], &env, want, s, &order),
                 ));
                 assert!(a.is_ok() && b.is_ok() && c.is_ok());
             }
         }
         let dt = t.elapsed();
         println!(
-            "leased x{conns}: {:.1} MB/s total ({:?} wall; {} B pinned read buffers, 1 shared {} B, max holders {})",
+            "leased x{conns}: {:.1} MB/s total ({:?} wall; no pinned read buffers, pool high water {} B)",
             (conns * want) as f64 / 1e6 / dt.as_secs_f64(),
             dt,
-            0,
-            READ_RECORD_BYTES,
-            pool.max_holders()
+            env.pool.stats().high_water
         );
     }
 }
 
-/// Needs the network: three leased connections to a real DERP server through ONE shared lease, each upgrades and reads the ServerKey frame.
+/// Needs the network: three leased connections to a real DERP server through the shared pool, each upgrades and reads the ServerKey frame.
 #[test]
 #[ignore = "needs network access to derp1.tailscale.com"]
 fn live_derp_three_leased_connections() {
@@ -393,9 +482,9 @@ fn live_derp_three_leased_connections() {
     let host = "derp1.tailscale.com";
     let addr = (host, 443).to_socket_addrs().unwrap().find(|a| a.is_ipv4()).unwrap();
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    let pool = LeasePool::<NoopRawMutex>::new();
+    let env = Env::new(1 << 20);
     let one = |id: u64| {
-        let pool = &pool;
+        let env = &env;
         async move {
             let s = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
             s.set_nonblocking(true).unwrap();
@@ -403,7 +492,7 @@ fn live_derp_three_leased_connections() {
             let params = TlsParams { hostname: host, cert: &cert, anchors: tdongle_tailnet_tls::DEFAULT_ANCHORS, now_unix: now };
             let mut wb = vec![0u8; WRITE_RECORD_BYTES];
             let mut rng = TestRng(now + id);
-            let mut c = LeasedTlsDerp::connect(NbSock(s), &mut wb, pool, &params, &mut rng).await.expect("handshake");
+            let mut c = LeasedTlsDerp::connect(NbSock(s), &mut wb, &env.stats, env.mem(), &params, &mut rng).await.expect("handshake");
             let mut req = [0u8; 200];
             let n = upgrade_request(host, &mut req).unwrap();
             c.write_all(&req[..n]).await.unwrap();
@@ -426,6 +515,6 @@ fn live_derp_three_leased_connections() {
         }
     };
     let (a, b, c) = block_on(join3(one(1), one(2), one(3)));
-    println!("three leased connections to {host}: {a:?} {b:?} {c:?}; leases {}, max holders {}", pool.leases(), pool.max_holders());
-    assert_eq!(pool.max_holders(), 1);
+    println!("three leased connections to {host}: {a:?} {b:?} {c:?}; leases {}, high water {}", env.stats.leases(), env.pool.stats().high_water);
+    assert_eq!(env.pool.in_use(), 0);
 }

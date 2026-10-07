@@ -97,6 +97,24 @@ pub struct Stats {
     pub exhausted: Counter,
 }
 
+impl Stats {
+    /// All zero (`const`, so state built from it can live in a `static`).
+    pub const fn new() -> Self {
+        Self {
+            sealed: Counter(0),
+            opened: Counter(0),
+            auth_failures: Counter(0),
+            bad_type: Counter(0),
+            oversize: Counter(0),
+            bad_framing: Counter(0),
+            buffer_too_small: Counter(0),
+            rx_dead: Counter(0),
+            exhausted: Counter(0),
+        }
+    }
+}
+
+
 /// An established transport: two cipher states and their counters. 8-byte aligned, about 160 bytes.
 #[derive(Debug)]
 pub struct Session {

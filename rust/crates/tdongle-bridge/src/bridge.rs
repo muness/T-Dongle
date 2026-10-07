@@ -165,6 +165,7 @@ impl<E: Env> Bridge<E> {
     /// Create the bridge for the STA MAC `identity` (the address the host speaks with). Equivalent of `tdongle_l2_start`, minus the allocations:
     /// the queue is part of the value, so a `static Bridge` is the C firmware's permanent 12 KB.
     #[must_use]
+    #[inline(always)] // built in place in `StaticCell::init_with`: three 12 KB copies on the stack otherwise (tools/check_stack.py)
     pub fn new(env: E, identity: [u8; 6]) -> Self {
         Self {
             env,

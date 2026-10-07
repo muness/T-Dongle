@@ -2641,7 +2641,9 @@ dependencies = [
  "tdongle-tailnet-map",
  "tdongle-tailnet-members",
  "tdongle-tailnet-noise",
+ "tdongle-tailnet-pool",
  "tdongle-tailnet-runtime",
+ "tdongle-tailnet-sockmem",
  "tdongle-tailnet-status",
  "tdongle-tailnet-types",
  "tdongle-tailnet-usbnet",
@@ -2688,6 +2690,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-tailnet-pool"
+version = "0.3.0-dev"
+dependencies = [
+ "critical-section",
+ "embassy-futures",
+ "embassy-sync 0.8.0",
+ "embassy-time",
+ "futures",
+ "tdongle-tailnet-admission",
+]
+
+[[package]]
 name = "tdongle-tailnet-router"
 version = "0.3.0-dev"
 dependencies = [
@@ -2718,6 +2732,7 @@ dependencies = [
  "tdongle-tailnet-fw",
  "tdongle-tailnet-map",
  "tdongle-tailnet-members",
+ "tdongle-tailnet-pool",
  "tdongle-tailnet-router",
  "tdongle-tailnet-status",
  "tdongle-tailnet-tls",
@@ -2725,6 +2740,18 @@ dependencies = [
  "tdongle-tailnet-usbnet",
  "tdongle-tailnet-wifimux",
  "zeroize",
+]
+
+[[package]]
+name = "tdongle-tailnet-sockmem"
+version = "0.3.0-dev"
+dependencies = [
+ "critical-section",
+ "embassy-net",
+ "embassy-sync 0.8.0",
+ "tdongle-tailnet-admission",
+ "tdongle-tailnet-pool",
+ "tdongle-tailnet-runtime",
 ]
 
 [[package]]
@@ -2740,8 +2767,10 @@ dependencies = [
 name = "tdongle-tailnet-tls"
 version = "0.3.0-dev"
 dependencies = [
+ "critical-section",
  "embassy-futures",
  "embassy-sync 0.8.0",
+ "embassy-time",
  "embedded-io-async 0.7.0",
  "embedded-tls 0.19.0",
  "embedded-tls 0.19.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2752,6 +2781,8 @@ dependencies = [
  "rustls",
  "sha2",
  "subtle",
+ "tdongle-tailnet-admission",
+ "tdongle-tailnet-pool",
  "tdongle-tailnet-types",
 ]
 

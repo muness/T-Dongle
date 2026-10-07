@@ -139,11 +139,13 @@ where
     }
 
     /// PATCH(lease): wait for the header of the next record. No buffer is needed and none is held; call this before leasing.
-    pub async fn wait_record(&mut self) -> Result<(), TlsError> {
+    /// PATCH(lease2): returns the length of the record body, which is what the lease for it must hold (`read_record_leased` needs exactly that many bytes).
+    pub async fn wait_record(&mut self) -> Result<usize, TlsError> {
         if !self.is_opened() {
             return Err(TlsError::MissingHandshake);
         }
-        self.record_reader.wait_header(&mut self.delegate).await
+        self.record_reader.wait_header(&mut self.delegate).await?;
+        self.record_reader.header_len().ok_or(TlsError::InternalError)
     }
 
     /// PATCH(lease): read the record announced by `wait_record` into `lease`, decrypt it in place and return its plaintext (possibly empty:

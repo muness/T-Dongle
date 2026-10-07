@@ -35,10 +35,19 @@ use static_cell::{ConstStaticCell, StaticCell};
 use tdongle_bridge::{Env, RingSend};
 use tdongle_tailnet_engine::RamDirectory;
 use tdongle_tailnet_fw::{HeapProbe, MemberCounts, Platform, Storage, StorageError, TailnetApi, UsbFrames};
-use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, GatewayBuffers, LinkGen};
+use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, LinkGen, Windows};
+use tdongle_tailnet_sockmem::HeapSockMem;
 use tdongle_tailnet_runtime::shared::{Config as RtConfig, MAX_RUN, PlatformRng, SlotState};
 use tdongle_tailnet_runtime::wifi_mux::MuxWifi;
-use tdongle_tailnet_runtime::{Shared, run};
+use tdongle_tailnet_runtime::control::control_slot;
+use tdongle_tailnet_runtime::net::Net;
+use tdongle_tailnet_runtime::derp::derp_slot;
+use tdongle_tailnet_runtime::members::supervisor;
+use tdongle_tailnet_runtime::sizes::{FUT_CONTROL, FUT_DERP, FUT_DNS, FUT_LINK, FUT_SUPERVISOR, FUT_TIMER, FUT_UDP, FUT_USB};
+use tdongle_tailnet_runtime::tasks::{dns_upstream, engine_timer, link_watch};
+use tdongle_tailnet_runtime::udp::udp_slot;
+use tdongle_tailnet_runtime::usb::usb_pump;
+use tdongle_tailnet_runtime::Shared;
 use tdongle_tailnet_usbnet::napt::NaptConfig;
 use tdongle_tailnet_wifimux::tap::{NaptTap, SharedNapt};
 use tdongle_tailnet_wifimux::{StackDriver, WifiMux};
@@ -374,9 +383,10 @@ fn pop_rx(out: &mut [u8; crate::MTU]) -> Option<usize> {
 /// The station as an Ethernet `embassy-net` driver. Receive does not need a TX credit (the S1 wedge of esp-radio's tokens): a reply the budget refuses is a
 /// counted drop, which TCP retransmits.
 #[derive(Debug)]
-pub struct L2Driver {
-    mac: [u8; 6],
-}
+pub struct L2Driver;
+
+/// The station's address, set by `start` before the stack is built (the mux and the driver are statics built at compile time, which cannot know it).
+static STA_MAC: critical_section::Mutex<core::cell::Cell<[u8; 6]>> = critical_section::Mutex::new(core::cell::Cell::new([0; 6]));
 
 /// A received frame.
 #[derive(Debug)]
@@ -431,7 +441,7 @@ impl Driver for L2Driver {
         c
     }
     fn hardware_address(&self) -> HardwareAddress {
-        HardwareAddress::Ethernet(self.mac)
+        HardwareAddress::Ethernet(critical_section::with(|cs| STA_MAC.borrow(cs).get()))
     }
 }
 
@@ -466,11 +476,16 @@ type Mux = WifiMux<L2Driver, Tap, MUX_TXQ, MUX_RXQ>;
 type MuxDrv = StackDriver<'static, L2Driver, Tap, MUX_TXQ, MUX_RXQ>;
 type Wifi = MuxWifi<'static, Stack<'static>, NAPT_FLOWS, MUX_TXQ, MUX_RXQ>;
 
-static SHARED: StaticCell<Sh> = StaticCell::new();
-static NET_BUFFERS: ConstStaticCell<GatewayBuffers> = ConstStaticCell::new(GatewayBuffers::new());
+/// The runtime's shared state, built at compile time (every constructor under it is `const`): there is no 88 KB value on any stack, now or at start.
+static SHARED: Sh = Shared::new(RtConfig { firmware: FIRMWARE, ..RtConfig::tailscale() }, FwPlatform, FwStorage, Dir::new());
+static NET: StaticCell<EmbassyNet> = StaticCell::new();
+static WIFI: StaticCell<Wifi> = StaticCell::new();
+static SOCKMEM: StaticCell<HeapSockMem> = StaticCell::new();
 static STACK_RES: ConstStaticCell<StackResources<STACK_SOCKETS>> = ConstStaticCell::new(StackResources::new());
-static NAPT: StaticCell<SharedNapt<NAPT_FLOWS>> = StaticCell::new();
-static MUX: StaticCell<Mux> = StaticCell::new();
+/// The NAT and the Wi-Fi mux are built at compile time like the shared state (19 KB and 14 KB values that never exist on a stack); `start` seeds the NAT and
+/// gives the mux its station address.
+static NAPT: SharedNapt<NAPT_FLOWS> = SharedNapt::new_const(NaptConfig::C);
+static MUX: ConstStaticCell<Mux> = ConstStaticCell::new(WifiMux::new_const(L2Driver, NaptTap::new(&NAPT)));
 static SNTP_BUFS: ConstStaticCell<SntpBufs> = ConstStaticCell::new(SntpBufs::new());
 static SHARED_REF: OnceLock<&'static Sh> = OnceLock::new();
 
@@ -496,29 +511,57 @@ pub fn api() -> Option<&'static dyn TailnetApi> {
 /// from safe mode: the init task returns before that).
 pub fn start(spawner: Spawner) {
     let platform = FwPlatform;
-    let sh: &'static Sh = SHARED.init_with(|| Shared::new(RtConfig { firmware: FIRMWARE, ..RtConfig::tailscale() }, FwPlatform, FwStorage, Dir::new()));
+    let sh: &'static Sh = &SHARED;
     let _ = SHARED_REF.init(sh);
 
     let mut rng = PlatformRng(&platform);
-    let napt: &'static SharedNapt<NAPT_FLOWS> = NAPT.init(SharedNapt::new(NaptConfig::C, &mut rng));
+    NAPT.seed(&mut rng);
+    let napt: &'static SharedNapt<NAPT_FLOWS> = &NAPT;
+    let mux: &'static mut Mux = MUX.take();
     let mac = platform.sta_mac();
-    let mux: &'static mut Mux = MUX.init_with(|| match WifiMux::new(L2Driver { mac }, NaptTap::new(napt)) {
-        Ok(m) => m,
-        Err(_) => panic!("wifimux"),
-    });
+    critical_section::with(|cs| STA_MAC.borrow(cs).set(mac));
+    mux.set_mac(mac);
     let (driver, port) = mux.split();
     let mut seed = [0u8; 8];
     platform.fill_random(&mut seed);
     let (stack, runner) = embassy_net::new(driver, NetConfig::dhcpv4(Default::default()), STACK_RES.take(), u64::from_le_bytes(seed));
-    let wifi: Wifi = MuxWifi::new(port, napt, stack);
-    let net = EmbassyNet::new(stack, &ASSOCIATION, NET_BUFFERS.take().slots());
+    let wifi: &'static Wifi = WIFI.init_with(|| MuxWifi::new(port, napt, stack));
+    // socket windows, TLS records and the control workspace come from the shared pool (the heap, admitted against the elastic floor), not from statics
+    let sockmem: &'static HeapSockMem = SOCKMEM.init(HeapSockMem::new(sh.mem()));
+    let net: &'static EmbassyNet = NET.init(EmbassyNet::new(stack, &ASSOCIATION, sockmem));
+    sh.net_member_bytes.store(net.member_buffer_bytes() as u32, Ordering::Relaxed);
 
     RX_ON.store(true, Ordering::Release);
     ACTIVE.store(true, Ordering::Release);
     if let Ok(t) = net_task(runner) {
         spawner.spawn(t);
     }
-    if let Ok(t) = runtime_task(sh, net, wifi) {
+    // The runtime's tasks run as tasks of their own, each future built in place in its own task storage: one joined future would be built on the stack first
+    // (a 49 KB frame measured with `tools/check_stack.py`, on top of the 24 KB it then occupies).
+    for idx in 0..MEMBERS {
+        if let Ok(t) = tn_control(sh, idx, net) {
+            spawner.spawn(t);
+        }
+        if let Ok(t) = tn_derp(sh, idx, net) {
+            spawner.spawn(t);
+        }
+        if let Ok(t) = tn_udp(sh, idx, net) {
+            spawner.spawn(t);
+        }
+    }
+    if let Ok(t) = tn_usb(sh, wifi) {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = tn_supervisor(sh) {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = tn_timer(sh) {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = tn_link(sh, net, wifi) {
+        spawner.spawn(t);
+    }
+    if let Ok(t) = tn_dns(sh, net) {
         spawner.spawn(t);
     }
     if let Ok(t) = sntp_task(stack, SNTP_BUFS.take()) {
@@ -540,9 +583,66 @@ async fn net_task(mut runner: Runner<'static, MuxDrv>) -> ! {
     runner.run().await
 }
 
+/// Record the size of a task's future (what `tn-mem` prints as `tn_future`), without moving it.
+fn note_future<F>(sh: &Sh, which: usize, f: &F) {
+    sh.fut_bytes[which].store(core::mem::size_of_val(f) as u32, Ordering::Relaxed);
+}
+
+#[embassy_executor::task(pool_size = MEMBERS)]
+async fn tn_control(sh: &'static Sh, idx: usize, net: &'static EmbassyNet) {
+    let f = core::pin::pin!(control_slot(sh, idx, net));
+    note_future(sh, FUT_CONTROL, &*f);
+    f.await
+}
+
+#[embassy_executor::task(pool_size = MEMBERS)]
+async fn tn_derp(sh: &'static Sh, idx: usize, net: &'static EmbassyNet) {
+    let f = core::pin::pin!(derp_slot(sh, idx, net));
+    note_future(sh, FUT_DERP, &*f);
+    f.await
+}
+
+#[embassy_executor::task(pool_size = MEMBERS)]
+async fn tn_udp(sh: &'static Sh, idx: usize, net: &'static EmbassyNet) {
+    let f = core::pin::pin!(udp_slot(sh, idx, net));
+    note_future(sh, FUT_UDP, &*f);
+    f.await
+}
+
 #[embassy_executor::task]
-async fn runtime_task(sh: &'static Sh, net: EmbassyNet, wifi: Wifi) {
-    run(sh, net, FwUsb, wifi).await
+async fn tn_usb(sh: &'static Sh, wifi: &'static Wifi) {
+    let mut usb = FwUsb;
+    let f = core::pin::pin!(usb_pump(sh, &mut usb, wifi));
+    note_future(sh, FUT_USB, &*f);
+    f.await
+}
+
+#[embassy_executor::task]
+async fn tn_supervisor(sh: &'static Sh) {
+    let f = core::pin::pin!(supervisor(sh));
+    note_future(sh, FUT_SUPERVISOR, &*f);
+    f.await
+}
+
+#[embassy_executor::task]
+async fn tn_timer(sh: &'static Sh) {
+    let f = core::pin::pin!(engine_timer(sh));
+    note_future(sh, FUT_TIMER, &*f);
+    f.await
+}
+
+#[embassy_executor::task]
+async fn tn_link(sh: &'static Sh, net: &'static EmbassyNet, wifi: &'static Wifi) {
+    let f = core::pin::pin!(link_watch(sh, net, wifi));
+    note_future(sh, FUT_LINK, &*f);
+    f.await
+}
+
+#[embassy_executor::task]
+async fn tn_dns(sh: &'static Sh, net: &'static EmbassyNet) {
+    let f = core::pin::pin!(dns_upstream(sh, net));
+    note_future(sh, FUT_DNS, &*f);
+    f.await
 }
 
 /// `l2::tx_done` (the Wi-Fi task, IRAM) signals one `Signal`; this task turns it into the stack's TX waker so the IRAM callback calls nothing new.
@@ -771,15 +871,33 @@ fn memory_report(sh: &Sh, out: &mut String) {
     );
     let _ = write!(
         out,
-        "tn_statics shared={} net_buffers={} napt={} mux={} stack_res={} rx_ring={} usb_rx={} runtime_future={}\r\n",
+        "tn_statics shared={} pooled_windows_per_member={} napt={} mux={} stack_res={} rx_ring={} usb_rx={} runtime_future={}\r\n",
         core::mem::size_of::<Sh>(),
-        core::mem::size_of::<GatewayBuffers>(),
+        Windows::PER_MEMBER,
         core::mem::size_of::<SharedNapt<NAPT_FLOWS>>(),
         core::mem::size_of::<Mux>(),
         core::mem::size_of::<StackResources<STACK_SOCKETS>>(),
         RX_RING * (crate::MTU + 2),
         USB_RX_FRAMES * (crate::MTU + 2),
-        tdongle_tailnet_runtime::sizes::future_bytes(sh, tdongle_tailnet_runtime::sizes::FUT_RUN)
+        (0..tdongle_tailnet_runtime::sizes::FUT_RUN).map(|i| tdongle_tailnet_runtime::sizes::future_bytes(sh, i)).sum::<usize>()
+    );
+    let ps = sh.pool.stats();
+    let _ = write!(
+        out,
+        "tn_pool in_use={} high_water={} cap={} takes_socket={} takes_record={} takes_negotiation={} denied_cap={} denied_floor={} denied_heap={} waits={} record_leases={} record_timeouts={} bulk_leases={}\r\n",
+        ps.in_use,
+        ps.high_water,
+        sh.pool.cap(),
+        ps.takes[0],
+        ps.takes[1],
+        ps.takes[2],
+        ps.denied_cap,
+        ps.denied_floor,
+        ps.denied_heap,
+        ps.waits,
+        sh.lease.leases(),
+        sh.lease.timeouts(),
+        sh.bulk.leases()
     );
     for (i, name) in tdongle_tailnet_runtime::sizes::FUTURE_NAMES.iter().enumerate() {
         let _ = write!(out, "tn_future {}={}\r\n", name, tdongle_tailnet_runtime::sizes::future_bytes(sh, i));

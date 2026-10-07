@@ -18,6 +18,8 @@ tdongle-tailnet-map = { path = "../tdongle-tailnet-map" }
 tdongle-tailnet-noise = { path = "../tdongle-tailnet-noise" }
 tdongle-tailnet-ctl = { path = "../tdongle-tailnet-ctl" }
 tdongle-tailnet-runtime = { path = "../tdongle-tailnet-runtime", features = ["embassy-net"] }
+tdongle-tailnet-pool = { path = "../tdongle-tailnet-pool" }
+tdongle-tailnet-sockmem = { path = "../tdongle-tailnet-sockmem" }
 tdongle-tailnet-engine = { path = "../tdongle-tailnet-engine" }
 tdongle-tailnet-fw = { path = "../tdongle-tailnet-fw" }
 tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }

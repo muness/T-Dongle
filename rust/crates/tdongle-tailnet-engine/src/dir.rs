@@ -75,8 +75,8 @@ struct Bank<const N: usize> {
 }
 
 impl<const N: usize> Bank<N> {
-    fn new() -> Self {
-        Self { recs: core::array::from_fn(|_| DirRecord::default()), count: 0 }
+    const fn new() -> Self {
+        Self { recs: [const { DirRecord::new() }; N], count: 0 }
     }
     fn live(&self) -> impl Iterator<Item = &DirRecord> {
         self.recs[..self.count].iter().filter(|r| r.vpn_ip != 0)
@@ -142,11 +142,12 @@ impl<const M: usize, const N: usize, const S: usize> RamDirectory<M, N, S> {
     /// Bytes of the whole directory.
     pub const STATE_BYTES: usize = core::mem::size_of::<Self>();
     /// Empty.
-    pub fn new() -> Self {
+    #[inline(always)]
+    pub const fn new() -> Self {
         Self {
-            live: core::array::from_fn(|_| Bank::new()),
+            live: [const { Bank::new() }; M],
             spare: Bank::new(),
-            staged: core::array::from_fn(|_| core::array::from_fn(|_| None)),
+            staged: [const { [const { None }; S] }; M],
             staged_n: [0; M],
             generation: [0; M],
         }

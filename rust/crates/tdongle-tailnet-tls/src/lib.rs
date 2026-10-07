@@ -52,7 +52,7 @@ pub use verify::{
 
 /// `size_of` of a [`lease::LeasedTlsDerp`] (feature `lease`): the whole live connection state, with no read buffer pinned (host build).
 #[cfg(feature = "lease")]
-pub const LEASED_STATE_BYTES: usize = core::mem::size_of::<lease::LeasedTlsDerp<'static, tls::NullIo, embassy_sync::blocking_mutex::raw::NoopRawMutex>>();
+pub const LEASED_STATE_BYTES: usize = core::mem::size_of::<lease::LeasedTlsDerp<'static, tls::NullIo>>();
 
 /// `size_of` of the state a live DERP connection owns besides its two record buffers (host build; the xtensa figure is in the ADR).
 pub const STATE_BYTES: usize = core::mem::size_of::<transport::TlsDerp<'static, tls::NullIo>>();

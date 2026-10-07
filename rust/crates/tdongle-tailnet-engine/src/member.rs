@@ -124,6 +124,7 @@ pub struct Member<const P: usize> {
 
 impl<const P: usize> Member<P> {
     /// Build a membership from its configuration; `None` for an all-zero or small-order private key.
+    #[inline(always)]
     pub fn new(cfg: &MemberConfig, slot: u8) -> Option<Self> {
         let identity = Identity::new(&cfg.node_private)?;
         let node_pub = identity.public().clone();

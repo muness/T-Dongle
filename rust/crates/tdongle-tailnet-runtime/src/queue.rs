@@ -125,6 +125,7 @@ impl<R: RawMutex, const N: usize> Default for ByteQueue<R, N> {
 
 impl<R: RawMutex, const N: usize> ByteQueue<R, N> {
     /// An empty queue.
+    #[inline(always)]
     pub const fn new() -> Self {
         Self { ring: Mutex::new(RefCell::new(Ring::new())), ready: Signal::new() }
     }

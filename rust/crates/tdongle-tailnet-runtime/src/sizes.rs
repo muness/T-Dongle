@@ -78,7 +78,7 @@ pub fn shared_bytes<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: 
 /// The sizes of the statics that do not depend on the generic parameters, for the memory table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaticSizes {
-    /// `ctl::Bulk`: the control sessions' big buffers, one set for the gateway (leased per record / message).
+    /// `ctl::Bulk`: the control sessions' big buffers; **pooled**, taken for a negotiation or a map message and given back (no static).
     pub bulk: usize,
     /// `ctl::SessionBuf`: what a control session keeps per membership.
     pub session_buf: usize,
@@ -90,7 +90,7 @@ pub struct StaticSizes {
     pub host_q: usize,
     /// The DNS upstream queue.
     pub dns_q: usize,
-    /// The shared TLS record lease buffer.
+    /// The largest TLS record lease (a maximal record body); **pooled**, normally a record is about 2 KB.
     pub lease: usize,
     /// The engine without its directory.
     pub engine: usize,
@@ -154,7 +154,6 @@ const _: () = {
     assert!(core::mem::size_of::<crate::shared::SlotStatus>() == 1_152);
     assert!(core::mem::size_of::<crate::shared::Ident>() == 352);
     assert!(core::mem::size_of::<tdongle_tailnet_derp::Link<{ crate::derp::DERP_TXQ }>>() == 4_376);
-    assert!(core::mem::size_of::<tdongle_tailnet_tls::lease::LeasePool<NoopRawMutex>>() == 16_668);
     assert!(core::mem::size_of::<crate::queue::ByteQueue<NoopRawMutex, { crate::shared::HOST_Q }>>() == 8_232);
     assert!(core::mem::size_of::<crate::shared::RegistryCell>() <= 2_232);
     assert!(core::mem::size_of::<crate::usb::UsbSide>() == 1_472);

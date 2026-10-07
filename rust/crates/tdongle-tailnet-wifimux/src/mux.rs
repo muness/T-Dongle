@@ -73,6 +73,19 @@ impl<D: Driver, T: RxTap, const TXQ: usize, const RXQ: usize> WifiMux<D, T, TXQ,
     /// `size_of::<Self>()`: the queues, the staging frame, the ARP table, the counters, and the driver and tap themselves.
     pub const STATE_BYTES: usize = core::mem::size_of::<Self>();
 
+    /// A mux built at compile time (for a `static`: its queues are 14 KB). The station address is not known yet: call [`WifiMux::set_mac`] before the stack runs.
+    pub const fn new_const(driver: D, tap: T) -> Self {
+        WifiMux {
+            side: Side { driver, tap, stage: [0; FRAME_MAX], stage_len: 0, link_up: false, owed: false, tx_asked: false, napt_turn: false },
+            shared: Shared(Mutex::new(RefCell::new(Core::new([0; 6])))),
+        }
+    }
+
+    /// Set the station's Ethernet address (what `new` reads from the driver).
+    pub fn set_mac(&self, mac: [u8; 6]) {
+        self.shared.with(|c| c.set_mac(mac));
+    }
+
     /// Wrap `driver` (an Ethernet radio) and `tap`.
     pub fn new(driver: D, tap: T) -> Result<Self, MuxError> {
         let HardwareAddress::Ethernet(mac) = driver.hardware_address() else { return Err(MuxError::NotEthernet) };

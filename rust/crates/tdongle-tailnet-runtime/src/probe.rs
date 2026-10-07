@@ -10,7 +10,7 @@
 //! and on the host the same function runs: [`future_sizes`] returns `size_of_val` of every top-level future. Nothing here is polled.
 
 use crate::net::Net;
-use crate::net_embassy::{EmbassyNet, GatewayBuffers};
+use crate::net_embassy::EmbassyNet;
 use crate::shared::{Config, MAX_RUN, Shared};
 use crate::sizes::*;
 use crate::wifi::NoWifi;
@@ -134,13 +134,9 @@ pub fn run_future_bytes(sh: &ProbeShared, net: EmbassyNet) -> usize {
     core::mem::size_of_val(&f)
 }
 
-/// The socket buffer set of the probe (what the firmware starts with).
-pub type ProbeBuffers = GatewayBuffers;
-
 /// Called by nothing: its only job is to make the compiler instantiate the generic tasks for `-Zprint-type-sizes`.
 #[doc(hidden)]
 pub fn instantiate(sh: &'static ProbeShared, net: EmbassyNet) -> usize {
     let n = future_sizes(sh, &net);
-    // (the buffer set's size makes the compiler print its layout too, which the size table reads)
-    n.iter().sum::<usize>() + run_future_bytes(sh, net) + core::mem::size_of::<ProbeBuffers>()
+    n.iter().sum::<usize>() + run_future_bytes(sh, net)
 }

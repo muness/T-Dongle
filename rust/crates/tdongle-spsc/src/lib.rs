@@ -78,6 +78,7 @@ impl<T, const N: usize> Spsc<T, N> {
     };
 
     /// A queue over `cells` (built by the caller so a `static` can use a `const` initialiser).
+    #[inline(always)]
     pub fn from_cells(cells: [sync::UnsafeCell<T>; N]) -> Self {
         let _ = Self::MASK;
         Self { cells, head: AtomicU32::new(0), tail: AtomicU32::new(0), producer_taken: AtomicBool::new(false), consumer_taken: AtomicBool::new(false) }

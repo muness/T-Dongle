@@ -525,6 +525,24 @@ pub struct Counters {
     pub outbox_overflow: Counter,
 }
 
+impl Counters {
+    /// All zero (`const`, so state built from it can live in a `static`).
+    pub const fn new() -> Self {
+        Self {
+            frames_in: Counter(0),
+            data_bytes_in: Counter(0),
+            settings_acks_sent: Counter(0),
+            window_updates_sent: Counter(0),
+            ping_acks_sent: Counter(0),
+            ignored_frames: Counter(0),
+            stream_window_updates_ignored: Counter(0),
+            fatal: Counter(0),
+            outbox_overflow: Counter(0),
+        }
+    }
+}
+
+
 /// The connection.
 #[derive(Clone, Debug)]
 pub struct Session {

@@ -68,6 +68,14 @@ impl<const N: usize> SharedNapt<N> {
     pub fn new(cfg: NaptConfig, entropy: &mut dyn Entropy) -> Self {
         SharedNapt(Mutex::new(RefCell::new(Napt::new(cfg, entropy))))
     }
+    /// A NAT built at compile time (for a `static`): seed it with [`SharedNapt::seed`] before the first packet.
+    pub const fn new_const(cfg: NaptConfig) -> Self {
+        SharedNapt(Mutex::new(RefCell::new(Napt::new_unseeded(cfg))))
+    }
+    /// Seed the port allocator and hash salt (see [`Napt::seed`]).
+    pub fn seed(&self, entropy: &mut dyn Entropy) {
+        self.with(|n| n.seed(entropy));
+    }
     /// Run `f` on the table. Do not call it from inside another `with` of the same table.
     pub fn with<R>(&self, f: impl FnOnce(&mut Napt<N>) -> R) -> R {
         self.0.lock(|n| f(&mut n.borrow_mut()))

@@ -234,6 +234,7 @@ macro_rules! zero {
 
 impl Stats {
     /// All zero.
+    #[inline(always)]
     pub const fn new() -> Self {
         Self {
             host_in: zero!(),

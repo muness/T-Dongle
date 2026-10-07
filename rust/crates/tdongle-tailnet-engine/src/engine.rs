@@ -73,8 +73,9 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
     pub const STATE_BYTES: usize = core::mem::size_of::<Self>() - core::mem::size_of::<D>();
 
     /// A new engine over `dir`.
-    pub fn new(dir: D) -> Self {
-        Self { members: core::array::from_fn(|_| None), sh: Shared::new(dir) }
+    #[inline(always)]
+    pub const fn new(dir: D) -> Self {
+        Self { members: [const { None }; M], sh: Shared::new(dir) }
     }
 
     /// The heap the runtime measured (call it whenever it changes, or before each `handle`): the elastic sites refuse below the floor (ADR 0022).

@@ -305,7 +305,8 @@ where
         let alive = Alive::new(&slot.alive, ALIVE_DERP);
         let key = slot.ident.lock(|i| i.borrow().wg.clone());
         select(relay(sh, idx, run.id, key, &mut tcp, &stage, &mut wbuf), wait_changed(&mut run_rx, run)).await;
-        tcp.close();
+        // the membership stopped (or changed): the socket's windows go back to the pool, the reset reaches the server
+        tcp.release().await;
         sh.token.release(sh.now(), key_derp(run.id));
         slot.derp_q.clear();
         slot.update(|st| {
@@ -395,7 +396,7 @@ where
     let now_unix = sh.platform.unix_seconds().unwrap_or(0);
     let params = TlsParams { hostname: host, cert: &cert, anchors: DEFAULT_ANCHORS, now_unix };
     let mut rng = crate::shared::PlatformRng(&sh.platform);
-    let handshake = LeasedTlsDerp::connect(&mut *tcp, &mut wbuf[..], &sh.lease, &params, &mut rng);
+    let handshake = LeasedTlsDerp::connect(&mut *tcp, &mut wbuf[..], &sh.lease, sh.mem(), &params, &mut rng);
     let neg = sh.stats.negotiation();
     let outcome = drive(d, true, pin!(handshake)).await;
     drop(neg);

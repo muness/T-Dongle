@@ -53,9 +53,19 @@ impl<'a> RecordReader<'a> {
     /// PATCH(lease): read the 5 byte header of the next record (no buffer needed) and keep it. Idempotent until the record is read.
     pub async fn wait_header(&mut self, transport: &mut impl AsyncRead) -> Result<(), TlsError> {
         if self.header.is_none() {
-            self.header = Some(next_record_header(transport).await?);
+            let h = next_record_header(transport).await?;
+            // RFC 8446 5.2: a ciphertext longer than 2^14 + 256 is a record_overflow; refusing it here keeps a lease from being asked for more than that
+            if h.content_length() > 16_384 + 256 {
+                return Err(TlsError::InvalidRecord);
+            }
+            self.header = Some(h);
         }
         Ok(())
+    }
+
+    /// PATCH(lease2): the body length of the record whose header `wait_header` has read (what a lease for that record needs to hold); `None` before that.
+    pub fn header_len(&self) -> Option<usize> {
+        self.header.as_ref().map(|h| h.content_length())
     }
 
     /// PATCH(lease): read the body of the record whose header `wait_header` returned into `lease` (which only has to live until the record

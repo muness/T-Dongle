@@ -324,6 +324,40 @@ pub struct Stats {
     pub order_errors: Counter,
 }
 
+impl Stats {
+    /// All zero (`const`, so state built from it can live in a `static`).
+    pub const fn new() -> Self {
+        Self {
+            frames_rx: Counter(0),
+            frames_tx: Counter(0),
+            connects: Counter(0),
+            connect_failures: Counter(0),
+            rx_timeouts: Counter(0),
+            tx_stalls: Counter(0),
+            oversize: Counter(0),
+            rx_refused: Counter(0),
+            protocol_errors: Counter(0),
+            stale: Counter(0),
+            pings_answered: Counter(0),
+            pings_dropped: Counter(0),
+            tx_drop_not_ready: Counter(0),
+            tx_drop_too_big: Counter(0),
+            tx_drop_over_budget: Counter(0),
+            tx_drop_no_space: Counter(0),
+            tx_flushed: Counter(0),
+            keepalives: Counter(0),
+            pongs_rx: Counter(0),
+            unknown_frames: Counter(0),
+            malformed_frames: Counter(0),
+            server_info_bad: Counter(0),
+            stray_events: Counter(0),
+            stray_bytes: Counter(0),
+            order_errors: Counter(0),
+        }
+    }
+}
+
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum TxOut {
     None,

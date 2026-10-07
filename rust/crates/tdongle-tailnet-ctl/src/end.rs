@@ -189,3 +189,28 @@ pub struct SessionStats {
     /// HTTP/2 counters.
     pub h2: H2Counters,
 }
+
+impl SessionStats {
+    /// All zero (`const`, so state built from it can live in a `static`).
+    pub const fn new() -> Self {
+        Self {
+            maps: 0,
+            keepalives: 0,
+            peer_events: 0,
+            map_bytes: 0,
+            first_map_applied: false,
+            register_bytes: 0,
+            machine_authorized: false,
+            challenge_seen: false,
+            endpoint_updates: 0,
+            endpoint_updates_unchanged: 0,
+            pings_sent: 0,
+            ping_acks: 0,
+            bytes_in: 0,
+            bytes_out: 0,
+            noise: NoiseStats::new(),
+            h2: H2Counters::new(),
+        }
+    }
+}
+

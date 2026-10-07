@@ -3,7 +3,7 @@
 use crate::adm::{Budget, Verdict};
 
 /// What the platform can say about its internal heap (`heap_caps_get_*_size(MALLOC_CAP_INTERNAL)` on the device).
-pub trait HeapProbe {
+pub trait HeapProbe: Sync {
     /// Free internal heap now, bytes.
     fn free(&self) -> usize;
     /// The largest single free block, bytes.

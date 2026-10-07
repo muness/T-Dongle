@@ -34,6 +34,7 @@ impl AliasBook {
     /// Bytes of the book.
     pub const STATE_BYTES: usize = core::mem::size_of::<Self>();
     /// Empty; the first alias is 198.18.0.1.
+    #[inline(always)]
     pub const fn new() -> Self {
         Self { entries: [const { Cell::new((0, 0, 0)) }; ALIAS_BOOK], n: Cell::new(0), next: Cell::new(ALIAS_BASE) }
     }

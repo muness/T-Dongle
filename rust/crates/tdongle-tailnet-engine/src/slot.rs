@@ -27,6 +27,7 @@ impl WgSlot {
     pub const BYTES: usize = core::mem::size_of::<WgSlot>();
 
     /// A slot for the peer with public key `public` and cold record `cold`.
+    #[inline(always)]
     pub fn new(public: [u8; 32], cold: PeerCold) -> WgSlot {
         WgSlot { hot: PeerHot::new(), cold: Some(cold), public, valid: true }
     }
@@ -96,6 +97,7 @@ pub struct PreDrawn {
 
 impl PreDrawn {
     /// An allocator that will return `index` (or fail when `None`).
+    #[inline(always)]
     pub fn new(index: Option<u32>) -> Self {
         Self { next: index }
     }

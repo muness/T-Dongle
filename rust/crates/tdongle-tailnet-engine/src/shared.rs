@@ -141,7 +141,7 @@ impl<D, const K: usize, const P: usize, const JB: usize> core::fmt::Debug for Ac
 }
 
 impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: usize, const JB: usize> Shared<D, M, K, A, F, JB> {
-    pub(crate) fn new(dir: D) -> Self {
+    pub(crate) const fn new(dir: D) -> Self {
         Self {
             pool: Pool::new(),
             arbiter: Arbiter::new(),

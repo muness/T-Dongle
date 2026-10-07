@@ -30,8 +30,9 @@ fn ram_per_membership_to_the_byte() {
     let futures_per_member = f(FUT_CONTROL) + f(FUT_DERP) + f(FUT_UDP);
     let statics_per_member = slot;
     let engine_per_member = eng.in_engine;
-    let net_per_member = tdongle_tailnet_runtime::net_embassy::GatewayBuffers::PER_MEMBER;
-    let total = futures_per_member + statics_per_member + engine_per_member + net_per_member;
+    let net_per_member = tdongle_tailnet_runtime::net_embassy::Windows::PER_MEMBER;
+    // what a membership pins statically; its socket windows come from the pool while it runs (`net_per_member`)
+    let total = futures_per_member + statics_per_member + engine_per_member;
     let gateway_shared = f(FUT_USB)
         + f(FUT_SUPERVISOR)
         + f(FUT_TIMER)
@@ -39,8 +40,6 @@ fn ram_per_membership_to_the_byte() {
         + f(FUT_DNS)
         + HOST_Q
         + DNS_Q
-        + st.lease
-        + bulk
         + SCRATCH
         + st.token
         + st.registry
@@ -60,21 +59,21 @@ fn ram_per_membership_to_the_byte() {
         "    engine, Member<8> record  {:>8}   (+ resident WireGuard slots {} from the shared pool of 12, DISCO {}, router share {})",
         eng.in_engine, eng.wg_slots_resident, eng.disco, eng.router_share
     );
-    println!("    socket buffers (embassy)  {:>8}   GatewayBuffers::PER_MEMBER (const, same on the device)", net_per_member);
+    println!("    socket windows (POOLED)   {:>8}   Windows::PER_MEMBER: taken from the pool while the membership's sockets exist, not static", net_per_member);
     println!("    ------------------------------------");
-    println!("    RAM per membership        {:>8}   (M-host futures + exact statics; device: see size-table.sh)", total);
+    println!("    STATIC per membership     {:>8}   (M-host futures + exact statics; device: see size-table.sh); + {net_per_member} pooled windows", total);
     println!("  once for the gateway:");
     println!(
-        "    usb {} + supervisor {} + timer {} + link {} + dns {} futures; host queue {HOST_Q}; dns queue {DNS_Q}; TLS lease {}; control Bulk {bulk}; scratch {SCRATCH}; token {}; registry {}; usb side {}",
+        "    usb {} + supervisor {} + timer {} + link {} + dns {} futures; host queue {HOST_Q}; dns queue {DNS_Q}; scratch {SCRATCH}; token {}; registry {}; usb side {} (pooled while used: control Bulk {bulk}, TLS record leases up to {})",
         f(FUT_USB),
         f(FUT_SUPERVISOR),
         f(FUT_TIMER),
         f(FUT_LINK),
         f(FUT_DNS),
-        st.lease,
         st.token,
         st.registry,
-        st.usb_side
+        st.usb_side,
+        st.lease
     );
     println!(
         "    = {gateway_shared}   (+ engine shared part {} = engine {} - {MAX_RUN} x Member)",
@@ -82,11 +81,11 @@ fn ram_per_membership_to_the_byte() {
         st.engine
     );
     println!("  Shared in all (host): {shared} B, of which the test directory {dir}; the joined run future: {} B", FUT_RUN_BYTES(&gw));
-    println!("  the control workspace is one gateway-wide set (Bulk {bulk} B), leased per record / message; each membership keeps {sess} B of session state");
+    println!("  the control workspace (Bulk {bulk} B) is taken from the pool per negotiation / map message; each membership keeps {sess} B of session state");
     assert!(f(FUT_CONTROL) > 0 && f(FUT_DERP) > f(FUT_UDP) && f(FUT_RUN) > f(FUT_DERP) * MAX_RUN);
     assert!(total > 30_000 && total < 250_000, "{total}");
     assert_eq!(st.lease, 16_640);
-    // the point of the lease: a membership's slot no longer holds the workspace
+    // the point of the pool: a membership's slot holds neither the workspace nor its sockets' windows
     assert!(slot < bulk / 2 && slot >= UDP_Q + DERP_Q + sess, "slot {slot}, bulk {bulk}");
     assert!(sess < 2_000, "{sess}");
 }

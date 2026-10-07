@@ -23,6 +23,7 @@ use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use tdongle_tailnet_control::requests::AUTH_URL_BYTES;
 use tdongle_tailnet_ctl::{Bulk, BulkLease, SessionBuf, SessionStats};
+use tdongle_tailnet_pool::{Charge, Class, Mem, Pool};
 use tdongle_tailnet_derp::link::{State as LinkState, Stats as LinkStats};
 use tdongle_tailnet_disco::Ep;
 use tdongle_tailnet_engine::{GatewayEngine, Handled, Input, NetmapEvent, Out, Output, PeerDirectory};
@@ -46,6 +47,10 @@ pub const DERP_Q: usize = 2048;
 /// engine), the USB side's two frame buffers, the registry's JSON. It is held only inside synchronous code (never across an `.await`), so tasks never
 /// contend for it in a single-executor image; the order of locks is registry, scratch, engine, leaf queues.
 pub const SCRATCH: usize = REGISTRY_SCRATCH;
+/// The pool's byte cap: what the runtime may hold at once as socket windows, TLS records and control workspaces. The heap floor is the real governor (every
+/// allocation must leave `ML_HB_FLOOR` free); this is the bound a test or a misbehaving peer cannot argue with: three memberships' windows (3 x 22.7 KB), a
+/// control workspace, a few TLS records.
+pub const POOL_CAP: usize = 3 * 23_552 + 2 * 17_744 + 4 * 16_640;
 /// Capacity of the queue towards the USB host (tunnel packets and DNS answers).
 pub const HOST_Q: usize = 8192;
 /// Capacity of the queue of DNS queries for the upstream resolver.
@@ -138,6 +143,7 @@ pub struct CertBook {
 
 impl CertBook {
     /// Empty.
+    #[inline(always)]
     pub const fn new() -> Self {
         CertBook { entries: [None, None, None, None] }
     }
@@ -231,7 +237,8 @@ pub struct SlotStatus {
 
 impl SlotStatus {
     /// A free slot.
-    pub fn new() -> Self {
+    #[inline(always)]
+    pub const fn new() -> Self {
         SlotStatus {
             state: SlotState::Free,
             id: 0,
@@ -240,14 +247,14 @@ impl SlotStatus {
             joined: false,
             sessions: 0,
             attempts: 0,
-            ctl: SessionStats::default(),
+            ctl: SessionStats::new(),
             noise_error: 0,
             map_error: 0,
             auth_url: FixedStr::new(),
             key_expired: false,
             last_error: FixedStr::new(),
             derp_state: LinkState::Idle,
-            derp: LinkStats::default(),
+            derp: LinkStats::new(),
             tls_untrusted: 0,
             tls_deferred: 0,
             tls_ok: 0,
@@ -272,6 +279,43 @@ impl SlotStatus {
 }
 
 impl Default for SlotStatus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RtStats {
+    /// All counters zero (`const`, so the shared state can be built at compile time).
+    pub const fn new() -> Self {
+        Self {
+            usb_rx: AtomicU32::new(0),
+            usb_tx: AtomicU32::new(0),
+            usb_tx_refused: AtomicU32::new(0),
+            to_engine: AtomicU32::new(0),
+            napt_forwarded: AtomicU32::new(0),
+            napt_refused: AtomicU32::new(0),
+            wifi_refused: AtomicU32::new(0),
+            local_other: AtomicU32::new(0),
+            dns_in: AtomicU32::new(0),
+            dns_fwd: AtomicU32::new(0),
+            dns_replies: AtomicU32::new(0),
+            out_refused: AtomicU32::new(0),
+            rx_heap_refused: AtomicU32::new(0),
+            rx_budget_refused: AtomicU32::new(0),
+            ticks: AtomicU32::new(0),
+            link_changes: AtomicU32::new(0),
+            admission_refused: AtomicU32::new(0),
+            admitted: AtomicU32::new(0),
+            identities_generated: AtomicU32::new(0),
+            identities_loaded: AtomicU32::new(0),
+            storage_failures: AtomicU32::new(0),
+            neg_now: AtomicU32::new(0),
+            neg_max: AtomicU32::new(0),
+        }
+    }
+}
+
+impl Default for RtStats {
     fn default() -> Self {
         Self::new()
     }
@@ -315,7 +359,8 @@ pub const ALIVE_DERP: u8 = 2;
 pub const ALIVE_UDP: u8 = 4;
 
 impl<R: RawMutex> Slot<R> {
-    fn new() -> Self {
+    #[inline(always)]
+    const fn new() -> Self {
         Slot {
             run: Watch::new(),
             alive: AtomicU8::new(0),
@@ -351,7 +396,7 @@ pub struct LinkView {
 }
 
 /// Counters of the runtime itself (everything that is not the engine's or a protocol crate's own). All atomic: any task bumps them.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RtStats {
     /// Frames received from the USB host.
     pub usb_rx: AtomicU32,
@@ -475,30 +520,26 @@ impl Config {
     }
 }
 
-/// The control sessions' big buffers, leased one holder at a time (a [`BulkLease`]): the same idea as the TLS record lease, with its counters.
-pub struct SharedBulk<R: RawMutex> {
-    buf: AsyncMutex<R, Bulk>,
+/// The counters of the control sessions' big buffers (a [`BulkLease`] through [`BulkSource`]). The buffers themselves ([`Bulk`], 17.7 KB) are taken from the
+/// pool for the time a session needs them and given back after: nothing of them is static.
+#[derive(Debug, Default)]
+pub struct SharedBulk {
     holders: AtomicU8,
     max_holders: AtomicU8,
     leases: AtomicU32,
 }
 
-impl<R: RawMutex> core::fmt::Debug for SharedBulk<R> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("SharedBulk").field("max_holders", &self.max_holders()).field("leases", &self.leases()).finish()
+impl SharedBulk {
+    /// No leases yet.
+    #[inline(always)]
+    pub const fn new() -> Self {
+        Self { holders: AtomicU8::new(0), max_holders: AtomicU8::new(0), leases: AtomicU32::new(0) }
     }
-}
-
-impl<R: RawMutex> SharedBulk<R> {
-    /// The buffers, free. Not `const` (the map projector's constructor is not).
-    pub fn new() -> Self {
-        Self { buf: AsyncMutex::new(Bulk::new()), holders: AtomicU8::new(0), max_holders: AtomicU8::new(0), leases: AtomicU32::new(0) }
-    }
-    /// Holders now (0 or 1).
+    /// Holders now.
     pub fn holders(&self) -> u8 {
         self.holders.load(Ordering::Relaxed)
     }
-    /// The most holders ever at once (the invariant is 1).
+    /// The most holders ever at once (the token admits one join at a time; a streaming membership's per-message lease may overlap it when the heap allows).
     pub fn max_holders(&self) -> u8 {
         self.max_holders.load(Ordering::Relaxed)
     }
@@ -508,54 +549,62 @@ impl<R: RawMutex> SharedBulk<R> {
     }
 }
 
-impl<R: RawMutex> Default for SharedBulk<R> {
-    fn default() -> Self {
-        Self::new()
-    }
+/// One session's way to get a [`Bulk`]: from the pool, as a [`Class::Negotiation`] allocation (the join's peak, which the heap floor reserves), waiting when the
+/// pool says no.
+#[derive(Debug)]
+pub struct BulkSource<'a> {
+    /// The counters.
+    pub stats: &'a SharedBulk,
+    /// The pool and the heap probe.
+    pub mem: Mem<'a>,
 }
 
-/// A held lease on [`SharedBulk`]; released on drop.
-pub struct BulkGuard<'a, R: RawMutex> {
-    guard: embassy_sync::mutex::MutexGuard<'a, R, Bulk>,
-    pool: &'a SharedBulk<R>,
+/// A held lease on a [`Bulk`]; its bytes go back to the pool on drop.
+pub struct BulkGuard<'a> {
+    bulk: alloc::boxed::Box<Bulk>,
+    stats: &'a SharedBulk,
+    _charge: Charge<'a>,
 }
 
-impl<R: RawMutex> core::fmt::Debug for BulkGuard<'_, R> {
+impl core::fmt::Debug for BulkGuard<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("BulkGuard")
     }
 }
 
-impl<R: RawMutex> core::ops::Deref for BulkGuard<'_, R> {
+impl core::ops::Deref for BulkGuard<'_> {
     type Target = Bulk;
     fn deref(&self) -> &Bulk {
-        &self.guard
+        &self.bulk
     }
 }
 
-impl<R: RawMutex> core::ops::DerefMut for BulkGuard<'_, R> {
+impl core::ops::DerefMut for BulkGuard<'_> {
     fn deref_mut(&mut self) -> &mut Bulk {
-        &mut self.guard
+        &mut self.bulk
     }
 }
 
-impl<R: RawMutex> Drop for BulkGuard<'_, R> {
+impl Drop for BulkGuard<'_> {
     fn drop(&mut self) {
-        self.pool.holders.fetch_sub(1, Ordering::Relaxed);
+        self.stats.holders.fetch_sub(1, Ordering::Relaxed);
     }
 }
 
-impl<R: RawMutex> BulkLease for SharedBulk<R> {
-    type Guard<'a>
-        = BulkGuard<'a, R>
+impl<'a> BulkLease for BulkSource<'a> {
+    type Guard<'g>
+        = BulkGuard<'a>
     where
-        Self: 'a;
-    async fn lease(&self) -> BulkGuard<'_, R> {
-        let guard = self.buf.lock().await;
-        let n = self.holders.fetch_add(1, Ordering::Relaxed) + 1;
-        self.max_holders.fetch_max(n, Ordering::Relaxed);
-        self.leases.fetch_add(1, Ordering::Relaxed);
-        BulkGuard { guard, pool: self }
+        Self: 'g;
+    async fn lease(&self) -> BulkGuard<'a> {
+        // admitted and counted first (this waits for memory), and proven servable by the allocator with a block of exactly this size, which is freed again
+        // just before the box takes its place: `Box::new` then does not reach the allocator's out-of-memory handler
+        let charge = self.mem.alloc_wait(Class::Negotiation, core::mem::size_of::<Bulk>()).await.into_charge();
+        let bulk = alloc::boxed::Box::new(Bulk::new());
+        let n = self.stats.holders.fetch_add(1, Ordering::Relaxed) + 1;
+        self.stats.max_holders.fetch_max(n, Ordering::Relaxed);
+        self.stats.leases.fetch_add(1, Ordering::Relaxed);
+        BulkGuard { bulk, stats: self.stats, _charge: charge }
     }
 }
 
@@ -600,11 +649,13 @@ pub struct Shared<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     /// The negotiation token.
     pub token: Token<R>,
     /// The one 16,640-byte TLS record buffer all DERP connections share.
-    pub lease: LeasePool<R>,
+    pub lease: LeasePool,
+    /// The dynamic buffer pool: socket windows, TLS records and the control session's [`Bulk`] are taken from it while they are needed (ADR 0002, "RAM fit").
+    pub pool: Pool,
     /// The shared scratch buffer (see [`SCRATCH`]); take it with [`Shared::with_scratch`].
     scratch: Mutex<R, RefCell<[u8; SCRATCH]>>,
     /// The one set of big control-session buffers (record reader, sealed record, JSON, projector) every membership's control task leases.
-    pub bulk: SharedBulk<R>,
+    pub bulk: SharedBulk,
     /// The next time the engine must be ticked.
     pub wake_at: Mutex<R, Cell<Option<Millis>>>,
     /// Re-arms the engine timer.
@@ -699,22 +750,29 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> 
         self.scratch.lock(|s| f(&mut s.borrow_mut()))
     }
 
+    /// The pool with the platform's heap probe: what a task takes buffers with.
+    pub fn mem(&self) -> Mem<'_> {
+        Mem { pool: &self.pool, heap: self.platform.heap() }
+    }
+
     /// Build the shared state around the image's platform, storage and the engine's peer directory. Nothing runs until [`crate::run`].
     ///
     /// Not `const`: the control workspace contains the map projector, whose constructor is not `const` in `tdongle-tailnet-map`. Build it in place with
     /// `StaticCell::init_with(|| Shared::new(..))`.
-    pub fn new(cfg: Config, platform: P, storage: S, dir: D) -> Self {
+    #[inline(always)]
+    pub const fn new(cfg: Config, platform: P, storage: S, dir: D) -> Self {
         Shared {
             platform,
             cfg,
             storage: Mutex::new(RefCell::new(storage)),
             engine: Mutex::new(RefCell::new(GatewayEngine::new(dir))),
-            slots: core::array::from_fn(|_| Slot::new()),
+            slots: [const { Slot::new() }; MAX_RUN],
             registry: Mutex::new(RefCell::new(RegistryCell { reg: MemberRegistry::new(), loaded: false, damaged: false })),
             host_q: ByteQueue::new(),
             dns_q: ByteQueue::new(),
             token: Token::new(),
             lease: LeasePool::new(),
+            pool: Pool::new(POOL_CAP),
             bulk: SharedBulk::new(),
             scratch: Mutex::new(RefCell::new([0; SCRATCH])),
             wake_at: Mutex::new(Cell::new(None)),
@@ -724,11 +782,11 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> 
             carrier_kick: Signal::new(),
             ready_count: AtomicU8::new(0),
             clock_valid: AtomicBool::new(false),
-            stats: RtStats::default(),
+            stats: RtStats::new(),
             heap_low_events: AtomicU32::new(0),
             heap_min_seen: AtomicU32::new(u32::MAX),
             epoch: AtomicU32::new(1),
-            fut_bytes: core::array::from_fn(|_| AtomicU32::new(0)),
+            fut_bytes: [const { AtomicU32::new(0) }; crate::sizes::FUTURES],
             net_member_bytes: AtomicU32::new(0),
             ledger: tdongle_tailnet_admission::ledger::Ledger::new(),
             adm_log: Mutex::new(RefCell::new(AdmLog {

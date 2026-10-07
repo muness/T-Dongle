@@ -35,6 +35,7 @@ tdongle-tailnet-dns = { path = "../tdongle-tailnet-dns" }
 tdongle-tailnet-tls = { path = "../tdongle-tailnet-tls", default-features = false, features = ["lease", "p384"] }
 tdongle-tailnet-engine = { path = "../tdongle-tailnet-engine", features = ["status"] }
 tdongle-tailnet-admission = { path = "../tdongle-tailnet-admission" }
+tdongle-tailnet-pool = { path = "../tdongle-tailnet-pool" }
 tdongle-tailnet-members = { path = "../tdongle-tailnet-members" }
 tdongle-tailnet-status = { path = "../tdongle-tailnet-status" }
 tdongle-tailnet-usbnet = { path = "../tdongle-tailnet-usbnet" }
