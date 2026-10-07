@@ -1018,7 +1018,7 @@ fn saved_for_join() -> Option<tdongle_nvs_format::load::Loaded> {
 // Keep the station configuration temporaries out of the long-running async
 // supervisor's frame (which also owns its saved-profile snapshot).
 #[inline(never)]
-fn configure_station(controller: &mut WifiController<'static>, ssid: &[u8], pass: &[u8], best_bss: Option<Bss>) -> bool {
+fn configure_station(controller: &mut WifiController<'static>, ssid: &str, pass: &str, best_bss: Option<Bss>) -> bool {
     let auth = match pass.try_into() {
         Ok(p) if !pass.is_empty() => AuthenticationMethodConfig::Wpa2Personal(p),
         _ => AuthenticationMethodConfig::Open,
