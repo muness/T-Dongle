@@ -26,15 +26,36 @@ else
   images=(0x20000 "$src")
 fi
 
-free_port() { local p; for p in /dev/cu.usbmodem*; do lsof -t "$p" 2>/dev/null | xargs -r kill -9 2>/dev/null || true; done; }
+# Resolve only this board's serial descendants from the live IORegistry. Never
+# probe unrelated serial devices: read_mac can change their running state.
+board_ports() {
+  python3 - "$MAC" <<'PORTS'
+import plistlib, subprocess, sys
+mac = sys.argv[1].replace(':', '').lower()
+tree = plistlib.loads(subprocess.check_output(['ioreg', '-a', '-l', '-p', 'IOService']))
+def walk(node, matched=False):
+    if not isinstance(node, dict):
+        return
+    serial = str(node.get('USB Serial Number', node.get('kUSBSerialNumberString', '')))
+    matched = matched or serial.replace(':', '').lower() == mac
+    port = node.get('IOCalloutDevice')
+    if matched and isinstance(port, str) and port.startswith('/dev/cu.usbmodem'):
+        print(port)
+    for child in node.get('IORegistryEntryChildren', []):
+        walk(child, matched)
+for root in (tree if isinstance(tree, list) else [tree]):
+    walk(root)
+PORTS
+}
+free_port() { local p; while IFS= read -r p; do [[ -n "$p" ]] && { lsof -t "$p" 2>/dev/null | xargs -r kill -9 2>/dev/null || true; }; done < <(board_ports); }
 mac_of() { "$ESPTOOL" --chip esp32s3 --port "$1" --before no_reset --after no_reset read_mac 2>/dev/null | grep -m1 -io 'MAC: [0-9a-f:]*' | cut -d' ' -f2; }
 
 find_rom_port() {
   local p
-  for p in /dev/cu.usbmodem*; do
-    [[ "$p" == "$APP_PORT" ]] && continue
+  while IFS= read -r p; do
+    [[ -z "$p" || "$p" == "$APP_PORT" ]] && continue
     [[ "$(mac_of "$p" | tr A-F a-f)" == "$MAC" ]] && { ROM_PORT="$p"; return 0; }
-  done
+  done < <(board_ports)
   return 1
 }
 
