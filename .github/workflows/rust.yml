@@ -19,7 +19,7 @@ jobs:
   host:
     # Pure crates: no hardware, no ESP-IDF. Stable Rust, plus Miri and loom on the crates that have unsafe or lock-free code.
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults: {run: {working-directory: rust}}
     steps:
       - uses: actions/checkout@v4
