@@ -60,6 +60,36 @@ pub trait Platform {
     /// One serial console line (without the newline); the image owns line discipline and the ACM writer. Used for the C-compatible `tailnet`/`route`
     /// lines the Android app parses.
     fn console_line(&self, line: &str);
+    /// The chip temperature sensor's snapshot (`tdongle_temperature_snapshot`), `None` when the image has no sensor (tests).
+    fn chip_temperature(&self) -> Option<ChipTemperature> {
+        None
+    }
+    /// Bytes of the stack never used so far (`uxTaskGetStackHighWaterMark`); `None` when the image does not measure it. The Rust image has one stack that every task
+    /// runs on, so every task's figure is this one.
+    fn stack_free_bytes(&self) -> Option<u32> {
+        None
+    }
+}
+
+/// `tdongle_temperature`: the sensor's state as `/status` reports it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChipTemperature {
+    /// The latest sample succeeded.
+    pub valid: bool,
+    /// Latest reading, tenths of a degree C.
+    pub current_tenths: i32,
+    /// Highest reading since boot.
+    pub peak_tenths: i32,
+    /// Uptime of the latest successful sample.
+    pub sampled_at_ms: u32,
+    /// Failed samples.
+    pub errors: u32,
+    /// Successful samples.
+    pub samples: u32,
+    /// Uptime when `current` last changed.
+    pub changed_at_ms: u32,
+    /// Snapshot time minus `sampled_at_ms` (`u32::MAX` before the first sample).
+    pub age_ms: u32,
 }
 
 /// A storage failure. The runtime treats every variant as "not saved" and reports it in `/status`.

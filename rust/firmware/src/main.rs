@@ -11,6 +11,8 @@ extern crate alloc;
 mod ops;
 mod guard;
 mod supervise;
+mod stackmark;
+mod temperature;
 mod settings;
 mod l2;
 mod dhcp;
@@ -37,6 +39,7 @@ use embassy_futures::yield_now;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use esp_hal::interrupt::Priority;
 use esp_rtos::embassy::InterruptExecutor;
+use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
@@ -654,6 +657,7 @@ async fn main(spawner: Spawner) -> ! {
     let state: &'static guard::State = STATE.init(guard::begin());
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     tdongle_rescue::arm();
+    stackmark::paint();
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: HEAP_RECLAIMED);
     #[cfg(feature = "tailnet")]
     esp_alloc::heap_allocator!(#[esp_hal::ram(unstable(dcache_reclaimed))] size: tailnet::budget::HEAP_DCACHE);
@@ -750,6 +754,7 @@ async fn main(spawner: Spawner) -> ! {
     spawner.spawn(ring_housekeeping_task().unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
     spawner.spawn(settings::task().unwrap());
+    spawner.spawn(temperature::task().unwrap());
     spawner.spawn(
         ui::ui_task(ui::Hardware {
             spi: peripherals.SPI2,
@@ -1431,13 +1436,58 @@ async fn ring_housekeeping_task() -> ! {
 // Console (CDC-ACM)
 // ======================================================================================================================
 
+/// Where a command's reply goes: the CDC-ACM console, or the buffer of the USB-side `POST /serial` (tailnet mode). **One dispatcher** ([`handle`]) serves both: the
+/// HTTP endpoint hands its line to the console task over [`HTTP_LINE`] and streams the pieces the dispatcher emits from [`HTTP_OUT`].
+#[derive(Clone, Copy)]
+enum Sink {
+    Console(&'static Mutex<CriticalSectionRawMutex, AcmWriter>),
+    Http,
+}
+
+/// A command line from `POST /serial`, for the console task (one at a time; the HTTP side serialises callers).
+pub static HTTP_LINE: Channel<CriticalSectionRawMutex, String, 1> = Channel::new();
+/// The reply pieces of the command in [`HTTP_LINE`], in order; an empty piece ends the reply. (A restarting command's last piece is the last thing sent: the chip resets right after.)
+pub static HTTP_OUT: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
+
+async fn emit(sink: Sink, s: &str, timeout_ms: u64) {
+    match sink {
+        Sink::Console(w) => out(w, s, timeout_ms).await,
+        // a full channel means the HTTP side gave up: drop, never wait (the console must not wedge)
+        Sink::Http => {
+            if !s.is_empty() {
+                let _ = HTTP_OUT.try_send(String::from(s));
+            }
+        }
+    }
+}
+
+/// Run one `POST /serial` line through the dispatcher and end its reply.
+async fn http_line(bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
+    handle(Sink::Http, bridge, state, line).await;
+    let _ = HTTP_OUT.try_send(String::new());
+}
+
 async fn out(w: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, s: &str, timeout_ms: u64) {
     let mut g = w.lock().await;
     // Do not wedge the console if nobody reads the port.
     let _ = with_timeout(Duration::from_millis(timeout_ms), g.write_all(s.as_bytes())).await;
 }
 
-/// `scan`: every access point of the last scan, strongest first (C `scan` prints `ssid= rssi= auth=`; the BSSID and channel are added), then a summary.
+/// `scan`: the C reply (`serial_scan` of the unified C): at most 12 access points of the last scan, strongest first, one `ssid=%s rssi=%d auth=%d` line each
+/// (the Android app's `ScanNetwork.parse` takes nothing else on a line). Hidden networks are left out (the C scans with `show_hidden = false`), and so is
+/// a row whose security the driver did not report (the app refuses an `auth` it does not know).
+fn scan_text_c(out: &mut String) {
+    let mut listed = 0;
+    scan_rows(|ssid, rssi, auth| {
+        if listed == 12 || ssid[0] == 0 || auth == 0xff {
+            return;
+        }
+        listed += 1;
+        let _ = reply::write_scan_line(out, ssid, rssi as i8, i32::from(auth));
+    });
+}
+
+/// `scan-detail`: every access point of the last scan, strongest first, with BSSID, channel and whether it is usable, then a summary.
 fn scan_text(out: &mut String) {
     // One row is copied out of the table at a time: formatting (which allocates) happens outside any critical section.
     let (count, seen, seq, joined) = critical_section::with(|cs| {
@@ -1472,15 +1522,15 @@ fn scan_text(out: &mut String) {
     let _ = write!(out, "scan_done seen={} listed={} seq={}\r\n", seen, count, seq);
 }
 
-/// The rows of the last scan as the setup page lists them: SSID (32 byte field), signal, not open.
-fn scan_rows(mut f: impl FnMut(&[u8; 32], i32, bool)) {
+/// The rows of the last scan, strongest first: SSID (32 byte field), signal, the driver's auth mode (`wifi_auth_mode_t` numbering, 0 open, 0xff unknown).
+pub(crate) fn scan_rows(mut f: impl FnMut(&[u8; 32], i32, u8)) {
     let n = critical_section::with(|cs| SCAN_TABLE.borrow_ref(cs).count);
     for i in 0..n {
         let row = critical_section::with(|cs| SCAN_TABLE.borrow_ref(cs).rows[i]);
         let mut ssid = [0u8; 32];
         let len = usize::from(row.ssid_len).min(32);
         ssid[..len].copy_from_slice(&row.ssid[..len]);
-        f(&ssid, i32::from(row.bss.rssi), row.auth != 0);
+        f(&ssid, i32::from(row.bss.rssi), row.auth);
     }
 }
 
@@ -1591,7 +1641,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         usb_ready: ALT.load(Ordering::Relaxed) != 0,
         uptime_ms: Instant::now().as_millis(),
         free_heap: esp_alloc::HEAP.free() as u32,
-        temperature: Default::default(),
+        temperature: temperature::snapshot(),
         clock: clock_for_status().0,
         clock_valid: clock_for_status().1,
         link: {
@@ -1620,7 +1670,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
             down_kbps: TRAFFIC_RATES.read().0,
             up_kbps: TRAFFIC_RATES.read().1,
             usb_resets: RESETS.load(Ordering::Relaxed),
-            control_stack_free_bytes: 0,
+            control_stack_free_bytes: stackmark::free_bytes(),
         },
         memory: &none,
     };
@@ -1772,16 +1822,25 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
     loop {
         // every wait has a 500 ms timer so the loop proves it is being polled (`supervise::console_alive`) even with no host attached
         supervise::console_alive().await;
-        if matches!(select(rd.wait_connection(), Timer::after_millis(500)).await, Either::Second(())) {
-            continue;
+        match select3(rd.wait_connection(), Timer::after_millis(500), HTTP_LINE.receive()).await {
+            Either3::First(_) => {}
+            Either3::Second(()) => continue,
+            Either3::Third(line) => {
+                http_line(bridge, state, &line).await;
+                continue;
+            }
         }
         loop {
             supervise::console_alive().await;
             let mut pkt = [0u8; 64];
-            let len = match select(rd.read_packet(&mut pkt), Timer::after_millis(500)).await {
-                Either::First(Ok(len)) => len,
-                Either::First(Err(_)) => break,
-                Either::Second(()) => continue,
+            let len = match select3(rd.read_packet(&mut pkt), Timer::after_millis(500), HTTP_LINE.receive()).await {
+                Either3::First(Ok(len)) => len,
+                Either3::First(Err(_)) => break,
+                Either3::Second(()) => continue,
+                Either3::Third(line) => {
+                    http_line(bridge, state, &line).await;
+                    continue;
+                }
             };
             for &c in &pkt[..len] {
                 let Some(ev) = reader.feed(c) else { continue };
@@ -1792,18 +1851,18 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
                 let Event::Line(line) = ev else { continue };
                 let mut owned = String::new();
                 let _ = owned.write_str(line);
-                handle(wr, bridge, state, &owned).await;
+                handle(Sink::Console(wr), bridge, state, &owned).await;
             }
         }
     }
 }
 
-async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
+async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
     let mut s = String::new();
     #[cfg(feature = "tailnet")]
     if let Some(reply) = tailnet::console(line).await {
         // a command the tailnet gateway owns (route, members, memory, inbound, member ..., tn-mem, tailnet-status)
-        out(wr, &reply, 3000).await;
+        emit(wr, &reply, 3000).await;
         return;
     }
     match line {
@@ -1833,11 +1892,13 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 None => s.push_str("usage: usb bridge|sink|source RATE_KBPS|max\r\n"),
             }
         }
-        "scan" => {
+        "scan" | "scan-detail" => {
             SCAN_DONE.reset();
             SCAN_REQ.signal(());
             if with_timeout(Duration::from_secs(20), SCAN_DONE.wait()).await.is_err() {
                 s.push_str("ERR scan did not finish (radio not started?)\r\n");
+            } else if line == "scan" {
+                scan_text_c(&mut s);
             } else {
                 scan_text(&mut s);
             }
@@ -1851,7 +1912,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
         "selftest flash" => dirflash::selftest(&mut s),
         st if st.starts_with("selftest ") => match tdongle_rescue::Selftest::parse(&st["selftest ".len()..]) {
             Some(kind) => {
-                out(wr, "selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)\r\n", 300).await;
+                emit(wr, "selftest: breaking this image on purpose; the rescue must reset it (two in a row: ROM download mode)\r\n", 300).await;
                 supervise::selftest(kind);
             }
             None => s.push_str("usage: selftest spin|irqoff|panic|console\r\n"),
@@ -1886,13 +1947,13 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
         }
         "normal" => {
             guard::leave_safe_mode();
-            out(wr, "leaving safe mode: resetting\r\n", 500).await;
+            emit(wr, "leaving safe mode: resetting\r\n", 500).await;
             Timer::after(Duration::from_millis(200)).await;
             crate::guard::planned_reset()
         }
         "bootloader" => {
             guard::leave_safe_mode(); // a deliberate reset is not a failed boot
-            out(wr, "rebooting to ROM download mode\r\n", 500).await;
+            emit(wr, "rebooting to ROM download mode\r\n", 500).await;
             Timer::after(Duration::from_millis(200)).await;
             ops::enter_bootloader()
         }
@@ -1913,10 +1974,39 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 }
             }
             Command::Help => {
-                let _ = reply::write_help_implemented(&mut s, "T-Dongle Wi-Fi bridge", reply::PHASE1_FIRMWARE_COMMANDS);
+                // the identity line the Android app checks, then every other command this image implements
+                let more = match (cfg!(feature = "tailnet"), tailnet_active()) {
+                    (_, true) => ", mode wifi_bridge|tailnet_gateway, tailnet-status, member add LABEL [KEY]|enable ID|disable ID|remove ID",
+                    (true, false) => ", mode wifi_bridge|tailnet_gateway",
+                    (false, _) => ", mode wifi_bridge",
+                };
+                let _ = reply::write_help_firmware(&mut s, tailnet_active(), more);
             }
             Command::Capabilities => {
-                let _ = reply::write_capabilities_implemented(&mut s, &["boot_diagnostics", "power_report"]);
+                // what this image implements: the unified C's list, `mode_switch` only where both modes exist, and the companion's metadata and display read-back
+                let _ = reply::write_capabilities_firmware(&mut s, tailnet_active(), cfg!(feature = "tailnet"));
+            }
+            Command::DisplaySettings => {
+                let d = critical_section::with(|cs| STORED.borrow(cs).get()).map(|x| x.display).unwrap_or_default();
+                let _ = reply::write_display_settings(&mut s, d.brightness, d.rotation, d.dim_seconds);
+            }
+            Command::Preference => {
+                let (preferred, count) = SAVED.lock(|c| c.borrow().as_ref().map_or((None, 0), |l| (l.meta.preferred, l.saved.count)));
+                let _ = reply::write_preference(&mut s, preferred, count);
+            }
+            Command::Metadata(_) if setup::ACTIVE.load(Ordering::Relaxed) => s.push_str(reply::METADATA_UNAVAILABLE),
+            Command::Metadata(json) => s.push_str(&settings::call(settings::Req::Metadata(String::from(json))).await.0),
+            Command::RetryStartup => {
+                // C `gateway_boot_retry`: keep the crash evidence, reset the recovery guard, restart. The evidence of the previous failure is already in flash
+                // (`settings::persist_diagnosis` at boot, printed by `status` as `last_diag`); without a mounted store it could not have been kept.
+                if settings::STORE.lock().await.is_none() {
+                    s.push_str(reply::RETRY_STARTUP_FAILED);
+                } else {
+                    guard::leave_safe_mode();
+                    emit(wr, reply::RETRY_STARTUP_OK, 500).await;
+                    Timer::after(Duration::from_millis(300)).await;
+                    crate::guard::planned_reset()
+                }
             }
             Command::List => {
                 SAVED.lock(|c| {
@@ -1957,7 +2047,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             Command::ConfirmReset => {
                 let (text, restart) = settings::call(settings::Req::ConfirmReset).await;
                 if restart {
-                    out(wr, &text, 500).await;
+                    emit(wr, &text, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
                     setup::restart(tdongle_setup::boot::Request::Enter, 0)
                 }
@@ -1970,7 +2060,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             Command::Mode(Some(mode)) => {
                 let (text, restart) = settings::call(settings::Req::Mode(mode)).await;
                 if restart {
-                    out(wr, &text, 500).await;
+                    emit(wr, &text, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
                     crate::guard::planned_reset()
                 }
@@ -1991,7 +2081,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                         s.push_str(reply::SETUP_ALREADY_OPEN);
                     }
                     Some(n) => {
-                        out(wr, reply::SETUP_RESTARTING, 500).await;
+                        emit(wr, reply::SETUP_RESTARTING, 500).await;
                         Timer::after(Duration::from_millis(300)).await;
                         setup::restart(tdongle_setup::boot::Request::Enter, u32::from(n))
                     }
@@ -1999,7 +2089,7 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             }
             Command::Cancel => {
                 if setup::ACTIVE.load(Ordering::Relaxed) {
-                    out(wr, reply::CANCEL_LEAVING, 500).await;
+                    emit(wr, reply::CANCEL_LEAVING, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
                     setup::restart(tdongle_setup::boot::Request::Leave, 0)
                 }
@@ -2007,16 +2097,16 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             }
             Command::Reboot => {
                 guard::leave_safe_mode();
-                out(wr, reply::REBOOT_OK, 500).await;
+                emit(wr, reply::REBOOT_OK, 500).await;
                 Timer::after(Duration::from_millis(200)).await;
                 crate::guard::planned_reset()
             }
             _ => {
-                let _ = reply::write_unknown(&mut s, false);
+                let _ = reply::write_unknown(&mut s, tailnet_active());
             }
         },
     }
-    out(wr, &s, 3000).await;
+    emit(wr, &s, 3000).await;
 }
 
 /// `heap` line every 5 s: to the console when the host holds DTR (`heap off` silences it) and to esp-println.

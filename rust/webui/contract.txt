@@ -1,0 +1,66 @@
+# The transport contract of the controller: every command form, and which transports serve it.
+#
+# One dispatcher (rust/firmware/src/main.rs `handle`) serves both transports. Web Serial types the line into the CDC-ACM
+# console; HTTP POSTs the same line to /serial (tailnet mode, 192.168.77.1), and tdongle_setup::usb::command_allowed decides
+# whether it reaches the dispatcher. Reply bytes are the same either way.
+#
+# Format: KIND | PATTERN | EXEMPLAR | NOTE
+#   both    served over Web Serial and POST /serial: same dispatcher, same reply bytes
+#   serial  console only: POST /serial answers 403 "That command is not available here"
+#   absent  not a command on any transport (the dispatcher replies "unknown"); listed so adding one forces a decision here
+# PATTERN is a JavaScript regex (whole line) the web UI's sent lines are matched against.
+# EXEMPLAR is one concrete line; the Rust test (tdongle-setup/tests/webui_contract.rs) and rust/webui/test.mjs both run it.
+#
+# Checked by: cargo test -p tdongle-setup --test webui_contract, and node rust/webui/test.mjs.
+#
+# The C USB page's endpoints are served beside /serial (the Android app's tailnet setup view proxies only GET /status, GET /wifi-scan
+# and POST /command): GET /wifi-scan runs `scan` through the same dispatcher and answers the C JSON from the table it filled; POST /command
+# (application/json, the C actions) runs `mode NAME` and `member ...` as those console lines through the same dispatcher, and `wifi` /
+# `wifi_remove` through the settings worker the console's `profile` / `del` use (tdongle_setup::usb::command_plan; tests/usb_command.rs).
+
+both   | status                                     | status                     | web UI poll; the Android app; carries chip_temperature (the temperature reading)
+both   | list                                       | list                       | web UI poll; the Android app
+both   | scan                                       | scan                       | web UI "Scan nearby"; the Android app
+both   | tailnet-status                             | tailnet-status             | web UI in tailnet mode
+both   | help                                       | help                       | the Android app's identity check
+both   | capabilities                               | capabilities               | the Android app
+both   | display                                    | display                    | read back display settings
+both   | display \d{1,3} [01] \d{2,4}               | display 60 1 120           | web UI Display form; the Android app
+both   | use [1-8]                                  | use 2                      | web UI "Use & prefer"; the Android app
+both   | del [1-8]                                  | del 2                      | web UI Delete; the Android app
+both   | profile \{.*\}                             | profile {"slot":3,"name":"Car","ssid":"CarWifi","password":"","priority":40} | web UI Save network; the Android app
+both   | mode (wifi_bridge|tailnet_gateway)         | mode wifi_bridge           | web UI Mode; restarts the dongle
+both   | mode (wifi_bridge|tailnet_gateway)         | mode tailnet_gateway       | web UI Mode; restarts the dongle
+both   | member add [A-Za-z0-9-]{1,20}( \S{1,159})? | member add work            | web UI Add tailnet (browser sign-in)
+both   | member add [A-Za-z0-9-]{1,20}( \S{1,159})? | member add work tskey-abc  | web UI Add tailnet (auth key)
+both   | member (enable|disable|remove) [1-9]\d*    | member enable 3            | web UI Reconnect
+both   | member (enable|disable|remove) [1-9]\d*    | member disable 3           | web UI Disconnect
+both   | member (enable|disable|remove) [1-9]\d*    | member remove 3            | web UI Remove
+both   | reboot                                     | reboot                     | web UI Restart
+both   | display-settings                           | display-settings           | the Android app (capability display_readback)
+both   | preference                                 | preference                 | the Android app (capability metadata)
+both   | metadata \{.*\}                            | metadata {"slot":1,"expectedName":"Home","expectedSsid":"Home","expectedPriority":50,"name":"Home 2","priority":60,"preferred":true} | the Android app: name, priority, preference of a saved network
+
+serial | -                                          | selftest flash             | erases and programs the last sector of the peerstore partition (bench diagnostic, rust/port)
+serial | -                                          | selftest panic             | breaks the image on purpose (rescue proof)
+serial | -                                          | selftest spin              | breaks the image on purpose
+serial | -                                          | selftest irqoff            | breaks the image on purpose
+serial | -                                          | selftest console           | parks the console on purpose
+serial | -                                          | selftest usb               | wedges USB on purpose
+serial | -                                          | bootloader                 | ROM download mode (the Android app's flasher, over USB serial)
+serial | -                                          | normal                     | leaves safe mode with a reset
+serial | -                                          | boot-status                | the Android app's boot diagnostics (USB serial)
+serial | -                                          | retry-startup              | the Android app's "Restart services" (USB serial): resets the recovery guard and restarts
+serial | -                                          | scan-detail                | scan with BSSID, channel and usability per access point (bench diagnostic)
+serial | -                                          | reset                      | factory reset, step one
+serial | -                                          | confirm-reset              | factory reset, step two
+serial | -                                          | setup                      | restarts into the setup access point
+serial | -                                          | setup 2                    | restarts into the setup access point
+serial | -                                          | cancel                     | leaves the setup access point
+serial | -                                          | pm                         | power report
+serial | -                                          | heap                       | heap line
+serial | -                                          | heap on                    | heap stream
+serial | -                                          | init                       | init stage
+serial | -                                          | usbwatch enforce on        | USB supervisor policy
+
+absent | -                                          | temperature                | no such command: the reading is the chip_temperature line of status

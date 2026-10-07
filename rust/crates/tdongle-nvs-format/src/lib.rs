@@ -21,6 +21,7 @@
 pub mod cstr;
 pub mod legacy;
 pub mod load;
+pub mod metadata_json;
 pub mod mode;
 pub mod profile_json;
 pub mod ui_settings;

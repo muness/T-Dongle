@@ -3,7 +3,9 @@
 //! [`Command::parse`] returns what the C code would *decide to do* for a line; carrying it out (queues, NVS, restarts) is the firmware's
 //! job. The order of the C tests is kept because it decides overlaps:
 //!
-//! 1. `command_task`: `help`, `capabilities`, `pm`, `status`, `boot-status`, `retry-startup`, `crypto bench` (all `strcmp`: the whole line)
+//! 1. `command_task`: `help`, `capabilities`, `pm`, `status`, `boot-status`, `retry-startup`, `crypto bench` (all `strcmp`: the whole line),
+//!    then the companion firmware's extensions (`handle` of its `main/control.c`): `display-settings`, `preference` (`strcmp`) and
+//!    `metadata ` (`strncmp`, 9)
 //! 2. `gateway_serial_command`: `status` (step 1's `status` branch calls it, then appends the `bridge_*` lines), `mode ` (`strncmp`, 5), `scan`, `display` (`display` alone or
 //!    `display ` + anything), `setup` / `setup ` + anything, `cancel`, `reset`, `confirm-reset`, then the network commands `list`
 //!    (`strcmp`), `profile ` / `del ` / `use ` (`strncmp` with the trailing space)
@@ -190,6 +192,13 @@ pub enum Command<'a> {
     RetryStartup,
     /// `crypto bench`
     CryptoBench,
+    /// `display-settings` (companion extension, capability `display_readback`)
+    DisplaySettings,
+    /// `preference` (companion extension, capability `metadata`)
+    Preference,
+    /// `metadata JSON` (companion extension, capability `metadata`): the text after `metadata ` (parse with
+    /// `tdongle_nvs_format::metadata_json`).
+    Metadata(&'a str),
     /// `mode NAME` (the trailing space is part of the command: `mode` alone is unknown). `None`: not a mode name (reply
     /// [`crate::reply::MODE_INVALID`]).
     Mode(Option<Mode>),
@@ -247,7 +256,13 @@ impl<'a> Command<'a> {
             "boot-status" => return Self::BootStatus,
             "retry-startup" => return Self::RetryStartup,
             "crypto bench" => return Self::CryptoBench,
+            // the companion firmware's extensions (`handle` in its control.c tests them right after `help` and `capabilities`)
+            "display-settings" => return Self::DisplaySettings,
+            "preference" => return Self::Preference,
             _ => {}
+        }
+        if let Some(json) = line.strip_prefix("metadata ") {
+            return Self::Metadata(json);
         }
         if let Some(command) = Self::parse_serial(line) {
             return command;

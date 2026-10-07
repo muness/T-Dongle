@@ -61,24 +61,24 @@ pub struct ParsedProfile {
 }
 
 /// A byte cursor over the text with cJSON's whitespace rule.
-struct Cursor<'a> {
-    text: &'a [u8],
-    at: usize,
+pub(crate) struct Cursor<'a> {
+    pub(crate) text: &'a [u8],
+    pub(crate) at: usize,
 }
 
 impl Cursor<'_> {
-    fn peek(&self) -> Option<u8> {
+    pub(crate) fn peek(&self) -> Option<u8> {
         self.text.get(self.at).copied()
     }
 
     /// cJSON `buffer_skip_whitespace`: every byte up to and including 0x20.
-    fn skip_ws(&mut self) {
+    pub(crate) fn skip_ws(&mut self) {
         while self.peek().is_some_and(|b| b <= 32) {
             self.at += 1;
         }
     }
 
-    fn eat(&mut self, byte: u8) -> bool {
+    pub(crate) fn eat(&mut self, byte: u8) -> bool {
         let hit = self.peek() == Some(byte);
         if hit {
             self.at += 1;
@@ -88,7 +88,7 @@ impl Cursor<'_> {
 
     /// cJSON `parse_string`: at an opening quote, decode up to the closing one into `out` (cut at its length; `None` for too long). The
     /// decoded length is returned either way so a caller comparing against a key can tell a longer string from a prefix.
-    fn string(&mut self, out: &mut [u8]) -> Result<usize, ProfileJsonError> {
+    pub(crate) fn string(&mut self, out: &mut [u8]) -> Result<usize, ProfileJsonError> {
         if !self.eat(b'"') {
             return Err(ProfileJsonError::Malformed);
         }
@@ -121,7 +121,7 @@ impl Cursor<'_> {
     }
 
     /// cJSON `parse_number`: the longest `strtod` prefix of the run of number characters, as an `f64`.
-    fn number(&mut self) -> Result<f64, ProfileJsonError> {
+    pub(crate) fn number(&mut self) -> Result<f64, ProfileJsonError> {
         let rest = &self.text[self.at..];
         let run = rest.iter().take_while(|b| matches!(b, b'0'..=b'9' | b'+' | b'-' | b'e' | b'E' | b'.')).count();
         let used = strtod_prefix(&rest[..run]);
@@ -166,7 +166,7 @@ fn strtod_prefix(s: &[u8]) -> usize {
 }
 
 /// C `integer()`: `valuedouble == valueint` (cJSON saturates the int) and `min <= valueint <= max`.
-fn integer(value: f64, min: i32, max: i32) -> Option<i32> {
+pub(crate) fn integer(value: f64, min: i32, max: i32) -> Option<i32> {
     let int = value as i32; // saturating, like cJSON's INT_MAX / INT_MIN clamp
     (value == f64::from(int) && (min..=max).contains(&int)).then_some(int)
 }

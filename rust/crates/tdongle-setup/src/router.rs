@@ -352,6 +352,41 @@ fn wifi_action<H: SetupHost>(origin: Origin, f: &Fields, host: &mut H) -> Result
     if !host.wifi_ready() {
         return Err("Wi-Fi did not start; restart services after saving diagnostics");
     }
+    let w = wifi_fields(origin, f, |ssid, slot| {
+        let count = host.saved_count();
+        (0..count).any(|i| cstr(host.saved_ssid(i)) == ssid) || (slot >= 0 && (slot as usize) < count)
+    })?;
+    if host.save_wifi(w.ssid, w.password, w.name, w.priority, w.slot) {
+        Ok(())
+    } else {
+        Err(WIFI_NOT_SAVED)
+    }
+}
+
+/// The `wifi` action's failure when `wifi_save_with` returns false.
+pub const WIFI_NOT_SAVED: &str = "Could not save Wi-Fi; at most eight networks can be saved, and a network can only be in one slot";
+
+/// The validated fields of a `wifi` action: the arguments of `wifi_save_with(ssid, password, name, priority, false, slot)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WifiFields<'f> {
+    /// SSID, 1 to 32 bytes.
+    pub ssid: &'f [u8],
+    /// Password, 0 to 63 bytes.
+    pub password: &'f [u8],
+    /// Name, `None` for the default.
+    pub name: Option<&'f [u8]>,
+    /// Priority 0 to 100, -1 for the default.
+    pub priority: i32,
+    /// 0-based slot, -1 for the next free one (or the network's own).
+    pub slot: i32,
+}
+
+/// The checks of the C `wifi` action, in their order, after `wifi_ready`. `already_saved(ssid, slot)` answers whether the SSID is saved or the slot
+/// is taken; it is asked only for an origin that may not replace a saved network.
+///
+/// # Errors
+/// The C failure text.
+pub fn wifi_fields<'f>(origin: Origin, f: &'f Fields, already_saved: impl FnOnce(&[u8], i32) -> bool) -> Result<WifiFields<'f>, &'static str> {
     let (ssid, password) = (f.string(f.ssid), f.string(f.password));
     let name = if access::may_set_metadata(origin) { f.string(f.name) } else { None };
     let priority_item = if access::may_set_metadata(origin) { f.priority } else { Val::Absent };
@@ -380,20 +415,11 @@ fn wifi_action<H: SetupHost>(origin: Origin, f: &Fields, host: &mut H) -> Result
     if origin == Origin::SetupAp && !password.is_empty() && password.len() < 8 {
         return Err("Passwords need at least 8 characters. Leave it empty only for an open network.");
     }
-    if !access::may_replace(origin) {
-        let count = host.saved_count();
-        let saved = (0..count).any(|i| cstr(host.saved_ssid(i)) == ssid);
-        if saved || (slot >= 0 && (slot as usize) < count) {
-            return Err("That network is already saved. Delete it first to change it: replacing a saved network is not available on the setup network.");
-        }
+    if !access::may_replace(origin) && already_saved(ssid, slot) {
+        return Err("That network is already saved. Delete it first to change it: replacing a saved network is not available on the setup network.");
     }
     if !extras_ok {
         return Err("Use a name of up to 24 plain characters, a slot from 1 to 8 and a priority from 0 to 100");
     }
-    let name = name.filter(|n| !n.is_empty());
-    if host.save_wifi(ssid, password, name, priority, slot) {
-        Ok(())
-    } else {
-        Err("Could not save Wi-Fi; at most eight networks can be saved, and a network can only be in one slot")
-    }
+    Ok(WifiFields { ssid, password, name: name.filter(|n| !n.is_empty()), priority, slot })
 }

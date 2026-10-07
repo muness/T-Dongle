@@ -27,5 +27,6 @@ pub mod out;
 pub mod pm_report;
 pub mod reply;
 pub mod status;
+pub mod temperature;
 mod text;
 pub mod wifi_link;
