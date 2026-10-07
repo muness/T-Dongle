@@ -20,6 +20,7 @@
 use core::fmt::{self, Write};
 
 pub mod report;
+pub mod usb_watch;
 pub mod watch;
 
 #[cfg(test)]

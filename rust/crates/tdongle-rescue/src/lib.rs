@@ -166,11 +166,13 @@ pub enum Selftest {
     Panic,
     /// The console executor stops polling the console (the supervisor sees its heartbeat stop).
     Console,
+    /// The USB device stack stops servicing the host (the USB interrupt handler is switched off and the bus is reset): only the USB liveness check can see it.
+    Usb,
 }
 
 impl Selftest {
     /// The names `help` lists.
-    pub const NAMES: &'static str = "selftest spin|irqoff|panic|console";
+    pub const NAMES: &'static str = "selftest spin|irqoff|panic|console|usb";
 
     /// Parse the part after `selftest `.
     #[must_use]
@@ -180,6 +182,7 @@ impl Selftest {
             "irqoff" => Some(Self::IrqOff),
             "panic" => Some(Self::Panic),
             "console" => Some(Self::Console),
+            "usb" => Some(Self::Usb),
             _ => None,
         }
     }
