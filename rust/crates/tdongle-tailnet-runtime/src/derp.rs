@@ -59,7 +59,6 @@ struct Drv<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     idx: usize,
     member: u32,
     link: Link<DERP_TXQ>,
-    rx: [u8; MAX_FRAME],
     acts: Acts,
     stage: &'a RefCell<[u8; MAX_SEND_FRAME]>,
     holds_token: bool,
@@ -70,7 +69,6 @@ struct DrvSink<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     sh: &'a Shared<R, P, S, D>,
     idx: usize,
     member: u32,
-    rx: &'a mut [u8; MAX_FRAME],
     acts: &'a mut Acts,
     stage: &'a RefCell<[u8; MAX_SEND_FRAME]>,
 }
@@ -113,9 +111,13 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_
             },
             Action::Close => self.acts.close = true,
             Action::DeliverPacket { src_key, payload } => {
-                let n = payload.len().min(self.rx.len());
-                self.rx[..n].copy_from_slice(&payload[..n]);
-                let _ = self.sh.feed(Input::DerpPacket { member, src: src_key, data: &mut self.rx[..n] });
+                // the engine takes the packet in a buffer it may change: the shared scratch, for this call only
+                let sh = self.sh;
+                sh.with_scratch(|buf| {
+                    let n = payload.len().min(MAX_FRAME).min(buf.len());
+                    buf[..n].copy_from_slice(&payload[..n]);
+                    let _ = sh.feed(Input::DerpPacket { member, src: src_key, data: &mut buf[..n] });
+                });
             }
             Action::PeerGone { .. } | Action::Health(_) | Action::ServerRestarting { .. } => {}
         }
@@ -129,7 +131,6 @@ impl<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, R, P, S
             idx,
             member,
             link: Link::new(key, Target::new(0, "", 443), Timing::DEFAULT),
-            rx: [0; MAX_FRAME],
             acts: Acts::default(),
             stage,
             holds_token: false,
@@ -141,8 +142,8 @@ impl<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, R, P, S
         let now = self.sh.now();
         let mut rng = crate::shared::PlatformRng(&self.sh.platform);
         {
-            let Drv { sh, idx, member, link, rx, acts, stage, .. } = self;
-            let mut sink = DrvSink { sh, idx: *idx, member: *member, rx, acts, stage };
+            let Drv { sh, idx, member, link, acts, stage, .. } = self;
+            let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage };
             link.handle(now, ev, &mut rng, &mut sink);
         }
         self.after();
@@ -217,8 +218,8 @@ impl<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, R, P, S
             let now = self.sh.now();
             let mut dst = [0u8; 32];
             dst.copy_from_slice(&eg[..32]);
-            let Drv { sh, idx, member, link, rx, acts, stage, .. } = self;
-            let mut sink = DrvSink { sh, idx: *idx, member: *member, rx, acts, stage };
+            let Drv { sh, idx, member, link, acts, stage, .. } = self;
+            let mut sink = DrvSink { sh, idx: *idx, member: *member, acts, stage };
             let _ = link.send_packet(now, &dst, &eg[32..n], &mut sink);
         }
         self.after();
@@ -265,12 +266,14 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drop for Drv<'_, R,
 }
 
 /// Run `work` while serving the link; `None` if the link asked for the transport to be closed first (the work is dropped).
+///
+/// `work` is passed **already pinned** (`pin!` at the call site): a future moved into this function and pinned here lives twice in the caller's frame
+/// (as the argument and as the pinned local), and the TLS handshake future is 3 KB.
 async fn drive<T, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(
     d: &mut Drv<'_, R, P, S, D>,
     egress: bool,
-    work: impl Future<Output = T>,
+    mut work: core::pin::Pin<&mut impl Future<Output = T>>,
 ) -> Option<T> {
-    let mut work = pin!(work);
     loop {
         match select(&mut work, d.wait(egress)).await {
             Either::First(v) => return Some(v),
@@ -341,7 +344,7 @@ async fn relay<R, P, S, D, T>(
             d.wait(true).await;
         };
         // ---- dial: resolve and connect in one
-        let connected = drive(&mut d, true, tcp.connect(host.as_str(), port)).await;
+        let connected = drive(&mut d, true, pin!(tcp.connect(host.as_str(), port))).await;
         match connected {
             Some(Ok(())) => {
                 d.call(Event::Dns(true));
@@ -394,7 +397,7 @@ where
     let mut rng = crate::shared::PlatformRng(&sh.platform);
     let handshake = LeasedTlsDerp::connect(&mut *tcp, &mut wbuf[..], &sh.lease, &params, &mut rng);
     let neg = sh.stats.negotiation();
-    let outcome = drive(d, true, handshake).await;
+    let outcome = drive(d, true, pin!(handshake)).await;
     drop(neg);
     let mut conn = match outcome {
         None => return,
@@ -419,7 +422,7 @@ where
                 conn.write_all(&st).await?;
                 conn.flush().await
             };
-            match drive(d, false, write).await {
+            match drive(d, false, pin!(write)).await {
                 Some(Ok(())) => d.call(Event::TxDone),
                 Some(Err(_)) => {
                     d.call(Event::Reconnect);

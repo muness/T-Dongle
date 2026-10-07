@@ -56,8 +56,17 @@ impl<D, const M: usize, const P: usize, const K: usize, const A: usize, const F:
     }
 }
 
-/// The firmware's configuration: three memberships, eight resident peers each, a twelve-slot WireGuard pool, 64 aliases, 64 flows, 24 arena blocks.
-pub type GatewayEngine<D> = Engine<D, 3, 8, 12, 64, 64, 24>;
+/// Memberships the firmware configuration runs at once: 3, or 2 / 1 with the `slots-2` / `slots-1` features (every static of the runtime scales with it).
+pub const GATEWAY_M: usize = if cfg!(feature = "slots-1") {
+    1
+} else if cfg!(feature = "slots-2") {
+    2
+} else {
+    3
+};
+
+/// The firmware's configuration: [`GATEWAY_M`] (three by default) memberships, eight resident peers each, a twelve-slot WireGuard pool, 64 aliases, 64 flows, 24 arena blocks.
+pub type GatewayEngine<D> = Engine<D, GATEWAY_M, 8, 12, 64, 64, 24>;
 
 impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: usize, const F: usize, const JB: usize> Engine<D, M, P, K, A, F, JB> {
     /// Bytes of the engine (host size) without its directory; see also [`Self::per_member_bytes`].

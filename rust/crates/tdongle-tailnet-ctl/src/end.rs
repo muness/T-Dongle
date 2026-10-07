@@ -120,6 +120,8 @@ pub enum SessionEnd {
     RequestTooLarge,
     /// Nothing was heard for the idle timeout.
     Idle,
+    /// The server went quiet in the middle of a record or message while the session held the leased buffers ([`crate::Timeouts::lease_stall_ms`]).
+    LeaseStall,
 }
 
 impl SessionEnd {
@@ -145,7 +147,7 @@ impl SessionEnd {
             SessionEnd::GoAway { .. } | SessionEnd::Reset { .. } => 10,
             SessionEnd::H2(H2Error::BadPadding) => 4,
             SessionEnd::H2(_) => 3,
-            SessionEnd::Io { stage: Stage::Map, .. } | SessionEnd::Idle | SessionEnd::Record(_) => 2,
+            SessionEnd::Io { stage: Stage::Map, .. } | SessionEnd::Idle | SessionEnd::LeaseStall | SessionEnd::Record(_) => 2,
             _ => 0,
         }
     }

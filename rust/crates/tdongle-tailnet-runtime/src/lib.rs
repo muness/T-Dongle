@@ -7,8 +7,9 @@
 //! ```text
 //!                       +--------------------------- Shared (one static) ----------------------------+
 //!  USB host <-> usb ----+  engine  (one, behind a blocking mutex; Output only enqueues)                |
-//!  (UsbNet: ARP, DHCP,  |  slots[3]: run state, identity, UDP queue, DERP queue, control workspace     |
-//!   alias router, DNS)  |  host queue, DNS queue, negotiation token, TLS record lease, registry        |
+//!  (UsbNet: ARP, DHCP,  |  slots[3]: run state, identity, UDP queue, DERP queue, control session state  |
+//!   alias router, DNS)  |  host queue, DNS queue, negotiation token, TLS record lease, control Bulk,    |
+//!         |             |  scratch, registry                                                           |
 //!         |             +-------------------------------------------------------------------------------+
 //!         +-- WifiRaw (NAT to Wi-Fi: tdongle-tailnet-wifimux)
 //!  tasks (all joined into ONE future by `run`):
@@ -38,17 +39,18 @@
 //! # Memory (see [`sizes`], `size-table.sh`, and `cargo test -p tdongle-tailnet-host --test memory -- --nocapture`)
 //!
 //! Everything the runtime owns is static or part of the one joined future: **no heap**. Per membership slot (xtensa, [`sizes`]): the control, DERP and UDP
-//! futures, the [`shared::Slot`] static (control workspace, two egress queues, status, identity), the engine's per-membership record and the socket buffers
+//! futures, the [`shared::Slot`] static (control session state, two egress queues, status, identity), the engine's per-membership record and the socket buffers
 //! the `Net` keeps ([`net_embassy::GatewayBuffers`]). The shared parts: the engine's shared half, the USB task, the supervisor, the TLS record lease (one
 //! 16,640-byte buffer for all DERP connections), the host and DNS queues. The ADR table is printed by the two commands above, labelled M-host / M-elf.
 //!
-//! **The one shared Workspace the brief asked for does not exist, and cannot with `tdongle_tailnet_ctl::run_session` as written.** The driver borrows
-//! the `Workspace` (record reader, sealed-record buffer, request / response JSON, the map projector: 19,928 B on xtensa) for the *whole* session, and a session
-//! is a long poll that stays open for ever. The negotiation token is released after the first map, but the session (and its borrow) goes on. So each slot owns
-//! one, and that is the largest single item of the per-membership figure. The remedy is in `ctl`, not here: lease the workspace per map message (hold it
-//! from the first byte of a record until the message is applied, release it while waiting for the next one, with the TLS lease's stall bound), which would
-//! leave one workspace plus about 1.1 KiB of per-session state per membership (the host test prints the saving as EST). It is the first thing to do for the
-//! multi-tailnet memory win.
+//! **The control workspace is leased, not owned** ("RAM diet", ADR 0002). `tdongle_tailnet_ctl::run_session_leased` takes the big buffers (record reader,
+//! sealed-record buffer, request / response JSON, the map projector: [`tdongle_tailnet_ctl::Bulk`], 18.8 KB on xtensa) from [`shared::Shared::bulk`], one set
+//! for every membership, from the first byte of a record until the message it carries is applied (and for the whole negotiation, which the token already
+//! serialises), and gives them back whenever the session waits for the server with nothing in progress, which is nearly always. Each membership keeps only its
+//! [`tdongle_tailnet_ctl::SessionBuf`] (the TCP input buffer and the counters, about 1.1 KB) in its slot. A server that goes quiet in the middle of a record
+//! or a message ends *its own* session after `Timeouts::lease_stall_ms` (5 s; the C's "a stalled server costs only its own membership a redial"). The other
+//! shared buffer is the **scratch** ([`shared::SCRATCH`], 4 KB): the datagram being handled by the UDP, DNS and DERP tasks, the USB side's reply frame and
+//! host record, the registry's JSON, each held only inside synchronous code, so no task keeps such a buffer across a wait.
 //!
 //! # Admission
 //!
@@ -60,7 +62,7 @@
 //!
 //! # Divergences from the C (all deliberate)
 //!
-//! * One control workspace per slot, not one shared (above).
+//! * One control workspace for the gateway, leased per record / message, with a stall bound (above); the C allocates and frees it on the heap per negotiation.
 //! * **No STUN probe before the first negotiation** (`COORD_STUN_PROBE`): the first session's `PreferredDERP` is 0; the engine homes the node from the first
 //!   DERP map and the region reaches the control plane in the next endpoint update (an additive `EndpointSource::preferred_derp` hook in `ctl`).
 //! * **Stop is split**: `TailnetApi::member_action` does the router suspend (engine `MemberDisabled`) synchronously and the rest (tasks, `MemberRemoved`,

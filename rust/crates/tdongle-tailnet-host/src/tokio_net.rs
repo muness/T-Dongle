@@ -265,6 +265,50 @@ impl UdpConn for TokioUdp {
             return Ok((n, Ep::v4(v4.ip().octets(), v4.port())));
         }
     }
+    async fn wait_readable(&self) -> Result<(), NetError> {
+        let s = self.sock.as_ref().ok_or(NetError::Closed)?;
+        s.readable().await.map_err(|_| NetError::Io)
+    }
+    fn try_recv_from(&self, buf: &mut [u8]) -> Result<Option<(usize, Ep)>, NetError> {
+        let s = self.sock.as_ref().ok_or(NetError::Closed)?;
+        loop {
+            match s.try_recv_from(buf) {
+                Ok((n, from)) => {
+                    if self.ctl.udp_blocked.load(Ordering::Relaxed) {
+                        self.ctl.udp_blocked_count.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
+                    let SocketAddr::V4(v4) = from else { continue };
+                    self.ctl.udp_rx.fetch_add(1, Ordering::Relaxed);
+                    return Ok(Some((n, Ep::v4(v4.ip().octets(), v4.port()))));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
+                Err(_) => return Err(NetError::Io),
+            }
+        }
+    }
+    async fn wait_writable(&self) -> Result<(), NetError> {
+        let s = self.sock.as_ref().ok_or(NetError::Closed)?;
+        s.writable().await.map_err(|_| NetError::Io)
+    }
+    fn try_send_to(&self, buf: &[u8], dst: Ep) -> Result<bool, NetError> {
+        let s = self.sock.as_ref().ok_or(NetError::Closed)?;
+        if self.ctl.udp_blocked.load(Ordering::Relaxed) {
+            self.ctl.udp_blocked_count.fetch_add(1, Ordering::Relaxed);
+            return Ok(true);
+        }
+        let Some(o) = dst.v4_octets() else { return Ok(true) };
+        let redirect = if self.dns { *self.ctl.dns_redirect.lock().unwrap() } else { None };
+        let to = redirect.unwrap_or(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::from(o), dst.port())));
+        match s.try_send_to(buf, to) {
+            Ok(_) => {
+                self.ctl.udp_tx.fetch_add(1, Ordering::Relaxed);
+                Ok(true)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(false),
+            Err(_) => Err(NetError::Io),
+        }
+    }
     async fn send_to(&self, buf: &[u8], dst: Ep) -> Result<(), NetError> {
         let s = self.sock.as_ref().ok_or(NetError::Closed)?;
         if self.ctl.udp_blocked.load(Ordering::Relaxed) {

@@ -11,7 +11,8 @@ use tdongle_tailnet_control::h2::{FrameHeader, flag, kind};
 use tdongle_tailnet_control::requests::{ENDPOINT_LOCAL, Endpoint, EndpointAddr, Hostinfo};
 use tdongle_tailnet_crypto::x25519;
 use tdongle_tailnet_ctl::{
-    Clock, Connect, EndpointSource, Gate, IoFail, MapEnd, NoEndpoints, RegisterFailure, SessionConfig, SessionEnd, SessionStats, Stage, Workspace, run_session,
+    Bulk, BulkLease, Clock, Connect, EndpointSource, Gate, IoFail, MapEnd, NoEndpoints, RegisterFailure, SessionBuf, SessionConfig, SessionEnd, SessionStats, Stage,
+    Timeouts, Workspace, run_session, run_session_leased,
 };
 use tdongle_tailnet_map::{MapEvent, MapSink, SinkError};
 use tdongle_tailnet_noise::responder::accept;
@@ -187,6 +188,8 @@ struct Script {
     data_split: usize,
     wire_chunk: usize,
     corrupt_map_records: bool,
+    /// After the maps, send the start of one more map message (its length and ten bytes) and then say nothing, connection open.
+    stall_mid_message: bool,
 }
 
 impl Script {
@@ -204,6 +207,7 @@ impl Script {
             data_split: 4000,
             wire_chunk: 4096,
             corrupt_map_records: false,
+            stall_mid_message: false,
         }
     }
 }
@@ -380,6 +384,12 @@ async fn server(mut io: Duplex, sc: Script, seen: Rc<RefCell<Seen>>) {
             if hdr.kind == kind::GOAWAY || (hdr.kind == kind::DATA && hdr.stream == 1 && matches!(sc.register, Register::GoAway)) {
                 return;
             }
+            if maps_now && sc.stall_mid_message {
+                let mut part = 1000u32.to_le_bytes().to_vec();
+                part.extend_from_slice(b"{\"PeersCha");
+                seal(&sc, &mut session, &io, &frame(kind::DATA, 0, 5, &part), false);
+                std::future::pending::<()>().await;
+            }
             if maps_now && !sc.wait_update {
                 if sc.extra_keepalives > 0 {
                     let doc = br#"{"KeepAlive":true}"#;
@@ -494,7 +504,7 @@ fn run(sc: Script, o: Opts) -> Outcome {
         }
     };
     let (end, _) = block_on(join(client, join(srv, ks)));
-    let stats = ws.stats;
+    let stats = ws.session.stats;
     let gate = log.borrow().clone();
     Outcome { end, stats, sink, seen, gate }
 }
@@ -650,7 +660,7 @@ fn run_pinned_to(sc: Script, pin: &Key32) -> Outcome {
     let client = run_session(&mut connect, &mut tclock, &cfg, &mut ws, &mut sh, &mut gate, &mut no_eps, &mut rng);
     let (end, _) = block_on(join(client, server(s, sc, seen.clone())));
     let gate = log.borrow().clone();
-    Outcome { end, stats: ws.stats, sink, seen, gate }
+    Outcome { end, stats: ws.session.stats, sink, seen, gate }
 }
 
 #[test]
@@ -731,4 +741,209 @@ fn sizes_are_reported() {
     use tdongle_tailnet_ctl::sizes::*;
     println!("Workspace {WORKSPACE} B (projector {PROJECTOR}), noise session {NOISE_SESSION}, h2 session {H2_SESSION}, stats {STATS}");
     const { assert!(WORKSPACE < 24 * 1024) };
+}
+
+
+// ---- the leased buffers ---------------------------------------------------------------------------------------------------------------------------
+
+/// A contended lease: one holder at a time, the others wait (as the runtime's `SharedBulk` does), with the facts a test wants to look at.
+struct TestLease {
+    bulk: RefCell<Bulk>,
+    held: Cell<bool>,
+    takes: Cell<u32>,
+}
+
+struct TestGuard<'a> {
+    g: std::cell::RefMut<'a, Bulk>,
+    held: &'a Cell<bool>,
+}
+
+impl std::ops::Deref for TestGuard<'_> {
+    type Target = Bulk;
+    fn deref(&self) -> &Bulk {
+        &self.g
+    }
+}
+impl std::ops::DerefMut for TestGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Bulk {
+        &mut self.g
+    }
+}
+impl Drop for TestGuard<'_> {
+    fn drop(&mut self) {
+        self.held.set(false);
+    }
+}
+
+impl BulkLease for TestLease {
+    type Guard<'a> = TestGuard<'a>;
+    async fn lease(&self) -> TestGuard<'_> {
+        std::future::poll_fn(|cx| match self.bulk.try_borrow_mut() {
+            Ok(g) => {
+                assert!(!self.held.get(), "two holders");
+                self.held.set(true);
+                self.takes.set(self.takes.get() + 1);
+                std::task::Poll::Ready(TestGuard { g, held: &self.held })
+            }
+            Err(_) => {
+                cx.waker().wake_by_ref();
+                std::task::Poll::Pending
+            }
+        })
+        .await
+    }
+}
+
+impl TestLease {
+    fn new() -> Self {
+        TestLease { bulk: RefCell::new(Bulk::new()), held: Cell::new(false), takes: Cell::new(0) }
+    }
+}
+
+/// Virtual time: a read that nothing answers for 40 turns of the executor "times out" and the clock moves on by the timeout it asked for.
+struct VirtClock(Rc<Cell<u64>>);
+impl Clock for VirtClock {
+    fn now(&self) -> Millis {
+        self.0.get()
+    }
+    async fn timeout<F: std::future::Future>(&mut self, ms: u32, fut: F) -> Option<F::Output> {
+        let mut fut = std::pin::pin!(fut);
+        let mut turns = 0u32;
+        let r = std::future::poll_fn(|cx| {
+            if let std::task::Poll::Ready(v) = fut.as_mut().poll(cx) {
+                return std::task::Poll::Ready(Some(v));
+            }
+            turns += 1;
+            if turns > 40 {
+                return std::task::Poll::Ready(None);
+            }
+            cx.waker().wake_by_ref();
+            std::task::Poll::Pending
+        })
+        .await;
+        if r.is_none() {
+            self.0.set(self.0.get() + u64::from(ms));
+        }
+        r
+    }
+}
+
+/// One client on the shared lease against its own scripted server; returns how its session ended and its gate log.
+async fn leased_client(sc: Script, lease: &TestLease, clock: Rc<Cell<u64>>, timeouts: Timeouts, sink: Rc<RefCell<Sink>>) -> (SessionEnd, Vec<String>) {
+    let control_pub = x25519::public(&sc.control_priv);
+    let (c, s) = duplex(usize::MAX, usize::MAX);
+    let (machine, node, disco) = (Key32([7; 32]), Key32([5; 32]), x25519::public(&Key32([6; 32])));
+    let log = Rc::new(RefCell::new(vec![]));
+    let cfg = SessionConfig {
+        host_header: "ctl.example",
+        machine_priv: &machine,
+        node_priv: &node,
+        disco_pub: &disco,
+        hostinfo: Hostinfo::new("tdongle", 1),
+        auth_key: "",
+        followup: "",
+        control_pub: Some(&control_pub),
+        home_derp: 1,
+        timeouts,
+    };
+    let (mut connect, mut tclock, mut gate, mut no_eps, mut rng) =
+        (Connector(VecDeque::from([c])), VirtClock(clock), TestGate(log.clone()), NoEndpoints, TestRng(1));
+    let mut sh = Shared(sink.clone());
+    let mut buf = SessionBuf::new();
+    let seen = Rc::new(RefCell::new(Seen::default()));
+    let client = run_session_leased(&mut connect, &mut tclock, &cfg, &mut buf, lease, &mut sh, &mut gate, &mut no_eps, &mut rng);
+    let end = match futures::future::select(Box::pin(client), Box::pin(server(s, sc, seen))).await {
+        futures::future::Either::Left((end, _)) => end,
+        futures::future::Either::Right(_) => panic!("the server returned before the client ended"),
+    };
+    let gate = log.borrow().clone();
+    (end, gate)
+}
+
+#[test]
+fn two_memberships_share_one_lease_and_both_join() {
+    // Both sessions negotiate and stream their maps through ONE set of big buffers: the second waits its turn at the lease (the TestLease panics on a
+    // second holder), and each ends the way a session against that server ends (the server closes after the maps).
+    let lease = TestLease::new();
+    let clock = Rc::new(Cell::new(0u64));
+    let (sa, sb) = (Rc::new(RefCell::new(Sink::default())), Rc::new(RefCell::new(Sink::default())));
+    let (a, b) = block_on(join(
+        leased_client(Script::new(key()), &lease, clock.clone(), Timeouts::default(), sa.clone()),
+        leased_client(Script::new(Key32([0x43; 32])), &lease, clock.clone(), Timeouts::default(), sb.clone()),
+    ));
+    for ((end, gate), sink) in [(&a, &sa), (&b, &sb)] {
+        assert!(matches!(end, SessionEnd::Io { stage: Stage::Map, fail: IoFail::Eof }), "{end:?}");
+        assert_eq!(gate, &["begin", "end(true)"]);
+        let s = sink.borrow();
+        assert_eq!((s.commits, s.keepalives, s.aborts), (3, 1, 0));
+    }
+    assert!(!lease.held.get(), "the lease is back when the sessions are over");
+}
+
+#[test]
+fn a_streaming_session_gives_the_buffers_back_while_the_server_is_quiet() {
+    // After its maps the server says nothing (it waits for an endpoint update that never comes): the session is idle between messages, so another
+    // membership can take the buffers.
+    let lease = TestLease::new();
+    let clock = Rc::new(Cell::new(0u64));
+    let mut sc = Script::new(key());
+    sc.wait_update = true;
+    // this test is about the lease, not the idle timeout
+    let t = Timeouts { idle_ms: u32::MAX, ..Timeouts::default() };
+    let sink = Rc::new(RefCell::new(Sink::default()));
+    let probe = async {
+        // wait until all three messages have been applied, then give the session some turns to reach its quiet wait
+        while sink.borrow().commits < 3 {
+            yield_now().await;
+        }
+        for _ in 0..100 {
+            yield_now().await;
+        }
+        assert!(!lease.held.get(), "an idle session must not sit on the buffers");
+        // and a second membership can take them at once
+        let g = lease.lease().await;
+        drop(g);
+    };
+    let c = leased_client(sc, &lease, clock, t, sink.clone());
+    match block_on(futures::future::select(Box::pin(probe), Box::pin(c))) {
+        futures::future::Either::Left(_) => {}
+        futures::future::Either::Right((r, _)) => panic!("the session ended: {:?}", r.0),
+    }
+}
+
+async fn yield_now() {
+    let mut yielded = false;
+    std::future::poll_fn(|cx| {
+        if yielded {
+            return std::task::Poll::Ready(());
+        }
+        yielded = true;
+        cx.waker().wake_by_ref();
+        std::task::Poll::Pending
+    })
+    .await
+}
+
+#[test]
+fn a_server_that_stalls_inside_a_message_costs_only_its_own_session() {
+    // The C's slicing check ("a stalled server costs only its own membership a redial"): A's server stops in the middle of a map message while A holds
+    // the buffers; B is waiting for them. A's session ends with the stall bound, and B then joins.
+    let lease = TestLease::new();
+    let clock = Rc::new(Cell::new(0u64));
+    let mut stalled = Script::new(key());
+    stalled.stall_mid_message = true;
+    let t = Timeouts { lease_stall_ms: 5_000, ..Timeouts::default() };
+    let (sa, sb) = (Rc::new(RefCell::new(Sink::default())), Rc::new(RefCell::new(Sink::default())));
+    let (a, b) = block_on(join(
+        leased_client(stalled, &lease, clock.clone(), t, sa.clone()),
+        leased_client(Script::new(Key32([0x43; 32])), &lease, clock.clone(), t, sb.clone()),
+    ));
+    assert!(matches!(a.0, SessionEnd::LeaseStall), "{:?}", a.0);
+    assert_eq!(a.1, ["begin", "end(true)"], "A had joined: its maps were applied before the stall");
+    assert_eq!(a.0.map_error(), 2);
+    assert!(matches!(b.0, SessionEnd::Io { stage: Stage::Map, fail: IoFail::Eof }), "{:?}", b.0);
+    assert_eq!(b.1, ["begin", "end(true)"]);
+    assert_eq!(sb.borrow().commits, 3);
+    // the stall was bounded by lease_stall_ms (5 s of virtual time), long before the idle timeout (30 s)
+    assert!(clock.get() < 20_000, "{}", clock.get());
 }

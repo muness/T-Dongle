@@ -22,7 +22,7 @@ use embassy_sync::mutex::Mutex as AsyncMutex;
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::Watch;
 use tdongle_tailnet_control::requests::AUTH_URL_BYTES;
-use tdongle_tailnet_ctl::{SessionStats, Workspace};
+use tdongle_tailnet_ctl::{Bulk, BulkLease, SessionBuf, SessionStats};
 use tdongle_tailnet_derp::link::{State as LinkState, Stats as LinkStats};
 use tdongle_tailnet_disco::Ep;
 use tdongle_tailnet_engine::{GatewayEngine, Handled, Input, NetmapEvent, Out, Output, PeerDirectory};
@@ -37,11 +37,15 @@ use zeroize::Zeroize;
 
 /// Memberships that can run at once (the engine's `M`). The registry may hold more saved ones ([`tdongle_tailnet_members::MAX_MEMBERS`]); a saved membership
 /// without a free slot waits in the supervisor's list with the error "Cannot allocate another membership".
-pub const MAX_RUN: usize = 3;
+pub const MAX_RUN: usize = tdongle_tailnet_engine::GATEWAY_M;
 /// Capacity of a slot's UDP egress queue (DISCO, STUN, WireGuard datagrams: records of up to 1,536 + 21 bytes; one full packet always fits an empty queue).
 pub const UDP_Q: usize = 3072;
 /// Capacity of a slot's DERP egress queue (one full relay packet: 3-byte header, 32-byte key, 1,500 bytes; the link has its own transmit ring behind it).
 pub const DERP_Q: usize = 2048;
+/// Bytes of the one scratch buffer every task shares: a datagram with its endpoint record (UDP and DNS ingress and egress, a DERP packet on its way into the
+/// engine), the USB side's two frame buffers, the registry's JSON. It is held only inside synchronous code (never across an `.await`), so tasks never
+/// contend for it in a single-executor image; the order of locks is registry, scratch, engine, leaf queues.
+pub const SCRATCH: usize = REGISTRY_SCRATCH;
 /// Capacity of the queue towards the USB host (tunnel packets and DNS answers).
 pub const HOST_Q: usize = 8192;
 /// Capacity of the queue of DNS queries for the upstream resolver.
@@ -283,8 +287,8 @@ pub struct Slot<R: RawMutex> {
     pub id: AtomicU32,
     /// Secrets and names of the membership.
     pub ident: Mutex<R, RefCell<Ident>>,
-    /// The control session's big buffers (see the crate docs: `run_session` keeps them for the whole session, so they are per slot).
-    pub ws: AsyncMutex<R, Workspace>,
+    /// The control session's own state (input buffer, counters: about 1.1 KiB). The big buffers are leased from [`Shared::bulk`].
+    pub ws: AsyncMutex<R, SessionBuf>,
     /// DISCO / STUN / WireGuard datagrams to send (record = `[ep: 18][data]`, kind 0 = datagram, 1 = STUN).
     pub udp_q: ByteQueue<R, UDP_Q>,
     /// DERP packets to relay (record = `[dst key: 32][data]`).
@@ -317,7 +321,7 @@ impl<R: RawMutex> Slot<R> {
             alive: AtomicU8::new(0),
             id: AtomicU32::new(0),
             ident: Mutex::new(RefCell::new(Ident::empty())),
-            ws: AsyncMutex::new(Workspace::new()),
+            ws: AsyncMutex::new(SessionBuf::new()),
             udp_q: ByteQueue::new(),
             derp_q: ByteQueue::new(),
             derp_cmd: Signal::new(),
@@ -465,9 +469,93 @@ impl Config {
             udp_port_base: 41641,
             usb_mac: None,
             firmware: "tdongle-rs",
-            timeouts: tdongle_tailnet_ctl::Timeouts { io_ms: 10_000, first_map_ms: 30_000, idle_ms: 30_000 },
+            timeouts: tdongle_tailnet_ctl::Timeouts { io_ms: 10_000, first_map_ms: 30_000, idle_ms: 30_000, lease_stall_ms: 5_000 },
             charge_static_bytes: false,
         }
+    }
+}
+
+/// The control sessions' big buffers, leased one holder at a time (a [`BulkLease`]): the same idea as the TLS record lease, with its counters.
+pub struct SharedBulk<R: RawMutex> {
+    buf: AsyncMutex<R, Bulk>,
+    holders: AtomicU8,
+    max_holders: AtomicU8,
+    leases: AtomicU32,
+}
+
+impl<R: RawMutex> core::fmt::Debug for SharedBulk<R> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SharedBulk").field("max_holders", &self.max_holders()).field("leases", &self.leases()).finish()
+    }
+}
+
+impl<R: RawMutex> SharedBulk<R> {
+    /// The buffers, free. Not `const` (the map projector's constructor is not).
+    pub fn new() -> Self {
+        Self { buf: AsyncMutex::new(Bulk::new()), holders: AtomicU8::new(0), max_holders: AtomicU8::new(0), leases: AtomicU32::new(0) }
+    }
+    /// Holders now (0 or 1).
+    pub fn holders(&self) -> u8 {
+        self.holders.load(Ordering::Relaxed)
+    }
+    /// The most holders ever at once (the invariant is 1).
+    pub fn max_holders(&self) -> u8 {
+        self.max_holders.load(Ordering::Relaxed)
+    }
+    /// Leases taken.
+    pub fn leases(&self) -> u32 {
+        self.leases.load(Ordering::Relaxed)
+    }
+}
+
+impl<R: RawMutex> Default for SharedBulk<R> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A held lease on [`SharedBulk`]; released on drop.
+pub struct BulkGuard<'a, R: RawMutex> {
+    guard: embassy_sync::mutex::MutexGuard<'a, R, Bulk>,
+    pool: &'a SharedBulk<R>,
+}
+
+impl<R: RawMutex> core::fmt::Debug for BulkGuard<'_, R> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("BulkGuard")
+    }
+}
+
+impl<R: RawMutex> core::ops::Deref for BulkGuard<'_, R> {
+    type Target = Bulk;
+    fn deref(&self) -> &Bulk {
+        &self.guard
+    }
+}
+
+impl<R: RawMutex> core::ops::DerefMut for BulkGuard<'_, R> {
+    fn deref_mut(&mut self) -> &mut Bulk {
+        &mut self.guard
+    }
+}
+
+impl<R: RawMutex> Drop for BulkGuard<'_, R> {
+    fn drop(&mut self) {
+        self.pool.holders.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+impl<R: RawMutex> BulkLease for SharedBulk<R> {
+    type Guard<'a>
+        = BulkGuard<'a, R>
+    where
+        Self: 'a;
+    async fn lease(&self) -> BulkGuard<'_, R> {
+        let guard = self.buf.lock().await;
+        let n = self.holders.fetch_add(1, Ordering::Relaxed) + 1;
+        self.max_holders.fetch_max(n, Ordering::Relaxed);
+        self.leases.fetch_add(1, Ordering::Relaxed);
+        BulkGuard { guard, pool: self }
     }
 }
 
@@ -475,8 +563,6 @@ impl Config {
 pub struct RegistryCell {
     /// The saved memberships.
     pub reg: MemberRegistry,
-    /// Scratch for the stored `members` JSON ([`REGISTRY_SCRATCH`] bytes; zeroed after every use).
-    pub scratch: [u8; REGISTRY_SCRATCH],
     /// The registry was loaded from storage (or storage had none).
     pub loaded: bool,
     /// Loading failed: tailnet access is disabled and the setup page says so (`ROUTING_DAMAGED`-style recovery text).
@@ -489,7 +575,8 @@ impl core::fmt::Debug for RegistryCell {
     }
 }
 
-/// Bytes of the registry's JSON scratch: eight memberships of the longest label and key encode to about 2 KiB; the C allows 16 KiB (heap, transient).
+/// Bytes of the registry's JSON scratch (the shared [`SCRATCH`], zeroed after every use): eight memberships of the longest label and key encode to about
+/// 2 KiB; the C allows 16 KiB (heap, transient).
 pub const REGISTRY_SCRATCH: usize = 4096;
 
 /// The shared state. `R` is the raw mutex (a critical section, or a spin lock that does not mask interrupts: engine calls take milliseconds when a
@@ -514,6 +601,10 @@ pub struct Shared<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     pub token: Token<R>,
     /// The one 16,640-byte TLS record buffer all DERP connections share.
     pub lease: LeasePool<R>,
+    /// The shared scratch buffer (see [`SCRATCH`]); take it with [`Shared::with_scratch`].
+    scratch: Mutex<R, RefCell<[u8; SCRATCH]>>,
+    /// The one set of big control-session buffers (record reader, sealed record, JSON, projector) every membership's control task leases.
+    pub bulk: SharedBulk<R>,
     /// The next time the engine must be ticked.
     pub wake_at: Mutex<R, Cell<Option<Millis>>>,
     /// Re-arms the engine timer.
@@ -594,7 +685,7 @@ impl<P: Platform + ?Sized> Entropy for PlatformRng<'_, P> {
 pub fn member_charges<D: PeerDirectory>() -> [(tdongle_tailnet_admission::ledger::Owner, usize); 4] {
     use tdongle_tailnet_admission::ledger::Owner;
     [
-        (Owner::Noise, core::mem::size_of::<Workspace>()),
+        (Owner::Noise, core::mem::size_of::<SessionBuf>()),
         (Owner::Packet, UDP_Q + DERP_Q),
         (Owner::WireGuard, GatewayEngine::<D>::per_member_bytes().in_engine),
         (Owner::Other, core::mem::size_of::<Ident>() + core::mem::size_of::<SlotStatus>()),
@@ -602,6 +693,12 @@ pub fn member_charges<D: PeerDirectory>() -> [(tdongle_tailnet_admission::ledger
 }
 
 impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> {
+    /// Run `f` on the shared scratch buffer. **Synchronous only** (a lock is never held across an `.await`): the closure may feed the engine (the order is
+    /// scratch, then engine) but must not take the scratch again.
+    pub fn with_scratch<T>(&self, f: impl FnOnce(&mut [u8; SCRATCH]) -> T) -> T {
+        self.scratch.lock(|s| f(&mut s.borrow_mut()))
+    }
+
     /// Build the shared state around the image's platform, storage and the engine's peer directory. Nothing runs until [`crate::run`].
     ///
     /// Not `const`: the control workspace contains the map projector, whose constructor is not `const` in `tdongle-tailnet-map`. Build it in place with
@@ -613,11 +710,13 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> 
             storage: Mutex::new(RefCell::new(storage)),
             engine: Mutex::new(RefCell::new(GatewayEngine::new(dir))),
             slots: core::array::from_fn(|_| Slot::new()),
-            registry: Mutex::new(RefCell::new(RegistryCell { reg: MemberRegistry::new(), scratch: [0; REGISTRY_SCRATCH], loaded: false, damaged: false })),
+            registry: Mutex::new(RefCell::new(RegistryCell { reg: MemberRegistry::new(), loaded: false, damaged: false })),
             host_q: ByteQueue::new(),
             dns_q: ByteQueue::new(),
             token: Token::new(),
             lease: LeasePool::new(),
+            bulk: SharedBulk::new(),
+            scratch: Mutex::new(RefCell::new([0; SCRATCH])),
             wake_at: Mutex::new(Cell::new(None)),
             wake: Signal::new(),
             link: Watch::new(),

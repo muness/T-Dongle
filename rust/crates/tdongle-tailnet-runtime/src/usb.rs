@@ -250,6 +250,11 @@ fn send_frame<U: UsbFrames, R: RawMutex, P: Platform, S: Storage, D: PeerDirecto
     }
 }
 
+/// The reply frame's place in the shared scratch.
+const REPLY: core::ops::Range<usize> = 0..FRAME_MAX;
+/// The host-queue record sits behind it (`FRAME_MAX + 16` bytes).
+const _: () = assert!(2 * FRAME_MAX + 16 <= crate::shared::SCRATCH);
+
 /// The USB task. Never returns.
 pub async fn usb_pump<R, P, S, D, U, W>(sh: &Shared<R, P, S, D>, usb: &mut U, wifi: &W)
 where
@@ -263,9 +268,9 @@ where
     let mac = sh.cfg.usb_mac.unwrap_or_else(|| derive_usb_mac(sh.platform.sta_mac()));
     let mut rng = crate::shared::PlatformRng(&sh.platform);
     let mut un = UsbSide::new(mac, &mut rng);
+    // `rx` and `wbuf` are waited into (a read pending on them holds them across an await); the reply frame and the host-queue record are only ever
+    // in use inside synchronous code, so they live in the shared scratch (the reply at its start, the record behind it) and cost this future nothing.
     let mut rx = [0u8; FRAME_MAX];
-    let mut reply = [0u8; FRAME_MAX];
-    let mut rec = [0u8; FRAME_MAX + 16];
     let mut wbuf = [0u8; FRAME_MAX];
     let mut generation = usb.link_generation();
     let mut carrier = false;
@@ -273,16 +278,26 @@ where
     loop {
         // ---- everything that is ready for the host, bounded
         for _ in 0..16 {
-            let Some((kind, n)) = sh.host_q.try_pop(&mut rec) else { break };
-            if let Some(len) = host_record(&un, kind, &rec[..n], &mut reply) {
-                send_frame(sh, usb, &reply[..len]);
+            let more = sh.with_scratch(|s| {
+                let (reply, rec) = s.split_at_mut(FRAME_MAX);
+                let rec = &mut rec[..FRAME_MAX + 16];
+                let Some((kind, n)) = sh.host_q.try_pop(rec) else { return false };
+                if let Some(len) = host_record(&un, kind, &rec[..n], reply) {
+                    send_frame(sh, usb, &reply[..len]);
+                }
+                true
+            });
+            if !more {
+                break;
             }
         }
         for _ in 0..16 {
             let Some(n) = wifi.try_next_to_host(&mut wbuf) else { break };
-            if let Some(len) = frame_to_host(&un, &wbuf[..n], &mut reply) {
-                send_frame(sh, usb, &reply[..len]);
-            }
+            sh.with_scratch(|s| {
+                if let Some(len) = frame_to_host(&un, &wbuf[..n], &mut s[REPLY]) {
+                    send_frame(sh, usb, &s[REPLY][..len]);
+                }
+            });
         }
         // ---- housekeeping
         let now = sh.now();
@@ -303,9 +318,11 @@ where
             while let Some(r) = wifi.pop_rst() {
                 let mut p = [0u8; RST_LEN];
                 r.to_host(&mut p);
-                if let Some(len) = frame_to_host(&un, &p, &mut reply) {
-                    send_frame(sh, usb, &reply[..len]);
-                }
+                sh.with_scratch(|s| {
+                    if let Some(len) = frame_to_host(&un, &p, &mut s[REPLY]) {
+                        send_frame(sh, usb, &s[REPLY][..len]);
+                    }
+                });
                 if let Some(v4) = sh.link.try_get().and_then(|l| l.v4) {
                     r.to_remote(v4.addr_u32(), &mut p);
                     let _ = wifi.try_send(&p);
@@ -323,15 +340,19 @@ where
                 RtStats::bump(&sh.stats.usb_rx);
                 let n = n.min(rx.len());
                 hold_for_room(sh, &rx[..n]).await;
-                if let UsbAction::Reply(len) | UsbAction::Echo(len) | UsbAction::Icmp(len) = host_frame(sh, &mut un, wifi, sh.now(), &mut rx[..n], &mut reply) {
-                    send_frame(sh, usb, &reply[..len]);
-                }
+                sh.with_scratch(|s| {
+                    if let UsbAction::Reply(len) | UsbAction::Echo(len) | UsbAction::Icmp(len) = host_frame(sh, &mut un, wifi, sh.now(), &mut rx[..n], &mut s[REPLY]) {
+                        send_frame(sh, usb, &s[REPLY][..len]);
+                    }
+                });
             }
             Either4::Second(()) => {}
             Either4::Third(n) => {
-                if let Some(len) = frame_to_host(&un, &wbuf[..n], &mut reply) {
-                    send_frame(sh, usb, &reply[..len]);
-                }
+                sh.with_scratch(|s| {
+                    if let Some(len) = frame_to_host(&un, &wbuf[..n], &mut s[REPLY]) {
+                        send_frame(sh, usb, &s[REPLY][..len]);
+                    }
+                });
             }
             Either4::Fourth(()) => {}
         }

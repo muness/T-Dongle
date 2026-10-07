@@ -16,13 +16,15 @@
 //! before the first map was applied.
 //!
 //! # Memory
-//! Everything big lives in one [`Workspace`] the caller allocates (a `Box`, or a `static` built in place: `Workspace::new` is not `const` because the map
-//! projector's constructor is not): the record reader (4 KiB), the sealed-record buffer (4 KiB), a request/response JSON buffer, the TCP input buffer and
-//! the map projector. **A session borrows its workspace for its whole life**, and a session is a long poll that stays open after the first map: the
-//! negotiation token serialises the *negotiations* (the gate is released after the first map is applied), not the sessions. So two memberships that are both
-//! streaming need two workspaces; one workspace can serve successive sessions of one membership, and nothing in it survives from one session to the next
-//! except the statistics. (Sharing one workspace across streaming sessions would need the driver to lease it per map message; see
-//! `tdongle-tailnet-runtime`'s crate docs.) The future of `run_session` itself holds the Noise session, the HTTP/2 session and a few counters (see [`sizes`]).
+//! The big buffers are a [`Bulk`]: the record reader (4 KiB), the sealed-record buffer (4 KiB), a request/response JSON buffer (the early payload passes
+//! through its start) and the map projector. [`run_session_leased`] **leases** it from a [`BulkLease`] instead of owning it: it takes it after the TCP connect
+//! (or for the `/key` fetch), keeps it while the session negotiates (the negotiation token is held for the same time), and once the first map is applied
+//! keeps it only from the first byte of a record until the map message that record belongs to is applied; whenever the session waits for the server with no
+//! record or message in progress it gives it back. A quiet long poll therefore holds nothing, and one `Bulk` serves every membership of a gateway. What a
+//! membership keeps for its whole session is a [`SessionBuf`] (the TCP input buffer and the counters, about 1.1 KiB). A server that stalls while the lease is
+//! held ends only its own session ([`SessionEnd::LeaseStall`], after [`Timeouts::lease_stall_ms`]); a write is bounded by the same figure.
+//! [`run_session`] is the one-owner form (a [`Workspace`] = one `SessionBuf` + one `Bulk`) for tests and tools. The future of the session itself holds the
+//! Noise session, the HTTP/2 session and a few counters (see [`sizes`]).
 //!
 //! # Cancellation
 //! Dropping the future abandons the connection (the stream is dropped with it) but does not call the gate: the owner of the future releases its token.
@@ -38,14 +40,18 @@ mod driver;
 mod end;
 mod traits;
 
-pub use driver::{SessionConfig, Timeouts, Workspace, fetch_control_key, run_session};
+pub use driver::{Bulk, BulkLease, SessionBuf, SessionConfig, TX_BYTES, Timeouts, Workspace, fetch_control_key, run_session, run_session_leased};
 pub use end::{IoFail, MapEnd, RegisterFailure, SessionEnd, SessionStats, Stage};
 pub use traits::{Clock, Connect, EndpointSource, Gate, NoEndpoints, NoGate};
 
 /// Sizes of the driver's memory on this target.
 pub mod sizes {
-    /// The shared [`crate::Workspace`].
+    /// One session's buffers all in one owner ([`crate::Workspace`]).
     pub const WORKSPACE: usize = core::mem::size_of::<crate::Workspace>();
+    /// The leased big buffers ([`crate::Bulk`]): one per gateway.
+    pub const BULK: usize = core::mem::size_of::<crate::Bulk>();
+    /// What a session keeps for its life ([`crate::SessionBuf`]): one per membership.
+    pub const SESSION_BUF: usize = core::mem::size_of::<crate::SessionBuf>();
     /// The statistics block.
     pub const STATS: usize = core::mem::size_of::<crate::SessionStats>();
     /// The Noise transport session kept by a running session.

@@ -9,6 +9,7 @@ use crate::net::{Net, NetV4, UdpConn, UdpRole};
 use crate::shared::{ALIVE_UDP, LinkView, Shared, ep_from_meta};
 use crate::taskutil::{Alive, wait_active, wait_changed, wait_link_change, wait_link_up};
 use embassy_futures::select::{Either3, select3};
+use crate::shared::SCRATCH;
 use embassy_sync::blocking_mutex::raw::RawMutex;
 use embassy_time::Timer;
 use tdongle_tailnet_disco::Ep;
@@ -21,6 +22,17 @@ pub const DATAGRAM_MAX: usize = 1600;
 pub const HOST_ROOM: usize = 1600;
 /// Bytes of the egress staging buffer (a record is `ep meta (18) + datagram`).
 pub const STAGE_MAX: usize = 18 + DATAGRAM_MAX;
+const _: () = assert!(STAGE_MAX <= SCRATCH);
+
+/// One step of the egress loop.
+enum Egress {
+    /// Nothing queued.
+    Empty,
+    /// A record was handed to the socket (or dropped as the engine addressed it wrongly).
+    Sent,
+    /// The socket has no room now; the record stays queued.
+    Full,
+}
 
 /// Why the socket loop ended.
 enum Exit {
@@ -41,8 +53,6 @@ where
     let mut sock = net.udp(UdpRole::Member, idx).expect("the Net has no UDP handle for this slot");
     let mut run_rx = slot.run.receiver().expect("slot run receivers");
     let mut link_rx = sh.link.receiver().expect("link receivers");
-    let mut rx_buf = [0u8; DATAGRAM_MAX];
-    let mut tx_buf = [0u8; STAGE_MAX];
     loop {
         let run = wait_active(&mut run_rx).await;
         let alive = Alive::new(&slot.alive, ALIVE_UDP);
@@ -50,7 +60,7 @@ where
             async {
                 loop {
                     let view = wait_link_up(&mut link_rx).await;
-                    match member_socket(sh, idx, run.id, net, &mut sock, &mut link_rx, view, &mut rx_buf, &mut tx_buf).await {
+                    match member_socket(sh, idx, run.id, net, &mut sock, &mut link_rx, view).await {
                         Exit::Rebind => {
                             sock.close();
                             publish_endpoints(sh, idx, run.id, &[]);
@@ -106,8 +116,6 @@ async fn member_socket<R, P, S, D, N>(
     sock: &mut N::Udp,
     link_rx: &mut crate::taskutil::LinkRx<'_, R>,
     view: LinkView,
-    rx_buf: &mut [u8; DATAGRAM_MAX],
-    tx_buf: &mut [u8; STAGE_MAX],
 ) -> Exit
 where
     R: RawMutex,
@@ -134,13 +142,43 @@ where
     publish_endpoints(sh, idx, member, &[Ep::v4(v4.addr, port)]);
     let sock = &*sock;
     loop {
-        // egress first, so a flood of arrivals cannot starve what the engine wants sent
-        while let Some((kind, n)) = slot.udp_q.try_pop(tx_buf) {
-            let _ = kind;
-            if let Some(dst) = ep_from_meta(&tx_buf[..n]) {
-                match sock.send_to(&tx_buf[18..n], dst).await {
-                    Ok(()) => slot.update(|st| st.udp_tx = st.udp_tx.wrapping_add(1)),
-                    Err(_) => slot.update(|st| st.udp_tx_err = st.udp_tx_err.wrapping_add(1)),
+        // egress first, so a flood of arrivals cannot starve what the engine wants sent. The record is copied into the shared scratch only for the
+        // moment it is handed to the socket; if the socket has no room it stays in the queue and this task waits for room (no buffer of its own).
+        let mut spins = 0u32;
+        loop {
+            let step = sh.with_scratch(|buf| {
+                let Some((_kind, n)) = slot.udp_q.try_peek(&mut buf[..STAGE_MAX]) else { return Egress::Empty };
+                let sent = match ep_from_meta(&buf[..n]) {
+                    Some(dst) => sock.try_send_to(&buf[18..n], dst),
+                    None => Ok(true),
+                };
+                match sent {
+                    Ok(false) => Egress::Full,
+                    Ok(true) => {
+                        slot.udp_q.discard_front();
+                        if ep_from_meta(&buf[..n]).is_some() {
+                            slot.update(|st| st.udp_tx = st.udp_tx.wrapping_add(1));
+                        }
+                        Egress::Sent
+                    }
+                    Err(_) => {
+                        slot.udp_q.discard_front();
+                        slot.update(|st| st.udp_tx_err = st.udp_tx_err.wrapping_add(1));
+                        Egress::Sent
+                    }
+                }
+            });
+            match step {
+                Egress::Empty => break,
+                Egress::Sent => spins = 0,
+                Egress::Full => {
+                    // "may have room" is a hint (the stack counts a ring with any free byte as writable): the second time round, poll
+                    if spins == 0 {
+                        let _ = sock.wait_writable().await;
+                    } else {
+                        Timer::after_millis(1).await;
+                    }
+                    spins += 1;
                 }
             }
         }
@@ -149,14 +187,24 @@ where
             while sh.host_q.free_bytes() < HOST_ROOM {
                 Timer::after_millis(2).await;
             }
-            sock.recv_from(&mut rx_buf[..]).await
+            sock.wait_readable().await
         };
         match select3(recv, slot.udp_q.wait_nonempty(), wait_link_change(link_rx, view)).await {
-            Either3::First(Ok((n, src))) => {
-                slot.update(|st| st.udp_rx = st.udp_rx.wrapping_add(1));
-                if sh.rx_admit(n) {
-                    let _ = sh.feed(Input::Udp { member, src, data: &mut rx_buf[..n] });
-                    sh.rx_done(n);
+            Either3::First(Ok(())) => {
+                let got = sh.with_scratch(|buf| match sock.try_recv_from(&mut buf[..DATAGRAM_MAX]) {
+                    Ok(Some((n, src))) => {
+                        slot.update(|st| st.udp_rx = st.udp_rx.wrapping_add(1));
+                        if sh.rx_admit(n) {
+                            let _ = sh.feed(Input::Udp { member, src, data: &mut buf[..n] });
+                            sh.rx_done(n);
+                        }
+                        Ok(())
+                    }
+                    Ok(None) => Ok(()),
+                    Err(e) => Err(e),
+                });
+                if got.is_err() {
+                    return Exit::Rebind;
                 }
             }
             Either3::First(Err(_)) => return Exit::Rebind,

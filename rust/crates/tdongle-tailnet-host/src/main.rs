@@ -38,6 +38,6 @@ async fn main() {
     let run = run_session(&mut connect, &mut clock, &cfg, &mut ws, &mut s, &mut gate, &mut eps, &mut rng);
     let end = tokio::time::timeout(std::time::Duration::from_secs(10), run).await;
     println!("end: {end:?}");
-    println!("stats: {:?}", ws.stats);
+    println!("stats: {:?}", ws.session.stats);
     println!("recorded: {:?}", sink.0.lock().unwrap().self_node);
 }

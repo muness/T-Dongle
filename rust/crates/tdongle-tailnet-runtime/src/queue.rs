@@ -67,6 +67,28 @@ impl<const N: usize> Ring<N> {
         self.stats.high_water = self.stats.high_water.max(self.used as u32);
         true
     }
+    fn peek(&self, out: &mut [u8]) -> Option<(u8, usize)> {
+        if self.used == 0 {
+            return None;
+        }
+        let mut h = [0u8; HDR];
+        self.get(0, &mut h);
+        let body = u16::from_le_bytes([h[0], h[1]]) as usize;
+        let n = body.min(out.len());
+        self.get(HDR, &mut out[..n]);
+        Some((h[2], n))
+    }
+    fn discard(&mut self) {
+        if self.used == 0 {
+            return;
+        }
+        let mut h = [0u8; HDR];
+        self.get(0, &mut h);
+        let body = u16::from_le_bytes([h[0], h[1]]) as usize;
+        self.head = (self.head + HDR + body) % N;
+        self.used -= HDR + body;
+        self.stats.popped += 1;
+    }
     fn pop(&mut self, out: &mut [u8]) -> Option<(u8, usize)> {
         if self.used == 0 {
             return None;
@@ -119,6 +141,15 @@ impl<R: RawMutex, const N: usize> ByteQueue<R, N> {
     /// Take the oldest record into `out` (a record longer than `out` is truncated; callers size `out` for the largest record they push).
     pub fn try_pop(&self, out: &mut [u8]) -> Option<(u8, usize)> {
         self.ring.lock(|r| r.borrow_mut().pop(out))
+    }
+    /// Copy the oldest record into `out` without taking it (see [`ByteQueue::discard_front`]): a consumer that may not be able to use it yet leaves it
+    /// queued instead of holding it in a buffer of its own across a wait. One consumer per queue.
+    pub fn try_peek(&self, out: &mut [u8]) -> Option<(u8, usize)> {
+        self.ring.lock(|r| r.borrow().peek(out))
+    }
+    /// Take the oldest record away (after [`ByteQueue::try_peek`] showed it).
+    pub fn discard_front(&self) {
+        self.ring.lock(|r| r.borrow_mut().discard());
     }
     /// Wait for a record. Cancel-safe.
     pub async fn pop(&self, out: &mut [u8]) -> (u8, usize) {
@@ -185,6 +216,30 @@ mod tests {
             let (k, n) = q.try_pop(&mut out).unwrap();
             assert_eq!((k, &out[..n]), (round.wrapping_add(1), &payload[..]));
             assert!(q.try_pop(&mut out).is_none());
+        }
+    }
+
+    #[test]
+    fn peek_leaves_the_record_queued_until_it_is_discarded() {
+        // the UDP and DNS tasks hold no buffer across a wait: a record the socket has no room for stays in the queue, in order, across the wrap
+        let q = ByteQueue::<NoopRawMutex, 48>::new();
+        let mut out = [0u8; 48];
+        for round in 0..40u8 {
+            let a: std::vec::Vec<u8> = (0..(round % 11 + 1)).map(|i| i ^ round).collect();
+            assert!(q.push(round, &[round], &a));
+            assert!(q.push(round.wrapping_add(100), &[], &a));
+            for _ in 0..3 {
+                let (k, n) = q.try_peek(&mut out).unwrap();
+                assert_eq!((k, &out[..n]), (round, &[&[round][..], &a].concat()[..]), "peeking twice gives the same record");
+            }
+            assert_eq!(q.stats().popped, u32::from(round) * 2, "peeking is not taking");
+            q.discard_front();
+            let (k, n) = q.try_peek(&mut out).unwrap();
+            assert_eq!((k, &out[..n]), (round.wrapping_add(100), &a[..]));
+            q.discard_front();
+            assert!(q.try_peek(&mut out).is_none());
+            q.discard_front(); // discarding an empty queue is a no-op
+            assert_eq!(q.len_bytes(), 0);
         }
     }
 

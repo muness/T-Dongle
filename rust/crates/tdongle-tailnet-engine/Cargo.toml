@@ -16,6 +16,9 @@ default = []
 fuzzing = ["tdongle-tailnet-types/test-util"]
 # Mapping of the engine's StatusSnapshot onto the status crate's input structs.
 status = ["dep:tdongle-tailnet-status"]
+# Memberships the gateway configuration runs at once ([`GATEWAY_M`]): 3 by default, 2 or 1 to shrink every static that scales with it. Tests assume 3.
+slots-2 = []
+slots-1 = []
 
 [dependencies]
 tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }

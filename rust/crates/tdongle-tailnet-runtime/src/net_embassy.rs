@@ -6,7 +6,7 @@
 //! [`NetBuffers::GATEWAY`] report them. The defaults of [`GatewayBuffers`] follow the C's windows where they matter and shrink them where the C's lwIP
 //! windows were dynamic: the control connection carries a map stream (a few KiB at a time, `rx 4,096`); the DERP connection's receive window is the
 //! relay's throughput (`rx 5,760`, the C's baseline `TCP_WND`, and the figure `tdongle-tailnet-tls::lease` documents; the C's 8,640 is
-//! `tcp_window::SDKCONFIG.tcp_wnd` and would be `DERP_RX = 8640`); transmit buffers hold one TLS record's worth (`2,048`); the UDP socket holds four
+//! `tcp_window::SDKCONFIG.tcp_wnd` and would be `DERP_RX = 8640`); the DERP transmit buffer holds one TLS record's worth (`2,048`) and the control transmit buffer `1,024` (its writes are single requests, a few hundred bytes to about 1.5 KB, which a short buffer takes in pieces: at worst one extra round trip per request, nothing on the map stream, which only the server writes); the UDP socket holds four
 //! datagrams on receive (`4 * 1,600`: bursts of DISCO and WireGuard arrive together) and two on transmit (`2 * 1,600`: the stack drains it at once). Per membership that is [`GatewayBuffers::PER_MEMBER`] bytes; they are static, so they are **not** heap.
 //!
 //! # Port ranges
@@ -87,7 +87,7 @@ pub struct NetBuffers<
 }
 
 /// The buffer sizes the firmware starts with.
-pub type GatewayBuffers = NetBuffers<4096, 2048, 5760, 2048, 4, 6400, 3200, 2048>;
+pub type GatewayBuffers = NetBuffers<4096, 1024, 5760, 2048, 4, 6400, 3200, 2048>;
 
 impl<
     const CTL_RX: usize,
@@ -338,6 +338,37 @@ impl UdpConn for EmbUdp {
         // the stack is built without IPv6 (`proto-ipv4` only), so every source is IPv4
         let IpAddress::Ipv4(v) = meta.endpoint.addr;
         Ok((n, Ep::v4(v.octets(), meta.endpoint.port)))
+    }
+    async fn wait_readable(&self) -> Result<(), NetError> {
+        self.sock.wait_recv_ready().await;
+        Ok(())
+    }
+    fn try_recv_from(&self, buf: &mut [u8]) -> Result<Option<(usize, Ep)>, NetError> {
+        // one poll with a waker that does nothing: a datagram is there or it is not (the task's own wait registers the real waker)
+        let mut cx = core::task::Context::from_waker(core::task::Waker::noop());
+        match self.sock.poll_recv_from(buf, &mut cx) {
+            core::task::Poll::Pending => Ok(None),
+            core::task::Poll::Ready(Err(_)) => Err(NetError::TooLarge),
+            core::task::Poll::Ready(Ok((n, meta))) => {
+                let IpAddress::Ipv4(v) = meta.endpoint.addr;
+                Ok(Some((n, Ep::v4(v.octets(), meta.endpoint.port))))
+            }
+        }
+    }
+    async fn wait_writable(&self) -> Result<(), NetError> {
+        self.sock.wait_send_ready().await;
+        Ok(())
+    }
+    fn try_send_to(&self, buf: &[u8], dst: Ep) -> Result<bool, NetError> {
+        let Some(o) = dst.v4_octets() else { return Ok(true) };
+        let mut cx = core::task::Context::from_waker(core::task::Waker::noop());
+        match self.sock.poll_send_to(buf, IpEndpoint::new(ip4(o), dst.port()), &mut cx) {
+            core::task::Poll::Pending => Ok(false),
+            core::task::Poll::Ready(Ok(())) => Ok(true),
+            core::task::Poll::Ready(Err(embassy_net::udp::SendError::NoRoute)) => Err(NetError::NoRoute),
+            core::task::Poll::Ready(Err(embassy_net::udp::SendError::PacketTooLarge)) => Err(NetError::TooLarge),
+            core::task::Poll::Ready(Err(_)) => Err(NetError::Io),
+        }
     }
     async fn send_to(&self, buf: &[u8], dst: Ep) -> Result<(), NetError> {
         let Some(o) = dst.v4_octets() else { return Ok(()) };

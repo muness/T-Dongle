@@ -90,7 +90,7 @@ impl Client {
                     _ = stop_rx => None,
                 };
                 d2.store(true, Ordering::SeqCst);
-                (end, ws.stats)
+                (end, ws.session.stats)
             })
         });
         Client { stop: Some(stop), join: Some(join), sink, node_key, endpoints, done }

@@ -53,13 +53,13 @@ pub const fn slot_static_bytes<R: RawMutex>() -> usize {
 }
 
 /// What one membership costs the runtime, as `Params::rust` wants it (see the crate docs for what is and is not heap):
-/// `control` = the control future and the workspace its session pins; `peer_table` = the engine's per-membership record; `derp_link` = the DERP future
+/// `control` = the control future and the session state its slot pins (the big buffers are leased from one gateway-wide set, [`StaticSizes::bulk`]); `peer_table` = the engine's per-membership record; `derp_link` = the DERP future
 /// (which owns the link); `queues` = the slot's two egress queues plus the `Net`'s socket buffers; `misc` = the rest of the slot (status, identity).
 pub fn member_sizes<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>) -> MemberSizes {
     let eng = tdongle_tailnet_engine::GatewayEngine::<D>::per_member_bytes();
     let slot = slot_static_bytes::<R>();
     let queues = crate::shared::UDP_Q + crate::shared::DERP_Q;
-    let ws = core::mem::size_of::<tdongle_tailnet_ctl::Workspace>();
+    let ws = core::mem::size_of::<tdongle_tailnet_ctl::SessionBuf>();
     MemberSizes {
         control: future_bytes(sh, FUT_CONTROL) + ws,
         peer_table: eng.in_engine,
@@ -78,8 +78,10 @@ pub fn shared_bytes<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: 
 /// The sizes of the statics that do not depend on the generic parameters, for the memory table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StaticSizes {
-    /// `ctl::Workspace`.
-    pub workspace: usize,
+    /// `ctl::Bulk`: the control sessions' big buffers, one set for the gateway (leased per record / message).
+    pub bulk: usize,
+    /// `ctl::SessionBuf`: what a control session keeps per membership.
+    pub session_buf: usize,
     /// One slot's UDP egress queue.
     pub udp_q: usize,
     /// One slot's DERP egress queue.
@@ -107,7 +109,8 @@ pub struct StaticSizes {
 /// The static sizes on the compiling target.
 pub const fn static_sizes<D: PeerDirectory>() -> StaticSizes {
     StaticSizes {
-        workspace: core::mem::size_of::<tdongle_tailnet_ctl::Workspace>(),
+        bulk: core::mem::size_of::<tdongle_tailnet_ctl::Bulk>(),
+        session_buf: core::mem::size_of::<tdongle_tailnet_ctl::SessionBuf>(),
         udp_q: crate::shared::UDP_Q,
         derp_q: crate::shared::DERP_Q,
         host_q: crate::shared::HOST_Q,
@@ -132,24 +135,27 @@ mod tests {
         let s = static_sizes::<crate::testutil::Dir>();
         std::println!("{s:#?}\nSlot<R> = {} B, Shared (test directory included) = {} B", slot_static_bytes::<R>(), core::mem::size_of::<crate::testutil::Sh>());
         assert_eq!(s.lease, 16_640);
-        assert!(s.workspace > 15_000 && s.workspace < 30_000, "{}", s.workspace);
-        assert!(slot_static_bytes::<R>() >= s.workspace + s.udp_q + s.derp_q);
+        assert!(s.bulk > 15_000 && s.bulk < 25_000, "{}", s.bulk);
+        assert!(s.session_buf < 2_000, "{}", s.session_buf);
+        assert!(slot_static_bytes::<R>() >= s.session_buf + s.udp_q + s.derp_q);
         assert!(s.engine > 50_000);
     }
 }
 
-// Layout guard, checked by `cargo +esp check --target xtensa-esp32s3-none-elf`: the 32-bit sizes of the statics. A growth past these fails the build of the
-// firmware, so the memory table of the ADR and this crate cannot drift apart unnoticed (the futures are measured by `size-table.sh`).
+// Layout guard, checked by `cargo +esp check --target xtensa-esp32s3-none-elf -Zbuild-std=core,alloc`: the 32-bit sizes of the statics, as ceilings (a growth past
+// them fails the build of the firmware, so the memory table of the ADR and this crate cannot drift apart unnoticed; the futures are measured by
+// `size-table.sh`). The ceilings are the measured sizes of the RAM diet (ADR 0002, "RAM diet results").
 #[cfg(target_arch = "xtensa")]
 const _: () = {
     use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-    assert!(core::mem::size_of::<tdongle_tailnet_ctl::Workspace>() == 19_928);
-    assert!(core::mem::size_of::<Slot<NoopRawMutex>>() == 26_832);
+    assert!(core::mem::size_of::<tdongle_tailnet_ctl::Bulk>() <= 17_744);
+    assert!(core::mem::size_of::<tdongle_tailnet_ctl::SessionBuf>() <= 1_160);
+    assert!(core::mem::size_of::<Slot<NoopRawMutex>>() <= 8_064);
     assert!(core::mem::size_of::<crate::shared::SlotStatus>() == 1_152);
     assert!(core::mem::size_of::<crate::shared::Ident>() == 352);
     assert!(core::mem::size_of::<tdongle_tailnet_derp::Link<{ crate::derp::DERP_TXQ }>>() == 4_376);
     assert!(core::mem::size_of::<tdongle_tailnet_tls::lease::LeasePool<NoopRawMutex>>() == 16_668);
     assert!(core::mem::size_of::<crate::queue::ByteQueue<NoopRawMutex, { crate::shared::HOST_Q }>>() == 8_232);
-    assert!(core::mem::size_of::<crate::shared::RegistryCell>() == 6_316);
+    assert!(core::mem::size_of::<crate::shared::RegistryCell>() <= 2_232);
     assert!(core::mem::size_of::<crate::usb::UsbSide>() == 1_472);
 };

@@ -92,7 +92,7 @@ impl UsbFrames for StubUsb {
 }
 
 /// The directory of the probe's engine.
-pub type ProbeDir = RamDirectory<3, 16, 32>;
+pub type ProbeDir = RamDirectory<{ crate::shared::MAX_RUN }, 16, 32>;
 /// The shared state of the probe.
 pub type ProbeShared = Shared<CriticalSectionRawMutex, StubPlatform, StubStorage, ProbeDir>;
 
@@ -141,5 +141,6 @@ pub type ProbeBuffers = GatewayBuffers;
 #[doc(hidden)]
 pub fn instantiate(sh: &'static ProbeShared, net: EmbassyNet) -> usize {
     let n = future_sizes(sh, &net);
-    n.iter().sum::<usize>() + run_future_bytes(sh, net)
+    // (the buffer set's size makes the compiler print its layout too, which the size table reads)
+    n.iter().sum::<usize>() + run_future_bytes(sh, net) + core::mem::size_of::<ProbeBuffers>()
 }

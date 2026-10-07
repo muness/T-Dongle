@@ -81,6 +81,12 @@ where
     }
 }
 
+enum DnsStep {
+    Done,
+    Sent,
+    Full,
+}
+
 /// The USB host's DNS forwarder: queries the engine wants answered by the Wi-Fi resolver go out on one UDP socket, replies come back into the engine.
 pub async fn dns_upstream<R, P, S, D, N>(sh: &Shared<R, P, S, D>, net: &N)
 where
@@ -92,8 +98,6 @@ where
 {
     let mut sock = net.udp(UdpRole::DnsUpstream, 0).expect("the Net has no DNS upstream UDP handle");
     let mut link_rx = sh.link.receiver().expect("link receivers");
-    let mut buf = [0u8; 1500];
-    let mut rec = [0u8; 1508];
     let mut bound = false;
     let mut gen_seen = u32::MAX;
     loop {
@@ -112,27 +116,72 @@ where
             }
         }
         let sock_ref = &sock;
-        match select(sock_ref.recv_from(&mut buf), select(sh.dns_q.pop(&mut rec), crate::taskutil::wait_link_change(&mut link_rx, view))).await {
-            Either::First(Ok((n, _src))) => {
-                RtStats::bump(&sh.stats.dns_replies);
-                let _ = sh.feed(Input::DnsUpstreamReply { data: &mut buf[..n] });
+        match select(sock_ref.wait_readable(), select(sh.dns_q.wait_nonempty(), crate::taskutil::wait_link_change(&mut link_rx, view))).await {
+            Either::First(Ok(())) => {
+                // the shared scratch, for the moment the reply is copied out and handed to the engine
+                let r = sh.with_scratch(|buf| match sock.try_recv_from(&mut buf[..1500]) {
+                    Ok(Some((n, _src))) => {
+                        RtStats::bump(&sh.stats.dns_replies);
+                        let _ = sh.feed(Input::DnsUpstreamReply { data: &mut buf[..n] });
+                        Ok(())
+                    }
+                    Ok(None) => Ok(()),
+                    Err(e) => Err(e),
+                });
+                if r.is_err() {
+                    sock.close();
+                    bound = false;
+                }
             }
             Either::First(Err(_)) => {
                 sock.close();
                 bound = false;
             }
-            Either::Second(Either::First((kind, n))) => {
-                if n < 5 {
-                    continue;
-                }
-                if kind == 1 {
-                    // the resolver changed: the engine forgot the pending queries; start from a fresh socket
-                    sock.close();
-                    bound = sock.bind(0).is_ok();
-                }
-                let upstream = Ep::v4([rec[0], rec[1], rec[2], rec[3]], 53);
-                if bound && sock.send_to(&rec[4..n], upstream).await.is_ok() {
-                    RtStats::bump(&sh.stats.dns_fwd);
+            Either::Second(Either::First(())) => {
+                // one query: it stays queued until the socket takes it (no buffer of this task's own holds it across a wait)
+                let mut spins = 0u32;
+                loop {
+                    let step = sh.with_scratch(|rec| {
+                        let Some((kind, n)) = sh.dns_q.try_peek(&mut rec[..1508]) else { return DnsStep::Done };
+                        if n < 5 {
+                            sh.dns_q.discard_front();
+                            return DnsStep::Done;
+                        }
+                        if kind == 1 && spins == 0 {
+                            // the resolver changed: the engine forgot the pending queries; start from a fresh socket
+                            sock.close();
+                            bound = sock.bind(0).is_ok();
+                        }
+                        let upstream = Ep::v4([rec[0], rec[1], rec[2], rec[3]], 53);
+                        if !bound {
+                            sh.dns_q.discard_front();
+                            return DnsStep::Done;
+                        }
+                        match sock.try_send_to(&rec[4..n], upstream) {
+                            Ok(false) => DnsStep::Full,
+                            Ok(true) => {
+                                sh.dns_q.discard_front();
+                                RtStats::bump(&sh.stats.dns_fwd);
+                                DnsStep::Sent
+                            }
+                            Err(_) => {
+                                sh.dns_q.discard_front();
+                                DnsStep::Sent
+                            }
+                        }
+                    });
+                    match step {
+                        DnsStep::Done => break,
+                        DnsStep::Sent => spins = 0,
+                        DnsStep::Full => {
+                            if spins == 0 {
+                                let _ = sock.wait_writable().await;
+                            } else {
+                                Timer::after_millis(1).await;
+                            }
+                            spins += 1;
+                        }
+                    }
                 }
             }
             Either::Second(Either::Second(_)) => {}

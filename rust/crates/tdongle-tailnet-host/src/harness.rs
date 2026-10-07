@@ -130,7 +130,7 @@ impl Gateway {
             udp_port_base: 0,
             usb_mac: None,
             firmware: "host-harness",
-            timeouts: tdongle_tailnet_ctl::Timeouts { io_ms: 5_000, first_map_ms: 20_000, idle_ms: 20_000 },
+            timeouts: tdongle_tailnet_ctl::Timeouts { io_ms: 5_000, first_map_ms: 20_000, idle_ms: 20_000, lease_stall_ms: 5_000 },
             charge_static_bytes: false,
         };
         let sh: &'static Sh = Box::leak(Box::new(Shared::new(cfg, platform, storage.clone(), Dir::new())));

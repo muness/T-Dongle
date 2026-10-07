@@ -70,3 +70,69 @@ Projection rule (EST until measured on the board): free DRAM after the image's o
 
 (RAM diet results, board measurements and the final N = 2 / N = 3 table are appended below as they are measured.)
 
+
+## RAM diet results
+
+Branch `rust/tailnet-diet`. All sizes are bytes of **static RAM** of the runtime (`.bss` plus the joined `run` future plus the socket buffer set), measured with `rust/crates/tdongle-tailnet-runtime/size-table.sh` (**M-elf**, `-Zprint-type-sizes` of the xtensa build, one build per slot count) and `cargo test -p tdongle-tailnet-host --test memory -- --nocapture` (**M-host**, 64-bit, futures inflated). Nothing here ran on a board. The goal was a per-membership marginal of about 40 KB, `MAX_RUN=1` at about 100 KB and `MAX_RUN=3` at about 180 KB. **None of the three is met**; the numbers and the reasons are below.
+
+### Before and after (M-elf)
+
+| | before | after | target |
+|---|---:|---:|---:|
+| marginal per extra membership (`MAX_RUN` 2 -> 3) | 85,872 | **58,800** | about 40,000 |
+| `MAX_RUN=1`, total | about 166,700 (lead: 166 KB) | **149,968** | about 100,000 |
+| `MAX_RUN=2`, total | about 252,600 (lead: 253 KB) | **208,784** | |
+| `MAX_RUN=3`, total | 338,448 (lead: 339 KB) | **267,584** | about 180,000 |
+
+The "before" figures for `MAX_RUN` 1 and 2 are the `MAX_RUN=3` build minus two or one marginal membership (the build option did not exist); the lead's own figures agree to 1 KB. `MAX_RUN` is now a build option of the runtime (cargo features `slots-2`, `slots-1`; default 3) that scales every static, future and engine record with it; `size-table.sh` prints the table for 1, 2 and 3.
+
+Per membership slot (one each), before -> after:
+
+| item | before | after | how |
+|---|---:|---:|---|
+| control future | 4,568 | 4,624 | (+56: the lease handling) |
+| DERP future | 17,600 | 13,080 | `drive` took its work future by value, so the 3 KB TLS handshake lived twice in the frame (as the argument and as the pinned local): now pinned at the call site (-2,960); the 1,600-byte relay packet buffer moved to the shared scratch (-1,560) |
+| UDP future | 3,632 | 384 | no datagram buffers of its own (-3,248): the shared scratch |
+| `Slot` static | 26,832 | 8,064 | the control workspace (19,928) left the slot: it is leased (-18,768; 1,160 stay as `SessionBuf`) |
+| engine `Member<8>` record | 9,560 | 9,560 | not changed (see "what is left") |
+| socket buffers (`GatewayBuffers::PER_MEMBER`) | 23,680 | 22,656 | control transmit window 2,048 -> 1,024 |
+| **marginal** | **85,872** | **58,368** (58,800 measured, with the join overhead) | |
+
+Once for the gateway, before -> after (`MAX_RUN=3`): the control `Bulk` 0 -> 17,744 (it was 3 x 19,928 inside the slots); the TLS record lease 16,668 (unchanged: a TLS record is 16,640); USB pump future 7,800 -> 4,712; DNS upstream future 3,184 -> 144; registry 6,320 -> 2,220 (its 4 KB JSON scratch is the shared one); the shared scratch 0 -> 4,096.
+
+### Per lever (M-elf, `MAX_RUN=3`, each step built and measured)
+
+| step | total | change |
+|---|---:|---:|
+| baseline | 338,448 | |
+| 1. lease the control workspace per record / message; `drive` pins its work future at the call site | 292,160 | -46,288 (lease -37,536, `drive` -8,880) |
+| 3 + 4. shared scratch for datagrams (UDP, DNS, DERP), USB frames and the registry JSON; early payload shares the JSON buffer; control transmit window 1,024 | 267,584 | -24,576 |
+| 5. `MAX_RUN` as a build option | | `MAX_RUN=1` 149,968, `MAX_RUN=2` 208,784 |
+| 2. share the TLS handshake state across memberships | not done | see below |
+
+### What changed
+
+1. **The control workspace is leased** (`tdongle_tailnet_ctl::run_session_leased`, `Bulk`, `BulkLease`, `SessionBuf`). The 17,744-byte `Bulk` (record reader, sealed-record buffer, request / response JSON, map projector) exists once. A session takes it after its TCP connect and keeps it while it negotiates (the negotiation token is held for the same time, so there is no new waiting between negotiations, but a streaming membership's next map message waits for a negotiation to finish: at most the 30 s first-map deadline, normally seconds). After its first map it holds it only from the first byte of a record until the map message that record belongs to is applied, and gives it back whenever it waits for the server with nothing in progress, which is nearly all the time. What a membership keeps is a 1,160-byte `SessionBuf` (TCP input buffer and counters). **Stall bound**: a server that goes quiet for `Timeouts::lease_stall_ms` (5 s, the C's "5 s mid-record" slicing scenario) while the session holds the lease ends *only that session* (`SessionEnd::LeaseStall`, `map_error` 2); writes after the first map are bounded by the same figure. Tests (`rust/crates/tdongle-tailnet-ctl/tests/driver.rs`): two sessions through one contended lease both join and never overlap; an idle streaming session does not hold the lease (the test fails if the release is removed: mutation-checked); a server that stops in the middle of a map message ends its own session at the stall bound and the membership waiting behind it then joins.
+2. **A shared scratch buffer** (`Shared::with_scratch`, `shared::SCRATCH` = 4,096): the datagram being handled by the UDP, DNS and DERP tasks, the USB side's reply frame and host record, the registry's JSON. It is held only inside synchronous code, so no task keeps such a buffer across a wait (lock order: registry, scratch, engine, leaf queues). To make that possible without dropping anything, `UdpConn` gained `wait_readable` / `try_recv_from` / `wait_writable` / `try_send_to` (buffer-less waits plus non-blocking copy-in / copy-out; implemented for embassy-net and the host's tokio net), and `ByteQueue` gained `try_peek` / `discard_front`: a record the socket has no room for stays in the queue, in order (test: `peek_leaves_the_record_queued_until_it_is_discarded`).
+3. **`MAX_RUN`** is `tdongle_tailnet_engine::GATEWAY_M`, 3 by default, 2 or 1 with the features `slots-2`, `slots-1` (runtime and engine). The default build and every test are unchanged; the tests assume 3.
+4. The early payload (at most 1,024 bytes, the node-key challenge) is read into the start of the JSON buffer, which is unused before registration (-1,024 in `Bulk`), through a buffer-less `EarlyParser` (`EarlyReader` is a wrapper over it).
+5. The layout guard in `sizes.rs` now holds ceilings at the new sizes.
+
+### What is left per membership (58.8 KB), and what could not be reduced
+
+* **Socket buffers 22.7 KB (39 %)**: control rx 4,096 + tx 1,024, DERP rx 5,760 + tx 2,048, UDP rx 6,400 + tx 3,200 + metadata 128. They are static rings; the C's lwIP windows are dynamic pbufs (about 9.3 KB for the five sockets, ADR 0013), which is most of the difference to the C's 39.4 KB. Cuts considered and **rejected, with the arithmetic**: control rx 4,096 -> 2,920: the window is the join throughput, `W / RTT` = 82 kB/s -> 58 kB/s at 50 ms, which makes a 750 KB netmap (about 500 peers) take 13 s instead of 9 s against the 30 s first-map deadline and lowers the largest netmap that joins by 29 %; DERP windows: the relay's throughput at its RTT (5,760 is the C's baseline `TCP_WND`); UDP rings: bursts of DISCO and WireGuard datagrams arrive together, and fewer slots means drops that TCP over the tunnel pays for. No host test can see any of this (loopback has no RTT), so none was cut on a guess. Only the control transmit window was cut: its writes are single requests (a few hundred bytes to about 1.5 KB) that a short buffer takes in pieces, at worst one more round trip per request, nothing on the map stream, which only the server writes. The sealed-record buffer stays at 4,096 (a server-supplied `Followup` URL, JSON-escaped, can need 2.3 KB; a smaller buffer would refuse requests that fit before).
+* **DERP future 13.1 KB**: the `Link` 4.4 (frame reader 1.6, transmit ring 2.1), the TLS handshake 3.0 (the largest await state: alive only while connecting, but a future's frame is the size of its largest state), the staged frame 1.6, the TLS write record 2.0, the rest 2.0. **Sharing the handshake across memberships through the token was not done.** It is not a matter of the token: a future cannot be moved between tasks, and the connection it builds borrows the slot's socket and write buffer, so a shared handshake needs one task that owns every TLS connection (a rewrite of `derp.rs` around a connection array); it would save about 3 KB per membership beyond the first and nothing at `MAX_RUN=1`. The vendored `embedded-tls` could lease its 2 KB write record as it leases the 16 KB read record (`PATCH.md` calls it not worth it next to 16 KB; it is 2 KB per membership now); not done.
+* **Engine `Member<8>` 9.6 KB**: eight resident peers at 456 bytes (hostname, 8 endpoints, 8 routes, DISCO state), the per-peer path state (248 bytes each), the DERP map (1.5 KB), STUN and netcheck state. The records are the C's own and already tight; the hostname, endpoint and route fields (about 1.7 KB per membership) are what the directory could restore, but every DISCO ping reads them, so moving them out costs a flash read on the hot path. Not done.
+* **`Slot` 8.1 KB**: the two egress queues (3,072 + 2,048), `SessionBuf` 1,160, status 1,152, identity 352. The queues' capacities are the engine's burst absorption (a full queue refuses and counts); not cut without a load test.
+* **Control future 4.6 KB**: Noise session, HTTP/2 session, the identity keys and the provisioning key copied into the frame, the `Followup` URL copy (388).
+
+The fixed part is 91 KB at `MAX_RUN=1`: engine shared half 30.3 (WireGuard pool 11.5, parked-packet store 6.2, router 6.2), `Bulk` 17.7, TLS lease 16.7, host queue 8.2, shared scratch 4.1, USB future 4.7, registry 2.2, the DNS socket 4.2 and the rest. The lease does not help `MAX_RUN=1` (the workspace is there either way); the total there fell by 16.7 KB from the scratch, the future fixes and the transmit window.
+
+**Why the targets are not reachable with this layout**: a marginal of 40 KB would need the sockets (22.7 KB) to be dynamic, as lwIP's are, or the windows cut at a throughput cost nobody has measured on a board; `MAX_RUN=1` at 100 KB would need the TLS record (16.7 KB), the control workspace (17.7 KB) and the engine's shared half (30.3 KB) to shrink by two thirds. The two mechanical levers left (the handshake in one connection task, a leased TLS write record) are worth about 3 KB and 2 KB per membership. The control `Bulk` could share the TLS lease's 16.6 KB buffer (its four byte arrays are 13.3 KB) at the price of control negotiation blocking every membership's relay reads for seconds, which the C's "a stalled member must not block the others" check forbids.
+
+### Risks
+
+* A server that stalls 5 s in the middle of a map message now costs a redial of its own session (before: 30 s of patience). That is the C's behaviour; a flaky Wi-Fi link that stops for 5 s mid-message restarts the session.
+* While one membership negotiates (join or rejoin), the others' map messages wait for the shared control buffers, up to the 30 s first-map deadline. Relay and WireGuard traffic is not affected (the TLS record lease is separate).
+* The shared scratch is a lock taken inside the UDP, DNS, DERP, USB and registry paths: a firmware raw mutex that is not reentrant and is shared with an interrupt context would deadlock the way the engine lock would. Same rule as for the engine lock.
+* `UdpConn` has four new required methods: any other `Net` implementation must add them (two exist: embassy-net and the host's tokio net).

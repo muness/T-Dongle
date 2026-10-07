@@ -99,6 +99,15 @@ pub trait UdpConn {
     async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, Ep), NetError>;
     /// Send a datagram (waits for room in the socket's transmit buffer; datagrams the stack cannot route are dropped by it, not an error).
     async fn send_to(&self, buf: &[u8], dst: Ep) -> Result<(), NetError>;
+    /// Wait until a datagram can be taken with [`UdpConn::try_recv_from`], without a buffer: the runtime keeps no receive buffer per socket (one shared
+    /// scratch buffer serves every membership, taken only for the moment a datagram is copied out and handed on). Cancel-safe.
+    async fn wait_readable(&self) -> Result<(), NetError>;
+    /// Take a waiting datagram without waiting: `Ok(None)` if there is none.
+    fn try_recv_from(&self, buf: &mut [u8]) -> Result<Option<(usize, Ep)>, NetError>;
+    /// Wait until the transmit side may have room (a hint: [`UdpConn::try_send_to`] can still say no). Cancel-safe.
+    async fn wait_writable(&self) -> Result<(), NetError>;
+    /// Send a datagram without waiting: `Ok(true)` it was taken (or silently dropped as unroutable, as `send_to` does), `Ok(false)` there is no room now.
+    fn try_send_to(&self, buf: &[u8], dst: Ep) -> Result<bool, NetError>;
 }
 
 /// The station's IPv4 configuration as the stack has it.

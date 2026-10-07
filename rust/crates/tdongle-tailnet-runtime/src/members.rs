@@ -47,13 +47,16 @@ pub fn load_registry<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh:
         if c.loaded {
             return;
         }
-        let got = sh.storage.lock(|s| s.borrow_mut().get(SETTINGS_NAMESPACE, MEMBERS_KEY, &mut c.scratch));
-        let r = match got {
-            Ok(n) => c.reg.load_stored(Some(&c.scratch[..n])).is_ok(),
-            Err(StorageError::NotFound) => c.reg.load_stored(None).is_ok(),
-            Err(_) => false,
-        };
-        zero(&mut c.scratch);
+        let r = sh.with_scratch(|scratch| {
+            let got = sh.storage.lock(|s| s.borrow_mut().get(SETTINGS_NAMESPACE, MEMBERS_KEY, &mut scratch[..]));
+            let r = match got {
+                Ok(n) => c.reg.load_stored(Some(&scratch[..n])).is_ok(),
+                Err(StorageError::NotFound) => c.reg.load_stored(None).is_ok(),
+                Err(_) => false,
+            };
+            zero(&mut scratch[..]);
+            r
+        });
         c.loaded = true;
         c.damaged = !r;
     });
@@ -133,7 +136,7 @@ pub fn apply_action<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: 
             return Reply::busy();
         }
         let mut io = ActionIo { sh, damaged: c.damaged };
-        apply(&mut c.reg, action, &mut io, &mut c.scratch)
+        sh.with_scratch(|scratch| apply(&mut c.reg, action, &mut io, &mut scratch[..]))
     });
     sh.supervisor_kick.signal(());
     reply
@@ -345,11 +348,14 @@ fn drop_spent_keys<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &
             let mut c = c.borrow_mut();
             let c = &mut *c;
             c.reg.clear_key(id);
-            let ok = match c.reg.encode(&mut c.scratch) {
-                Ok(n) => sh.storage.lock(|s| s.borrow_mut().set(SETTINGS_NAMESPACE, MEMBERS_KEY, &c.scratch[..n])).is_ok(),
-                Err(_) => false,
-            };
-            zero(&mut c.scratch);
+            let ok = sh.with_scratch(|scratch| {
+                let ok = match c.reg.encode(&mut scratch[..]) {
+                    Ok(n) => sh.storage.lock(|s| s.borrow_mut().set(SETTINGS_NAMESPACE, MEMBERS_KEY, &scratch[..n])).is_ok(),
+                    Err(_) => false,
+                };
+                zero(&mut scratch[..]);
+                ok
+            });
             if let Some(m) = c.reg.get_mut(id) {
                 if ok {
                     if m.error.as_bytes() == text::KEY_CLEANUP.as_bytes() {

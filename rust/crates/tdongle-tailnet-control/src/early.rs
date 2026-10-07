@@ -42,25 +42,32 @@ pub enum EarlyStatus {
     },
 }
 
-/// Streaming reader of the early payload into a caller buffer (1024 bytes is enough).
+/// The state of the early-payload reader, without the JSON buffer: the caller passes the buffer to every [`EarlyParser::push`], so the state can live
+/// across moments in which the buffer is not held (the driver leases it).
 #[derive(Debug)]
-pub struct EarlyReader<'a> {
+pub struct EarlyParser {
     hdr: [u8; 9],
     used: u8,
-    json: &'a mut [u8],
     want: usize,
     got: usize,
     done: bool,
 }
 
-impl<'a> EarlyReader<'a> {
-    /// Collect the JSON into `json`.
-    pub fn new(json: &'a mut [u8]) -> Self {
-        Self { hdr: [0; 9], used: 0, json, want: 0, got: 0, done: false }
+impl Default for EarlyParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl EarlyParser {
+    /// A fresh parser.
+    pub const fn new() -> Self {
+        Self { hdr: [0; 9], used: 0, want: 0, got: 0, done: false }
     }
 
-    /// Consume from `data`; returns the bytes taken (the rest is HTTP/2) and the status.
-    pub fn push(&mut self, data: &[u8]) -> Result<(usize, EarlyStatus), EarlyError> {
+    /// Consume from `data`, collecting the JSON into `json` (1024 bytes is enough; the same slice every call); returns the bytes taken (the rest is
+    /// HTTP/2) and the status.
+    pub fn push(&mut self, json: &mut [u8], data: &[u8]) -> Result<(usize, EarlyStatus), EarlyError> {
         if self.done {
             return Ok((0, EarlyStatus::NeedMore));
         }
@@ -83,14 +90,14 @@ impl<'a> EarlyReader<'a> {
                 self.done = true;
                 return Err(EarlyError::BadLength(len));
             }
-            if len as usize > self.json.len() {
+            if len as usize > json.len() {
                 self.done = true;
                 return Err(EarlyError::BufferTooSmall);
             }
             self.want = len as usize;
         }
         let take = (self.want - self.got).min(data.len() - n);
-        self.json[self.got..self.got + take].copy_from_slice(&data[n..n + take]);
+        json[self.got..self.got + take].copy_from_slice(&data[n..n + take]);
         self.got += take;
         n += take;
         if self.got < self.want {
@@ -98,13 +105,32 @@ impl<'a> EarlyReader<'a> {
         }
         self.done = true;
         let mut v = [None; 1];
-        json::scan_top(&self.json[..self.want], EARLY_JSON_DEPTH, false, &["nodeKeyChallenge"], &mut v).map_err(|_: JsonError| EarlyError::BadJson)?;
+        json::scan_top(&json[..self.want], EARLY_JSON_DEPTH, false, &["nodeKeyChallenge"], &mut v).map_err(|_: JsonError| EarlyError::BadJson)?;
         let challenge = match v[0] {
             None => None,
             Some(Value::Str(s)) if s.len() == 72 && s.starts_with(b"chalpub:") => Some(Key32::from_hex(&s[8..]).ok_or(EarlyError::BadChallenge)?),
             Some(_) => return Err(EarlyError::BadChallenge),
         };
         Ok((n, EarlyStatus::Present { challenge }))
+    }
+}
+
+/// Streaming reader of the early payload into a caller buffer (1024 bytes is enough): an [`EarlyParser`] bound to one buffer.
+#[derive(Debug)]
+pub struct EarlyReader<'a> {
+    parser: EarlyParser,
+    json: &'a mut [u8],
+}
+
+impl<'a> EarlyReader<'a> {
+    /// Collect the JSON into `json`.
+    pub fn new(json: &'a mut [u8]) -> Self {
+        Self { parser: EarlyParser::new(), json }
+    }
+
+    /// Consume from `data`; returns the bytes taken (the rest is HTTP/2) and the status.
+    pub fn push(&mut self, data: &[u8]) -> Result<(usize, EarlyStatus), EarlyError> {
+        self.parser.push(self.json, data)
     }
 }
 

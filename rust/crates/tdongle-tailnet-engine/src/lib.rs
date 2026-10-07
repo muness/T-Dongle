@@ -80,7 +80,7 @@ mod tx;
 
 pub use alias::AliasBook;
 pub use dir::{DirError, PeerDirectory, RamDirectory};
-pub use engine::{ActFail, Engine, GatewayEngine, Handled};
+pub use engine::{ActFail, Engine, GATEWAY_M, GatewayEngine, Handled};
 pub use io::{DerpNote, Input, MemberConfig, MemberId, NetmapEvent, NullOutput, Out, Output, TokenPhase};
 pub use netmap::{EngineNetmap, NetmapSink, NetmapTarget};
 pub use rx::From;

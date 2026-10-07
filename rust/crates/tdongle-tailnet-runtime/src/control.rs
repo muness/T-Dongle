@@ -23,7 +23,7 @@ use embedded_io_async::{ErrorType, Read, Write};
 use tdongle_tailnet_admission::negotiation::{Phase, Prio};
 use tdongle_tailnet_control::requests::{ENDPOINT_LOCAL, ENDPOINT_STUN, Endpoint, EndpointAddr, Hostinfo};
 use tdongle_tailnet_crypto::x25519;
-use tdongle_tailnet_ctl::{Clock, Connect, EndpointSource, Gate, RegisterFailure, SessionConfig, SessionEnd, run_session};
+use tdongle_tailnet_ctl::{Clock, Connect, EndpointSource, Gate, RegisterFailure, SessionConfig, SessionEnd, run_session_leased};
 use tdongle_tailnet_engine::{NetmapSink, PeerDirectory};
 use tdongle_tailnet_fw::{Platform, Storage};
 use tdongle_tailnet_members::CText;
@@ -286,7 +286,7 @@ async fn member_control<R, P, S, D, T>(
         let mut eps = SlotEndpoints { sh, idx, seen: None, derp_sent: home };
         let mut sink = NetmapSink::new(MapTee { sh, slot: idx, member, expired: false });
         let end = {
-            let session = run_session(&mut connect, &mut clock, &cfg, &mut ws, &mut sink, &mut gate, &mut eps, &mut rng);
+            let session = run_session_leased(&mut connect, &mut clock, &cfg, &mut ws, &sh.bulk, &mut sink, &mut gate, &mut eps, &mut rng);
             match select(session, wait_link_change(link_rx, view)).await {
                 Either::First(e) => Some(e),
                 Either::Second(_) => None,
@@ -294,6 +294,7 @@ async fn member_control<R, P, S, D, T>(
         };
         first = false;
         let stats = ws.stats;
+        // (the big buffers went back to `sh.bulk` when the session ended)
         drop(ws);
         // the session may have been cancelled with the token held
         sh.token.release(sh.now(), key_control(member));
