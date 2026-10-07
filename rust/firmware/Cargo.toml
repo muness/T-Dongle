@@ -63,6 +63,7 @@ tdongle-tailnet-runtime = { path = "../crates/tdongle-tailnet-runtime", features
 tdongle-tailnet-wifimux = { path = "../crates/tdongle-tailnet-wifimux", features = ["embassy-net"], optional = true }
 tdongle-tailnet-usbnet = { path = "../crates/tdongle-tailnet-usbnet", optional = true }
 tdongle-tailnet-engine = { path = "../crates/tdongle-tailnet-engine", optional = true }
+tdongle-tailnet-peers = { path = "../crates/tdongle-tailnet-peers", optional = true }
 tdongle-tailnet-members = { path = "../crates/tdongle-tailnet-members", optional = true }
 
 [patch.crates-io]
@@ -72,7 +73,7 @@ embassy-usb-synopsys-otg = { path = "../vendor/embassy-usb-synopsys-otg" }
 [features]
 # The tailnet gateway mode (`mode tailnet_gateway`): OFF by default until the runtime's statics fit the DRAM next to the Wi-Fi driver; build it with `--features tailnet,members-1`. `members-1|2` lower the number of memberships that can run (default 3; each costs ~86 KB of DRAM).
 default = []
-tailnet = ["embassy-net/dns", "embassy-net/dhcpv4", "dep:embedded-io-async", "dep:tdongle-tailnet-fw", "dep:tdongle-tailnet-pool", "dep:tdongle-tailnet-admission", "dep:tdongle-tailnet-sockmem", "dep:tdongle-tailnet-runtime", "dep:tdongle-tailnet-wifimux", "dep:tdongle-tailnet-usbnet", "dep:tdongle-tailnet-engine", "dep:tdongle-tailnet-members"]
+tailnet = ["embassy-net/dns", "embassy-net/dhcpv4", "dep:embedded-io-async", "dep:tdongle-tailnet-fw", "dep:tdongle-tailnet-pool", "dep:tdongle-tailnet-admission", "dep:tdongle-tailnet-sockmem", "dep:tdongle-tailnet-runtime", "dep:tdongle-tailnet-wifimux", "dep:tdongle-tailnet-usbnet", "dep:tdongle-tailnet-engine", "dep:tdongle-tailnet-peers", "dep:tdongle-tailnet-members"]
 members-1 = ["tdongle-tailnet-runtime?/slots-1"]
 members-2 = ["tdongle-tailnet-runtime?/slots-2"]
 # Stock one-packet OUT transfers (no multi-packet arming): the A/B baseline.

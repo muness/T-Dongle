@@ -6,6 +6,9 @@
 //!
 //! The trait takes `&mut self` for lookups because a flash read needs a buffer; the engine never holds a record across calls.
 
+extern crate alloc;
+
+use alloc::vec::Vec;
 use tdongle_tailnet_map::directory::is_storable;
 use tdongle_tailnet_map::types::{PeerAction, PeerRecord};
 use tdongle_tailnet_peers::directory::{self as dirfmt, Op, OpLog, RecordFile};
@@ -37,6 +40,15 @@ pub trait PeerDirectory {
     fn peer_view(&self, member: usize, j: usize) -> Option<(&str, u32)>;
     /// Generation counter of the live records (bumped by every commit).
     fn generation(&self, member: usize) -> u32;
+    /// Bytes the next [`PeerDirectory::stage`] may take from the heap (0 for a directory that does not use it). The engine refuses the update, counted, when the
+    /// heap would fall below the elastic floor (ADR 0022): the directory is an elastic consumer like the others.
+    fn stage_cost(&self) -> usize {
+        0
+    }
+    /// Bytes the next [`PeerDirectory::commit`] of `member` may take from the heap (the next bank, built beside the live one).
+    fn commit_cost(&self, _member: usize) -> usize {
+        0
+    }
 }
 
 /// `PeerRecord` (the map projector's) to `DirRecord` (the directory's), as the C's `ml_directory_stage` does.
@@ -67,68 +79,70 @@ const fn action_of(a: PeerAction) -> Action {
     }
 }
 
-/// A fixed bank of records (a `RecordFile`).
+/// A bank of at most `N` records (a `RecordFile`), each a heap block of its own: a tailnet of ten peers holds ten records (2.9 KB), not `N` (6.9 KB at 24). Growth
+/// is exact and fallible: a bank that cannot get the memory reports [`DirError`], which the engine turns into "the map failed, the previous directory stays in
+/// force" like any other directory failure.
 #[derive(Clone)]
 struct Bank<const N: usize> {
-    recs: [DirRecord; N],
-    count: usize,
+    recs: Vec<DirRecord>,
 }
 
 impl<const N: usize> Bank<N> {
     const fn new() -> Self {
-        Self { recs: [const { DirRecord::new() }; N], count: 0 }
+        Self { recs: Vec::new() }
     }
     fn live(&self) -> impl Iterator<Item = &DirRecord> {
-        self.recs[..self.count].iter().filter(|r| r.vpn_ip != 0)
+        self.recs.iter().filter(|r| r.vpn_ip != 0)
+    }
+    /// Room for `more` records, or why not: the cap `N` and the allocator are both refusals.
+    fn reserve(&mut self, more: usize) -> Result<(), DirError> {
+        if self.recs.len() + more > N {
+            return Err(DirError);
+        }
+        self.recs.try_reserve_exact(more).map_err(|_| DirError)
     }
 }
 
 impl<const N: usize> RecordFile for Bank<N> {
     type Error = DirError;
     fn count(&self) -> usize {
-        self.count
+        self.recs.len()
     }
     fn read(&mut self, i: usize) -> Result<DirRecord, DirError> {
-        self.recs.get(i).filter(|_| i < self.count).cloned().ok_or(DirError)
+        self.recs.get(i).cloned().ok_or(DirError)
     }
     fn write(&mut self, i: usize, r: &DirRecord) -> Result<(), DirError> {
-        if i >= self.count {
-            return Err(DirError);
-        }
-        self.recs[i] = r.clone();
+        *self.recs.get_mut(i).ok_or(DirError)? = r.clone();
         Ok(())
     }
     fn append(&mut self, r: &DirRecord) -> Result<(), DirError> {
-        if self.count >= N {
+        if self.recs.len() >= N {
             return Err(DirError);
         }
-        self.recs[self.count] = r.clone();
-        self.count += 1;
+        // exact growth, one record at a time (a bank built by `commit` is reserved up front, so this is no reallocation there)
+        self.recs.try_reserve_exact(1).map_err(|_| DirError)?;
+        self.recs.push(r.clone());
         Ok(())
     }
 }
 
 struct OpBuf<'a> {
-    ops: &'a [Option<Op>],
+    ops: &'a [Op],
 }
 
 impl OpLog for OpBuf<'_> {
     type Error = DirError;
     fn replay(&mut self, f: &mut dyn FnMut(&Op) -> Result<(), DirError>) -> Result<(), DirError> {
-        for op in self.ops.iter().flatten() {
-            f(op)?;
-        }
-        Ok(())
+        self.ops.iter().try_for_each(f)
     }
 }
 
-/// An in-RAM directory: `M` memberships of up to `N` records each, `S` staged updates per membership. `N` records of 288 bytes each
-/// per membership: size it for the tests, not for a 500-node tailnet.
+/// An in-RAM directory: `M` memberships of up to `N` records each, `S` staged updates per membership; **every record and every staged update is a heap block**,
+/// so the directory costs what the tailnets hold (and a map in flight), not `M x N` and `M x S` records up front. `N` records of 288 bytes each per membership: size
+/// the limit for the board, not for a 500-node tailnet (the C keeps the directory in flash).
 pub struct RamDirectory<const M: usize, const N: usize, const S: usize> {
     live: [Bank<N>; M],
-    spare: Bank<N>,
-    staged: [[Option<Op>; S]; M],
-    staged_n: [usize; M],
+    staged: [Vec<Op>; M],
     generation: [u32; M],
 }
 
@@ -139,22 +153,23 @@ impl<const M: usize, const N: usize, const S: usize> Default for RamDirectory<M,
 }
 
 impl<const M: usize, const N: usize, const S: usize> RamDirectory<M, N, S> {
-    /// Bytes of the whole directory.
+    /// Bytes of the directory value itself (the records are heap blocks on top of this).
     pub const STATE_BYTES: usize = core::mem::size_of::<Self>();
+    /// Bytes the directory can hold at most: `M` live banks, one bank being built by a commit, `S` staged updates per membership.
+    pub const MAX_HEAP_BYTES: usize = (M + 1) * N * core::mem::size_of::<DirRecord>() + M * S * core::mem::size_of::<Op>();
     /// Empty.
     #[inline(always)]
     pub const fn new() -> Self {
-        Self {
-            live: [const { Bank::new() }; M],
-            spare: Bank::new(),
-            staged: [const { [const { None }; S] }; M],
-            staged_n: [0; M],
-            generation: [0; M],
-        }
+        Self { live: [const { Bank::new() }; M], staged: [const { Vec::new() }; M], generation: [0; M] }
     }
     /// Staged updates waiting for a commit.
     pub fn staged(&self, member: usize) -> usize {
-        self.staged_n.get(member).copied().unwrap_or(0)
+        self.staged.get(member).map_or(0, Vec::len)
+    }
+    /// Heap bytes the directory holds now (live records and staged updates, by capacity).
+    pub fn heap_bytes(&self) -> usize {
+        self.live.iter().map(|b| b.recs.capacity() * core::mem::size_of::<DirRecord>()).sum::<usize>()
+            + self.staged.iter().map(|s| s.capacity() * core::mem::size_of::<Op>()).sum::<usize>()
     }
     /// Insert a record directly (tests: a netmap without the event path).
     pub fn insert(&mut self, member: usize, rec: &DirRecord) -> Result<(), DirError> {
@@ -184,42 +199,43 @@ impl<const M: usize, const N: usize, const S: usize> PeerDirectory for RamDirect
         if rec.action == PeerAction::Add && !is_storable(rec) {
             return Ok(());
         }
-        let n = self.staged_n[member];
-        if n >= S {
+        let staged = &mut self.staged[member];
+        if staged.len() >= S {
             return Err(DirError);
         }
-        self.staged[member][n] = Some(Op { group: rec.group as u32, action: action_of(rec.action), record: to_dir_record(rec) });
-        self.staged_n[member] = n + 1;
+        staged.try_reserve(1).map_err(|_| DirError)?;
+        staged.push(Op { group: rec.group as u32, action: action_of(rec.action), record: to_dir_record(rec) });
         Ok(())
     }
     fn commit(&mut self, member: usize, authoritative: bool) -> Result<(), DirError> {
         if member >= M {
             return Err(DirError);
         }
-        self.spare.count = 0;
-        let n = self.staged_n[member];
-        let mut log = OpBuf { ops: &self.staged[member][..n] };
-        let r = dirfmt::commit(&mut self.spare, Some(&mut self.live[member]), &mut log, authoritative);
-        // staging is consumed either way
-        for s in &mut self.staged[member][..n] {
-            *s = None;
-        }
-        self.staged_n[member] = 0;
+        // the next generation is built beside the live one (a failure leaves the live bank untouched), with room for every record it can hold: the live records and
+        // what the staged updates can add; the old bank is freed when the new one replaces it
+        let mut next = Bank::<N>::new();
+        let ops = core::mem::take(&mut self.staged[member]);
+        let room = (self.live[member].recs.len() + ops.len()).min(N);
+        let r = next.reserve(room).and_then(|()| {
+            let mut log = OpBuf { ops: &ops[..] };
+            dirfmt::commit(&mut next, Some(&mut self.live[member]), &mut log, authoritative)
+        });
+        // staging is consumed either way (the vector's memory goes back with `ops`)
+        drop(ops);
         r?;
-        core::mem::swap(&mut self.live[member], &mut self.spare);
+        self.live[member] = next;
         self.generation[member] = self.generation[member].wrapping_add(1);
         Ok(())
     }
     fn abort(&mut self, member: usize) {
         if member < M {
-            self.staged[member].fill(None);
-            self.staged_n[member] = 0;
+            self.staged[member] = Vec::new();
         }
     }
     fn clear(&mut self, member: usize) {
         if member < M {
             self.abort(member);
-            self.live[member].count = 0;
+            self.live[member] = Bank::new();
             self.generation[member] = self.generation[member].wrapping_add(1);
         }
     }
@@ -231,6 +247,13 @@ impl<const M: usize, const N: usize, const S: usize> PeerDirectory for RamDirect
     }
     fn generation(&self, member: usize) -> u32 {
         self.generation.get(member).copied().unwrap_or(0)
+    }
+    fn stage_cost(&self) -> usize {
+        core::mem::size_of::<Op>() + 16
+    }
+    fn commit_cost(&self, member: usize) -> usize {
+        let have = self.live.get(member).map_or(0, |b| b.recs.len()) + self.staged.get(member).map_or(0, Vec::len);
+        have.min(N) * core::mem::size_of::<DirRecord>() + 16
     }
 }
 
@@ -301,5 +324,42 @@ mod tests {
         assert_eq!(d.staged(0), 0);
         d.commit(0, true).unwrap();
         assert_eq!(d.count(0), 0);
+    }
+
+    #[test]
+    fn the_directory_costs_what_the_tailnet_holds_and_gives_it_back() {
+        let mut d = RamDirectory::<1, 24, 32>::new();
+        assert_eq!(d.heap_bytes(), 0, "an empty directory holds nothing");
+        for i in 0..5u8 {
+            d.stage(0, &rec(0x64400002 + u32::from(i), i + 1, u64::from(i) + 2)).unwrap();
+        }
+        assert!(d.heap_bytes() >= 5 * core::mem::size_of::<Op>(), "staged updates are blocks");
+        d.commit(0, true).unwrap();
+        // five peers: five records (and nothing staged any more), not 24
+        let rec_bytes = core::mem::size_of::<DirRecord>();
+        assert_eq!(d.count(0), 5);
+        assert!(d.heap_bytes() >= 5 * rec_bytes && d.heap_bytes() < 8 * rec_bytes, "{} B for 5 records of {rec_bytes}", d.heap_bytes());
+        assert!(d.heap_bytes() < RamDirectory::<1, 24, 32>::MAX_HEAP_BYTES / 3);
+        d.clear(0);
+        assert_eq!((d.count(0), d.heap_bytes()), (0, 0), "clear gives the records back");
+    }
+
+    #[test]
+    fn a_map_that_does_not_fit_fails_and_the_previous_directory_stays_in_force() {
+        let mut d = RamDirectory::<1, 4, 16>::new();
+        for i in 0..3u8 {
+            d.stage(0, &rec(0x64400002 + u32::from(i), i + 1, u64::from(i) + 2)).unwrap();
+        }
+        d.commit(0, true).unwrap();
+        let before = d.generation(0);
+        // an authoritative map of six peers into a directory of four
+        for i in 0..6u8 {
+            d.stage(0, &rec(0x64400010 + u32::from(i), 0x40 + i, u64::from(i) + 20)).unwrap();
+        }
+        assert_eq!(d.commit(0, true), Err(DirError));
+        assert_eq!(d.generation(0), before, "no new generation");
+        assert_eq!(d.count(0), 3, "the previous peers are all still there");
+        assert!(d.find_by_ip(0, 0x64400002).is_some() && d.find_by_ip(0, 0x64400010).is_none());
+        assert_eq!(d.staged(0), 0, "the failed map's staging was consumed");
     }
 }

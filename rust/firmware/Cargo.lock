@@ -2372,6 +2372,7 @@ dependencies = [
  "tdongle-tailnet-engine",
  "tdongle-tailnet-fw",
  "tdongle-tailnet-members",
+ "tdongle-tailnet-peers",
  "tdongle-tailnet-pool",
  "tdongle-tailnet-runtime",
  "tdongle-tailnet-sockmem",

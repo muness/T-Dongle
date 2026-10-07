@@ -7,6 +7,7 @@ use crate::member::{Member, NETCHECK_REGIONS, Phase};
 use crate::rx::From;
 use crate::shared::{ActHost, Cx, Shared, residents_of_others};
 use crate::stats::{HostFate, IdentityError, ParkEnd, RxFate, Stats, TxFate};
+use tdongle_tailnet_admission::heap::hb_ok;
 use tdongle_tailnet_admission::probe::HeapSnapshot;
 use tdongle_tailnet_disco::Ep;
 use tdongle_tailnet_disco::netcheck::NetcheckPoll;
@@ -639,7 +640,8 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
     fn on_netmap(&mut self, cx: &mut Cx<'_>, id: MemberId, ev: &NetmapEvent) -> bool {
         let Some(slot) = self.slot_by_id(id) else { return false };
         match ev {
-            NetmapEvent::Peer(rec) => self.sh.dir.stage(slot, rec).is_ok(),
+            // an elastic consumer: refused (counted as a refused map) when the heap would fall below the floor
+            NetmapEvent::Peer(rec) => hb_ok(self.sh.heap.free, self.sh.dir.stage_cost()) && self.sh.dir.stage(slot, rec).is_ok(),
             NetmapEvent::Abort => {
                 self.sh.dir.abort(slot);
                 true
@@ -687,7 +689,7 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
     }
 
     fn commit_map(&mut self, cx: &mut Cx<'_>, slot: usize, authoritative: bool, self_expired: bool) -> bool {
-        if self.sh.dir.commit(slot, authoritative).is_err() {
+        if !hb_ok(self.sh.heap.free, self.sh.dir.commit_cost(slot)) || self.sh.dir.commit(slot, authoritative).is_err() {
             return false;
         }
         let Some(m) = self.members[slot].as_mut() else { return false };

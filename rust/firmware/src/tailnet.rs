@@ -118,8 +118,8 @@ pub mod budget {
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
-    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 4 KB of margin. `tn-mem` on the board settles it.
-    pub const WIFI_AND_USB: usize = 52 * 1024;
+    /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 12 KB of margin. `tn-mem` on the board settles it.
+    pub const WIFI_AND_USB: usize = 60 * 1024;
     /// The bridge's permanent ring slots (8 x 1,514 + header), allocated at boot.
     pub const RING_BASE: usize = 8 * 1_536;
 
@@ -673,12 +673,21 @@ pub static START_REFUSED: AtomicU32 = AtomicU32::new(0);
 
 /// What tailnet mode keeps on the heap once it runs, besides the Wi-Fi driver: the shared state, the receive ring, the pool's steady use (one membership's socket
 /// windows, the DNS forwarder's rings, a record in flight). The elastic floor comes on top ([`ML_HB_FLOOR`]), and the control workspace of a join is inside it.
-pub const TAILNET_HEAP_BYTES: usize =
-    core::mem::size_of::<Sh>() + core::mem::size_of::<RxRing>() + Windows::PER_MEMBER + Windows::GATEWAY.gateway() + 4_096 + ELASTIC_TYPICAL;
+pub const TAILNET_HEAP_BYTES: usize = core::mem::size_of::<Sh>()
+    + core::mem::size_of::<RxRing>()
+    + Windows::PER_MEMBER
+    + Windows::GATEWAY.gateway()
+    + 4_096
+    + DIR_LIVE_FULL
+    + ELASTIC_TYPICAL;
 
-/// What the elastic frames hold in ordinary use (a few radio frames waiting for the stack, a few host frames, the mux's NAT queues): a tuning figure; each consumer is
-/// refused at the floor, so the peak is bounded by the heap, not by this.
-pub const ELASTIC_TYPICAL: usize = 6 * 1024;
+/// The directory when every membership's tailnet is as big as the directory allows (`DIR_PEERS` records of 288 bytes per membership); a smaller tailnet holds less.
+/// The bank a commit builds beside it and the staged updates of a map in flight are elastic ([`ELASTIC_TYPICAL`]).
+pub const DIR_LIVE_FULL: usize = MEMBERS * DIR_PEERS * core::mem::size_of::<tdongle_tailnet_peers::record::DirRecord>();
+
+/// What the elastic frames hold in ordinary use (a few radio frames waiting for the stack, a few host frames, the mux's NAT queues, a map being applied): a tuning
+/// figure; each consumer is refused at the floor, so the peak is bounded by the heap, not by this.
+pub const ELASTIC_TYPICAL: usize = 10 * 1024;
 
 #[embassy_executor::task]
 async fn net_task(mut runner: Runner<'static, MuxDrv>) -> ! {

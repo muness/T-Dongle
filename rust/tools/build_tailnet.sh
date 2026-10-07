@@ -32,4 +32,10 @@ python3 tools/check_stack.py "$elf" --depth 36000
 # DRAM budget as the linker laid it out
 python3 tools/check_dram.py "$elf" --stack-min 40960
 (cd "$dist" && shasum -a 256 app-tailnet.bin tdongle-fw.elf | tee SHA256SUMS)
-if command -v esptool.py >/dev/null || python3 -c "import esptool" 2>/dev/null; then python3 -m esptool image_info --version 2 "$dist/app-tailnet.bin" | sed -n '1,12p;/Segments information/,/^$/p;/Checksum/,/Validation/p'; fi
+# the image must be valid for esptool (the same esptool the C build uses, from the pinned ESP-IDF checkout)
+IDF_ROOT="${IDF_PATH:-$HOME/.cache/tdongle/esp-idf-v5.5.5}"
+if [ -f "$IDF_ROOT/export.sh" ]; then
+  (. "$IDF_ROOT/export.sh" >/dev/null 2>&1; python -m esptool image_info --version 2 "$dist/app-tailnet.bin" | sed -n '1,14p;/Segments information/,/^$/p;/Checksum/,/Validation/p;/Project name/,$p') | tee "$dist/image_info.txt"
+else
+  echo "esptool: ESP-IDF not found at $IDF_ROOT (tools/bootstrap.sh); image_info not run" >&2
+fi

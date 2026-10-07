@@ -87,3 +87,29 @@ fn a_refused_staging_fails_the_map_and_the_old_directory_stays() {
     assert_eq!(s.eng.dir().count(0), 3, "abort keeps the previous directory");
     s.eng.check_identities().unwrap();
 }
+
+#[test]
+fn a_peer_update_below_the_elastic_floor_is_refused_not_stored() {
+    use tdongle_tailnet_admission::heap::ML_HB_FLOOR;
+    use tdongle_tailnet_admission::probe::HeapSnapshot;
+    let mut s = Solo::new(33);
+    s.member(1, 2, 0);
+    assert_eq!(s.eng.dir().count(0), 2);
+    // the directory is an elastic consumer (ADR 0022): with the heap at the floor a staged update would cross it
+    s.eng.set_heap(HeapSnapshot { free: ML_HB_FLOOR + 10, largest: 20_000, minimum: 0 });
+    let r = peer_record(6000, Solo::ip(1, 200), &keys(9), "late.m1.ts.net", None);
+    let before = s.eng.stats().netmap_refused.get();
+    assert_eq!(s.input(Input::Netmap { member: 1, event: &NetmapEvent::Peer(r.clone()) }), Handled::Refused);
+    assert_eq!(s.eng.stats().netmap_refused.get(), before + 1, "counted");
+    assert_eq!(s.eng.dir().count(0), 2, "the previous directory stays");
+    // with room again the same update is staged and the map commits
+    s.eng.set_heap(HeapSnapshot { free: ML_HB_FLOOR + 100_000, largest: 50_000, minimum: 0 });
+    assert_ne!(s.input(Input::Netmap { member: 1, event: &NetmapEvent::Peer(r) }), Handled::Refused);
+    s.eng.set_heap(HeapSnapshot { free: ML_HB_FLOOR + 10, largest: 20_000, minimum: 0 });
+    assert_eq!(
+        s.input(Input::Netmap { member: 1, event: &NetmapEvent::Commit { authoritative: false, self_expired: false } }),
+        Handled::Refused,
+        "the commit builds the next bank beside the live one: it is refused at the floor too"
+    );
+    assert_eq!(s.eng.dir().count(0), 2);
+}
