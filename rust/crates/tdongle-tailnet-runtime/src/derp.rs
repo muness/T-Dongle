@@ -157,8 +157,8 @@ pub static VISIT_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomi
 pub const X_HOME_QUIET_MS: u32 = 10_000;
 /// A visit ends when packets for the home region (or another region) have waited this long: the visit is not worth starving them.
 pub const X_STARVE_MS: u32 = 10_000;
-/// The last time a packet for the home region (or for none in particular) was handed to the link, and when the oldest packet for it that had to wait (the link being away)
-/// was queued (0: none), ms clock.
+/// The last time a data packet was handed to the link (for the region it is on), and when the oldest packet for the home region that had to wait (the link being away) was
+/// queued (0: none), ms clock.
 static HOME_LAST_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 static HOME_WAITING_SINCE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// The region the member's engine homes the link on (its last `Connect` command), and the region the link is visiting (0: none).
@@ -252,12 +252,8 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
                 }
                 Ok(()) => {
                     X_COUNTS[1].fetch_add(1, Relaxed);
-                    if u32::from(region) == VISITING.load(Relaxed) {
-                        VISIT_LAST_MS.store((now as u32).max(1), Relaxed);
-                    } else {
-                        HOME_LAST_MS.store((now as u32).max(1), Relaxed);
-                        HOME_WAITING_SINCE.store(0, Relaxed);
-                    }
+                    HOME_LAST_MS.store((now as u32).max(1), Relaxed);
+                    HOME_WAITING_SINCE.store(0, Relaxed);
                 }
                 Err(_) => {
                     X_COUNTS[8].fetch_add(1, Relaxed);
@@ -407,8 +403,6 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
     }
 }
 
-/// The last packet the link sent to the region it is visiting, ms clock.
-static VISIT_LAST_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// The member's relay link visits the region a peer is homed on when that is not the one the link is on. A relay server forwards only to clients connected to it, so a packet
 /// for a peer homed on region 27 is lost on a link to region 12; and a second link costs about 17 KB of heap (a 10 KB future, the TLS write record and the windows), which
@@ -431,8 +425,9 @@ where
 {
     use core::sync::atomic::Ordering::Relaxed;
     let slot = &sh.slots[idx];
+    let mut switched_at = 0u32;
     loop {
-        // a foreign region's packets wait: the region of the first one (the link's own region is not foreign)
+        // a packet waits for a region other than the one the link is on (the link's own region is never foreign)
         let region = loop {
             let cur = match VISITING.load(Relaxed) {
                 0 => HOME_REGION.load(Relaxed),
@@ -444,19 +439,22 @@ where
             X_SIG.wait().await;
         };
         let now = || (sh.now() as u32).max(1);
-        // not while the link serves the home region
-        let home_last = HOME_LAST_MS.load(Relaxed);
-        if home_last != 0 && now().wrapping_sub(home_last) < X_HOME_QUIET_MS && VISITING.load(Relaxed) == 0 {
+        let t = now();
+        let oldest = XQ.lock(|q| q.borrow().iter().filter(|p| p.slot == idx as u8 && p.region == region).map(|p| p.at_ms).min()).unwrap_or(t);
+        let starved = t.wrapping_sub(oldest) > X_STARVE_MS;
+        // the link stays where it is until real traffic needs another region: the region it is on is quiet (no packet for it went out for a while), or the packets that wait
+        // have waited too long; and not before it has been there for the minimum (a switch is a reconnect, and the new home needs time to reach the peers)
+        let quiet = t.wrapping_sub(HOME_LAST_MS.load(Relaxed)) >= X_HOME_QUIET_MS;
+        let dwelled = switched_at == 0 || t.wrapping_sub(switched_at) >= VISIT_TIMING[1].load(Relaxed);
+        if !dwelled || !(quiet || starved) || slot.status().derp_state != State::Ready {
             X_COUNTS[10].fetch_add(1, Relaxed);
             Timer::after_secs(1).await;
             continue;
         }
-        if slot.status().derp_state != State::Ready {
-            Timer::after_secs(1).await;
-            continue;
-        }
         let member = slot.id.load(core::sync::atomic::Ordering::Acquire);
-        let Some((host, port, cert)) = sh.with_engine(|e, _| e.derp_target(member, region)) else {
+        let back_home = u32::from(region) == HOME_REGION.load(Relaxed);
+        let target = if back_home { None } else { sh.with_engine(|e, _| e.derp_target(member, region)) };
+        if !back_home && target.is_none() {
             // a region the member's map does not have: nothing to dial
             let n = XQ.lock(|q| {
                 let mut q = q.borrow_mut();
@@ -466,57 +464,52 @@ where
             });
             X_COUNTS[4].fetch_add(n as u32, Relaxed);
             continue;
-        };
-        X_CERT.lock(|c| {
-            *c.borrow_mut() = Some(match cert {
-                tdongle_tailnet_map::types::IndexCert::Hostname => tdongle_tailnet_tls::DerpCert::Hostname,
-                tdongle_tailnet_map::types::IndexCert::Pin(p) => tdongle_tailnet_tls::DerpCert::Pin(p),
-                tdongle_tailnet_map::types::IndexCert::Invalid => tdongle_tailnet_tls::DerpCert::Invalid,
-            })
-        });
+        }
         X_COUNTS[5].fetch_add(1, Relaxed);
-        VISIT_LAST_MS.store(now(), Relaxed);
+        HOME_LAST_MS.store(t, Relaxed);
         HOME_WAITING_SINCE.store(0, Relaxed);
-        VISITING.store(u32::from(region), Relaxed);
+        switched_at = t;
         // a node sends to the destination's home relay, so for the peer to answer us while we are on `region` our home has to be `region`: advertised to the control plane
-        // (`PreferredDERP` of the next endpoint update), which pushes it to the peers
+        // (`PreferredDERP` of the next endpoint update), which pushes it to the peers. The link then stays there.
         advertise_home(slot, region);
-        let started = now();
-        VISIT.signal(Visit::Region { region, host, port });
-        // stay while the region is used
-        let why = loop {
-            Timer::after_secs(2).await;
-            let t = now();
-            let since_start = t.wrapping_sub(started);
-            let idle = t.wrapping_sub(VISIT_LAST_MS.load(Relaxed)) > VISIT_TIMING[0].load(Relaxed) && since_start >= VISIT_TIMING[1].load(Relaxed);
-            let waiting = HOME_WAITING_SINCE.load(Relaxed);
-            let starved = waiting != 0 && t.wrapping_sub(waiting) > X_STARVE_MS;
-            let other_waiting = XQ.lock(|q| q.borrow().iter().any(|p| p.slot == idx as u8 && p.region != region && t.wrapping_sub(p.at_ms) > X_STARVE_MS));
-            if idle {
-                break 6;
+        match target {
+            Some((host, port, cert)) => {
+                X_CERT.lock(|c| {
+                    *c.borrow_mut() = Some(match cert {
+                        tdongle_tailnet_map::types::IndexCert::Hostname => tdongle_tailnet_tls::DerpCert::Hostname,
+                        tdongle_tailnet_map::types::IndexCert::Pin(p) => tdongle_tailnet_tls::DerpCert::Pin(p),
+                        tdongle_tailnet_map::types::IndexCert::Invalid => tdongle_tailnet_tls::DerpCert::Invalid,
+                    })
+                });
+                VISITING.store(u32::from(region), Relaxed);
+                VISIT.signal(Visit::Region { region, host, port });
             }
-            // starving packets end a visit, but not before the minimum: a visit that is cut at once settles nothing
-            if (starved || other_waiting) && since_start >= VISIT_TIMING[1].load(Relaxed) {
-                break 8;
+            None => {
+                VISITING.store(0, Relaxed);
+                VISIT.signal(Visit::Home);
             }
-        };
-        VISITING.store(0, Relaxed);
-        // the real home again, in the control plane and on the link
-        advertise_home(slot, HOME_REGION.load(Relaxed) as u16);
-        VISIT.signal(Visit::Home);
-        // what the visit did not send is gone with it (the region's packets would only go stale)
-        let n = XQ.lock(|q| {
-            let mut q = q.borrow_mut();
-            let before = q.len();
-            q.retain(|p| !(p.slot == idx as u8 && p.region == region));
-            before - q.len()
-        });
-        X_COUNTS[7].fetch_add(n as u32, Relaxed);
-        X_LAST_END.store(why, Relaxed);
-        // the home region gets a turn before the next visit (and its advertisement time to settle)
+        }
+        X_LAST_END.store(if back_home { 8 } else { 6 }, Relaxed);
+        // time for the new home to settle before the next switch
         Timer::after_millis(u64::from(VISIT_TIMING[2].load(Relaxed))).await;
     }
 }
+
+/// Forget the visit state (the region the link visits, the home it was told, what waits): for a runtime that starts again in the same process (the host tests; on the device a
+/// reset does it).
+pub fn reset_visit_state() {
+    use core::sync::atomic::Ordering::Relaxed;
+    VISITING.store(0, Relaxed);
+    HOME_REGION.store(0, Relaxed);
+    HOME_LAST_MS.store(0, Relaxed);
+    HOME_WAITING_SINCE.store(0, Relaxed);
+    XQ.lock(|q| q.borrow_mut().clear());
+    VISIT.reset();
+    for c in &X_COUNTS {
+        c.store(0, Relaxed);
+    }
+}
+
 /// Make `region` the home the member tells the control plane (the next endpoint update carries it as `PreferredDERP`).
 fn advertise_home<R: RawMutex>(slot: &crate::shared::Slot<R>, region: u16) {
     if region == 0 {
@@ -793,7 +786,7 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
                 }
                 _ => {
                     self.sh.slots[self.idx].derp_q.discard_front();
-                    if self.visiting.is_none() && !background {
+                    if !background {
                         HOME_LAST_MS.store((now as u32).max(1), core::sync::atomic::Ordering::Relaxed);
                     }
                 }

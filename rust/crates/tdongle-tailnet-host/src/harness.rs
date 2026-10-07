@@ -121,6 +121,7 @@ impl std::fmt::Debug for Gateway {
 impl Gateway {
     /// Build and start a gateway.
     pub fn start(opts: GatewayOpts) -> Gateway {
+        tdongle_tailnet_runtime::derp::reset_visit_state();
         let heap = Arc::new(ModelHeap::new(opts.heap_free, opts.heap_largest));
         let platform = MemPlatform::new(heap.clone());
         let storage = opts.storage.clone().unwrap_or_default();

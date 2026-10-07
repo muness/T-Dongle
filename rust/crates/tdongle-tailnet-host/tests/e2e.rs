@@ -951,9 +951,10 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
     // in by, so this test alone would pass without it; the control plane's view of our home is what a peer that does not do that depends on)
     let visiting = tdongle_tailnet_runtime::derp::VISITING.load(Ordering::Relaxed);
     let _ = visiting;
-    // idle: the link comes home and the real home is advertised again
-    wait_until("the visit to end", 40, || tdongle_tailnet_runtime::derp::VISITING.load(Ordering::Relaxed) == 0);
-    wait_until("control to have our real home again", 15, || go.home_derp(&gw_key) == Some(home));
+    // the link stays on the peer's region, and the control plane keeps it as our home, until traffic needs another region: idle time does not bring it back
+    std::thread::sleep(Duration::from_secs(12));
+    assert_eq!(tdongle_tailnet_runtime::derp::VISITING.load(Ordering::Relaxed), peer_region, "the link stayed on the peer's region while idle");
+    assert_eq!(go.home_derp(&gw_key), Some(peer_region), "and our advertised home stayed with it");
     use tdongle_tailnet_runtime::derp::X_COUNTS;
     let c: Vec<u32> = X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect();
     let (queued, sent, starts) = (c[0], c[1], c[5]);
@@ -962,7 +963,8 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
     assert_eq!(c[6] + c[2] + c[3] + c[4] + c[8], 0, "nothing was dropped or expired while the link came up: {c:?}");
     println!("home region {home}; visit: queued {queued} sent {sent} visits {starts}; down {:.1} up {:.1} Mbit/s", mbit(n, d), mbit(n2, d2));
     // only the packets that arrived before the link reached the peer's region wait in the queue (the first of the handshake); the rest go straight out on the link
-    assert!(queued >= 1 && sent == queued && starts >= 1, "the packets that waited for the visit were sent: queued {queued} sent {sent} visits {starts}");
+    // one visit, then it stays: the probes of the peer and idle time do not move the link back and forth
+    assert!(queued >= 1 && sent == queued && starts == 1, "the packets that waited for the visit were sent, and the link went there once: queued {queued} sent {sent} visits {starts}");
     let indexed = gw.sh.with_engine(|e, _| e.member(id).map_or(0, |m| m.rt.derp_index.count));
     assert_eq!(indexed, expect_index, "every region of the map is in the compact index");
     gw.check_engine();
