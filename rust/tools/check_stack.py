@@ -143,4 +143,5 @@ def main():
     print(f'ok: no frame over {limit} bytes')
 
 
-main()
+if __name__ == '__main__':
+    main()
