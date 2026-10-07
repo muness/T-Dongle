@@ -47,7 +47,16 @@ jobs:
         run: python3 tools/check_boot_order.py firmware/src/main.rs spikes/s1-wifi-l2/src/main.rs
       - name: Rescue arm first (every image)
         run: python3 tools/check_rescue_first.py
+      - name: cJSON used by ESP-IDF 5.5.5 (NVS golden generator only)
+        uses: actions/checkout@v4
+        with:
+          repository: DaveGamble/cJSON
+          ref: b2890c8d76bbb64e710585ebc0a917196b9c67e7
+          path: .ci/esp-idf/components/json/cJSON
+          persist-credentials: false
       - name: Golden files are reproducible from the C sources
+        env:
+          IDF_PATH: ${{ github.workspace }}/.ci/esp-idf
         run: |
           crates/tdongle-serial/tools/regen.sh
           crates/tdongle-nvs-format/tools/regen.sh
