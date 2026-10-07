@@ -116,6 +116,8 @@ pub struct Rt<const P: usize> {
     pub init_window: (Millis, u16),
     /// Bumped by every table change (the C's `peer_generation`).
     pub generation: u32,
+    /// The directory generation the resident peers last followed (a directory may apply a commit later, in its background upkeep).
+    pub dir_generation: u32,
 }
 
 /// A membership.
@@ -184,6 +186,7 @@ impl<const P: usize> Member<P> {
                 next_disco_tick: 0,
                 init_window: (0, 0),
                 generation: 0,
+                dir_generation: 0,
             },
         })
     }

@@ -118,7 +118,11 @@ fn big_map(peer: &Keys, peers: usize) -> std::string::String {
     let mut j = std::string::String::from("{\"Node\":{\"ID\":1,\"Name\":\"me.tail.ts.net.\",\"Addresses\":[\"100.64.0.1/32\"],\"HomeDERP\":3}");
     j.push_str(",\"DERPMap\":{\"Regions\":{");
     for r in 1..=24 {
-        let _ = write!(j, "{}\"{r}\":{{\"RegionID\":{r},\"RegionCode\":\"r{r}\",\"RegionName\":\"Region {r}\",\"Nodes\":[{{\"Name\":\"{r}a\",\"RegionID\":{r},\"HostName\":\"derp{r}.example\",\"IPv4\":\"192.0.2.{r}\",\"STUNPort\":3478}},{{\"Name\":\"{r}b\",\"RegionID\":{r},\"HostName\":\"derp{r}b.example\",\"IPv4\":\"192.0.3.{r}\"}}]}}", if r > 1 { "," } else { "" });
+        let _ = write!(
+            j,
+            "{}\"{r}\":{{\"RegionID\":{r},\"RegionCode\":\"r{r}\",\"RegionName\":\"Region {r}\",\"Nodes\":[{{\"Name\":\"{r}a\",\"RegionID\":{r},\"HostName\":\"derp{r}.example\",\"IPv4\":\"192.0.2.{r}\",\"STUNPort\":3478}},{{\"Name\":\"{r}b\",\"RegionID\":{r},\"HostName\":\"derp{r}b.example\",\"IPv4\":\"192.0.3.{r}\"}}]}}",
+            if r > 1 { "," } else { "" }
+        );
     }
     j.push_str("}}");
     j.push_str(",\"Domain\":\"tail.ts.net\",\"DNSConfig\":{\"Resolvers\":[{\"Addr\":\"100.100.100.100\"},{\"Addr\":\"1.1.1.1\"}],\"Routes\":{");
@@ -128,11 +132,22 @@ fn big_map(peer: &Keys, peers: usize) -> std::string::String {
     j.push_str("},\"Domains\":[\"tail.ts.net\",\"corp.example.com\"],\"Proxied\":true,\"CertDomains\":[\"me.tail.ts.net\"]}");
     j.push_str(",\"PacketFilter\":[");
     for r in 0..400 {
-        let _ = write!(j, "{}{{\"SrcIPs\":[\"100.64.{}.0/24\",\"fd7a:115c:a1e0::/48\"],\"DstPorts\":[{{\"IP\":\"*\",\"Ports\":{{\"First\":{},\"Last\":{}}}}}]}}", if r > 0 { "," } else { "" }, r % 250, 1000 + r, 2000 + r);
+        let _ = write!(
+            j,
+            "{}{{\"SrcIPs\":[\"100.64.{}.0/24\",\"fd7a:115c:a1e0::/48\"],\"DstPorts\":[{{\"IP\":\"*\",\"Ports\":{{\"First\":{},\"Last\":{}}}}}]}}",
+            if r > 0 { "," } else { "" },
+            r % 250,
+            1000 + r,
+            2000 + r
+        );
     }
     j.push_str("],\"UserProfiles\":[");
     for u in 0..400 {
-        let _ = write!(j, "{}{{\"ID\":{u},\"LoginName\":\"user{u}@example.com\",\"DisplayName\":\"User Number {u}\",\"ProfilePicURL\":\"https://example.com/p/{u}.png\"}}", if u > 0 { "," } else { "" });
+        let _ = write!(
+            j,
+            "{}{{\"ID\":{u},\"LoginName\":\"user{u}@example.com\",\"DisplayName\":\"User Number {u}\",\"ProfilePicURL\":\"https://example.com/p/{u}.png\"}}",
+            if u > 0 { "," } else { "" }
+        );
     }
     j.push_str("],\"Peers\":[");
     for i in 0..peers {
@@ -161,7 +176,8 @@ fn a_real_sized_map_applies_keeps_what_fits_and_counts_the_rest() {
     let me = keys(1);
     let mut label = FixedStr::new();
     label.set("tail");
-    let cfg = MemberConfig { id: 1, node_private: me.node_priv, disco_private: me.disco_priv, label, priority_peer_ip: 0, persistent_keepalive_s: 0, enabled: true };
+    let cfg =
+        MemberConfig { id: 1, node_private: me.node_priv, disco_private: me.disco_priv, label, priority_peer_ip: 0, persistent_keepalive_s: 0, enabled: true };
     s.input(Input::MemberAdded(&cfg));
     let json = big_map(&keys(2), 450);
     assert!(json.len() > 150_000, "{} bytes", json.len());

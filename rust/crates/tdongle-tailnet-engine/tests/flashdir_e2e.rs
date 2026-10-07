@@ -89,6 +89,20 @@ fn a_map_of_300_peers_applies_end_to_end_on_the_flash_directory() {
         MemberConfig { id: 1, node_private: me.node_priv, disco_private: me.disco_priv, label, priority_peer_ip: 0, persistent_keepalive_s: 0, enabled: true };
     s.input(Input::MemberAdded(&cfg));
     apply(&mut s, &full_map());
+    // a new directory has no erased area yet: the map is queued, and the ticks apply it (one erase at most each) while the engine waits for it
+    assert_eq!(s.eng.dir().queued(0), 1, "the first commit is deferred");
+    assert_eq!(s.eng.dir().count(0), 0);
+    let mut ticks = 0;
+    while s.eng.dir().queued(0) > 0 {
+        let before = s.eng.dir().stats().erases;
+        assert!(s.wake.is_some_and(|w| w <= s.now + 10), "the engine wakes for the queued commit");
+        s.now += 10;
+        s.input(Input::Tick);
+        assert!(s.eng.dir().stats().erases - before <= 1, "one erase a tick");
+        ticks += 1;
+        assert!(ticks < 10_000);
+    }
+    assert!(ticks > 10, "{ticks} ticks to the first commit");
     assert_eq!(s.eng.dir().count(0), PEERS as usize, "no peer cap");
     assert_eq!(s.eng.dir().overflow(0), (0, 0));
     for i in [2, 150, PEERS + 1] {

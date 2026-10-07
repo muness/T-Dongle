@@ -69,6 +69,8 @@ const BUCKET: usize = 4;
 const MAX_SLOTS: usize = 0xFFF0;
 /// Aborted transactions remembered per membership; a commit compacts first when this many are pending.
 const ABORTED: usize = 8;
+/// Commits accepted but not yet applied (waiting for an erased area or a compaction), a membership.
+pub const QUEUED: usize = 4;
 /// Slots a compaction step copies at most.
 pub const COPY_STEP: usize = 16;
 /// Erased sectors a maintenance step may skip over (blank checks are reads) before it returns.
@@ -318,6 +320,8 @@ struct Member {
     next_txn: u32,
     aborted: [u32; ABORTED],
     n_aborted: u8,
+    /// A torn transaction found no room in `aborted`: no commit until a compaction leaves the torn ones behind (the committed state stays the one before it).
+    abort_over: bool,
     /// Sectors of the spare area known erased, from its start (the spare is area 0 when there is no active one).
     spare_clean: u32,
     /// Compaction in progress: next slot of the active area to copy, next free slot of the spare.
@@ -330,6 +334,28 @@ struct Member {
     /// Staging-log sectors `[tx_ready, tx_dirty)` may hold old updates; the others are erased.
     tx_ready: u32,
     tx_dirty: u32,
+    /// Staging-log index where the map being received starts (the ones before it are queued commits).
+    open: u32,
+    /// Accepted commits, oldest first: the staging-log range each applies, whether it is authoritative, whether it already waited for a compaction.
+    queue: [Queued; QUEUED],
+    n_queued: u8,
+    /// The head of the queue waits for a compaction, to start once the spare area is erased.
+    want_copy: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Queued {
+    lo: u16,
+    hi: u16,
+    auth: bool,
+    compacted: bool,
+}
+
+/// What applying the head of the queue came to.
+enum Apply {
+    Done,
+    Wait,
+    Failed,
 }
 
 impl Member {
@@ -344,6 +370,7 @@ impl Member {
             next_txn: 1,
             aborted: [0; ABORTED],
             n_aborted: 0,
+            abort_over: false,
             spare_clean: 0,
             copy: None,
             retry_at: 0,
@@ -352,6 +379,10 @@ impl Member {
             overflow: 0,
             tx_ready: 0,
             tx_dirty: u32::MAX,
+            open: 0,
+            queue: [Queued { lo: 0, hi: 0, auth: false, compacted: false }; QUEUED],
+            n_queued: 0,
+            want_copy: false,
         }
     }
     fn spare(&self) -> u8 {
@@ -372,7 +403,14 @@ impl Member {
         if (self.n_aborted as usize) < ABORTED {
             self.aborted[self.n_aborted as usize] = txn;
             self.n_aborted += 1;
+        } else {
+            // never forget a torn transaction: it is above `txn`, so it stays invisible as long as no later commit raises `txn`
+            self.abort_over = true;
         }
+    }
+    /// A commit has to wait for a compaction first.
+    fn short(&self, g: &Geometry) -> bool {
+        self.end as usize + 2 > g.slots || self.n_aborted as usize >= ABORTED - 1 || self.abort_over
     }
 }
 
@@ -416,6 +454,10 @@ pub struct DirStats {
     pub commits_failed: u32,
     /// Resident peers the cache had no room to pin.
     pub pins_refused: u32,
+    /// Commits accepted before their area was ready, applied later by [`FlashDirectory::maintain`].
+    pub deferred_commits: u32,
+    /// Commits refused because the queue of deferred ones was full.
+    pub queue_full: u32,
 }
 
 /// The working state of one commit.
@@ -458,7 +500,19 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
             m: [const { Member::new() }; M],
             cache: [const { None }; C],
             clock: 0,
-            stats: Cell::new(DirStats { cache_hits: 0, cache_misses: 0, erases: 0, compactions: 0, sync_compactions: 0, compactions_failed: 0, flash_errors: 0, commits_failed: 0, pins_refused: 0 }),
+            stats: Cell::new(DirStats {
+                cache_hits: 0,
+                cache_misses: 0,
+                erases: 0,
+                compactions: 0,
+                sync_compactions: 0,
+                compactions_failed: 0,
+                flash_errors: 0,
+                commits_failed: 0,
+                pins_refused: 0,
+                deferred_commits: 0,
+                queue_full: 0,
+            }),
         }
     }
     /// Bytes of RAM the directory takes (it holds nothing on the heap between commits).
@@ -493,6 +547,10 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
     /// Pinned cache entries of `member`.
     pub fn pinned(&self, member: usize) -> usize {
         self.cache.iter().flatten().filter(|c| c.member as usize == member && c.pinned).count()
+    }
+    /// Commits of `member` accepted but not yet applied.
+    pub fn queued(&self, member: usize) -> usize {
+        self.m.get(member).map_or(0, |s| s.n_queued as usize)
     }
     /// Cached records.
     pub fn cached(&self) -> usize {
@@ -696,7 +754,13 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         let clock = self.clock;
         let slot = match self.cache.iter().position(Option::is_none) {
             Some(i) => Some(i),
-            None => self.cache.iter().enumerate().filter(|(_, c)| c.as_ref().is_some_and(|c| !c.pinned)).min_by_key(|(_, c)| c.as_ref().map_or(0, |c| c.used)).map(|(i, _)| i),
+            None => self
+                .cache
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.as_ref().is_some_and(|c| !c.pinned))
+                .min_by_key(|(_, c)| c.as_ref().map_or(0, |c| c.used))
+                .map(|(i, _)| i),
         };
         let Some(i) = slot else { return false };
         self.cache[i] = Some(Cached { member: member as u8, pinned, pos: pos as u16, used: clock, rec: r.clone() });
@@ -796,9 +860,11 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
                             s.abort(o);
                         }
                         open = Some((t, true));
-                        s.txn = t;
-                        s.generation = word(&b, 0);
-                        s.count = word(&b, 1);
+                        if !s.abort_over {
+                            s.txn = t;
+                            s.generation = word(&b, 0);
+                            s.count = word(&b, 1);
+                        }
                     }
                     _ => {}
                 }
@@ -814,12 +880,14 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
 
     // ---- areas, compaction --------------------------------------------------------------------------------------------------------------------
 
-    /// The membership has an active area (the first commit erases area 0 here if the background has not yet).
+    /// The membership has an active area: a header over the erased spare (the caller checked it is all erased; nothing is erased here).
     fn ensure_area(&mut self, g: &Geometry, m: usize) -> Result<u8, DirError> {
         if let Some(a) = self.m[m].active {
             return Ok(a);
         }
-        self.erase_spare(g, m)?;
+        if (self.m[m].spare_clean as usize) < g.area {
+            return Err(DirError);
+        }
         let s = self.m[m];
         let epoch = s.epoch + 1;
         if !self.write(g.slot_off(m, 0, 0), &seal(K_HEADER, 0, &words(&[epoch, s.generation, 0, s.txn]))) {
@@ -833,21 +901,11 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         s.spare_clean = 0;
         Ok(0)
     }
-    fn erase_spare(&mut self, g: &Geometry, m: usize) -> Result<(), DirError> {
-        while (self.m[m].spare_clean as usize) < g.area {
-            let s = self.m[m];
-            if !self.clean(g.area_sector(m, s.spare(), s.spare_clean as usize)) {
-                return Err(DirError);
-            }
-            self.m[m].spare_clean += 1;
-        }
-        Ok(())
-    }
     fn should_compact(&self, g: &Geometry, m: usize) -> bool {
         let s = &self.m[m];
         s.active.is_some()
             && s.end >= s.retry_at
-            && ((s.end as usize >= g.slots / 2 && (s.end - s.count) as usize >= g.slots / 8) || s.n_aborted as usize >= ABORTED / 2)
+            && ((s.end as usize >= g.slots / 2 && (s.end - s.count) as usize >= g.slots / 8) || s.n_aborted as usize >= ABORTED / 2 || s.abort_over)
     }
     /// One compaction step: copy up to [`COPY_STEP`] slots, or switch areas when the copy has caught up. `Ok(true)`: done.
     fn copy_step(&mut self, g: &Geometry, m: usize) -> Result<bool, DirError> {
@@ -900,6 +958,7 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         s.epoch = epoch;
         s.end = dst;
         s.n_aborted = 0;
+        s.abort_over = false;
         s.copy = None;
         s.spare_clean = 0;
         s.retry_at = 0;
@@ -907,27 +966,17 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         self.revalidate(m);
         Ok(true)
     }
-    /// Compact now (a commit found no room).
-    fn compact_now(&mut self, g: &Geometry, m: usize) -> Result<(), DirError> {
-        self.bump(|x| x.sync_compactions += 1);
-        if self.m[m].copy.is_none() {
-            self.erase_spare(g, m)?;
-            self.m[m].copy = Some((1, 1));
-        }
-        while !self.copy_step(g, m)? {}
-        Ok(())
-    }
-
     /// Whether [`FlashDirectory::maintain`] has work: a staging log or a spare area to erase, a compaction to run.
     pub fn wants_maintenance(&self) -> bool {
         let Some(g) = self.geo else { return !self.mounted };
         (0..M).any(|m| {
             let s = &self.m[m];
-            s.tx_ready < s.tx_dirty.min(g.tx as u32) || (s.spare_clean as usize) < g.area || s.copy.is_some() || self.should_compact(&g, m)
+            s.n_queued > 0 || s.tx_ready < s.tx_dirty.min(g.tx as u32) || (s.spare_clean as usize) < g.area || s.copy.is_some() || self.should_compact(&g, m)
         })
     }
 
-    /// One bounded step of background work: at most one sector erase, or one compaction step. Returns whether there is more.
+    /// One bounded step of background work: at most one sector erase, one compaction step, or applying one deferred commit (writes only). Returns whether
+    /// there is more.
     pub fn maintain(&mut self) -> bool {
         if !self.mounted {
             self.mount();
@@ -952,6 +1001,10 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
             if blanks > 0 {
                 return true;
             }
+            // a deferred commit whose area is ready
+            if self.m[m].n_queued > 0 && !matches!(self.apply_head(&g, m), Apply::Wait) {
+                return true;
+            }
             // compaction: copy, then switch
             if self.m[m].copy.is_some() {
                 let _ = self.copy_step(&g, m);
@@ -972,6 +1025,14 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
                         break;
                     }
                     blanks += 1;
+                }
+                return true;
+            }
+            if self.m[m].want_copy {
+                // the spare is erased: the compaction a queued commit waits for starts
+                self.m[m].want_copy = false;
+                if self.m[m].copy.is_none() {
+                    self.m[m].copy = Some((1, 1));
                 }
                 return true;
             }
@@ -1033,10 +1094,9 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         self.put(g, m, a, end, cx, v)
     }
 
-    fn commit_body(&self, g: &Geometry, m: usize, a: u8, end: &mut u32, cx: &mut Ctx) -> Result<(), DirError> {
-        let staged = self.m[m].staged as usize;
+    fn commit_body(&self, g: &Geometry, m: usize, a: u8, end: &mut u32, cx: &mut Ctx, lo: usize, hi: usize) -> Result<(), DirError> {
         for pass in 0..3u8 {
-            for i in 0..staged {
+            for i in lo..hi {
                 let (action, group, u) = self.read_tx(g, m, i).ok_or(DirError)?;
                 if cx.auth && group == 6 {
                     continue;
@@ -1084,54 +1144,89 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         if self.io_error.get() { Err(DirError) } else { Ok(()) }
     }
 
-    fn do_commit(&mut self, m: usize, authoritative: bool) -> Result<(), DirError> {
-        let g = self.geo.ok_or(DirError)?;
-        self.ensure_area(&g, m)?;
-        for attempt in 0..2 {
-            let s = self.m[m];
-            // unchanged records cost nothing, so the room a map needs is not known before it runs: one that runs out is retried once over a compacted area
-            let short = s.end as usize + 2 > g.slots || s.n_aborted as usize >= ABORTED - 1;
-            if attempt == 1 || short {
-                if s.retry_at > s.end {
-                    return Err(DirError); // full: the last compaction could not make room
-                }
-                self.compact_now(&g, m)?;
+    /// Apply the oldest queued commit of `m` if its area is ready. Never erases: an area that is not erased yet, or a compaction it needs, makes it wait
+    /// for [`FlashDirectory::maintain`]. Meanwhile the previous generation keeps serving lookups.
+    fn apply_head(&mut self, g: &Geometry, m: usize) -> Apply {
+        let s = self.m[m];
+        let Some(&q) = s.queue.first().filter(|_| s.n_queued > 0) else { return Apply::Done };
+        let r = self.try_apply(g, m, q);
+        if !matches!(r, Apply::Wait) {
+            let s = &mut self.m[m];
+            s.queue.copy_within(1..QUEUED, 0);
+            s.n_queued -= 1;
+            s.want_copy = false;
+            if matches!(r, Apply::Failed) {
+                self.bump(|x| x.commits_failed += 1);
             }
             let s = self.m[m];
-            let a = s.active.ok_or(DirError)?;
-            let mut cx = Ctx { txn: s.next_txn, start: s.end, auth: authoritative, seen: Vec::new(), count: i64::from(s.count) };
-            if authoritative {
-                let words = (s.end as usize).div_ceil(64);
-                cx.seen.try_reserve_exact(words).map_err(|_| DirError)?;
-                cx.seen.resize(words, 0);
-            }
-            self.m[m].next_txn += 1;
-            self.io_error.set(false);
-            self.full.set(false);
-            let mut end = s.end;
-            let r = self.commit_body(&g, m, a, &mut end, &mut cx);
-            let st = &mut self.m[m];
-            st.end = end;
-            match r {
-                Ok(()) => {
-                    st.txn = cx.txn;
-                    st.generation = st.generation.wrapping_add(1);
-                    st.count = cx.count.max(0) as u32;
-                    st.overflow = 0;
-                    self.revalidate(m);
-                    return Ok(());
-                }
-                Err(e) => {
-                    st.abort(cx.txn);
-                    if attempt == 0 && self.full.get() && !self.io_error.get() {
-                        continue;
-                    }
-                    self.bump(|x| x.commits_failed += 1);
-                    return Err(e);
-                }
+            if s.n_queued == 0 && s.open == s.staged {
+                self.consume_staging(m);
             }
         }
-        Err(DirError)
+        r
+    }
+
+    fn try_apply(&mut self, g: &Geometry, m: usize, q: Queued) -> Apply {
+        let s = self.m[m];
+        if s.want_copy || (q.compacted && s.copy.is_some()) {
+            return Apply::Wait;
+        }
+        if s.active.is_none() {
+            if (s.spare_clean as usize) < g.area {
+                return Apply::Wait;
+            }
+            if self.ensure_area(g, m).is_err() {
+                return Apply::Failed;
+            }
+        }
+        let need_compaction = |d: &mut Self| {
+            let s = &mut d.m[m];
+            // full: the last compaction could not make room, or this commit already had one
+            if q.compacted || s.retry_at > s.end {
+                return Apply::Failed;
+            }
+            s.queue[0].compacted = true;
+            // one already running will do (the head waits for it); otherwise one starts once the spare is erased
+            s.want_copy = s.copy.is_none();
+            d.bump(|x| x.sync_compactions += 1);
+            Apply::Wait
+        };
+        if self.m[m].short(g) {
+            return need_compaction(self);
+        }
+        let s = self.m[m];
+        let Some(a) = s.active else { return Apply::Failed };
+        let mut cx = Ctx { txn: s.next_txn, start: s.end, auth: q.auth, seen: Vec::new(), count: i64::from(s.count) };
+        if q.auth {
+            let words = (s.end as usize).div_ceil(64);
+            if cx.seen.try_reserve_exact(words).is_err() {
+                return Apply::Failed;
+            }
+            cx.seen.resize(words, 0);
+        }
+        self.m[m].next_txn += 1;
+        self.io_error.set(false);
+        self.full.set(false);
+        let mut end = s.end;
+        let r = self.commit_body(g, m, a, &mut end, &mut cx, q.lo.into(), q.hi.into());
+        let st = &mut self.m[m];
+        st.end = end;
+        match r {
+            Ok(()) => {
+                st.txn = cx.txn;
+                st.generation = st.generation.wrapping_add(1);
+                st.count = cx.count.max(0) as u32;
+                st.overflow = 0;
+                self.revalidate(m);
+                Apply::Done
+            }
+            Err(_) => {
+                st.abort(cx.txn);
+                // unchanged records cost nothing, so the room a map needs is not known before it runs: one that runs out is retried once over a
+                // compacted area
+                if self.full.get() && !self.io_error.get() { need_compaction(self) } else { Apply::Failed }
+            }
+        }
     }
 
     fn consume_staging(&mut self, m: usize) {
@@ -1140,6 +1235,16 @@ impl<F: DirFlash, const M: usize, const C: usize> FlashDirectory<F, M, C> {
         s.tx_dirty = used.max(if s.tx_ready < s.tx_dirty { s.tx_dirty } else { 0 });
         s.tx_ready = 0;
         s.staged = 0;
+        s.open = 0;
+    }
+
+    /// Drop the map being received: its slots of the staging log are skipped, the whole log is recycled once nothing queued needs it.
+    fn drop_open(&mut self, m: usize) {
+        let s = &mut self.m[m];
+        s.open = s.staged;
+        if s.n_queued == 0 {
+            self.consume_staging(m);
+        }
     }
 
     /// Call `f` with every live record of `member` (diagnostics: reads the whole active area).
@@ -1190,7 +1295,8 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
             return Ok(());
         }
         let i = self.m[member].staged as usize;
-        if i >= g.tx_slots() {
+        // the queue keeps staging-log indices as u16
+        if i >= g.tx_slots().min(u16::MAX as usize) {
             // a map with more updates than the log holds keeps what fits and counts the rest
             self.m[member].stage_dropped = self.m[member].stage_dropped.saturating_add(1);
             return Ok(());
@@ -1219,14 +1325,34 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
         if member >= M {
             return Err(DirError);
         }
-        let r = self.do_commit(member, authoritative);
-        // staging is consumed either way
-        self.consume_staging(member);
-        r
+        let Some(g) = self.geo else { return Err(DirError) };
+        let s = self.m[member];
+        if s.n_queued as usize >= QUEUED {
+            self.bump(|x| x.queue_full += 1);
+            self.drop_open(member);
+            return Err(DirError);
+        }
+        let st = &mut self.m[member];
+        st.queue[st.n_queued as usize] = Queued { lo: s.open as u16, hi: s.staged as u16, auth: authoritative, compacted: false };
+        st.n_queued += 1;
+        st.open = s.staged;
+        if s.n_queued > 0 {
+            // behind an earlier one: applied in order
+            self.bump(|x| x.deferred_commits += 1);
+            return Ok(());
+        }
+        match self.apply_head(&g, member) {
+            Apply::Done => Ok(()),
+            Apply::Failed => Err(DirError),
+            Apply::Wait => {
+                self.bump(|x| x.deferred_commits += 1);
+                Ok(())
+            }
+        }
     }
     fn abort(&mut self, member: usize) {
         if member < M {
-            self.consume_staging(member);
+            self.drop_open(member);
         }
     }
     fn clear(&mut self, member: usize) {
@@ -1235,6 +1361,10 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
         if member >= M {
             return;
         }
+        // what was queued goes too
+        let st = &mut self.m[member];
+        st.n_queued = 0;
+        st.want_copy = false;
         self.consume_staging(member);
         let s = self.m[member];
         let generation = s.generation.wrapping_add(1);
@@ -1264,6 +1394,7 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
         st.copy = None;
         st.count = 0;
         st.n_aborted = 0;
+        st.abort_over = false;
         st.generation = generation;
         if swapped {
             st.spare_clean = 0;
@@ -1290,7 +1421,10 @@ impl<F: DirFlash, const M: usize, const C: usize> PeerDirectory for FlashDirecto
                 && s.committed(txn_of(&raw))
             {
                 let r = record_of(&raw);
-                if r.vpn_ip != 0 && first_label(r.hostname.as_str()).eq_ignore_ascii_case(label) && self.latest(&g, member, a, Canon::of(&r), View::Committed).is_some_and(|l| l.0 == p) {
+                if r.vpn_ip != 0
+                    && first_label(r.hostname.as_str()).eq_ignore_ascii_case(label)
+                    && self.latest(&g, member, a, Canon::of(&r), View::Committed).is_some_and(|l| l.0 == p)
+                {
                     f(r.hostname.as_str(), r.vpn_ip);
                 }
             }

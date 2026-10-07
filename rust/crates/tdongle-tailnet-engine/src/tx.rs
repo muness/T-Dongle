@@ -239,7 +239,10 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
         let Ok(n) = ticket.seal(&mut self.tx, 0) else { return };
         let key = Self::peer_key(m, idx);
         let route = m.rt.paths[idx].route(cx.now);
-        if matches!(emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, peer_region(m, idx), &self.tx[..n]), Sent::Direct | Sent::Derp) {
+        if matches!(
+            emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, peer_region(m, idx), &self.tx[..n]),
+            Sent::Direct | Sent::Derp
+        ) {
             self.stats.keepalive_tx.bump();
         }
     }
@@ -306,7 +309,10 @@ impl<D: PeerDirectory, const M: usize, const K: usize, const A: usize, const F: 
         let key = Self::peer_key(m, idx);
         // DISCO (pings, call-me-maybe) always goes out on the member's own relay link, whatever region the peer is homed on: it must not make the link travel (a visit is a
         // reconnect, seconds of nothing): the relay moves for a peer with traffic, not for the probes of every peer in the map. As in the C, which has one link.
-        if matches!(emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, crate::io::REGION_BACKGROUND, &self.ctl[..n]), Sent::Direct | Sent::Derp) {
+        if matches!(
+            emit_route(&mut self.stats, &self.hb, &self.heap, cx, m.rt.id, m.rt.derp_ready, route, &key, crate::io::REGION_BACKGROUND, &self.ctl[..n]),
+            Sent::Direct | Sent::Derp
+        ) {
             self.stats.disco_tx.bump();
         }
     }
