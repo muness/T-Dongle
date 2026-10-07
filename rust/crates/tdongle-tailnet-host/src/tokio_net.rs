@@ -38,6 +38,8 @@ pub struct NetControl {
     pub derp_connect_delay_ms: AtomicU32,
     /// Milliseconds every write to a DERP connection takes (a relay at about 1.4 KB per this many ms).
     pub derp_write_delay_ms: AtomicU32,
+    /// While set, writes to a DERP connection do not complete (a relay that has stopped reading).
+    pub derp_write_stalled: AtomicBool,
 }
 
 impl Default for NetControl {
@@ -55,6 +57,7 @@ impl Default for NetControl {
             dns_redirect: Mutex::new(None),
             derp_connect_delay_ms: AtomicU32::new(0),
             derp_write_delay_ms: AtomicU32::new(0),
+            derp_write_stalled: AtomicBool::new(false),
         }
     }
 }
@@ -201,6 +204,11 @@ impl Write for TokioTcp {
     async fn write(&mut self, buf: &[u8]) -> Result<usize, NetError> {
         if !self.alive() {
             return Err(NetError::Closed);
+        }
+        if self.extra {
+            while self.ctl.derp_write_stalled.load(Ordering::Relaxed) {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
         }
         let n = self.stream.as_mut().ok_or(NetError::Closed)?.write(buf).await.map_err(|_| NetError::Io)?;
         if self.extra {
