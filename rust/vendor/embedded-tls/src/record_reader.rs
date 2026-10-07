@@ -538,3 +538,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "record_reader_cancel_tests.rs"]
+mod cancellation_tests;
