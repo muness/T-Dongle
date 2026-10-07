@@ -78,8 +78,8 @@ pub const USB_RX_FRAMES: usize = 2;
 pub const DIR_PEERS: usize = 24;
 /// Staged directory updates per membership.
 pub const DIR_STAGED: usize = 32;
-/// Sockets of the embassy-net stack: 4 per membership (control, DERP, the extra DERP link, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + one for the lookup in flight (the dials and SNTP take turns on it) + 1 spare.
-const STACK_SOCKETS: usize = 4 * MEMBERS + 6;
+/// Sockets of the embassy-net stack: 3 per membership (control, DERP, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + one for the lookup in flight (the dials and SNTP take turns on it) + 1 spare.
+const STACK_SOCKETS: usize = 3 * MEMBERS + 6;
 
 /// The stack's interrupt-free lock (see the module docs).
 #[derive(Debug)]
@@ -1295,39 +1295,28 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 st.tls_untrusted
             );
         }
-        // the extra link: the region a peer is homed on when it is not ours; up only while a packet needs it
+        // the link's visits to the regions peers are homed on, and the moves of its home region
         {
-            use tdongle_tailnet_runtime::derp::{X_COUNTS, X_DIAG, X_STATS};
-            let (xs, d) = X_STATS.lock(|c| *c.borrow());
-            let ready_at = X_DIAG.ready_at_ms.load(Relaxed);
-            let xip = X_DIAG.ip.load(Relaxed).to_be_bytes();
-            let xhost = X_DIAG.text.lock(|t| {
-                let t = t.borrow();
-                String::from_utf8_lossy(&t.0[..t.0.iter().position(|&c| c == 0).unwrap_or(64)]).into_owned()
-            });
+            use tdongle_tailnet_runtime::derp::{HOME_MOVES, VISITING, X_COUNTS, X_LAST_END};
             let _ = write!(
                 out,
-                "tn_derp_x state={} region={} host={} ip={}.{}.{}.{} stage={} uptime_ms={} connects={} frames_rx={} frames_tx={} queued={} sent={} dropped[queue_full,heap,region_unknown]={},{},{} starts={} expired={} dropped_on_close={} link_refused={} rx_to_engine={} last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close,6 idle,7 home_gone,8 other_region)\r\n",
-                xs.name(),
-                X_DIAG.region.load(Relaxed),
-                xhost,
-                xip[0], xip[1], xip[2], xip[3],
-                X_DIAG.stage.load(Relaxed),
-                if ready_at == 0 { 0 } else { now.wrapping_sub(ready_at) },
-                d.connects.get(),
-                d.frames_rx.get(),
-                d.frames_tx.get(),
+                "tn_derp_visit visiting={} queued={} sent={} dropped[queue_full,heap,region_unknown]={},{},{} visits={} refused_home_busy={} expired={} dropped_on_leave={} link_refused={} rx_to_engine={} last_leave={} (6 idle, 8 others starving) home_moves={} (last {} -> {})\r\n",
+                VISITING.load(Relaxed),
                 X_COUNTS[0].load(Relaxed),
                 X_COUNTS[1].load(Relaxed),
                 X_COUNTS[2].load(Relaxed),
                 X_COUNTS[3].load(Relaxed),
                 X_COUNTS[4].load(Relaxed),
                 X_COUNTS[5].load(Relaxed),
+                X_COUNTS[10].load(Relaxed),
                 X_COUNTS[6].load(Relaxed),
                 X_COUNTS[7].load(Relaxed),
                 X_COUNTS[8].load(Relaxed),
                 X_COUNTS[9].load(Relaxed),
-                X_DIAG.end.load(Relaxed)
+                X_LAST_END.load(Relaxed),
+                HOME_MOVES[0].load(Relaxed),
+                HOME_MOVES[1].load(Relaxed),
+                HOME_MOVES[2].load(Relaxed)
             );
         }
     }

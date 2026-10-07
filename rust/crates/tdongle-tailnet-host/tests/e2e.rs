@@ -904,7 +904,7 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
     gw.net.udp_blocked.store(true, Ordering::SeqCst);
     // the extra link takes two seconds to come up, as a slow TLS start on the board does: the peer's first packets (the handshake, then the flow's SYNs) arrive before it
     // is ready and must wait for it, not be lost
-    gw.net.extra_connect_delay_ms.store(2000, Ordering::Relaxed);
+    gw.net.derp_connect_delay_ms.store(2000, Ordering::Relaxed);
     let id = gw.add("lab", "tskey-fake");
     wait_until("the membership to be routing", 60, || gw.is_ready(id));
     // the region the gateway's own link is on; the peer is started afterwards and may not choose that region as its home
@@ -922,17 +922,14 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
     let alias = gw.host.resolve("gopeer.lab.tailnet", Duration::from_secs(30)).expect("dns");
     let echoed = gw.host.echo(alias, 7, b"across regions", Duration::from_secs(40));
     if echoed.is_err() {
-        use tdongle_tailnet_runtime::derp::{X_COUNTS, X_DIAG};
+        use tdongle_tailnet_runtime::derp::X_COUNTS;
         eprintln!("{}", gw.dump());
         let mut extra = String::new();
         TailnetApi::serial_status_extra(&*gw.sh, &mut extra);
         eprintln!("{extra}");
         eprintln!(
-            "home {home}; extra link counts {:?} diag region {} stage {} end {}; peers {:?}",
+            "home {home}; visit counts {:?}; peers {:?}",
             X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect::<Vec<_>>(),
-            X_DIAG.region.load(Ordering::Relaxed),
-            X_DIAG.stage.load(Ordering::Relaxed),
-            X_DIAG.end.load(Ordering::Relaxed),
             go.ids()
         );
     }
@@ -944,11 +941,12 @@ fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index
     use tdongle_tailnet_runtime::derp::X_COUNTS;
     let c: Vec<u32> = X_COUNTS.iter().map(|c| c.load(Ordering::Relaxed)).collect();
     let (queued, sent, starts) = (c[0], c[1], c[5]);
-    println!("counts [queued, sent, full, heap, unknown, starts, expired, closed, refused, rx_to_engine] {c:?}");
+    println!("counts [queued, sent, full, heap, unknown, visits, expired, dropped_on_leave, refused, rx_while_visiting, home_busy] {c:?}");
     assert!(c[9] > 0, "frames from the extra link's region reach the engine: {c:?}");
     assert_eq!(c[6] + c[2] + c[3] + c[4] + c[8], 0, "nothing was dropped or expired while the link came up: {c:?}");
-    println!("home region {home}; extra link: queued {queued} sent {sent} starts {starts}; down {:.1} up {:.1} Mbit/s", mbit(n, d), mbit(n2, d2));
-    assert!(queued > 100 && sent * 100 >= queued * 95, "the packets for the peer went through the extra link (a few may wait or drop while it connects): queued {queued} sent {sent}");
+    println!("home region {home}; visit: queued {queued} sent {sent} visits {starts}; down {:.1} up {:.1} Mbit/s", mbit(n, d), mbit(n2, d2));
+    // only the packets that arrived before the link reached the peer's region wait in the queue (the first of the handshake); the rest go straight out on the link
+    assert!(queued >= 1 && sent == queued && starts >= 1, "the packets that waited for the visit were sent: queued {queued} sent {sent} visits {starts}");
     let indexed = gw.sh.with_engine(|e, _| e.member(id).map_or(0, |m| m.rt.derp_index.count));
     assert_eq!(indexed, expect_index, "every region of the map is in the compact index");
     gw.check_engine();

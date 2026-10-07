@@ -253,8 +253,6 @@ impl Net for EmbassyNet {
         let (rx, tx) = match role {
             TcpRole::Control => (self.win.ctl_rx, self.win.ctl_tx),
             TcpRole::Derp => (self.win.derp_rx, self.win.derp_tx),
-            // the extra link carries one peer's packets, below the home link's rate: half the windows (3.9 KB less while it exists)
-            TcpRole::DerpExtra => (self.win.derp_rx / 2, self.win.derp_tx / 2),
         };
         Some(EmbTcp { stack: self.stack, mem: self.mem, rx_len: rx, tx_len: tx, sock: None, held: [(0, 0); 2] })
     }

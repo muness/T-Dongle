@@ -34,8 +34,8 @@ pub struct NetControl {
     pub control_routes: Mutex<Vec<Option<SocketAddr>>>,
     /// Where the DNS forwarder's datagrams really go (the "resolver" the lease advertises is not listening on port 53 on the test host).
     pub dns_redirect: Mutex<Option<SocketAddr>>,
-    /// Milliseconds an extra DERP link's connect takes before it is made (a slow TLS start: traffic for the peer arrives while the link is still coming up).
-    pub extra_connect_delay_ms: AtomicU32,
+    /// Milliseconds a DERP connect takes before it is made (a slow start of the relay link, as after a move to another region: traffic arrives while it comes up).
+    pub derp_connect_delay_ms: AtomicU32,
 }
 
 impl Default for NetControl {
@@ -51,7 +51,7 @@ impl Default for NetControl {
             tcp_connects: AtomicU64::new(0),
             control_routes: Mutex::new(Vec::new()),
             dns_redirect: Mutex::new(None),
-            extra_connect_delay_ms: AtomicU32::new(0),
+            derp_connect_delay_ms: AtomicU32::new(0),
         }
     }
 }
@@ -107,9 +107,8 @@ impl Net for TokioNet {
         let r = match role {
             TcpRole::Control => 0,
             TcpRole::Derp => 1,
-            TcpRole::DerpExtra => 2,
         };
-        self.take(0, r, slot).then(|| TokioTcp { ctl: self.ctl.clone(), stream: None, epoch: 0, gen_: 0, route: (role == TcpRole::Control).then_some(slot), extra: role == TcpRole::DerpExtra })
+        self.take(0, r, slot).then(|| TokioTcp { ctl: self.ctl.clone(), stream: None, epoch: 0, gen_: 0, route: (role == TcpRole::Control).then_some(slot), extra: role == TcpRole::Derp })
     }
     fn udp(&self, role: UdpRole, slot: usize) -> Option<TokioUdp> {
         let r = match role {
@@ -225,7 +224,7 @@ impl TcpConn for TokioTcp {
             }
         };
         if self.extra {
-            let ms = self.ctl.extra_connect_delay_ms.load(Ordering::Relaxed);
+            let ms = self.ctl.derp_connect_delay_ms.load(Ordering::Relaxed);
             if ms != 0 {
                 tokio::time::sleep(std::time::Duration::from_millis(u64::from(ms))).await;
             }
