@@ -79,7 +79,7 @@ pub mod status_map;
 mod tx;
 
 pub use alias::AliasBook;
-pub use dir::{DirError, PeerDirectory, RamDirectory};
+pub use dir::{DirError, PeerInfo, PeerDirectory, RamDirectory};
 pub use engine::{ActFail, Engine, GATEWAY_M, GatewayEngine, Handled};
 pub use io::{DerpNote, Input, MemberConfig, MemberId, NetmapEvent, NullOutput, Out, Output, TokenPhase};
 pub use netmap::{EngineNetmap, NetmapSink, NetmapTarget};
@@ -98,5 +98,5 @@ const _: () = {
     assert!(core::mem::size_of::<jit::JitStore<24>>() == 6176);
     assert!(core::mem::size_of::<alias::AliasBook>() == 1544);
     assert!(core::mem::size_of::<tdongle_tailnet_peers::pool::Pool<slot::WgSlot, 12>>() == 11472);
-    assert!(core::mem::size_of::<Engine<RamDirectory<1, 1, 1>, 3, 8, 12, 64, 64, 24>>() - core::mem::size_of::<RamDirectory<1, 1, 1>>() == 59304);
+    assert!(core::mem::size_of::<Engine<RamDirectory<1, 1, 1>, 3, 8, 12, 64, 64, 24>>() - core::mem::size_of::<RamDirectory<1, 1, 1>>() == 59368);
 };

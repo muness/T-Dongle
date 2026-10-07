@@ -361,29 +361,62 @@ where
             neg.waiting
         );
         let c = self.with_engine(|e, _| e.counters());
-        let _ = write!(
-            out,
-            "tn_eng host_in={} host={:?} tx={:?} rx_in={} rx_derp={} rx={:?} hs_init={} hs_noroute={} hs_resp={} ka_tx={} udp_tx={} derp_tx={} out_refused={}\r\n",
-            c.host_in, c.host, c.tx, c.rx_in, c.rx_in_derp, c.rx, c.hs_init_tx, c.hs_init_noroute, c.hs_resp_tx, c.keepalive_tx, c.udp_tx, c.derp_tx, c.out_refused
-        );
-        let bad = self.with_engine(|e, _| *e.router().bad());
-        let _ = write!(out, "tn_bad");
-        for (dir, v) in [("host", &bad.host), ("tunnel", &bad.tunnel)] {
-            let _ = write!(out, " {dir}={{");
-            for (i, w) in tdongle_tailnet_router::packet::Invalid::ALL.iter().enumerate() {
-                if v[i] != 0 {
-                    let _ = write!(out, "{}:{} ", w.name(), v[i]);
+        {
+            use tdongle_tailnet_engine::{HostFate, RxFate, TxFate};
+            fn named<const N: usize>(out: &mut dyn core::fmt::Write, key: &str, v: &[u32; N], name: impl Fn(usize) -> &'static str) {
+                let _ = write!(out, " {key}={{");
+                for (i, c) in v.iter().enumerate() {
+                    if *c != 0 {
+                        let _ = write!(out, "{}:{} ", name(i), c);
+                    }
+                }
+                let _ = write!(out, "}}");
+            }
+            let _ = write!(out, "tn_eng host_in={}", c.host_in);
+            named(out, "host", &c.host, |i| HostFate::ALL[i].name());
+            named(out, "tx", &c.tx, |i| TxFate::ALL[i].name());
+            let _ = write!(out, " rx_in={} rx_derp={}", c.rx_in, c.rx_in_derp);
+            named(out, "rx", &c.rx, |i| RxFate::ALL[i].name());
+            let _ = write!(
+                out,
+                " hs_init={} hs_noroute={} hs_resp={} ka_tx={} udp_tx={} derp_tx={} out_refused={}\r\n",
+                c.hs_init_tx, c.hs_init_noroute, c.hs_resp_tx, c.keepalive_tx, c.udp_tx, c.derp_tx, c.out_refused
+            );
+        }
+        {
+            let (bad, ac, flows, held) = self.with_engine(|e, _| (*e.router().bad(), e.alias_counts(), e.router().flows_used(), e.router().held_count()));
+            let _ = write!(out, "tn_route");
+            for (i, n) in tdongle_tailnet_status::diag::RT_STAT_NAMES.iter().enumerate() {
+                if snap.router[i] != 0 {
+                    let _ = write!(out, " {}={}", n, snap.router[i]);
                 }
             }
-            let _ = write!(out, "}}");
-        }
-        if bad.last_len != 0 {
-            let _ = write!(out, " last={} total={} hex=", tdongle_tailnet_router::packet::Invalid::ALL[bad.last_why as usize].name(), bad.last_total);
-            for b in &bad.last[..usize::from(bad.last_len)] {
-                let _ = write!(out, "{b:02x}");
+            let _ = write!(out, " drops={{");
+            for (i, d) in tdongle_tailnet_router::HostDrop::ALL.iter().enumerate() {
+                if bad.drops[i] != 0 {
+                    let _ = write!(out, "{}:{} ", d.name(), bad.drops[i]);
+                }
             }
+            let (s, d) = (bad.last_src.to_be_bytes(), bad.last_dst.to_be_bytes());
+            let _ = write!(
+                out,
+                "}} last_src={}.{}.{}.{} last_dst={}.{}.{}.{} aliases_book={} aliases_cached={} flows={} held_now={}\r\n",
+                s[0], s[1], s[2], s[3], d[0], d[1], d[2], d[3], ac.0, ac.1, flows, held
+            );
         }
-        let _ = write!(out, "\r\n");
+        for slot in 0..snap.members.len() {
+            self.with_engine(|e, _| {
+                e.directory_lines(slot, |l| {
+                    let (ip, al) = (l.info.ip.to_be_bytes(), l.alias.to_be_bytes());
+                    let _ = write!(
+                        out,
+                        "tn_dir member_slot={} name={} ip={}.{}.{}.{} alias={}.{}.{}.{} key={:02x}{:02x}{:02x}{:02x} derp={} endpoints={} routes={} online={:?}\r\n",
+                        slot, l.name, ip[0], ip[1], ip[2], ip[3], al[0], al[1], al[2], al[3], l.info.key[0], l.info.key[1], l.info.key[2], l.info.key[3],
+                        l.info.derp_region, l.info.endpoints, l.info.routes, l.info.online
+                    );
+                });
+            });
+        }
         for slot in 0..snap.members.len() {
             self.with_engine(|e, now| {
                 e.peers_wg(slot, now, |p| {

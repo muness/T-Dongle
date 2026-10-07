@@ -69,6 +69,42 @@ pub enum HostDrop {
 }
 
 impl HostDrop {
+    /// Every variant, in declaration order.
+    pub const ALL: [HostDrop; 14] = [
+        HostDrop::StaleGeneration,
+        HostDrop::Invalid,
+        HostDrop::BadTcpOptions,
+        HostDrop::TtlExpired,
+        HostDrop::BadSource,
+        HostDrop::AliasUnknown,
+        HostDrop::AliasMiss,
+        HostDrop::HoldFull,
+        HostDrop::NoMember,
+        HostDrop::MemberDown,
+        HostDrop::FlowFull,
+        HostDrop::OversizeNoDf,
+        HostDrop::OversizeInvalid,
+        HostDrop::IcmpSuppressed,
+    ];
+    /// Stable name for diagnostics.
+    pub const fn name(self) -> &'static str {
+        match self {
+            HostDrop::StaleGeneration => "stale_generation",
+            HostDrop::Invalid => "invalid",
+            HostDrop::BadTcpOptions => "bad_tcp_options",
+            HostDrop::TtlExpired => "ttl_expired",
+            HostDrop::BadSource => "bad_source",
+            HostDrop::AliasUnknown => "alias_unknown",
+            HostDrop::AliasMiss => "alias_miss",
+            HostDrop::HoldFull => "hold_full",
+            HostDrop::NoMember => "no_member",
+            HostDrop::MemberDown => "member_down",
+            HostDrop::FlowFull => "flow_full",
+            HostDrop::OversizeNoDf => "oversize_no_df",
+            HostDrop::OversizeInvalid => "oversize_invalid",
+            HostDrop::IcmpSuppressed => "icmp_suppressed",
+        }
+    }
     /// The C counters this drop moves (each by one), in the order the C bumps them.
     pub const fn counters(self) -> &'static [Stat] {
         match self {

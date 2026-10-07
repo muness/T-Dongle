@@ -41,6 +41,49 @@ pub const TOKEN_WAIT_MS: u32 = 1500;
 /// Read the stored member list into the registry. A fresh install (no key) is an empty registry; anything else that fails marks the settings damaged
 /// (tailnet access is then refused with the recovery text, as the C does when `load_members` fails).
 pub fn load_registry<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>) {
+    if !sh.registry.lock(|c| c.borrow().loaded) {
+        restore_aliases(sh);
+    }
+    load_registry_inner(sh);
+}
+
+/// Key of the alias log in [`SETTINGS_NAMESPACE`]: 12 bytes per alias (membership id, peer address, alias; little endian).
+pub const ALIASES_KEY: &str = "aliases";
+
+/// Read the alias log (`ml_directory_alias_*` in the C persists them): an alias the host resolved before a reboot keeps meaning the same peer, so a
+/// host that cached it (or typed it) still reaches that peer.
+pub fn restore_aliases<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>) {
+    let mut b = alloc::vec![0u8; 128 * 12];
+    let got = sh.storage.lock(|s| s.borrow_mut().get(SETTINGS_NAMESPACE, ALIASES_KEY, &mut b[..]));
+    if let Ok(n) = got {
+        sh.with_engine_mut(|e| {
+            for c in b[..n.min(b.len())].chunks_exact(12) {
+                let w = |i: usize| u32::from_le_bytes([c[i], c[i + 1], c[i + 2], c[i + 3]]);
+                let _ = e.restore_alias((w(0), w(4), w(8)));
+            }
+        });
+    }
+}
+
+/// Write the alias log (after the book grew).
+pub fn persist_aliases<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>) {
+    let mut b = alloc::vec::Vec::new();
+    sh.with_engine(|e, _| {
+        let book = e.aliases();
+        for i in 0..book.len() {
+            if let Some((a, p, l)) = book.entry(i) {
+                b.extend_from_slice(&a.to_le_bytes());
+                b.extend_from_slice(&p.to_le_bytes());
+                b.extend_from_slice(&l.to_le_bytes());
+            }
+        }
+    });
+    if sh.storage.lock(|s| s.borrow_mut().set(SETTINGS_NAMESPACE, ALIASES_KEY, &b)).is_err() {
+        sh.stats.storage_failures.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn load_registry_inner<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>) {
     sh.registry.lock(|c| {
         let mut c = c.borrow_mut();
         let c = &mut *c;

@@ -317,3 +317,31 @@ impl<D: crate::dir::PeerDirectory, const M: usize, const P: usize, const K: usiz
         }
     }
 }
+
+/// One directory record with its alias (printed even when no session exists).
+#[derive(Clone, Copy, Debug)]
+pub struct DirLine<'a> {
+    /// Hostname.
+    pub name: &'a str,
+    /// Alias address (0 = none allocated yet).
+    pub alias: u32,
+    /// Everything else.
+    pub info: crate::dir::PeerInfo,
+}
+
+impl<D: crate::dir::PeerDirectory, const M: usize, const P: usize, const K: usize, const A: usize, const F: usize, const JB: usize>
+    Engine<D, M, P, K, A, F, JB>
+{
+    /// Visit every directory record of membership `slot`.
+    pub fn directory_lines(&self, slot: usize, mut f: impl FnMut(DirLine<'_>)) {
+        let Some(m) = self.members.get(slot).and_then(|m| m.as_ref()) else { return };
+        for j in 0..self.sh.dir.count(slot) {
+            let (Some((name, ip)), Some(info)) = (self.sh.dir.peer_view(slot, j), self.sh.dir.peer_info(slot, j)) else { continue };
+            f(DirLine { name, alias: self.sh.book.find(m.rt.id, ip).unwrap_or(0), info });
+        }
+    }
+    /// Aliases in the book / cached by the router.
+    pub fn alias_counts(&self) -> (usize, usize) {
+        (self.sh.book.len(), self.sh.router.alias_cached())
+    }
+}

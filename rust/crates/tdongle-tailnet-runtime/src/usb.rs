@@ -206,7 +206,11 @@ fn local<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(
         let sport = rd16(&frame[off..], ihl);
         RtStats::bump(&sh.stats.dns_in);
         let (a, b) = (off + ihl + 8, off + total);
+        let before = sh.with_engine(|e, _| e.aliases().len());
         let _ = sh.feed(Input::Dns { client: Client { addr: src, port: sport }, data: &frame[a..b] });
+        if sh.with_engine(|e, _| e.aliases().len()) != before {
+            crate::members::persist_aliases(sh);
+        }
         return UsbAction::Dns;
     }
     if proto == 1 {

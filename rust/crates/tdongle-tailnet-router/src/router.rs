@@ -147,6 +147,12 @@ pub struct BadLog {
     pub host: [u32; 10],
     /// Tunnel direction.
     pub tunnel: [u32; 10],
+    /// Every host-direction drop by [`HostDrop::ALL`] index.
+    pub drops: [u32; 14],
+    /// Source and destination of the packet the router looked at last (host direction).
+    pub last_src: u32,
+    /// Destination of the packet looked at last.
+    pub last_dst: u32,
     /// Reason of the last bad packet (host direction), as an index into [`packet::Invalid::ALL`].
     pub last_why: u8,
     /// Bytes kept of the last bad host packet (at most 64).
@@ -159,7 +165,7 @@ pub struct BadLog {
 
 impl BadLog {
     const fn new() -> Self {
-        Self { host: [0; 10], tunnel: [0; 10], last_why: 0, last_len: 0, last_total: 0, last: [0; 64] }
+        Self { host: [0; 10], tunnel: [0; 10], drops: [0; 14], last_src: 0, last_dst: 0, last_why: 0, last_len: 0, last_total: 0, last: [0; 64] }
     }
 }
 
@@ -194,6 +200,14 @@ impl<const M: usize, const A: usize, const F: usize> Router<M, A, F> {
             hold: Hold::new(),
             bad: BadLog::new(),
         }
+    }
+    /// Aliases in the cache.
+    pub fn alias_cached(&self) -> usize {
+        self.aliases.len()
+    }
+    /// Flows in use.
+    pub fn flows_used(&self) -> usize {
+        self.flows.len()
     }
     /// The invalid-packet log.
     pub fn bad(&self) -> &BadLog {
@@ -386,7 +400,14 @@ impl<const M: usize, const A: usize, const F: usize> Router<M, A, F> {
         self.route_outbound(pkt, dest, now, true)
     }
 
+    /// Record a drop whose counters the caller already moved.
+    fn note_drop(&mut self, d: HostDrop) -> HostOutcome {
+        self.bad.drops[HostDrop::ALL.iter().position(|x| *x == d).unwrap_or(0)] += 1;
+        HostOutcome::Dropped(d)
+    }
+
     fn drop_host(&mut self, d: HostDrop) -> HostOutcome {
+        self.bad.drops[HostDrop::ALL.iter().position(|x| *x == d).unwrap_or(0)] += 1;
         for &s in d.counters() {
             self.stats.bump(s);
         }
@@ -397,6 +418,10 @@ impl<const M: usize, const A: usize, const F: usize> Router<M, A, F> {
     }
 
     fn route_outbound(&mut self, b: &mut [u8], dest: u32, now: Millis, may_hold: bool) -> HostOutcome {
+        if b.len() >= 20 {
+            self.bad.last_src = rd32(b, 12);
+            self.bad.last_dst = dest;
+        }
         let h = match packet::check(b) {
             Ok(h) => h,
             Err(why) => {
@@ -433,7 +458,7 @@ impl<const M: usize, const A: usize, const F: usize> Router<M, A, F> {
                     if !waiting {
                         // alias_miss already counted AliasMiss (and AliasUnknown); record the drop reason without double counting.
                         let unknown = dest < ALIAS_BASE || dest >= self.alias_limit;
-                        return HostOutcome::Dropped(if unknown { HostDrop::AliasUnknown } else { HostDrop::AliasMiss });
+                        return self.note_drop(if unknown { HostDrop::AliasUnknown } else { HostDrop::AliasMiss });
                     }
                     if may_hold {
                         if self.hold.add(b, dest, generation, now) {
@@ -441,9 +466,9 @@ impl<const M: usize, const A: usize, const F: usize> Router<M, A, F> {
                             return HostOutcome::Held;
                         }
                         self.stats.bump_extra(Extra::HoldFull);
-                        return HostOutcome::Dropped(HostDrop::HoldFull);
+                        return self.note_drop(HostDrop::HoldFull);
                     }
-                    return HostOutcome::Dropped(HostDrop::AliasMiss);
+                    return self.note_drop(HostDrop::AliasMiss);
                 }
             },
         };

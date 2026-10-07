@@ -874,6 +874,11 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Shared<R, P, S, D> 
         })
     }
 
+    /// The engine, mutably (boot-time loading only).
+    pub(crate) fn with_engine_mut<T>(&self, f: impl FnOnce(&mut GatewayEngine<D>) -> T) -> T {
+        self.engine.lock(|e| f(&mut e.borrow_mut()))
+    }
+
     /// Read the engine (status, counters). Do not call from inside an engine callback; it takes the engine lock.
     pub fn with_engine<T>(&self, f: impl FnOnce(&GatewayEngine<D>, Millis) -> T) -> T {
         let now = self.now();

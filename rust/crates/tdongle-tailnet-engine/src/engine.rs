@@ -139,6 +139,14 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
     pub fn dir_mut(&mut self) -> &mut D {
         &mut self.sh.dir
     }
+    /// Load one alias of the persistent log (boot): the book keeps it for good and the router may now be asked about it.
+    pub fn restore_alias(&mut self, e: crate::alias::AliasEntry) -> bool {
+        let ok = self.sh.book.restore(e);
+        if ok {
+            self.sh.router.alias_limit_raise(e.2);
+        }
+        ok
+    }
     /// The alias book.
     pub fn aliases(&self) -> &AliasBook {
         &self.sh.book

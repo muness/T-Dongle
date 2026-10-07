@@ -218,6 +218,24 @@ fn macos_frames_through_usbnet_and_the_router() {
     assert!(gw.host.counters.to_host.load(Ordering::Relaxed) > before, "no DNS answer: {}", extra());
 }
 
+/// The board symptom of 2831c4f: the host kept using an alias it had resolved before the dongle rebooted; the new boot did not know it (no alias log), so
+/// every packet was held, then dropped. The C persists the alias log (ADR 0013): after a reboot the same alias reaches the same peer without a new lookup.
+#[test]
+fn an_alias_resolved_before_a_reboot_still_reaches_its_peer() {
+    let mut go = go_or_skip!();
+    let (gw, id, alias) = up(&mut go, "gopeer");
+    assert_eq!(gw.host.echo(alias, 7, b"before", Duration::from_secs(30)).unwrap(), b"before");
+    let mut opts = GatewayOpts::new(&go.control_addr);
+    opts.storage = Some(gw.storage.clone());
+    drop(gw);
+    let gw2 = Gateway::start(opts);
+    wait_until("the membership to come back", 60, || gw2.is_ready(id));
+    gw2.host.wait_dhcp(Duration::from_secs(10)).expect("dhcp");
+    // no DNS lookup: the host still holds the old alias
+    assert_eq!(gw2.host.echo(alias, 7, b"after the reboot", Duration::from_secs(30)).unwrap(), b"after the reboot");
+    gw2.check_engine();
+}
+
 #[test]
 fn direct_path_is_discovered_and_traffic_moves_to_it() {
     let mut go = go_or_skip!();

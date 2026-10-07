@@ -18,6 +18,23 @@ use tdongle_tailnet_peers::record::{Action, DirRecord, Endpoint, MICROLINK_MAX_P
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DirError;
 
+/// A directory record, as much of it as the diagnostics print.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeerInfo {
+    /// Tailnet address.
+    pub ip: u32,
+    /// First four bytes of the WireGuard public key.
+    pub key: [u8; 4],
+    /// Home DERP region, 0 = unknown.
+    pub derp_region: u16,
+    /// Endpoints carried.
+    pub endpoints: u8,
+    /// Subnet routes carried.
+    pub routes: u8,
+    /// `Node.Online`, if the map said.
+    pub online: Option<bool>,
+}
+
 /// Peer records, per membership slot (`member` is the engine's slot index, not the router id).
 pub trait PeerDirectory {
     /// The record whose WireGuard key is `key`.
@@ -38,6 +55,10 @@ pub trait PeerDirectory {
     fn count(&self, member: usize) -> usize;
     /// The `j`-th live record's hostname and address (for DNS).
     fn peer_view(&self, member: usize, j: usize) -> Option<(&str, u32)>;
+    /// What the `j`-th live record carries, for diagnostics.
+    fn peer_info(&self, _member: usize, _j: usize) -> Option<PeerInfo> {
+        None
+    }
     /// Generation counter of the live records (bumped by every commit).
     fn generation(&self, member: usize) -> u32;
     /// Peers the last commit had no room for, and updates dropped because staging was full (both counted overflow, never a failed map).
@@ -266,6 +287,16 @@ impl<const M: usize, const N: usize, const S: usize> PeerDirectory for RamDirect
     }
     fn peer_view(&self, member: usize, j: usize) -> Option<(&str, u32)> {
         self.live.get(member)?.live().nth(j).map(|r| (r.hostname.as_str(), r.vpn_ip))
+    }
+    fn peer_info(&self, member: usize, j: usize) -> Option<PeerInfo> {
+        self.live.get(member)?.live().nth(j).map(|r| PeerInfo {
+            ip: r.vpn_ip,
+            key: [r.public_key[0], r.public_key[1], r.public_key[2], r.public_key[3]],
+            derp_region: r.derp_region,
+            endpoints: r.endpoint_count.max(0) as u8,
+            routes: r.subnet_route_count,
+            online: if r.has_online { Some(r.online) } else { None },
+        })
     }
     fn generation(&self, member: usize) -> u32 {
         self.generation.get(member).copied().unwrap_or(0)
