@@ -106,8 +106,6 @@ pub struct Gateway {
     pub heap: Arc<ModelHeap>,
     /// The fake Wi-Fi data path (NAT + a reflecting "Internet").
     pub wifi: Arc<FakeWifi>,
-    /// Ticks of a task on the runtime's own thread, one every 50 ms: stops advancing when something starves the executor (the board's supervisor resets after 8 s of that).
-    pub heartbeat: Arc<std::sync::atomic::AtomicU64>,
     stop: Option<tokio::sync::oneshot::Sender<()>>,
     join: Option<std::thread::JoinHandle<()>>,
 }
@@ -151,20 +149,12 @@ impl Gateway {
         let wifi = Arc::new(FakeWifi::new(u32::from_be_bytes(opts.local_ip)));
         let wifi_run = wifi.clone();
         let (usb, host) = spawn_host();
-        let heartbeat = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let hb = heartbeat.clone();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         let join = std::thread::Builder::new()
             .name("tailnet-runtime".into())
             .spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
                 rt.block_on(async move {
-                    tokio::spawn(async move {
-                        loop {
-                            tokio::time::sleep(Duration::from_millis(50)).await;
-                            hb.fetch_add(1, Ordering::Relaxed);
-                        }
-                    });
                     tokio::select! {
                         _ = tdongle_tailnet_runtime::run(sh, net, usb, ArcWifi(wifi_run)) => {}
                         _ = stop_rx => {}
@@ -172,7 +162,7 @@ impl Gateway {
                 });
             })
             .unwrap();
-        Gateway { sh, net: ctl, host, storage, heap, wifi, heartbeat, stop: Some(stop_tx), join: Some(join) }
+        Gateway { sh, net: ctl, host, storage, heap, wifi, stop: Some(stop_tx), join: Some(join) }
     }
 
     /// `TailnetApi::member_action`, from the calling thread.

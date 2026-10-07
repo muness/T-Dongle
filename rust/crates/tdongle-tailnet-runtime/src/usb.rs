@@ -402,9 +402,8 @@ async fn hold_for_room<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(s
     let Some(member) = sh.with_engine(|e, _| e.aliases().owner(dst)).map(|(m, _)| m) else { return };
     let Some((_, slot)) = sh.slot_of(member) else { return };
     let start = sh.now();
-    // the byte bound of the relay's elastic queue, not the heap: a frame that goes direct must not wait for heap the relay queue might need (heap short of room refuses the
-    // push, counted; waiting here would hold every ACK of a direct flow for 100 ms)
-    while (slot.derp_q.free_bytes() < ROOM_BYTES || slot.udp_q.free_bytes() < ROOM_BYTES) && sh.now().saturating_sub(start) < HOLD_MAX_MS {
+    // the relay's queue is elastic: room means room in its byte bound and heap above the floor for a block of this size
+    while (!slot.derp_q.has_room(ROOM_BYTES, sh.mem().heap.free()) || slot.udp_q.free_bytes() < ROOM_BYTES) && sh.now().saturating_sub(start) < HOLD_MAX_MS {
         Timer::after_millis(1).await;
     }
 }

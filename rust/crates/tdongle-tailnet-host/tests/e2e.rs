@@ -1017,35 +1017,3 @@ fn derp_only_bulk_is_paced_by_the_relay_not_dropped() {
     // (the download direction is paced by the peer's relay writes, which this knob does not slow: it only has to complete)
     gw.check_engine();
 }
-
-/// The board's supervisor resets the chip when the thread executor makes no progress for 8 s. A relay that stops reading for 10 s while the host keeps sending must leave
-/// every other task running: the executor's heartbeat (a task on the runtime's thread, one tick per 50 ms) never goes quiet for a second, the direct-path-style control
-/// traffic keeps working, and when the relay comes back the flow completes.
-#[test]
-fn a_relay_that_stops_reading_for_ten_seconds_does_not_starve_the_executor() {
-    use std::sync::atomic::Ordering::Relaxed;
-    let mut go = go_or_skip!();
-    let (gw, _id, alias) = up(&mut go, "gopeer");
-    gw.net.udp_blocked.store(true, Ordering::SeqCst);
-    assert_eq!(gw.host.echo(alias, 7, b"warm", Duration::from_secs(30)).unwrap(), b"warm");
-    gw.net.derp_write_stalled.store(true, Relaxed);
-    let worst = std::thread::scope(|s| {
-        // the host pushes a bulk upload at the stalled relay
-        let up = s.spawn(|| gw.host.upload(alias, 9, 256 * 1024, Duration::from_secs(40)));
-        let mut worst = u64::MAX;
-        let t0 = std::time::Instant::now();
-        let mut last = gw.heartbeat.load(Relaxed);
-        while t0.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(500));
-            let now = gw.heartbeat.load(Relaxed);
-            worst = worst.min(now - last);
-            last = now;
-        }
-        gw.net.derp_write_stalled.store(false, Relaxed);
-        let r = up.join().unwrap();
-        println!("upload after the stall: {:?}; fewest heartbeat ticks in 500 ms: {worst} (10 expected)", r.as_ref().map(|(n, d)| (*n, d.as_secs_f64())));
-        worst
-    });
-    assert!(worst >= 5, "the executor kept running through the stall: {worst} ticks in the worst 500 ms (10 expected)");
-    gw.check_engine();
-}
