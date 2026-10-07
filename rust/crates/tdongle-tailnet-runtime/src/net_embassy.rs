@@ -28,6 +28,7 @@ use embassy_net::udp::{PacketMetadata, UdpSocket};
 use embassy_net::{IpAddress, IpEndpoint, IpListenEndpoint, Ipv4Address, Stack};
 use embassy_time::{Duration, Timer, with_timeout};
 use embedded_io_async::{ErrorType, Read, Write};
+use core::sync::atomic::{AtomicU32, Ordering};
 use tdongle_tailnet_disco::Ep;
 
 /// Where the association generation comes from: the firmware's `WifiLink::association_generation()` (or anything that changes on re-association).
@@ -113,12 +114,72 @@ fn ip4(a: [u8; 4]) -> IpAddress {
     IpAddress::Ipv4(Ipv4Address::new(a[0], a[1], a[2], a[3]))
 }
 
+/// Why the last control / DERP dial failed, with counts (read by the firmware's `tn_dial` console line): the stage and the stack's own error, not only
+/// "transport failed".
+#[derive(Debug)]
+pub struct DialDiag {
+    /// Dials started.
+    pub attempts: AtomicU32,
+    /// Name resolution: `InvalidName`, `NameTooLong`, `Failed`, no A record.
+    pub dns: [AtomicU32; 4],
+    /// The pool refused the windows.
+    pub nomem: AtomicU32,
+    /// `connect` errors: no route, invalid state, reset, timed out.
+    pub connect: [AtomicU32; 4],
+    /// Connections made.
+    pub ok: AtomicU32,
+    /// The last result: 0 none, 1 ok, 2 dns, 3 nomem, 4 connect error.
+    pub last_stage: AtomicU32,
+    /// Detail of the last failure (the index in `dns` or `connect`).
+    pub last_detail: AtomicU32,
+    /// The address and port the last dial went to (host order, port in the high half of `last_port`).
+    pub last_ip: AtomicU32,
+    /// See `last_ip`.
+    pub last_port: AtomicU32,
+    /// Free socket windows the stack's DNS or TCP could not take: socket slot exhaustion would show here as `last_stage = 5`.
+    pub last_state: AtomicU32,
+}
+
+/// The dial diagnostics of every [`EmbTcp`].
+pub static DIAL: DialDiag = DialDiag {
+    attempts: AtomicU32::new(0),
+    dns: [const { AtomicU32::new(0) }; 4],
+    nomem: AtomicU32::new(0),
+    connect: [const { AtomicU32::new(0) }; 4],
+    ok: AtomicU32::new(0),
+    last_stage: AtomicU32::new(0),
+    last_detail: AtomicU32::new(0),
+    last_ip: AtomicU32::new(0),
+    last_port: AtomicU32::new(0),
+    last_state: AtomicU32::new(0),
+};
+
 async fn resolve(stack: Stack<'static>, host: &str) -> Result<[u8; 4], NetError> {
     if let Some(ip) = parse_ipv4(host) {
         return Ok(ip);
     }
-    let addrs = stack.dns_query(host, DnsQueryType::A).await.map_err(|_| NetError::Dns)?;
-    addrs.iter().map(|IpAddress::Ipv4(v)| v.octets()).next().ok_or(NetError::Dns)
+    match stack.dns_query(host, DnsQueryType::A).await {
+        Ok(addrs) => match addrs.iter().map(|IpAddress::Ipv4(v)| v.octets()).next() {
+            Some(a) => Ok(a),
+            None => {
+                DIAL.dns[3].fetch_add(1, Ordering::Relaxed);
+                DIAL.last_stage.store(2, Ordering::Relaxed);
+                DIAL.last_detail.store(3, Ordering::Relaxed);
+                Err(NetError::Dns)
+            }
+        },
+        Err(e) => {
+            let i = match e {
+                embassy_net::dns::Error::InvalidName => 0,
+                embassy_net::dns::Error::NameTooLong => 1,
+                embassy_net::dns::Error::Failed => 2,
+            };
+            DIAL.dns[i].fetch_add(1, Ordering::Relaxed);
+            DIAL.last_stage.store(2, Ordering::Relaxed);
+            DIAL.last_detail.store(i as u32, Ordering::Relaxed);
+            Err(NetError::Dns)
+        }
+    }
 }
 
 impl Net for EmbassyNet {
@@ -257,19 +318,41 @@ impl Write for EmbTcp {
 impl TcpConn for EmbTcp {
     async fn connect(&mut self, host: &str, port: u16) -> Result<(), NetError> {
         self.release().await;
+        DIAL.attempts.fetch_add(1, Ordering::Relaxed);
         let ip = resolve(self.stack, host).await?;
+        DIAL.last_ip.store(u32::from_be_bytes(ip), Ordering::Relaxed);
+        DIAL.last_port.store(u32::from(port), Ordering::Relaxed);
         // the windows are taken now, after the name resolved: a connection that cannot be made holds nothing
-        let Some((rx, tx)) = take_pair(self.mem, self.rx_len, self.tx_len) else { return Err(NetError::NoMem) };
+        let Some((rx, tx)) = take_pair(self.mem, self.rx_len, self.tx_len) else {
+            DIAL.nomem.fetch_add(1, Ordering::Relaxed);
+            DIAL.last_stage.store(3, Ordering::Relaxed);
+            return Err(NetError::NoMem);
+        };
         self.held = [(rx.as_ptr() as usize, rx.len()), (tx.as_ptr() as usize, tx.len())];
         let mut sock = TcpSocket::new(self.stack, rx, tx);
         sock.set_timeout(Some(Duration::from_secs(30)));
         sock.set_nagle_enabled(false);
-        let r = sock.connect(IpEndpoint::new(ip4(ip), port)).await.map_err(|e| match e {
-            tcp::ConnectError::NoRoute => NetError::NoRoute,
-            tcp::ConnectError::InvalidState => NetError::Closed,
-            tcp::ConnectError::ConnectionReset => NetError::Io,
-            tcp::ConnectError::TimedOut => NetError::Connect,
+        let r = sock.connect(IpEndpoint::new(ip4(ip), port)).await.map_err(|e| {
+            let i = match e {
+                tcp::ConnectError::NoRoute => 0,
+                tcp::ConnectError::InvalidState => 1,
+                tcp::ConnectError::ConnectionReset => 2,
+                tcp::ConnectError::TimedOut => 3,
+            };
+            DIAL.connect[i].fetch_add(1, Ordering::Relaxed);
+            DIAL.last_stage.store(4, Ordering::Relaxed);
+            DIAL.last_detail.store(i as u32, Ordering::Relaxed);
+            match e {
+                tcp::ConnectError::NoRoute => NetError::NoRoute,
+                tcp::ConnectError::InvalidState => NetError::Closed,
+                tcp::ConnectError::ConnectionReset => NetError::Io,
+                tcp::ConnectError::TimedOut => NetError::Connect,
+            }
         });
+        if r.is_ok() {
+            DIAL.ok.fetch_add(1, Ordering::Relaxed);
+            DIAL.last_stage.store(1, Ordering::Relaxed);
+        }
         self.sock = Some(sock);
         if r.is_err() {
             // a socket that did not connect holds its windows for nothing

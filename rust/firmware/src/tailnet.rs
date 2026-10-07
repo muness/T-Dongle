@@ -114,12 +114,12 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 124 * 1024;
+    pub const HEAP_REGULAR: usize = 121 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
     /// 102 KB of 192 KB with the ring grown to its 42 KB maximum, which includes the permanent slots), plus 12 KB of margin. `tn-mem` on the board settles it.
-    pub const WIFI_AND_USB: usize = 60 * 1024;
+    pub const WIFI_AND_USB: usize = 66 * 1024;
     /// The bridge's permanent ring slots (8 x 1,514 + header), allocated at boot.
     pub const RING_BASE: usize = 8 * 1_536;
 
@@ -316,6 +316,125 @@ pub async fn usb_rx(datagram: &[u8]) -> bool {
     }
 }
 
+/// Frames for the USB-side stack ([`usb_stack`]), and its waker.
+static LOCAL_RX: Channel<CriticalSectionRawMutex, alloc::vec::Vec<u8>, 4> = Channel::new();
+static LOCAL_WAKER: AtomicWaker = AtomicWaker::new();
+
+/// The USB netif's own TCP stack: embassy-net over the NCM data interface at 192.168.77.1/24, serving `GET /status` (the JSON the Android app reads) as the C does in
+/// tailnet mode. It sees only what the runtime hands it ([`UsbFrames::local_frame`]: ARP replies and TCP to the dongle); everything else on that interface is the
+/// runtime's. Frames to the host go through the same ring as the runtime's.
+#[derive(Debug)]
+pub struct UsbStackDriver;
+
+/// A frame for the USB stack.
+#[derive(Debug)]
+pub struct UsbRx(alloc::vec::Vec<u8>);
+/// Permission to send one frame to the host.
+#[derive(Debug)]
+pub struct UsbTx;
+
+impl RxToken for UsbRx {
+    fn consume<R, F: FnOnce(&mut [u8]) -> R>(mut self, f: F) -> R {
+        f(&mut self.0)
+    }
+}
+
+impl TxToken for UsbTx {
+    fn consume<R, F: FnOnce(&mut [u8]) -> R>(self, len: usize, f: F) -> R {
+        let mut buf = [0u8; crate::MTU];
+        let n = len.min(crate::MTU);
+        let r = f(&mut buf[..n]);
+        let _ = FwEnv.usb_ring_send(&buf[..n]);
+        r
+    }
+}
+
+impl Driver for UsbStackDriver {
+    type RxToken<'a> = UsbRx;
+    type TxToken<'a> = UsbTx;
+    fn receive(&mut self, cx: &mut core::task::Context<'_>) -> Option<(UsbRx, UsbTx)> {
+        LOCAL_WAKER.register(cx.waker());
+        LOCAL_RX.try_receive().ok().map(|f| (UsbRx(f), UsbTx))
+    }
+    fn transmit(&mut self, _cx: &mut core::task::Context<'_>) -> Option<UsbTx> {
+        Some(UsbTx)
+    }
+    fn link_state(&mut self, cx: &mut core::task::Context<'_>) -> LinkState {
+        LOCAL_WAKER.register(cx.waker());
+        if ALT.load(Ordering::Relaxed) != 0 && CONFIGURED.load(Ordering::Relaxed) { LinkState::Up } else { LinkState::Down }
+    }
+    fn capabilities(&self) -> Capabilities {
+        let mut c = Capabilities::default();
+        c.max_transmission_unit = crate::MTU;
+        c
+    }
+    fn hardware_address(&self) -> HardwareAddress {
+        HardwareAddress::Ethernet(tdongle_tailnet_runtime::usb::derive_usb_mac(FwPlatform.sta_mac()))
+    }
+}
+
+#[embassy_executor::task]
+async fn usb_net_task(mut runner: Runner<'static, UsbStackDriver>) -> ! {
+    runner.run().await
+}
+
+/// `GET /status` on port 80: the gateway's status JSON; anything else is a 404. One connection at a time per task, small windows (heap, once).
+#[embassy_executor::task(pool_size = 2)]
+async fn http_status_task(stack: Stack<'static>) -> ! {
+    use embassy_net::tcp::TcpSocket;
+    use embedded_io_async::Write as _;
+    let rx: &'static mut [u8] = alloc::boxed::Box::leak(alloc::vec![0u8; 1024].into_boxed_slice());
+    let tx: &'static mut [u8] = alloc::boxed::Box::leak(alloc::vec![0u8; 2048].into_boxed_slice());
+    let mut sock = TcpSocket::new(stack, rx, tx);
+    sock.set_timeout(Some(Duration::from_secs(10)));
+    let mut req = [0u8; 256];
+    loop {
+        if sock.accept(80).await.is_err() {
+            sock.abort();
+            Timer::after_millis(50).await;
+            continue;
+        }
+        // the request line is all that is read (the page and the app send small GETs); the rest of the headers are not needed
+        let mut n = 0;
+        while n < req.len() {
+            match with_timeout(Duration::from_secs(3), sock.read(&mut req[n..])).await {
+                Ok(Ok(k)) if k > 0 => {
+                    n += k;
+                    if req[..n].windows(2).any(|w| w == b"\r\n") {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        let line = core::str::from_utf8(&req[..n]).unwrap_or("").lines().next().unwrap_or("");
+        let path = line.strip_prefix("GET ").and_then(|r| r.split(' ').next()).unwrap_or("");
+        let (head, body): (&str, alloc::vec::Vec<u8>) = match (path.split('?').next().unwrap_or(""), api()) {
+            ("/status", Some(api)) => {
+                let mut body = alloc::vec::Vec::new();
+                let mut sink = |chunk: &[u8]| body.try_reserve(chunk.len()).is_ok() && {
+                    body.extend_from_slice(chunk);
+                    true
+                };
+                let _ = api.render_status(&mut sink);
+                ("200 OK", body)
+            }
+            ("/status", None) => ("503 Service Unavailable", alloc::vec::Vec::new()),
+            _ => ("404 Not Found", alloc::vec::Vec::new()),
+        };
+        let mut h = String::new();
+        let _ = write!(h, "HTTP/1.1 {head}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+        let ok = sock.write_all(h.as_bytes()).await.is_ok() && sock.write_all(&body).await.is_ok() && sock.flush().await.is_ok();
+        HTTP_SERVED.fetch_add(u32::from(ok), Ordering::Relaxed);
+        sock.close();
+        let _ = with_timeout(Duration::from_secs(2), sock.flush()).await;
+        sock.abort();
+    }
+}
+
+/// `/status` answers sent.
+pub static HTTP_SERVED: AtomicU32 = AtomicU32::new(0);
+
 /// Times a host frame had to wait for heap above the floor.
 pub static USB_RX_WAITS: AtomicU32 = AtomicU32::new(0);
 
@@ -338,6 +457,16 @@ impl UsbFrames for FwUsb {
     }
     fn link_generation(&self) -> u32 {
         USB_GEN.load(Ordering::Relaxed)
+    }
+    fn local_frame(&mut self, frame: &[u8]) {
+        // an ARP reply or TCP to 192.168.77.1: the USB-side stack (the `/status` page) takes it; full or short of heap, it is dropped (TCP retransmits)
+        let mut block: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
+        if hb_ok(FwHeap.free(), frame.len() + 16) && block.try_reserve_exact(frame.len()).is_ok() {
+            block.extend_from_slice(frame);
+            if LOCAL_RX.try_send(block).is_ok() {
+                LOCAL_WAKER.wake();
+            }
+        }
     }
     fn set_carrier(&mut self, up: bool) {
         // Deviation shared with bridge mode: no NETWORK_CONNECTION notification on a carrier change (the NCM receiver sends it once when the host selects alt 1).
@@ -377,6 +506,41 @@ static RING: critical_section::Mutex<RefCell<Option<alloc::boxed::Box<RxRing>>>>
 /// Frames the callback refused because the free heap was at the elastic floor (or the allocator had no block).
 pub static RX_HEAP_REFUSED: AtomicU32 = AtomicU32::new(0);
 
+/// DHCP and ARP frames seen on the station interface, each way (the `tn_sta` line): the first thing to read when the station has no address.
+static DHCP_RX: AtomicU32 = AtomicU32::new(0);
+static DHCP_TX: AtomicU32 = AtomicU32::new(0);
+static ARP_RX: AtomicU32 = AtomicU32::new(0);
+static ARP_TX: AtomicU32 = AtomicU32::new(0);
+/// The stack handle for the diagnostics. `Stack` is not `Sync` (it is a reference to a `RefCell`); it is only ever used from the thread executor (the stack's runner and the
+/// console worker are both tasks of it), which is why the wrapper may be shared.
+struct ThreadOnly<T>(T);
+// SAFETY: see above; the value is only touched by tasks of the single thread executor, which never run concurrently.
+unsafe impl<T> Sync for ThreadOnly<T> {}
+static STACK_REF: OnceLock<ThreadOnly<Stack<'static>>> = OnceLock::new();
+static DIAG_PORT: OnceLock<tdongle_tailnet_wifimux::RawPort<'static, MUX_TXQ, MUX_RXQ>> = OnceLock::new();
+
+/// Count an Ethernet frame as ARP or DHCP (BOOTP ports 67 and 68) for the `tn_sta` line.
+fn note_frame(frame: &[u8], rx: bool) {
+    if frame.len() < 14 {
+        return;
+    }
+    match u16::from_be_bytes([frame[12], frame[13]]) {
+        0x0806 => {
+            (if rx { &ARP_RX } else { &ARP_TX }).fetch_add(1, Ordering::Relaxed);
+        }
+        0x0800 if frame.len() >= 38 && frame[23] == 17 => {
+            let ihl = usize::from(frame[14] & 15) * 4;
+            if frame.len() >= 14 + ihl + 4 {
+                let (sp, dp) = (u16::from_be_bytes([frame[14 + ihl], frame[15 + ihl]]), u16::from_be_bytes([frame[16 + ihl], frame[17 + ihl]]));
+                if (sp == 67 && dp == 68) || (sp == 68 && dp == 67) {
+                    (if rx { &DHCP_RX } else { &DHCP_TX }).fetch_add(1, Ordering::Relaxed);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 /// The radio's receive callback (Wi-Fi task): copy the frame and return. `true`: tailnet mode took it (the bridge must not see it).
 pub fn wifi_rx(frame: &[u8]) -> bool {
     if !RX_ON.load(Ordering::Acquire) {
@@ -386,6 +550,7 @@ pub fn wifi_rx(frame: &[u8]) -> bool {
         RX_DROPPED.fetch_add(1, Ordering::Relaxed);
         return true;
     }
+    note_frame(frame, true);
     // admitted like an elastic consumer (the frame and its allocator header must leave the floor free), then copied into a block of its own length
     let mut block: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
     if !hb_ok(FwHeap.free(), frame.len() + 16) || block.try_reserve_exact(frame.len()).is_err() {
@@ -461,6 +626,7 @@ impl TxToken for L2Tx {
         let mut buf = [0u8; crate::MTU];
         let n = len.min(crate::MTU);
         let r = f(&mut buf[..n]);
+        note_frame(&buf[..n], false);
         if crate::l2::tx(&buf[..n]).is_err() {
             TX_REFUSED.fetch_add(1, Ordering::Relaxed);
         }
@@ -597,12 +763,32 @@ pub fn start(spawner: Spawner) -> Result<(), StartError> {
     let mut seed = [0u8; 8];
     platform.fill_random(&mut seed);
     let (stack, runner) = embassy_net::new(driver, NetConfig::dhcpv4(Default::default()), STACK_RES.take(), u64::from_le_bytes(seed));
+    let _ = DIAG_PORT.init(port);
+    let _ = STACK_REF.init(ThreadOnly(stack));
     let wifi: &'static Wifi = WIFI.init_with(|| MuxWifi::new(port, napt, stack));
     // socket windows, TLS records and the control workspace come from the shared pool (the heap, admitted against the elastic floor), not from statics
     let sockmem: &'static HeapSockMem = SOCKMEM.init(HeapSockMem::new(sh.mem()));
     let net: &'static EmbassyNet = NET.init(EmbassyNet::new(stack, &ASSOCIATION, sockmem));
     sh.net_member_bytes.store(net.member_buffer_bytes() as u32, Ordering::Relaxed);
 
+    // the USB netif's own stack (192.168.77.1/24) for the `/status` page; its socket table is one heap block
+    {
+        let usb_res: &'static mut StackResources<3> = alloc::boxed::Box::leak(alloc::boxed::Box::new(StackResources::new()));
+        let usb_cfg = NetConfig::ipv4_static(embassy_net::StaticConfigV4 {
+            address: embassy_net::Ipv4Cidr::new(embassy_net::Ipv4Address::new(192, 168, 77, 1), 24),
+            gateway: None,
+            dns_servers: Default::default(),
+        });
+        let (usb_stack, usb_runner) = embassy_net::new(UsbStackDriver, usb_cfg, usb_res, u64::from_le_bytes(seed) ^ 0x7573_6200);
+        if let Ok(t) = usb_net_task(usb_runner) {
+            spawner.spawn(t);
+        }
+        for _ in 0..2 {
+            if let Ok(t) = http_status_task(usb_stack) {
+                spawner.spawn(t);
+            }
+        }
+    }
     RX_ON.store(true, Ordering::Release);
     ACTIVE.store(true, Ordering::Release);
     if let Ok(t) = net_task(runner) {
@@ -683,7 +869,10 @@ pub const TAILNET_HEAP_BYTES: usize = core::mem::size_of::<Sh>()
 
 /// What the pool holds besides windows while a membership runs: the DERP relay's write record and staging frame (3,584 per membership) and a TLS record or a control
 /// workspace in flight (the workspace is inside the floor).
-pub const POOL_TRANSIENT: usize = MEMBERS * 3_584 + 4_096;
+pub const POOL_TRANSIENT: usize = MEMBERS * 3_584 + 4_096 + USB_HTTP_BYTES;
+
+/// The USB-side stack's socket table and the two `/status` servers' windows (1 KB + 2 KB each), all taken once at start.
+pub const USB_HTTP_BYTES: usize = 3 * 640 + 2 * (1024 + 2048) + 512;
 
 /// The directory when every membership's tailnet is as big as the directory allows (`DIR_PEERS` records of 288 bytes per membership); a smaller tailnet holds less.
 /// The bank a commit builds beside it and the staged updates of a map in flight are elastic ([`ELASTIC_TYPICAL`]).
@@ -885,14 +1074,121 @@ fn crlf(s: &mut String) {
     }
 }
 
+/// What the station's IP side is doing: the link, the stack's configuration (DHCP result), the DHCP / ARP frames each way, the mux's counters and the last control dial
+/// (`tn_dial`: stage and the stack's own error). Everything a board needs to say why the control plane is not reached.
+fn sta_report(sh: &Sh, out: &mut String) {
+    use tdongle_tailnet_runtime::net_embassy::DIAL;
+    let ld = |a: &AtomicU32| a.load(Ordering::Relaxed);
+    let (up, cfg_up, v4) = match STACK_REF.try_get() {
+        Some(ThreadOnly(st)) => (st.is_link_up(), st.is_config_up(), st.config_v4()),
+        None => (false, false, None),
+    };
+    let _ = write!(out, "tn_sta link_up={} wifi_connected={} stack_link={} stack_config={}", LINK_UP.load(Ordering::Relaxed) as u8, crate::CONNECTED_NOW.load(Ordering::Relaxed) as u8, up as u8, cfg_up as u8);
+    match v4 {
+        Some(c) => {
+            let _ = write!(out, " ip={}/{}", c.address.address(), c.address.prefix_len());
+            match c.gateway {
+                Some(g) => {
+                    let _ = write!(out, " gw={g}");
+                }
+                None => out.push_str(" gw=none"),
+            }
+            out.push_str(" dns=");
+            for (i, d) in c.dns_servers.iter().enumerate() {
+                let _ = write!(out, "{}{}", if i > 0 { "," } else { "" }, d);
+            }
+            if c.dns_servers.is_empty() {
+                out.push_str("none");
+            }
+        }
+        None => out.push_str(" ip=none gw=none dns=none"),
+    }
+    let _ = write!(
+        out,
+        " dhcp_rx={} dhcp_tx={} arp_rx={} arp_tx={} wifi_rx={} rx_dropped={} rx_heap_refused={} tx_refused={} up_ms={}\r\n",
+        ld(&DHCP_RX),
+        ld(&DHCP_TX),
+        ld(&ARP_RX),
+        ld(&ARP_TX),
+        ld(&RX_FRAMES),
+        ld(&RX_DROPPED),
+        ld(&RX_HEAP_REFUSED),
+        ld(&TX_REFUSED),
+        Instant::now().as_millis()
+    );
+    if let Some(p) = DIAG_PORT.try_get() {
+        let m = p.stats();
+        let _ = write!(
+            out,
+            "tn_mux rx_frames={} to_stack={} to_host={} tx_stack={} gateway_mac={:?} rx_drop[runt,oversize,not_for_us,bad_src,bad_ip,tap_rej,tap_drop,tap_range,hostq]={},{},{},{},{},{},{},{},{} snooped={}\r\n",
+            m.rx_frames.get(),
+            m.rx_to_stack.get(),
+            m.rx_to_host.get(),
+            m.tx_stack.get(),
+            p.gateway_mac(),
+            m.rx_dropped[0].get(),
+            m.rx_dropped[1].get(),
+            m.rx_dropped[2].get(),
+            m.rx_dropped[3].get(),
+            m.rx_dropped[4].get(),
+            m.rx_dropped[5].get(),
+            m.rx_dropped[6].get(),
+            m.rx_dropped[7].get(),
+            m.rx_dropped[8].get(),
+            m.snooped.get()
+        );
+    }
+    for (i, sl) in sh.slots.iter().enumerate() {
+        let st = sl.status();
+        if st.state == SlotState::Free {
+            continue;
+        }
+        let _ = write!(out, "tn_ctl slot={} stage={} connected={} end=\"{}\" error=\"{}\"\r\n", i, st.control_stage, st.connected as u8, st.last_end.as_str(), st.last_error.as_str());
+    }
+    let stage = match ld(&DIAL.last_stage) {
+        0 => "none",
+        1 => "ok",
+        2 => ["dns_invalid_name", "dns_name_too_long", "dns_failed", "dns_no_a_record"][(ld(&DIAL.last_detail) as usize).min(3)],
+        3 => "no_memory_for_windows",
+        _ => ["connect_no_route", "connect_invalid_state", "connect_reset", "connect_timed_out"][(ld(&DIAL.last_detail) as usize).min(3)],
+    };
+    let ip = ld(&DIAL.last_ip).to_be_bytes();
+    let _ = write!(
+        out,
+        "tn_dial attempts={} ok={} last={} to={}.{}.{}.{}:{} dns[invalid,too_long,failed,no_a]={},{},{},{} connect[no_route,invalid_state,reset,timed_out]={},{},{},{} no_memory={}\r\n",
+        ld(&DIAL.attempts),
+        ld(&DIAL.ok),
+        stage,
+        ip[0],
+        ip[1],
+        ip[2],
+        ip[3],
+        ld(&DIAL.last_port),
+        ld(&DIAL.dns[0]),
+        ld(&DIAL.dns[1]),
+        ld(&DIAL.dns[2]),
+        ld(&DIAL.dns[3]),
+        ld(&DIAL.connect[0]),
+        ld(&DIAL.connect[1]),
+        ld(&DIAL.connect[2]),
+        ld(&DIAL.connect[3]),
+        ld(&DIAL.nomem)
+    );
+}
+
 fn handle(sh: &'static Sh, line: &str, out: &mut String) -> bool {
     let api: &dyn TailnetApi = sh;
     if line == "\u{1}status-extra" {
         api.serial_status_extra(out);
+        sta_report(sh, out);
         let _ = write!(out, "tailnet_rust members={} napt_flows={} mux_tx={} mux_rx={} wifi_rx={} wifi_rx_dropped={} wifi_tx_refused={} usb_rx_queue={}\r\n", MEMBERS, NAPT_FLOWS, MUX_TXQ, MUX_RXQ, RX_FRAMES.load(Ordering::Relaxed), RX_DROPPED.load(Ordering::Relaxed), TX_REFUSED.load(Ordering::Relaxed), USB_RX_FRAMES);
         return true;
     }
-    if line == "tn-mem" {
+    if line == "tn-mem" || line == "tn-sta" {
+        if line == "tn-sta" {
+            sta_report(sh, out);
+            return true;
+        }
         memory_report(sh, out);
         return true;
     }
@@ -996,6 +1292,7 @@ fn memory_report(sh: &Sh, out: &mut String) {
         USB_RX_FRAMES * (crate::MTU + 2),
         (0..tdongle_tailnet_runtime::sizes::FUT_RUN).map(|i| tdongle_tailnet_runtime::sizes::future_bytes(sh, i)).sum::<usize>()
     );
+    let _ = write!(out, "tn_http served={}\r\n", HTTP_SERVED.load(Ordering::Relaxed));
     let _ = write!(
         out,
         "tn_budget heap_total={} wifi_usb_assumed={} ring_base={} tailnet_state={} floor={} headroom={} stack={} start_refused={} rx_heap_refused={} usb_rx_waits={}\r\n",

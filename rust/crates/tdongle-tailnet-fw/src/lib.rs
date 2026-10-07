@@ -104,6 +104,9 @@ pub trait UsbFrames {
     fn link_generation(&self) -> u32;
     /// Tell the host the carrier is up or down (the NCM notification), as the C does when the first membership is routing.
     fn set_carrier(&mut self, up: bool);
+    /// A frame from the host that the dongle's own TCP stack should see: an ARP reply, or TCP to the dongle's own address (192.168.77.1: the `/status` page the
+    /// Android app reads). The runtime still handles the frame as before; an image without such a stack ignores this (the default).
+    fn local_frame(&mut self, _frame: &[u8]) {}
 }
 
 /// **Documentation of the Wi-Fi contract; the runtime does not bound on it.** The runtime consumes the radio through its own `net_embassy::LinkGen` (the

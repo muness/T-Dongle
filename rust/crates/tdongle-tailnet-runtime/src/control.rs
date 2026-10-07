@@ -349,7 +349,13 @@ fn note_end<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<
             text.set("Control-plane transport failed; retrying");
         }
     }
+    let mut detail = crate::util::Buf::<120>::new();
+    {
+        use core::fmt::Write as _;
+        let _ = write!(detail, "{end:?}");
+    }
     slot.update(|st| {
+        st.last_end = detail;
         st.noise_error = end.noise_error();
         st.map_error = end.map_error();
         st.last_error = text;

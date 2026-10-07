@@ -26,7 +26,7 @@ use tdongle_tailnet_usbnet::dhcp::DhcpOutcome;
 use tdongle_tailnet_usbnet::eth::Rx;
 use tdongle_tailnet_usbnet::napt::Verdict;
 use tdongle_tailnet_usbnet::reply::{ICMP_ERROR_MAX, RST_LEN, build_icmp_error};
-use tdongle_tailnet_usbnet::wire::{ETHERTYPE_IPV4, Mac, USB_IP, USB_MASK, is_alias, rd16, rd32, wr16, wr32, write_eth};
+use tdongle_tailnet_usbnet::wire::{ETHERTYPE_ARP, ETHERTYPE_IPV4, Mac, USB_IP, USB_MASK, is_alias, rd16, rd32, wr16, wr32, write_eth};
 
 /// The longest a frame waits for room in its membership's egress queues before the engine is allowed to refuse it.
 pub const HOLD_MAX_MS: u64 = 100;
@@ -339,6 +339,9 @@ where
             Either4::First(n) => {
                 RtStats::bump(&sh.stats.usb_rx);
                 let n = n.min(rx.len());
+                if wants_local_stack(&rx[..n]) {
+                    usb.local_frame(&rx[..n]);
+                }
                 hold_for_room(sh, &rx[..n]).await;
                 sh.with_scratch(|s| {
                     if let UsbAction::Reply(len) | UsbAction::Echo(len) | UsbAction::Icmp(len) = host_frame(sh, &mut un, wifi, sh.now(), &mut rx[..n], &mut s[REPLY]) {
@@ -356,6 +359,18 @@ where
             }
             Either4::Fourth(()) => {}
         }
+    }
+}
+
+/// Frames the image's own TCP stack on the USB side must see: ARP replies (it resolves the host's address itself) and TCP segments to the dongle's address.
+fn wants_local_stack(frame: &[u8]) -> bool {
+    if frame.len() < 34 {
+        return false;
+    }
+    match rd16(frame, 12) {
+        ETHERTYPE_ARP => frame.len() >= 22 && rd16(frame, 20) == 2,
+        ETHERTYPE_IPV4 => frame[14 + 9] == 6 && rd32(frame, 14 + 16) == USB_IP,
+        _ => false,
     }
 }
 
@@ -625,5 +640,26 @@ mod tests {
             assert_eq!((m[0] & 1, m[0] & 2), (0, 2));
             assert_ne!(m, sta);
         }
+    }
+
+    #[test]
+    fn only_arp_replies_and_tcp_to_the_dongle_reach_the_local_stack() {
+        let mut arp = [0u8; 42];
+        wr16(&mut arp, 12, ETHERTYPE_ARP);
+        wr16(&mut arp, 20, 2);
+        assert!(wants_local_stack(&arp), "an ARP reply: the stack resolves the host itself");
+        wr16(&mut arp, 20, 1);
+        assert!(!wants_local_stack(&arp), "a who-has is the runtime's to answer");
+        let mut tcp = [0u8; 60];
+        wr16(&mut tcp, 12, ETHERTYPE_IPV4);
+        tcp[14] = 0x45;
+        tcp[14 + 9] = 6;
+        wr32(&mut tcp, 14 + 16, USB_IP);
+        assert!(wants_local_stack(&tcp));
+        wr32(&mut tcp, 14 + 16, 0x0808_0808);
+        assert!(!wants_local_stack(&tcp), "TCP to the Internet is the NAT's");
+        wr32(&mut tcp, 14 + 16, USB_IP);
+        tcp[14 + 9] = 17;
+        assert!(!wants_local_stack(&tcp), "UDP to the dongle (DNS, DHCP) is the runtime's");
     }
 }

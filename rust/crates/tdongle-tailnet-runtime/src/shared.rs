@@ -203,6 +203,8 @@ pub struct SlotStatus {
     pub key_expired: bool,
     /// The control session's last failure as text (`protocol_error` in `/status`).
     pub last_error: FixedStr<96>,
+    /// How the last control session ended, as the driver's own `Debug` (stage and failure): what `last_error`'s fixed C text leaves out (the `tn_ctl` console line).
+    pub last_end: crate::util::Buf<120>,
     /// The relay link's state.
     pub derp_state: LinkState,
     /// The relay link's counters.
@@ -253,6 +255,7 @@ impl SlotStatus {
             auth_url: FixedStr::new(),
             key_expired: false,
             last_error: FixedStr::new(),
+            last_end: crate::util::Buf::new(),
             derp_state: LinkState::Idle,
             derp: LinkStats::new(),
             tls_untrusted: 0,
