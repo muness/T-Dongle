@@ -416,7 +416,7 @@ fn it_agrees_with_a_hashmap_model_on_random_maps() {
             queued.iter_mut().for_each(VecDeque::clear);
         }
         if rng.next(150) == 0 {
-            erases_at_most(&mut d, 2, "clear", |d| d.clear(m));
+            erases_at_most(&mut d, 0, "clear", |d| d.clear(m));
             model[m].recs.clear();
             queued[m].clear();
         }
@@ -898,4 +898,44 @@ fn a_mount_over_more_torn_transactions_than_it_can_list() {
     check(&mut d, 0, &model, ids, "after the compaction");
     let mut d = reboot(d);
     check(&mut d, 0, &model, ids, "after the compaction and a reboot");
+}
+
+/// Both generations can have valid headers after compaction; clearing must
+/// invalidate both without blocking the executor on two sector erases.
+#[test]
+fn clear_invalidates_both_headers_without_erasing() {
+    let mut d: D<2> = FlashDirectory::new(MemFlash::new(SMALL));
+    d.stage(0, &add(1, "old")).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
+    settle(&mut d);
+    let g = d.geometry().unwrap();
+    d.m[0].copy = Some((1, 1));
+    while d.m[0].copy.is_some() {
+        assert!(d.copy_step(&g, 0).is_ok());
+    }
+    assert_eq!(d.m[0].spare_clean, 0);
+    for a in 0..=1 {
+        assert_eq!(d.slot(&g, 0, a, 0).unwrap()[0], K_HEADER);
+    }
+    erases_at_most(&mut d, 0, "clear with two headers", |d| d.clear(0));
+    let mut d = reboot(d);
+    assert_eq!(d.count(0), 0);
+    assert!(d.find_by_ip(0, ip_of(1)).is_none());
+    d.stage(0, &add(2, "new")).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
+    assert_eq!(reboot(d).count(0), 1);
+}
+
+#[test]
+fn failed_clear_keeps_the_active_generation_until_retry() {
+    let mut d: D<2> = FlashDirectory::new(MemFlash::new(SMALL));
+    d.stage(0, &add(1, "old")).unwrap();
+    commit_now(&mut d, 0, true).unwrap();
+    d.flash().cut_after(0, 0);
+    erases_at_most(&mut d, 0, "failed clear", |d| d.clear(0));
+    assert_eq!(d.count(0), 1);
+    let mut d = reboot(d);
+    assert_eq!(d.count(0), 1);
+    erases_at_most(&mut d, 0, "retried clear", |d| d.clear(0));
+    assert_eq!(reboot(d).count(0), 0);
 }
