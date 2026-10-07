@@ -72,7 +72,7 @@ pub struct Windows {
 
 impl Windows {
     /// The sizes the firmware starts with.
-    pub const GATEWAY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 5760, derp_tx: 2048, udp_rx: 9600, udp_tx: 3200, dns: 1536 };
+    pub const GATEWAY: Windows = Windows { ctl_rx: 4096, ctl_tx: 1024, derp_rx: 5760, derp_tx: 6144, udp_rx: 9600, udp_tx: 3200, dns: 1536 };
     /// Bytes one membership's sockets hold (windows only: the packet metadata is static).
     pub const fn per_member(&self) -> usize {
         self.ctl_rx + self.ctl_tx + self.derp_rx + self.derp_tx + self.udp_rx + self.udp_tx
@@ -91,7 +91,7 @@ pub const DERP_RX_BIG: usize = crate::derp::RELAY_RX_BIG;
 /// See [`DERP_RX_BIG`].
 pub const DERP_TX_BIG: usize = crate::derp::RELAY_TX_BIG;
 
-const _: () = assert!(Windows::GATEWAY.derp_rx + Windows::GATEWAY.derp_tx == 5760 + 2048, "derp::IDLE_WINDOW_BYTES follows the idle relay windows");
+const _: () = assert!(Windows::GATEWAY.derp_rx + Windows::GATEWAY.derp_tx == 5760 + 6144, "derp::IDLE_WINDOW_BYTES follows the idle relay windows");
 
 /// Datagrams a UDP socket can queue each way.
 pub const UDP_PKTS: usize = 8;

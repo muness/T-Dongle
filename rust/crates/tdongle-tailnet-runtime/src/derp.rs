@@ -294,7 +294,33 @@ pub const RELAY_RX_BIG: usize = 6144;
 /// See [`RELAY_RX_BIG`].
 pub const RELAY_TX_BIG: usize = 6144;
 /// The idle relay windows' bytes (`Windows::GATEWAY.derp_rx + derp_tx`).
-const IDLE_WINDOW_BYTES: usize = 5760 + 2048;
+const IDLE_WINDOW_BYTES: usize = 5760 + 6144;
+
+/// The relay link's time out of the ready state: `[times it left ready (or failed to connect), milliseconds not ready in all, since when it is not ready (0: ready)]`. The
+/// engine's `no_route` (a packet for the relay while the link is down) is read against it.
+pub static RELAY_DOWN: [core::sync::atomic::AtomicU32; 3] = [const { core::sync::atomic::AtomicU32::new(0) }; 3];
+
+fn relay_down(now: u64) {
+    use core::sync::atomic::Ordering::Relaxed;
+    if RELAY_DOWN[2].load(Relaxed) == 0 {
+        RELAY_DOWN[2].store((now as u32).max(1), Relaxed);
+        RELAY_DOWN[0].fetch_add(1, Relaxed);
+    }
+}
+
+/// Move `f` to the heap if the heap above the floor admits a block of its size (counted in [`HANDSHAKE_NOMEM`] if not). A plain function: `f` is not part of the caller's future,
+/// only the box is (a future moved into an `async fn` or held across a check stays in the state machine).
+#[inline(never)]
+pub fn admit_box<F: core::future::Future>(heap: &dyn tdongle_tailnet_admission::probe::HeapProbe, f: F) -> Option<core::pin::Pin<alloc::boxed::Box<F>>> {
+    if !tdongle_tailnet_admission::heap::hb_ok(heap.free(), core::mem::size_of::<F>() + 64) {
+        HANDSHAKE_NOMEM.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+        return None;
+    }
+    Some(alloc::boxed::Box::pin(f))
+}
+
+/// TLS handshakes (relay and control) that were not started for want of heap for their boxed state.
+pub static HANDSHAKE_NOMEM: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// Relay window mode, `[window ms, frames per window that make it big, quiet windows that make it small again]`. Tests shorten them.
 pub static WIN_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomic::AtomicU32::new(2000), core::sync::atomic::AtomicU32::new(50), core::sync::atomic::AtomicU32::new(15)];
@@ -561,15 +587,24 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_
         let member = self.member;
         match a {
             Action::Notify(LinkEvent::Connected) => {
+                {
+                    use core::sync::atomic::Ordering::Relaxed;
+                    let since = RELAY_DOWN[2].swap(0, Relaxed);
+                    if since != 0 {
+                        RELAY_DOWN[1].fetch_add((self.sh.now() as u32).wrapping_sub(since), Relaxed);
+                    }
+                }
                 DERP_DIAG.stage.store(4, core::sync::atomic::Ordering::Relaxed);
                 DERP_DIAG.ready_at_ms.store((self.sh.now() as u32).max(1), core::sync::atomic::Ordering::Relaxed);
                 let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::Connected });
             }
             Action::Notify(LinkEvent::Disconnected | LinkEvent::RxStale) => {
+                relay_down(self.sh.now());
                 self.sh.slots[self.idx].derp_q.clear();
                 let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::Disconnected });
             }
             Action::Notify(LinkEvent::ConnectFailed) => {
+                relay_down(self.sh.now());
                 self.sh.slots[self.idx].derp_q.clear();
                 let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::ConnectFailed });
             }
@@ -972,9 +1007,16 @@ where
     let params = TlsParams { hostname: host, cert: &cert, anchors: DEFAULT_ANCHORS, now_unix };
     let mut rng = crate::shared::PlatformRng(&sh.platform);
     let handshake = LeasedTlsDerp::connect(&mut *tcp, &mut wbuf[..], &sh.lease, sh.mem(), &params, &mut rng);
+    // the handshake's state (about 2.8 KB) is a heap block for the length of the handshake, not part of this task's static future: admitted above the floor, or this attempt fails
+    // (counted) and the link tries again later
+    let Some(mut handshake) = admit_box(sh.mem().heap, handshake) else {
+        d.call(Event::TlsDone(false));
+        return;
+    };
     let neg = sh.stats.negotiation();
-    let outcome = drive(d, true, pin!(handshake)).await;
+    let outcome = drive(d, true, handshake.as_mut()).await;
     drop(neg);
+    drop(handshake);
     let mut conn = match outcome {
         None => return,
         Some(Ok(c)) => {

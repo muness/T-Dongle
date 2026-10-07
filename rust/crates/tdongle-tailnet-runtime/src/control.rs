@@ -247,7 +247,12 @@ impl<'a, T: TcpConn, P: Platform> Connect for CtlConnect<'a, T, P> {
             now_unix: t.platform.unix_seconds().unwrap_or(0),
         };
         let mut rng = crate::shared::PlatformRng(t.platform);
-        let r = with_timeout(io, tdongle_tailnet_tls::lease::LeasedTlsDerp::connect(CtlTcp { tcp }, wbuf, t.lease, t.mem, &params, &mut rng)).await;
+        // the handshake's state is a heap block for the length of the handshake, not part of this task's static future (see the relay's)
+        let Some(handshake) = crate::derp::admit_box(t.mem.heap, tdongle_tailnet_tls::lease::LeasedTlsDerp::connect(CtlTcp { tcp }, wbuf, t.lease, t.mem, &params, &mut rng)) else {
+            tcp.lock().await.close();
+            return fail();
+        };
+        let r = with_timeout(io, handshake).await;
         match r {
             Ok(Ok(conn)) => Ok(CtlStream::Tls(alloc::boxed::Box::new(TlsStream { conn, mem: t.mem, carry: None }))),
             _ => {

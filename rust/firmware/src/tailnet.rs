@@ -120,7 +120,7 @@ pub mod budget {
     pub const HEAP_DCACHE: usize = 32 * 1024;
     /// The regular region: DRAM is 341,760 bytes (`0x3FC88000..0x3FCDB700`); 42,860 of it is the IRAM overlap (`.rwdata_dummy`: the Wi-Fi blobs' IRAM code and the
     /// vectors), the statics are measured by the linker (`tn-mem` prints them), and the stack gets what this leaves: the link asserts at least 40 KB.
-    pub const HEAP_REGULAR: usize = 124 * 1024;
+    pub const HEAP_REGULAR: usize = 128 * 1024;
     /// Heap in all.
     pub const HEAP_TOTAL: usize = HEAP_RECLAIMED + HEAP_DCACHE + HEAP_REGULAR;
     /// What the Wi-Fi driver, the USB device and the settings keep on the heap besides the ring's permanent slots: 48 KB from the bridge's board run (heap minimum
@@ -1326,6 +1326,18 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 WIN_STATS[5].load(Relaxed),
                 tdongle_tailnet_engine::shared::FORCE_DERP.load(Relaxed) as u8,
                 tdongle_tailnet_runtime::derp::WIN_ENABLED.load(Relaxed) as u8
+            );
+        }
+        {
+            use tdongle_tailnet_runtime::derp::{HANDSHAKE_NOMEM, RELAY_DOWN};
+            let since = RELAY_DOWN[2].load(Relaxed);
+            let _ = write!(
+                out,
+                "tn_relay_down left_ready={} down_ms_total={} down_now_ms={} handshakes_refused_for_heap={} (the engine's no_route counts packets for the relay while it was down)\r\n",
+                RELAY_DOWN[0].load(Relaxed),
+                RELAY_DOWN[1].load(Relaxed),
+                if since == 0 { 0 } else { (Instant::now().as_millis() as u32).wrapping_sub(since) },
+                HANDSHAKE_NOMEM.load(Relaxed)
             );
         }
         // the link's visits to the regions peers are homed on, and the moves of its home region
