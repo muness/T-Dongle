@@ -52,6 +52,17 @@ pub const fn backoff_ms(attempts: u32) -> u64 {
     if ms > BACKOFF_MAX_MS { BACKOFF_MAX_MS } else { ms }
 }
 
+/// A session that applied a map counts as a success (the backoff starts again from one second) only if it also lasted this long (ms). Before, any applied map reset the
+/// backoff: a session that applied its first map and then failed (a directory commit that kept failing on flash errors, a map that broke right after) reconnected every
+/// second, a TLS handshake, a negotiation workspace and a map each time, for as long as the fault lasted, churning and fragmenting the heap until an allocation failed.
+pub const STABLE_SESSION_MS: u64 = 60_000;
+
+/// Consecutive failures to count after a session: back to zero after a stable session, otherwise unchanged (the caller waits `backoff_ms` of it and adds one).
+#[must_use]
+pub const fn attempts_after(attempts: u32, first_map_applied: bool, session_ms: u64) -> u32 {
+    if first_map_applied && session_ms >= STABLE_SESSION_MS { 0 } else { attempts }
+}
+
 /// The control connection's two transports, as the control driver's `Connect`: plain TCP (an explicit `http://` control address) or **verified TLS** over the same
 /// TCP handle (the default: Tailscale answers a plaintext `/key` with a 302 to https; the C's `use_tls`, `ctrl_key_auth = CTRL_KEY_TLS_VERIFIED`). The handle is
 /// shared through an async mutex because `Connect::Stream` cannot borrow `&mut self`; the driver keeps at most one stream alive at a time (its contract), so the
@@ -254,7 +265,14 @@ impl<'a, T: TcpConn, P: Platform> Connect for CtlConnect<'a, T, P> {
         };
         let r = with_timeout(io, handshake).await;
         match r {
-            Ok(Ok(conn)) => Ok(CtlStream::Tls(alloc::boxed::Box::new(TlsStream { conn, mem: t.mem, carry: None }))),
+            Ok(Ok(conn)) => match crate::fallible::try_box(TlsStream { conn, mem: t.mem, carry: None }) {
+                Ok(b) => Ok(CtlStream::Tls(b)),
+                Err(s) => {
+                    drop(s);
+                    tcp.lock().await.close();
+                    fail()
+                }
+            },
             _ => {
                 tcp.lock().await.close();
                 fail()
@@ -424,6 +442,7 @@ async fn member_control<R, P, S, D, T>(
             st.connected = false;
         });
         let mut ws = slot.ws.lock().await;
+        let session_start = Instant::now();
         let hostinfo = Hostinfo::new(hostname.as_str().unwrap_or("tdongle"), u32::from(home));
         let cfg = SessionConfig {
             host_header: host_header.as_str(),
@@ -472,9 +491,7 @@ async fn member_control<R, P, S, D, T>(
             attempts = 0;
             continue;
         };
-        if stats.first_map_applied {
-            attempts = 0;
-        }
+        attempts = attempts_after(attempts, stats.first_map_applied, session_start.elapsed().as_millis());
         note_end(sh, idx, &end);
         if matches!(end, SessionEnd::Register(RegisterFailure::NodeKeyExpired)) {
             slot.update(|st| st.key_expired = true);
@@ -529,6 +546,32 @@ mod tests {
     use super::*;
     use crate::testutil::shared;
     use tdongle_tailnet_disco::Ep;
+
+    /// The retry storm behind the board's out-of-memory panic: every session applies its first map and fails a few seconds later. The waits must grow to the cap, not stay
+    /// at one second; a session that stays up a minute is a success and starts again from one second.
+    #[test]
+    fn short_sessions_that_applied_a_map_still_back_off() {
+        let mut attempts = 0u32;
+        let mut waits = std::vec::Vec::new();
+        for _ in 0..8 {
+            attempts = attempts_after(attempts, true, 4_000);
+            waits.push(backoff_ms(attempts));
+            attempts = attempts.saturating_add(1);
+        }
+        assert_eq!(waits, [1_000, 2_000, 4_000, 8_000, 16_000, 16_000, 16_000, 16_000]);
+        assert_eq!(attempts_after(attempts, true, STABLE_SESSION_MS), 0);
+        assert_eq!(attempts_after(attempts, false, 10 * STABLE_SESSION_MS), attempts, "no map, no success");
+    }
+
+    /// The reserve check before a handshake or a workspace: the floor, and one block that can hold it.
+    #[test]
+    fn reserve_needs_the_floor_and_one_block() {
+        use tdongle_tailnet_admission::heap::ML_HB_FLOOR;
+        let need = 3_000;
+        assert!(crate::derp::reserve_ok(ML_HB_FLOOR + need, need, need));
+        assert!(!crate::derp::reserve_ok(ML_HB_FLOOR + need - 1, need, need), "below the floor");
+        assert!(!crate::derp::reserve_ok(ML_HB_FLOOR * 2, need - 1, need), "plenty free, but in pieces");
+    }
 
     #[test]
     fn backoff_is_the_cs() {

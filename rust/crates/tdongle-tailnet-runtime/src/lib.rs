@@ -110,7 +110,8 @@
 //! `EndpointSource::preferred_derp` (default `None`) and its use in the endpoint update.
 
 #![no_std]
-#![forbid(unsafe_code)]
+// one exception, `fallible` (a box that reports allocation failure instead of reaching the out-of-memory handler)
+#![deny(unsafe_code)]
 #![deny(missing_docs)]
 
 extern crate alloc;
@@ -120,6 +121,7 @@ pub mod api;
 pub mod control;
 pub mod control_url;
 pub mod derp;
+pub mod fallible;
 pub mod identity;
 pub mod members;
 pub mod net;

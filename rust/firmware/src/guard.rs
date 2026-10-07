@@ -153,14 +153,27 @@ pub fn boot_status<W: Write>(w: &mut W, firmware: &str, elf: &[u8; 32], state: &
 /// safe mode, so a panic at start-up cannot loop the device out of reach.
 #[panic_handler]
 fn panic(info: &PanicInfo<'_>) -> ! {
+    // the host must see this device go away: pull the bus to SE0 now, it stays so through the reset and the next boot's detach hold (a core-only reset otherwise leaves
+    // the host with the old, configured device and nothing answering it, until a replug)
+    crate::supervise::detach_for_reset();
     let mut rec = load();
+    // the file's name only (the record keeps a few dozen bytes: a toolchain path left no room for "memory allocation of N bytes failed"), then what the gateway was doing
+    #[cfg(feature = "tailnet")]
+    let op = tdongle_tailnet_runtime::optag::name();
+    #[cfg(not(feature = "tailnet"))]
+    let op = "";
     match info.location() {
-        Some(l) => rec.note_panic(format_args!("{}:{} {}", l.file(), l.line(), info.message())),
-        None => rec.note_panic(format_args!("{}", info.message())),
+        Some(l) => rec.note_panic(format_args!("{}:{} {} op={}", short_file(l.file()), l.line(), info.message(), op)),
+        None => rec.note_panic(format_args!("{} op={}", info.message(), op)),
     }
     store(&rec);
     // No I/O here: a print that blocks (a full UART FIFO) would leave the reset to the watchdog. Record, then reset the digital core at once (the RTC domain survives).
     esp_hal::system::software_reset()
+}
+
+/// The last path component of a panic location (`alloc.rs` for `/rustc/.../library/alloc/src/alloc.rs`).
+fn short_file(f: &str) -> &str {
+    f.rsplit(['/', '\\']).next().unwrap_or(f)
 }
 
 /// A tiny fixed string that implements `Write` (no allocation: used before the heap is trusted).

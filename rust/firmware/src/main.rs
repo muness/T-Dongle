@@ -693,6 +693,9 @@ async fn main(spawner: Spawner) -> ! {
     let hex: &'static str = core::str::from_utf8(hex).unwrap_or("000000000000");
 
     let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
+    // a reset that was not a power-on (panic, supervisor, the rescue watchdog's core-only reset) left the host with the old device: detach, and hold it detached for
+    // `usb_watch::DETACH_HOLD_MS` before `usb_task` attaches, so the host sees an unplug and enumerates afresh
+    supervise::boot_detach(matches!(esp_hal::system::reset_reason(), Some(esp_hal::rtc_cntl::SocResetReason::ChipPowerOn)));
     static EP_OUT: StaticCell<[u8; EP_OUT_BYTES]> = StaticCell::new();
     let mut otg_config = OtgConfig::default();
     // PATCH (vendor/embassy-usb-synopsys-otg): the NCM bulk OUT endpoint (0x04) is armed for a whole NTB.
@@ -1195,6 +1198,7 @@ unsafe impl Send for SendDevice {}
 
 #[embassy_executor::task]
 async fn usb_task(mut dev: SendDevice) -> ! {
+    supervise::attach_allowed().await;
     dev.0.run().await
 }
 
@@ -1369,6 +1373,22 @@ struct SendTx(NcmSender);
 // SAFETY: single owner after the move; the endpoint is touched only by `usb_tx_task`.
 unsafe impl Send for SendTx {}
 
+/// One empty ring slot on the heap, or `None` when the allocator has no block for it.
+fn ring_slot_box() -> Option<alloc::boxed::Box<RingSlot>> {
+    let layout = core::alloc::Layout::new::<RingSlot>();
+    // SAFETY: `RingSlot` is not zero-sized. A non-null result is a fresh allocation of exactly `layout` from the global allocator; it is initialised in place (no
+    // stack copy of the 1.5 KB slot) before `Box::from_raw` takes ownership, as that function requires.
+    unsafe {
+        let p = alloc::alloc::alloc(layout).cast::<RingSlot>();
+        if p.is_null() {
+            return None;
+        }
+        core::ptr::addr_of_mut!((*p).len).write(0);
+        core::ptr::addr_of_mut!((*p).data).write_bytes(0, 1);
+        Some(alloc::boxed::Box::from_raw(p))
+    }
+}
+
 /// Grows and shrinks the frame ring (the only code that allocates or frees its slots), in the thread executor.
 #[embassy_executor::task]
 async fn ring_housekeeping_task() -> ! {
@@ -1384,8 +1404,11 @@ async fn ring_housekeeping_task() -> ! {
         let idle = now.wrapping_sub(LAST_BUSY_MS.load(Ordering::Relaxed));
         match elastic::step(used, cap, RING_MAX.load(Ordering::Relaxed) as usize, elastic::CHUNK_SLOTS * core::mem::size_of::<RingSlot>(), esp_alloc::HEAP.free(), idle) {
             Step::Grow => {
-                let a = alloc::boxed::Box::new(RingSlot { len: 0, data: [0; MTU] });
-                let b = alloc::boxed::Box::new(RingSlot { len: 0, data: [0; MTU] });
+                // fallible: the heap check above counts free bytes, not one block; a refused chunk is a denied grow, not an out-of-memory panic
+                let (Some(a), Some(b)) = (ring_slot_box(), ring_slot_box()) else {
+                    RING_GROW_DENIED.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                };
                 let added = critical_section::with(|cs| {
                     let mut r = RING.borrow_ref_mut(cs);
                     match (r.next_free_id(), a, b) {
@@ -1761,6 +1784,13 @@ fn tdongle_traffic_reading() -> tdongle_traffic::Reading {
     }
 }
 
+/// Bytes reserved for a console reply before the command runs (the longest, `status` on a tailnet boot, is about 3 KB; a longer one grows as before).
+pub const CONSOLE_REPLY_BYTES: usize = 4096;
+/// The reply when that block is not available.
+pub const CONSOLE_NOMEM_REPLY: &str = "ERR low memory, try again\r\n";
+/// Console commands refused for want of heap.
+pub static CONSOLE_NOMEM: AtomicU32 = AtomicU32::new(0);
+
 #[embassy_executor::task]
 async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State) -> ! {
     let mut reader = LineReader::new();
@@ -1786,6 +1816,11 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
                 }
                 let Event::Line(line) = ev else { continue };
                 let mut owned = String::new();
+                if owned.try_reserve_exact(line.len()).is_err() {
+                    CONSOLE_NOMEM.fetch_add(1, Ordering::Relaxed);
+                    out(wr, CONSOLE_NOMEM_REPLY, 500).await;
+                    continue;
+                }
                 let _ = owned.write_str(line);
                 handle(wr, bridge, state, &owned).await;
             }
@@ -1794,11 +1829,18 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
 }
 
 async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
-    let mut s = String::new();
+    // The reply buffer is reserved up front and fallibly: the console runs in the interrupt executor, above everything, and an infallible `String` growing at a moment the
+    // heap is fragmented is an out-of-memory panic. Without the block the command is refused with a static line (no allocation) and the device stays up.
     #[cfg(feature = "tailnet")]
     if let Some(reply) = tailnet::console(line).await {
-        // a command the tailnet gateway owns (route, members, memory, inbound, member ..., tn-mem, tailnet-status)
-        out(wr, &reply, 3000).await;
+        // a command the tailnet gateway owns (route, members, memory, inbound, member ..., tn-mem, tailnet-status); an empty reply is the worker's refusal for want of heap
+        out(wr, if reply.is_empty() { CONSOLE_NOMEM_REPLY } else { &reply }, 3000).await;
+        return;
+    }
+    let mut s = String::new();
+    if s.try_reserve_exact(CONSOLE_REPLY_BYTES).is_err() {
+        CONSOLE_NOMEM.fetch_add(1, Ordering::Relaxed);
+        out(wr, CONSOLE_NOMEM_REPLY, 500).await;
         return;
     }
     match line {
@@ -2020,6 +2062,9 @@ async fn heap_task(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>) -> ! 
     loop {
         Timer::after_secs(5).await;
         let mut s = String::new();
+        if s.try_reserve_exact(512).is_err() {
+            continue; // the next tick
+        }
         heap_line(&mut s);
         println!("{}", s.trim_end());
         if HEAP_STREAM.load(Ordering::Relaxed) && DTR.load(Ordering::Relaxed) {
