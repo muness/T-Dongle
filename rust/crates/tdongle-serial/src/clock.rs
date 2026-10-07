@@ -124,6 +124,11 @@ impl Clock {
         }
     }
 
+    /// Set the server index the supervisor is on (an SNTP task that rotates its own servers reports through this).
+    pub fn set_server(&mut self, server: u8) {
+        self.server = server;
+    }
+
     /// The server in use: `gw_clock_server_name[server % GW_CLOCK_SERVERS]` (the modulo is what the status line applies).
     #[must_use]
     pub const fn server_name(&self) -> &'static str {

@@ -98,5 +98,5 @@ const _: () = {
     assert!(core::mem::size_of::<jit::JitStore<24>>() == 6176);
     assert!(core::mem::size_of::<alias::AliasBook>() == 1544);
     assert!(core::mem::size_of::<tdongle_tailnet_peers::pool::Pool<slot::WgSlot, 12>>() == 11472);
-    assert!(core::mem::size_of::<Engine<RamDirectory<1, 1, 1>, 3, 8, 12, 64, 64, 24>>() - core::mem::size_of::<RamDirectory<1, 1, 1>>() == 58964);
+    assert!(core::mem::size_of::<Engine<RamDirectory<1, 1, 1>, 3, 8, 12, 64, 64, 24>>() - core::mem::size_of::<RamDirectory<1, 1, 1>>() == 58960);
 };

@@ -201,8 +201,8 @@ fn semantic_map_section_over_capacity_in_ram_mode_only() {
     }
     many.push_str("]}");
     let (r, rec, _) = run(0, &many);
-    assert_eq!(r, Err(MapError::SectionFull));
-    assert_eq!(MapError::SectionFull.message(), "Map peer update section exceeds configured capacity");
+    assert_eq!(r, Err(MapError::SectionFull(Group::Changed)));
+    assert_eq!(MapError::SectionFull(Group::Changed).message(), "Map peer update section exceeds configured capacity");
     assert!(rec.summary.is_none());
     // exactly eight is fine
     let eight = many.replacen(",{}", "", 1);
@@ -213,7 +213,7 @@ fn semantic_map_section_over_capacity_in_ram_mode_only() {
     assert_eq!(rec.staged.len(), 9);
     // the removal section counts too
     let (r, _, _) = run(0, "{\"PeersRemoved\":[1,2,3,4,5,6,7,8,9]}");
-    assert_eq!(r, Err(MapError::SectionFull));
+    assert_eq!(r, Err(MapError::SectionFull(Group::Removed)), "the error names the section");
 }
 
 #[test]

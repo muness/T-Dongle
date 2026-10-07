@@ -40,6 +40,10 @@ pub trait PeerDirectory {
     fn peer_view(&self, member: usize, j: usize) -> Option<(&str, u32)>;
     /// Generation counter of the live records (bumped by every commit).
     fn generation(&self, member: usize) -> u32;
+    /// Peers the last commit had no room for, and updates dropped because staging was full (both counted overflow, never a failed map).
+    fn overflow(&self, _member: usize) -> (u32, u32) {
+        (0, 0)
+    }
     /// Bytes the next [`PeerDirectory::stage`] may take from the heap (0 for a directory that does not use it). The engine refuses the update, counted, when the
     /// heap would fall below the elastic floor (ADR 0022): the directory is an elastic consumer like the others.
     fn stage_cost(&self) -> usize {
@@ -85,11 +89,13 @@ const fn action_of(a: PeerAction) -> Action {
 #[derive(Clone)]
 struct Bank<const N: usize> {
     recs: Vec<DirRecord>,
+    /// Records the bank had no room for (counted, not an error: a tailnet bigger than the directory keeps what fits).
+    dropped: u32,
 }
 
 impl<const N: usize> Bank<N> {
     const fn new() -> Self {
-        Self { recs: Vec::new() }
+        Self { recs: Vec::new(), dropped: 0 }
     }
     fn live(&self) -> impl Iterator<Item = &DirRecord> {
         self.recs.iter().filter(|r| r.vpn_ip != 0)
@@ -117,7 +123,9 @@ impl<const N: usize> RecordFile for Bank<N> {
     }
     fn append(&mut self, r: &DirRecord) -> Result<(), DirError> {
         if self.recs.len() >= N {
-            return Err(DirError);
+            // the C with a bounded directory keeps what fits and counts the rest; the map is not refused for it
+            self.dropped = self.dropped.saturating_add(1);
+            return Ok(());
         }
         // exact growth, one record at a time (a bank built by `commit` is reserved up front, so this is no reallocation there)
         self.recs.try_reserve_exact(1).map_err(|_| DirError)?;
@@ -144,6 +152,9 @@ pub struct RamDirectory<const M: usize, const N: usize, const S: usize> {
     live: [Bank<N>; M],
     staged: [Vec<Op>; M],
     generation: [u32; M],
+    /// Peers the last commit of each membership had no room for, and staged updates dropped for want of staging room: counted overflow.
+    overflow: [u32; M],
+    stage_dropped: [u32; M],
 }
 
 impl<const M: usize, const N: usize, const S: usize> Default for RamDirectory<M, N, S> {
@@ -160,7 +171,7 @@ impl<const M: usize, const N: usize, const S: usize> RamDirectory<M, N, S> {
     /// Empty.
     #[inline(always)]
     pub const fn new() -> Self {
-        Self { live: [const { Bank::new() }; M], staged: [const { Vec::new() }; M], generation: [0; M] }
+        Self { live: [const { Bank::new() }; M], staged: [const { Vec::new() }; M], generation: [0; M], overflow: [0; M], stage_dropped: [0; M] }
     }
     /// Staged updates waiting for a commit.
     pub fn staged(&self, member: usize) -> usize {
@@ -201,7 +212,17 @@ impl<const M: usize, const N: usize, const S: usize> PeerDirectory for RamDirect
         }
         let staged = &mut self.staged[member];
         if staged.len() >= S {
-            return Err(DirError);
+            // Full: keep the peers that matter. An online (or addressed-and-active) peer takes the place of a staged add that is not online; otherwise this
+            // update is dropped and counted. The map is not refused (a real tailnet has hundreds of peers).
+            let online = |r: &DirRecord| r.has_online && r.online;
+            let incoming = to_dir_record(rec);
+            if rec.action == PeerAction::Add && online(&incoming) {
+                if let Some(slot) = staged.iter_mut().find(|o| o.action == Action::Add && !online(&o.record)) {
+                    *slot = Op { group: rec.group as u32, action: action_of(rec.action), record: incoming };
+                }
+            }
+            self.stage_dropped[member] = self.stage_dropped[member].saturating_add(1);
+            return Ok(());
         }
         staged.try_reserve(1).map_err(|_| DirError)?;
         staged.push(Op { group: rec.group as u32, action: action_of(rec.action), record: to_dir_record(rec) });
@@ -223,6 +244,7 @@ impl<const M: usize, const N: usize, const S: usize> PeerDirectory for RamDirect
         // staging is consumed either way (the vector's memory goes back with `ops`)
         drop(ops);
         r?;
+        self.overflow[member] = next.dropped;
         self.live[member] = next;
         self.generation[member] = self.generation[member].wrapping_add(1);
         Ok(())
@@ -247,6 +269,9 @@ impl<const M: usize, const N: usize, const S: usize> PeerDirectory for RamDirect
     }
     fn generation(&self, member: usize) -> u32 {
         self.generation.get(member).copied().unwrap_or(0)
+    }
+    fn overflow(&self, member: usize) -> (u32, u32) {
+        (self.overflow.get(member).copied().unwrap_or(0), self.stage_dropped.get(member).copied().unwrap_or(0))
     }
     fn stage_cost(&self) -> usize {
         core::mem::size_of::<Op>() + 16
@@ -315,11 +340,13 @@ mod tests {
     }
 
     #[test]
-    fn staging_full_refuses_and_abort_discards() {
+    fn staging_full_drops_counted_and_abort_discards() {
         let mut d = RamDirectory::<1, 4, 2>::new();
         d.stage(0, &rec(0x64400002, 2, 2)).unwrap();
         d.stage(0, &rec(0x64400003, 3, 3)).unwrap();
-        assert_eq!(d.stage(0, &rec(0x64400004, 4, 4)), Err(DirError));
+        // a real tailnet has more peers than the staging holds: the update is dropped and counted, the map is not refused
+        assert_eq!(d.stage(0, &rec(0x64400004, 4, 4)), Ok(()));
+        assert_eq!((d.staged(0), d.overflow(0)), (2, (0, 1)));
         d.abort(0);
         assert_eq!(d.staged(0), 0);
         d.commit(0, true).unwrap();
@@ -345,21 +372,39 @@ mod tests {
     }
 
     #[test]
-    fn a_map_that_does_not_fit_fails_and_the_previous_directory_stays_in_force() {
+    fn a_map_bigger_than_the_directory_keeps_what_fits_and_counts_the_rest() {
         let mut d = RamDirectory::<1, 4, 16>::new();
         for i in 0..3u8 {
             d.stage(0, &rec(0x64400002 + u32::from(i), i + 1, u64::from(i) + 2)).unwrap();
         }
         d.commit(0, true).unwrap();
         let before = d.generation(0);
-        // an authoritative map of six peers into a directory of four
+        // an authoritative map of six peers into a directory of four: the C keeps what fits (the first four) and counts the rest; the map is not refused
         for i in 0..6u8 {
             d.stage(0, &rec(0x64400010 + u32::from(i), 0x40 + i, u64::from(i) + 20)).unwrap();
         }
-        assert_eq!(d.commit(0, true), Err(DirError));
-        assert_eq!(d.generation(0), before, "no new generation");
-        assert_eq!(d.count(0), 3, "the previous peers are all still there");
-        assert!(d.find_by_ip(0, 0x64400002).is_some() && d.find_by_ip(0, 0x64400010).is_none());
-        assert_eq!(d.staged(0), 0, "the failed map's staging was consumed");
+        assert_eq!(d.commit(0, true), Ok(()));
+        assert_eq!(d.generation(0), before.wrapping_add(1));
+        assert_eq!((d.count(0), d.overflow(0).0), (4, 2));
+        assert!(d.find_by_ip(0, 0x64400010).is_some() && d.find_by_ip(0, 0x64400013).is_some() && d.find_by_ip(0, 0x64400014).is_none());
+        assert_eq!(d.staged(0), 0);
+    }
+
+    #[test]
+    fn a_full_staging_area_prefers_online_peers() {
+        let mut d = RamDirectory::<1, 8, 2>::new();
+        let mut off = |ip: u32, k: u8| {
+            let mut r = rec(ip, k, u64::from(k));
+            r.online = Some(false);
+            r
+        };
+        d.stage(0, &off(0x64400002, 2)).unwrap();
+        d.stage(0, &off(0x64400003, 3)).unwrap();
+        let mut on = rec(0x64400004, 4, 4);
+        on.online = Some(true);
+        d.stage(0, &on).unwrap();
+        d.commit(0, true).unwrap();
+        assert!(d.find_by_ip(0, 0x64400004).is_some(), "the online peer took an offline one's place");
+        assert_eq!(d.count(0), 2);
     }
 }

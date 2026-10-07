@@ -441,7 +441,7 @@ async fn member_control<R, P, S, D, T>(
         let mut connect = CtlConnect { tcp, host: sh.cfg.control_host, port: sh.cfg.control_port, io_ms: sh.cfg.timeouts.io_ms, tls };
         let mut gate = TokenGate { sh, idx, member, prio: if first { Prio::Start } else { Prio::Rejoin }, neg: None };
         let mut eps = SlotEndpoints { sh, idx, seen: None, derp_sent: home };
-        let mut sink = NetmapSink::new(MapTee { sh, slot: idx, member, expired: false });
+        let mut sink = NetmapSink::new(MapTee { sh, slot: idx, member, expired: false, cur: Default::default() });
         let end = {
             let bulk = crate::shared::BulkSource { stats: &sh.bulk, mem: sh.mem() };
             let session = run_session_leased(&mut connect, &mut clock, &cfg, &mut ws, &bulk, &mut sink, &mut gate, &mut eps, &mut rng);

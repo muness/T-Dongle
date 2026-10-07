@@ -1535,6 +1535,15 @@ fn write_pm(out: &mut String) {
     let _ = tdongle_serial::pm_report::write_report(out, &power, &locks, None);
 }
 
+/// The clock the status prints: the tailnet image's SNTP in tailnet mode, nothing otherwise.
+fn clock_for_status() -> (tdongle_serial::clock::Clock, bool) {
+    #[cfg(feature = "tailnet")]
+    if tailnet_active() {
+        return tailnet::clock_snapshot();
+    }
+    (Default::default(), false)
+}
+
 fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
     l2::HEAP_MIN.fetch_min(esp_alloc::HEAP.free() as u32, Ordering::Relaxed);
     let st = bridge.stats();
@@ -1563,8 +1572,8 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
         uptime_ms: Instant::now().as_millis(),
         free_heap: esp_alloc::HEAP.free() as u32,
         temperature: Default::default(),
-        clock: Default::default(),
-        clock_valid: false,
+        clock: clock_for_status().0,
+        clock_valid: clock_for_status().1,
         link: {
             // the driver's own view (`wifi_link_read`): unknown stays unknown (an all-zero Info prints phy=lr)
             let mut info = critical_section::with(|cs| LINK_SNAPSHOT.borrow(cs).get());

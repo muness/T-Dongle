@@ -98,7 +98,7 @@ pub struct Bulk {
 impl Bulk {
     /// Fresh buffers.
     pub fn new() -> Self {
-        Self { reader: RecordReader::new(), tx: [0; TX_BYTES], json: [0; JSON_BYTES], projector: MapProjector::new(MapConfig::new(1)) }
+        Self { reader: RecordReader::new(), tx: [0; TX_BYTES], json: [0; JSON_BYTES], projector: MapProjector::new(MapConfig::new(1).with_flash_directory()) }
     }
 }
 
@@ -749,7 +749,7 @@ async fn serve<'l, L: BulkLease, S: Read + Write, K: Clock, Sk: MapSink, G: Gate
                         };
                         b = &b[k..];
                         match fe {
-                            Some(FrameEvent::Start { .. }) => projector.reset(MapConfig::new(cfg.home_derp)),
+                            Some(FrameEvent::Start { .. }) => projector.reset(MapConfig::new(cfg.home_derp).with_flash_directory()),
                             Some(FrameEvent::Json(j)) => {
                                 counting.stats.map_bytes += j.len() as u64;
                                 if let Err(e) = projector.feed(j, &mut counting) {

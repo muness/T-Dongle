@@ -978,6 +978,14 @@ impl SntpBufs {
 /// Seconds between 1900-01-01 and 1970-01-01.
 const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
 
+/// The SNTP state as `status` prints it (`clock=`, `valid=`, `sntp_restarts=`, `server=`): the real clock of this mode, not a default.
+pub fn clock_snapshot() -> (tdongle_serial::clock::Clock, bool) {
+    let mut c = tdongle_serial::clock::Clock::default();
+    c.restarts = SNTP_TRIES.load(Ordering::Relaxed).saturating_sub(SNTP_OK.load(Ordering::Relaxed).max(1)).min(SNTP_TRIES.load(Ordering::Relaxed));
+    c.set_server(SNTP_SERVER.load(Ordering::Relaxed) as u8);
+    (c, CLOCK_BASE.load(Ordering::Relaxed) != 0)
+}
+
 /// SNTP counters for the `tn_sntp` line: tries, successes, the server index in use and why the last try failed (1 no A record / DNS, 2 send, 3 no answer in 4 s,
 /// 4 not a server answer or stratum 0, 5 time before 2023).
 static SNTP_TRIES: AtomicU32 = AtomicU32::new(0);
@@ -1163,6 +1171,25 @@ fn sta_report(sh: &Sh, out: &mut String) {
         if st.state == SlotState::Free {
             continue;
         }
+        let m = st.map;
+        let _ = write!(
+            out,
+            "tn_map slot={} maps={} authoritative={} peers[add,removed,patch]={},{},{} derp_regions={}/{} dns={} directory={}/{} directory_overflow={} staged_dropped={}/cap_staged={}\r\n",
+            i,
+            m.maps,
+            m.authoritative as u8,
+            m.peers_add,
+            m.peers_removed,
+            m.peers_patch,
+            m.derp_regions,
+            tdongle_tailnet_map::types::MAX_DERP_REGIONS,
+            m.dns,
+            m.dir_peers,
+            DIR_PEERS,
+            m.dir_overflow,
+            m.stage_dropped,
+            DIR_STAGED
+        );
         let _ = write!(out, "tn_ctl slot={} stage={} connected={} end=\"{}\" error=\"{}\"\r\n", i, st.control_stage, st.connected as u8, st.last_end.as_str(), st.last_error.as_str());
     }
     let _ = write!(

@@ -150,8 +150,8 @@ const _: () = {
     use embassy_sync::blocking_mutex::raw::NoopRawMutex;
     assert!(core::mem::size_of::<tdongle_tailnet_ctl::Bulk>() <= 17_744);
     assert!(core::mem::size_of::<tdongle_tailnet_ctl::SessionBuf>() <= 1_160);
-    assert!(core::mem::size_of::<Slot<NoopRawMutex>>() <= 8_300);
-    assert!(core::mem::size_of::<crate::shared::SlotStatus>() <= 1_300);
+    assert!(core::mem::size_of::<Slot<NoopRawMutex>>() <= 8_400);
+    assert!(core::mem::size_of::<crate::shared::SlotStatus>() <= 1_360);
     assert!(core::mem::size_of::<crate::shared::Ident>() == 352);
     assert!(core::mem::size_of::<tdongle_tailnet_derp::Link<{ crate::derp::DERP_TXQ }>>() == 4_376);
     assert!(core::mem::size_of::<crate::queue::ByteQueue<NoopRawMutex, { crate::shared::HOST_Q }>>() == 8_232);

@@ -200,7 +200,7 @@ fn online_and_seen_change_maps() {
     assert_eq!(s.seen_keys_bad.get(), 2);
     // in RAM mode they count towards the section bound
     let many: Vec<String> = (1..=9).map(|i| format!("\"{i}\":true")).collect();
-    assert_eq!(run(4, &format!("{{\"OnlineChange\":{{{}}}}}", many.join(","))).0, Err(MapError::SectionFull));
+    assert_eq!(run(4, &format!("{{\"OnlineChange\":{{{}}}}}", many.join(","))).0, Err(MapError::SectionFull(Group::OnlineChange)));
 }
 
 #[test]

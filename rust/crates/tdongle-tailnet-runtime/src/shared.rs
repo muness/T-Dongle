@@ -205,6 +205,8 @@ pub struct SlotStatus {
     pub last_error: FixedStr<96>,
     /// How the last control session ended, as the driver's own `Debug` (stage and failure): what `last_error`'s fixed C text leaves out (the `tn_ctl` console line).
     pub last_end: crate::util::Buf<120>,
+    /// The last map's sections (see [`MapSummary`]).
+    pub map: MapSummary,
     /// The relay link's state.
     pub derp_state: LinkState,
     /// The relay link's counters.
@@ -256,6 +258,7 @@ impl SlotStatus {
             key_expired: false,
             last_error: FixedStr::new(),
             last_end: crate::util::Buf::new(),
+            map: MapSummary { maps: 0, authoritative: false, peers_add: 0, peers_removed: 0, peers_patch: 0, derp_regions: 0, dns: 0, dir_peers: 0, dir_overflow: 0, stage_dropped: 0 },
             derp_state: LinkState::Idle,
             derp: LinkStats::new(),
             tls_untrusted: 0,
@@ -322,6 +325,32 @@ impl Default for RtStats {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// What the last map that was applied (or aborted) carried, as the runtime saw it through the sink (the `tn_map` console line): the sections a real tailnet
+/// makes big, and what the directory had no room for. Overflow is counted, never a failed map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MapSummary {
+    /// Maps applied so far.
+    pub maps: u32,
+    /// The last map carried the whole peer list.
+    pub authoritative: bool,
+    /// Peer additions / full records in the last map.
+    pub peers_add: u32,
+    /// Peer removals.
+    pub peers_removed: u32,
+    /// Field-level patches (and online changes).
+    pub peers_patch: u32,
+    /// DERP regions kept (the C keeps [`tdongle_tailnet_map::types::MAX_DERP_REGIONS`], its home region first).
+    pub derp_regions: u32,
+    /// DNS configurations seen.
+    pub dns: u32,
+    /// Peers the directory held after the commit.
+    pub dir_peers: u32,
+    /// Peers the commit had no room for.
+    pub dir_overflow: u32,
+    /// Updates dropped because staging was full.
+    pub stage_dropped: u32,
 }
 
 /// One membership slot.
@@ -1029,6 +1058,8 @@ pub struct MapTee<'a, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> {
     pub member: u32,
     /// The map committed with `key_expired` set.
     pub expired: bool,
+    /// What the map in flight carries so far.
+    pub cur: MapSummary,
 }
 
 impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> core::fmt::Debug for MapTee<'_, R, P, S, D> {
@@ -1040,14 +1071,37 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> core::fmt::Debug fo
 impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> tdongle_tailnet_engine::NetmapTarget for MapTee<'_, R, P, S, D> {
     fn netmap(&mut self, ev: NetmapEvent) -> bool {
         match &ev {
-            NetmapEvent::Derp(map) => self.sh.slots[self.slot].update(|st| st.certs.load(map)),
-            NetmapEvent::Commit { self_expired, .. } => {
+            NetmapEvent::Derp(map) => {
+                self.cur.derp_regions = u32::from(map.count);
+                self.sh.slots[self.slot].update(|st| st.certs.load(map));
+            }
+            NetmapEvent::Peer(r) => match r.action {
+                tdongle_tailnet_map::types::PeerAction::Add => self.cur.peers_add += 1,
+                tdongle_tailnet_map::types::PeerAction::Remove => self.cur.peers_removed += 1,
+                tdongle_tailnet_map::types::PeerAction::Patch => self.cur.peers_patch += 1,
+            },
+            NetmapEvent::Dns(_) => self.cur.dns += 1,
+            NetmapEvent::Commit { self_expired, authoritative } => {
                 self.expired = *self_expired;
+                self.cur.authoritative = *authoritative;
                 self.sh.slots[self.slot].update(|st| st.key_expired = *self_expired);
             }
             _ => {}
         }
-        self.sh.feed(Input::Netmap { member: self.member, event: &ev }) != Handled::Refused
+        let ok = self.sh.feed(Input::Netmap { member: self.member, event: &ev }) != Handled::Refused;
+        if matches!(ev, NetmapEvent::Commit { .. } | NetmapEvent::Abort) {
+            let (slot, committed) = (self.slot, matches!(ev, NetmapEvent::Commit { .. }) && ok);
+            let (peers, over) = self.sh.with_engine(|e, _| (e.dir().count(slot) as u32, e.dir().overflow(slot)));
+            let mut m = core::mem::take(&mut self.cur);
+            m.dir_peers = peers;
+            m.dir_overflow = over.0;
+            m.stage_dropped = over.1;
+            self.sh.slots[self.slot].update(|st| {
+                m.maps = st.map.maps + u32::from(committed);
+                st.map = m;
+            });
+        }
+        ok
     }
 }
 

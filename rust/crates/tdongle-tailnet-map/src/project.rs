@@ -98,7 +98,7 @@ pub enum MapError {
     /// A record has more than [`RECORD_NODES_MAX`] values or [`RECORD_STRINGS_MAX`] string bytes, or retains text that is not clean.
     RecordDecode,
     /// A section has more entries than [`MapLimits::section_entries`].
-    SectionFull,
+    SectionFull(Group),
     /// The sink refused a staged record ("Peer flash staging failed; previous directory retained").
     SinkRefused,
     /// The sink refused the commit ("Map batch admission failed; no map applied").
@@ -111,7 +111,7 @@ impl MapError {
     /// The C's `ml->map_error` code (`gateway_map_fail`): 6 capacity, 8 malformed / unsupported, 9 commit.
     pub fn code(&self) -> u32 {
         match self {
-            MapError::RecordTooLarge | MapError::SectionFull => 6,
+            MapError::RecordTooLarge | MapError::SectionFull(_) => 6,
             MapError::SinkRefused | MapError::CommitRefused => 9,
             _ => 8,
         }
@@ -124,7 +124,7 @@ impl MapError {
             MapError::DuplicateControlField => "Map contains duplicate control fields",
             MapError::RecordTooLarge => "Map record exceeds 4 KiB capacity",
             MapError::RecordDecode => "Map record exceeds decoding bounds or contains unsupported text",
-            MapError::SectionFull => "Map peer update section exceeds configured capacity",
+            MapError::SectionFull(_) => "Map peer update section exceeds configured capacity",
             MapError::SinkRefused => "Peer flash staging failed; previous directory retained",
             MapError::CommitRefused => "Map batch admission failed; no map applied",
             MapError::Incomplete => "Incomplete or unsupported semantic map",
@@ -783,7 +783,7 @@ impl State {
         let c = &mut self.section[g as usize];
         *c = c.saturating_add(1);
         match self.cfg.limits.section_entries {
-            Some(max) if *c > max as u32 => Err(MapError::SectionFull),
+            Some(max) if *c > max as u32 => Err(MapError::SectionFull(g)),
             _ => Ok(()),
         }
     }

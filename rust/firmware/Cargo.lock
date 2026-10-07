@@ -2371,6 +2371,7 @@ dependencies = [
  "tdongle-tailnet-admission",
  "tdongle-tailnet-engine",
  "tdongle-tailnet-fw",
+ "tdongle-tailnet-map",
  "tdongle-tailnet-members",
  "tdongle-tailnet-peers",
  "tdongle-tailnet-pool",
