@@ -675,7 +675,7 @@ pub static START_REFUSED: AtomicU32 = AtomicU32::new(0);
 /// windows, the DNS forwarder's rings, a record in flight). The elastic floor comes on top ([`ML_HB_FLOOR`]), and the control workspace of a join is inside it.
 pub const TAILNET_HEAP_BYTES: usize = core::mem::size_of::<Sh>()
     + core::mem::size_of::<RxRing>()
-    + Windows::PER_MEMBER
+    + MEMBERS * Windows::PER_MEMBER
     + Windows::GATEWAY.gateway()
     + 4_096
     + DIR_LIVE_FULL

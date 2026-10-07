@@ -177,9 +177,15 @@ fn clear_error<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shar
 }
 
 /// The admission parameters of the Rust runtime (`Params::rust`): see `sizes::member_sizes` for what a membership is charged and
-/// `Config::charge_static_bytes` for why that is off by default.
+/// `Config::charge_static_bytes` for why that is off by default. **What the pool holds for a running membership is always charged** (its socket windows, as the
+/// C charges lwIP's): it is heap, taken when the membership's sockets are made, so a membership that the free heap cannot hold is refused here, with the C's
+/// arithmetic, instead of starting and then being refused by the pool socket by socket.
 pub fn admission_params<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R, P, S, D>) -> Params {
-    let ms = if sh.cfg.charge_static_bytes { crate::sizes::member_sizes(sh) } else { Default::default() };
+    let ms = if sh.cfg.charge_static_bytes {
+        crate::sizes::member_sizes(sh)
+    } else {
+        tdongle_tailnet_admission::adm::MemberSizes { queues: sh.net_member_bytes.load(core::sync::atomic::Ordering::Relaxed) as usize, ..Default::default() }
+    };
     let shared = SharedSizes { executor_bytes: if sh.cfg.charge_static_bytes { crate::sizes::shared_bytes(sh) } else { 0 } };
     Params::rust(&ms, tdongle_tailnet_engine::slot::WgSlot::BYTES, &shared, &Provisional { tls_live: 0, lwip: 0, other: 0 })
 }
@@ -679,5 +685,21 @@ mod tests {
         assert_eq!(t, [(5, 300), (6, 200), (0, 0)]);
         forget_retry(&mut t, 5);
         assert_eq!(t[0], (0, 0));
+    }
+
+    #[test]
+    fn admission_charges_the_socket_windows_the_pool_will_hold_for_a_running_membership() {
+        // the windows are heap taken at connect: without the charge a membership the heap cannot hold would start and then be refused by the pool socket by socket
+        let sh = shared();
+        let none = admission_params(&sh).budget(false).required;
+        sh.net_member_bytes.store(22_528, O::Relaxed);
+        let with = admission_params(&sh).budget(false);
+        assert_eq!(with.required, none + 22_528);
+        let guaranteed_slots = tdongle_tailnet_admission::adm::ML_ADM_PEER_SLOTS as usize * tdongle_tailnet_engine::slot::WgSlot::BYTES;
+        assert_eq!(with.member_steady, 22_528 + guaranteed_slots, "the windows and the two guaranteed WireGuard slots; the runtime's own state is a block the firmware admitted before any membership");
+        // so a heap that holds the C's dynamic part but not the windows refuses
+        use tdongle_tailnet_admission::adm::Verdict;
+        assert_eq!(with.decide(none + 22_527, 24_576), Verdict::RefusedBudget);
+        assert_eq!(with.decide(none + 22_528, 24_576), Verdict::Ok);
     }
 }

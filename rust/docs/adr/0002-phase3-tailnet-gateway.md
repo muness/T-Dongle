@@ -136,3 +136,72 @@ The fixed part is 91 KB at `MAX_RUN=1`: engine shared half 30.3 (WireGuard pool 
 * While one membership negotiates (join or rejoin), the others' map messages wait for the shared control buffers, up to the 30 s first-map deadline. Relay and WireGuard traffic is not affected (the TLS record lease is separate).
 * The shared scratch is a lock taken inside the UDP, DNS, DERP, USB and registry paths: a firmware raw mutex that is not reentrant and is shared with an interrupt context would deadlock the way the engine lock would. Same rule as for the engine lock.
 * `UdpConn` has four new required methods: any other `Net` implementation must add them (two exist: embassy-net and the host's tokio net).
+
+## RAM fit (branch `rust/tailnet-fit`)
+
+The diet ended at 150 KB of statics for one membership and an image that did not link: the DRAM the Wi-Fi driver, the bridge and the stack leave is 298.9 KB (341,760 B, minus 42,856 B that the Wi-Fi blobs' IRAM code takes from the same SRAM). This section is what was done about it, what was measured, and what remains an estimate. Nothing here ran on a board.
+
+### The idea: what only exists while something runs comes from one pool, as the C's pbufs and mbedTLS buffers do
+
+`tdongle-tailnet-pool` is one bounded pool (`Pool`, `PoolBuf`, `Mem`). An allocation is **admitted like every elastic consumer of ADR 0022**: after taking `len` bytes the free heap must still be `ML_HB_FLOOR` (29,884 B), or, for a control negotiation, `ML_ADM_RECOVERY_BYTES` (the negotiation peak is what the floor reserves). A refusal is a counter and backpressure, never a panic: the connection backs off (`NetError::NoMem`), a TLS read or a control lease waits for memory (`alloc_wait`: woken by every refund, ticking every 100 ms), a datagram or a frame is dropped and counted. The pool has a byte cap of its own (`shared::POOL_CAP`). What moved into it:
+
+| what | before (static) | now | where |
+|---|---:|---|---|
+| socket windows, TCP and UDP | 22,656 per membership + 4,096 DNS | taken at `connect` / `bind`, given back at `release` / `close`: 22,528 per membership + 3,072 DNS while the sockets exist | `net_embassy::SockMem`, implemented by `tdongle-tailnet-sockmem` (the only `unsafe` of the path: pool blocks as `&'static mut` for embassy-net, reclaimed by address from a table of what was handed out) |
+| TLS record buffer | 16,640 shared, one holder at a time | one block of the record's own length per record (about 2 KB from a Go derper; 16,640 at most; a longer header is refused before any allocation), handshake records as negotiation class | `tdongle-tailnet-tls::lease`, vendored `embedded-tls` patch `lease2` |
+| control workspace (`ctl::Bulk`) | 17,744 shared | taken per negotiation or map message, negotiation class | `shared::BulkSource` |
+| radio receive ring, host receive frames, NAT queues | 15,172 + 3,064 + 12,000 | one block per frame, of its length, above the floor | firmware `wifi_rx` / `usb_rx`, `wifimux::Ring` |
+| peer directory | 23,320 | one block per record and per staged update (a 10-peer tailnet holds 2.9 KB); refused at the floor | `RamDirectory`, engine `hb_ok` on stage and commit |
+
+Admission now charges what the pool holds for a running membership (the windows) with the C's arithmetic; the runtime's own state is a heap block the firmware admits before any membership (`tailnet::start`: heap >= state + steady pool use + floor, else a counted refusal and a bridge boot).
+
+### Statics and stack frames
+
+* **`Shared` is built at compile time.** Every constructor under it (`Engine`, the router, the WireGuard pool, `Slot`, the counters, the directory, the NAT, the Wi-Fi mux) is `const`; the firmware keeps `Shared` as a `const` item and copies it from flash into a heap block when tailnet mode starts. A host test (`const_build`) fails if one of them stops being `const`. Before, `start` and the joined `run` future were 112 KB and 50 KB stack frames, and the bridge's own `main` poll was 37 KB (three 12 KB copies of `Bridge::new`: one `#[inline(always)]` fixed it).
+* **The runtime's tasks are spawned one by one** (`tn_control`, `tn_derp`, ...), each future built in place in its task storage; the joined future (24 KB plus the 49 KB frame that built it) is gone.
+* **The setup access point's tasks (DHCP, captive DNS, two HTTP servers, the stack runner, the control check; 17 KB) run as boxed futures on one small task**: every boot used to carry them.
+* `rust/tools/check_stack.py` reads the built image: the **largest frame of any function is 240 B** (limit 12 KB), the deepest chain of direct calls is 3,888 B (the Wi-Fi blob, which runs on its own stack); indirect calls (the executor's poll) are not followed, so this bounds the tasks' own code, not a proof. The 40 KB minimum is the owner's rule; the measured need is far lower, and every 4 KB of it given up is 4 KB of heap.
+
+### The DRAM budget of the image (`--features tailnet,members-1`, `rust/tools/build_tailnet.sh`)
+
+| | bytes |
+|---|---:|
+| DRAM `0x3FC88000..0x3FCDB700` | 341,760 |
+| IRAM overlap (`.rwdata_dummy`) | 42,856 |
+| `.data` (the NAT table, the mux, the Wi-Fi blobs) | 44,028 |
+| `.bss` without the heap (task storage, stack table, bridge, USB) | 89,480 |
+| **stack** (what is left; the link asserts >= 40,960) | 42,512 |
+| regular heap | 122,880 |
+| heap in dram2 (all of it; the bridge image takes 64 KB) | 73,728 |
+| heap in the data cache (`ESP_HAL_CONFIG_DATA_CACHE_SIZE=32KB`, the C's own size) | 32,768 |
+| **heap in all** (the bridge image: 196,608) | 229,376 |
+
+The heap must hold, and a `const` assert in `tailnet::budget` says so: the Wi-Fi driver and USB (60 KB: **48 KB from the bridge's board run, heap minimum 102 KB of 192 KB with the ring at its 42 KB maximum, plus 12 KB margin; an estimate**), the bridge ring's permanent slots 12,288, tailnet's own state 106,064 (`Shared` 59,088, the windows 22,528 + 3,072, a record or workspace in flight 4,096, a full directory 6,912, elastic frames 10,240) and `ML_HB_FLOOR` 29,884: **209,676, headroom 19,700**. `members-2` does not fit: the assert fails at 262,692 bytes needed against 229,376, before its 18.5 KB of extra statics shrink the heap further (about 52 KB short); the C's three are further away. A tailnet bigger than the directory's 24 records per membership is truncated exactly as before (the C keeps the directory in flash: the open item).
+
+### Per crate (M-elf, one membership)
+
+| | before | now |
+|---|---:|---:|
+| `tdongle-tailnet-runtime` total (the diet's definition: `Shared` + futures + socket buffers + lease + Bulk) | 149,968 | `Shared` 59,088 (a heap block; the directory is in it by value only) + futures 24,504 = **83,592** static or at start; windows, records and workspace pooled |
+| marginal per membership, statics | 58.8 KB (22.7 of it sockets) | **36.2 KB** (Slot 8,112, engine member 9,560, futures 18.5 KB) + 22,528 pooled windows; the first extra membership also needs the 12-slot pool and 24 parked-packet blocks (+5.9 KB) |
+| `tdongle-tailnet-engine` | directory 23,320, pool 12 slots, 24 JIT blocks | directory by content, 8 slots and 16 blocks at one membership (the other four slots could never be used), refusal at the floor |
+| `tdongle-tailnet-wifimux` | queues (4 + 4) x 1,504 | 12 B a slot, frames on demand |
+| firmware tailnet statics (first link attempt: about 233,000: `Shared` 122,576, sockets 26,884, futures 24,232, NAT 19,144, ring 15,172, mux 14,160, ...) | 233,000 | **53,835** (NAT 19,136, futures 24,504, stack table 4,536, mux 2,240, the rest 3.4 KB) |
+
+### Host measurements (`cargo test --release -p tdongle-tailnet-host --test e2e`, loopback, real Tailscale testcontrol and DERP, 13 tests)
+
+| | before | after |
+|---|---:|---:|
+| TCP through the tunnel, DERP down / up (Mbit/s) | 155.1 / 7.5 | 148 to 170 / 7.5 to 7.7 |
+| direct down / up | 186.8 / 14.8 | 194 to 203 / 14.6 to 14.9 |
+| join to routing (loopback; the first map is due within 30 s) | n/a | 1.07 to 1.12 s |
+| soak, two tailnets | min free 92,500 | min free 87,792 (model heap now includes the pool), no floor crossing, pool back to 0 |
+
+The host's network is tokio, so the embassy-net path (windows from the pool) is covered by its own host test (`embassy_net.rs`: windows held exactly while connected, none after `release`, refusal is a counted `NoMem`), not by the e2e. The per-record TLS buffer costs a block allocation per record (16 KB zeroing at worst); the loopback numbers include it, a board's do not exist yet.
+
+### Not done, not verified
+
+* Nothing ran on a board. The Wi-Fi/USB figure, the 32 KB data cache, the whole of dram2 as heap, per-frame allocations in the radio callback and the throughput of a pool block per TLS record are the things the board checklist settles.
+* One membership. Two would need the directory and the WireGuard pool in flash, the NAT table in chunks, and about 50 KB more than the image has.
+* The NAT table (19,136 B at the C's 512 entries) is still a static.
+
