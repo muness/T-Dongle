@@ -364,12 +364,14 @@ mod tests {
 
     #[test]
     fn threads_deliver_in_order_exactly_once() {
+        // Miri checks 256 wraps of the eight-slot ring; native tests retain the full stress workload.
+        const ITEMS: u32 = if cfg!(miri) { 2_048 } else { 200_000 };
         let q = Arc::new(queue());
         let producer = {
             let q = q.clone();
             thread::spawn(move || {
                 let mut p = q.producer().unwrap();
-                for n in 0..200_000u32 {
+                for n in 0..ITEMS {
                     while p.reserve(5).map(|r| r.publish(|s| *s = n)).is_err() {
                         thread::yield_now();
                     }
@@ -378,13 +380,13 @@ mod tests {
         };
         let mut seen = Vec::new();
         let mut c = q.consumer().unwrap();
-        while seen.len() < 200_000 {
+        while seen.len() < ITEMS as usize {
             match c.claim() {
                 Some(mut lease) => seen.push(lease.with(|s| *s)),
                 None => thread::yield_now(),
             }
         }
         producer.join().unwrap();
-        assert!(seen.iter().copied().eq(0..200_000));
+        assert!(seen.iter().copied().eq(0..ITEMS));
     }
 }
