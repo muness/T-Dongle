@@ -10,7 +10,7 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use embassy_executor::SendSpawner;
 use embassy_sync::once_lock::OnceLock;
 use embassy_time::{Instant, Timer};
-use tdongle_boot_guard::usb_watch::{Fault, Sample, UsbWatch};
+use tdongle_boot_guard::usb_watch::{Fault, Policy, Sample};
 use tdongle_boot_guard::watch::{Verdict, Watch};
 use tdongle_rescue::{HealthyTimer, Selftest};
 
@@ -26,17 +26,12 @@ pub static CONSOLE_FROZEN: AtomicBool = AtomicBool::new(false);
 /// A spawner of the thread executor, for `selftest spin`.
 pub static THREAD_SPAWNER: OnceLock<SendSpawner> = OnceLock::new();
 
-/// The console task is inside a read of the ACM OUT endpoint (set around `read_packet`): that endpoint must then be enabled.
-pub static READER_WAITING: AtomicBool = AtomicBool::new(false);
-
 /// The OTG core's registers, read-only here (the driver owns writes): the supervisor's USB liveness input. Reading status registers has no side effects.
 mod otg {
     const BASE: usize = 0x6008_0000;
     const GINTSTS: usize = 0x014;
     const GINTMSK: usize = 0x018;
-    const DCTL: usize = 0x804;
     const DSTS: usize = 0x808;
-    const DOEPCTL2: usize = 0xB00 + 0x20 * 2;
     /// RXFLVL, USBSUSP, USBRST, ENUMDNE, IEPINT, OEPINT, WKUPINT: the causes the driver's handler clears or masks.
     pub const EVENTS: u32 = (1 << 4) | (1 << 11) | (1 << 12) | (1 << 13) | (1 << 18) | (1 << 19) | (1 << 31);
 
@@ -52,47 +47,12 @@ mod otg {
         let v = rd(DSTS);
         ((v >> 8) & 0x3FFF, v & 1 != 0)
     }
-    pub fn out2_armed() -> bool {
-        rd(DOEPCTL2) >> 31 != 0
-    }
-    /// DCTL.SDIS: hold the device off the bus (the host sees a disconnect) or let it back on.
-    pub fn soft_disconnect(on: bool) {
-        // SAFETY: a read-modify-write of DCTL.SDIS only.
-        unsafe {
-            let dctl = (BASE + DCTL) as *mut u32;
-            let v = core::ptr::read_volatile(dctl);
-            core::ptr::write_volatile(dctl, if on { v | 2 } else { v & !2 });
-        }
-    }
-    /// `selftest usb`: switch the USB interrupt off and bounce the bus (soft disconnect, then connect), so the host's reset stays pending with nobody to service it.
+    /// `selftest usb`: switch the USB interrupt off and leave the bus attached (no soft disconnect, no bounce: a bus bounce wedged a real hub on the board). The next thing the host
+    /// does (any console command) then stays pending with nobody to service it.
     pub fn stop_servicing() {
         esp_hal::interrupt::disable(esp_hal::system::Cpu::ProCpu, esp_hal::peripherals::Interrupt::USB);
-        // SAFETY: a read-modify-write of DCTL.SDIS only, on a core whose handler is switched off.
-        unsafe {
-            let dctl = (BASE + DCTL) as *mut u32;
-            core::ptr::write_volatile(dctl, core::ptr::read_volatile(dctl) | 2);
-            esp_hal::delay::Delay::new().delay_millis(20);
-            core::ptr::write_volatile(dctl, core::ptr::read_volatile(dctl) & !2);
-        }
     }
 }
-
-/// After a reset from esptool the host may never have seen the device leave the bus (the ROM's USB-Serial-JTAG held the pull-up through the reset and the OTG core took over
-/// the same pads), so it does not enumerate the new device: the port looks enumerated and nothing answers. If the host has not configured the device 400 ms after the core came up,
-/// take it off the bus for 150 ms and put it back, which every host treats as a replug. A host that configured in time (a normal plug) is not touched.
-#[embassy_executor::task]
-pub async fn reattach_task() {
-    Timer::after_millis(400).await;
-    if !USB_CONFIGURED.load(Ordering::Relaxed) {
-        otg::soft_disconnect(true);
-        Timer::after_millis(150).await;
-        otg::soft_disconnect(false);
-        REATTACHES.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
-/// How many times [`reattach_task`] bounced the bus (`boot-status` `usb`).
-pub static REATTACHES: AtomicU32 = AtomicU32::new(0);
 
 /// The supervisor's own counters (`boot-status` `sup`): a supervisor that stopped, or one that never feeds, shows here without a debugger.
 pub static SUP_TICKS: AtomicU32 = AtomicU32::new(0);
@@ -132,7 +92,7 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
     let mut watch = Watch::new(["thread", "console"], [8_000, 3_000], Instant::now().as_millis());
     let mut healthy = HealthyTimer::new();
     let mut marked = false;
-    let mut usb_watch = UsbWatch::new();
+    let mut usb_policy = Policy::new();
     let mut last_frame = otg::dsts().0;
     loop {
         let now = Instant::now().as_millis();
@@ -146,12 +106,15 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
                     suspended,
                     configured: USB_CONFIGURED.load(Ordering::Relaxed),
                     pending: otg::pending(),
-                    reader_waiting: READER_WAITING.load(Ordering::Relaxed),
-                    out_armed: otg::out2_armed(),
                 };
                 last_frame = frame;
-                if let Some(fault) = usb_watch.check(now, &sample) {
-                    USB_FAULT.store(match fault { Fault::NotConfigured => 1, Fault::IrqNotServiced => 2, Fault::OutNotArmed => 3 }, Ordering::Relaxed);
+                usb_policy.enforce = USB_ENFORCE.load(Ordering::Relaxed);
+                let decision = usb_policy.decide(now, &sample);
+                for (cell, n) in USB_TRIPS.iter().zip(usb_policy.trips) {
+                    cell.store(n, Ordering::Relaxed);
+                }
+                if let Some(fault) = decision {
+                    USB_FAULT.store(match fault { Fault::NotConfigured => 1, Fault::IrqNotServiced => 2, }, Ordering::Relaxed);
                     healthy.observe(now, false);
                     guard::hang(Fault::HANG);
                     tdongle_rescue::demote(); // an unplanned reset the bootloader must count, even if this image had been healthy
@@ -175,7 +138,11 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
     }
 }
 
-/// Which USB fault the supervisor saw (1 not configured, 2 interrupt not serviced, 3 OUT endpoint not armed), for the log line of the next boot's `boot-status` neighbours.
+/// Which USB fault the supervisor saw (1 not configured, 2 interrupt not serviced), for the log line of the next boot's `boot-status` neighbours.
+/// Reset on a USB fault (`selftest usb` and the console's `usbwatch enforce on` set it; off at every boot until the board shows no rule trips on a healthy idle device).
+pub static USB_ENFORCE: AtomicBool = AtomicBool::new(false);
+/// Trips per USB rule (not configured, interrupt not serviced), enforced or not.
+pub static USB_TRIPS: [AtomicU32; 2] = [const { AtomicU32::new(0) }; 2];
 pub static USB_FAULT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 /// `selftest NAME`: deliberately break the image so the rescue is proven on the board. Returns only for `console` (the console task parks itself at its next turn).
@@ -192,7 +159,10 @@ pub fn selftest(kind: Selftest) {
         Selftest::IrqOff => tdongle_rescue::irqoff(),
         Selftest::Panic => panic!("selftest panic"),
         Selftest::Console => CONSOLE_FROZEN.store(true, Ordering::Relaxed),
-        Selftest::Usb => otg::stop_servicing(),
+        Selftest::Usb => {
+            USB_ENFORCE.store(true, Ordering::Relaxed); // the self-test proves the enforced path
+            otg::stop_servicing()
+        }
     }
 }
 
@@ -202,14 +172,14 @@ pub fn write_usb_live(out: &mut alloc::string::String) {
     let (frame, suspended) = otg::dsts();
     let _ = write!(
         out,
-        "usb_live configured={} frame={} suspended={} pending={:#x} out2_armed={} reader_waiting={} reattaches={} fault={}\r\n",
+        "usb_live configured={} frame={} suspended={} pending={:#x} fault={} enforce={} trips={}/{}\r\n",
         u8::from(USB_CONFIGURED.load(Ordering::Relaxed)),
         frame,
         u8::from(suspended),
         otg::pending(),
-        u8::from(otg::out2_armed()),
-        u8::from(READER_WAITING.load(Ordering::Relaxed)),
-        REATTACHES.load(Ordering::Relaxed),
-        USB_FAULT.load(Ordering::Relaxed)
+        USB_FAULT.load(Ordering::Relaxed),
+        u8::from(USB_ENFORCE.load(Ordering::Relaxed)),
+        USB_TRIPS[0].load(Ordering::Relaxed),
+        USB_TRIPS[1].load(Ordering::Relaxed)
     );
 }
