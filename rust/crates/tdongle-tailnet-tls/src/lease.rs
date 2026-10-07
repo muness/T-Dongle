@@ -104,9 +104,16 @@ pub struct OwnedRecord<'a> {
     start: usize,
     len: usize,
 }
+impl core::fmt::Debug for OwnedRecord<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OwnedRecord").field("len", &self.len).finish_non_exhaustive()
+    }
+}
 impl Deref for OwnedRecord<'_> {
     type Target = [u8];
-    fn deref(&self) -> &[u8] { &self.lease[self.start..self.start + self.len] }
+    fn deref(&self) -> &[u8] {
+        &self.lease[self.start..self.start + self.len]
+    }
 }
 
 /// The [`RecordBufProvider`] over the pool: every lease is a buffer of the announced record's length.
@@ -235,14 +242,18 @@ impl<'a, IO: Read + Write> LeasedTlsDerp<'a, IO> {
     /// `f` runs while the lease is held: copy what you need into your carry buffer (a partial DERP frame, about 2 KB) and return.
     pub async fn read_with<T: Future<Output = ()>>(&mut self, stall_timeout: impl FnOnce() -> T, mut f: impl FnMut(&[u8])) -> Result<usize, ReadError> {
         let record = self.read_owned(stall_timeout).await?;
-        f(&record);
+        if !record.is_empty() {
+            f(&record);
+        }
         Ok(record.len())
     }
 
     /// Read plaintext in its original lease. Header and body progress survive cancellation.
     /// The timeout factory must preserve its deadline when a cancelled body read is resumed.
     pub async fn read_owned<T: Future<Output = ()>>(&mut self, stall_timeout: impl FnOnce() -> T) -> Result<OwnedRecord<'a>, ReadError> {
-        if self.read_failed { return Err(ReadError::LeaseTimeout); }
+        if self.read_failed {
+            return Err(ReadError::LeaseTimeout);
+        }
         if self.pending_record.is_none() {
             let len = self.conn.wait_record().await.map_err(ReadError::Tls)?;
             let mut provider = PoolLease { stats: self.pool, mem: self.mem, class: Class::Record };
@@ -263,7 +274,9 @@ impl<'a, IO: Read + Write> LeasedTlsDerp<'a, IO> {
         let (start, len) = match result {
             Ok(range) => range,
             Err(e) => {
-                if matches!(e, ReadError::LeaseTimeout) { self.pool.timeouts.fetch_add(1, Ordering::Relaxed); }
+                if matches!(e, ReadError::LeaseTimeout) {
+                    self.pool.timeouts.fetch_add(1, Ordering::Relaxed);
+                }
                 self.read_failed = true;
                 self.pending_record = None;
                 return Err(e);

@@ -172,7 +172,7 @@ impl<T: TcpConn> TlsStream<'_, T> {
             self.record_deadline = None;
             match r {
                 Ok(record) if !record.is_empty() => self.carry = Some((record, 0)),
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) if e.is_closed() => return Ok(0),
                 Err(_) => return Err(NetError::Io),
             }
@@ -230,7 +230,9 @@ impl<'a, T: TcpConn, P: Platform> Connect for CtlConnect<'a, T, P> {
         };
         let mut rng = crate::shared::PlatformRng(t.platform);
         // the handshake's state is a heap block for the length of the handshake, not part of this task's static future (see the relay's)
-        let Some(handshake) = crate::derp::admit_box(t.mem.heap, tdongle_tailnet_tls::lease::LeasedTlsDerp::connect(CtlTcp { tcp }, wbuf, t.lease, t.mem, &params, &mut rng)) else {
+        let Some(handshake) =
+            crate::derp::admit_box(t.mem.heap, tdongle_tailnet_tls::lease::LeasedTlsDerp::connect(CtlTcp { tcp }, wbuf, t.lease, t.mem, &params, &mut rng))
+        else {
             tcp.lock().await.close();
             return fail();
         };
@@ -640,7 +642,8 @@ mod tests {
         }
 
         fn serve(reply: &'static str) -> u16 {
-            let certs: std::vec::Vec<CertificateDer<'static>> = ["leaf_ok", "ye2", "ye", "x2_cross", "derpkey"].iter().map(|n| CertificateDer::from(fixture(n))).collect();
+            let certs: std::vec::Vec<CertificateDer<'static>> =
+                ["leaf_ok", "ye2", "ye", "x2_cross", "derpkey"].iter().map(|n| CertificateDer::from(fixture(n))).collect();
             let provider = rustls::crypto::ring::default_provider();
             let signer = provider.key_provider.load_private_key(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(fixture("key_leafk")))).unwrap();
             #[derive(Debug)]
@@ -652,7 +655,11 @@ mod tests {
             }
             let ck = Arc::new(rustls::sign::CertifiedKey { cert: certs, key: signer, ocsp: None });
             let cfg = Arc::new(
-                rustls::ServerConfig::builder_with_provider(Arc::new(provider)).with_protocol_versions(&[&rustls::version::TLS13]).unwrap().with_no_client_auth().with_cert_resolver(Arc::new(Fixed(ck))),
+                rustls::ServerConfig::builder_with_provider(Arc::new(provider))
+                    .with_protocol_versions(&[&rustls::version::TLS13])
+                    .unwrap()
+                    .with_no_client_auth()
+                    .with_cert_resolver(Arc::new(Fixed(ck))),
             );
             let l = TcpListener::bind("127.0.0.1:0").unwrap();
             let port = l.local_addr().unwrap().port();
@@ -671,7 +678,11 @@ mod tests {
                         break;
                     }
                 }
-                assert!(req[..n].starts_with(b"GET /key?v=131 HTTP/1.1\r\nHost: derp1.test.example\r\n"), "{:?}", std::string::String::from_utf8_lossy(&req[..n]));
+                assert!(
+                    req[..n].starts_with(b"GET /key?v=131 HTTP/1.1\r\nHost: derp1.test.example\r\n"),
+                    "{:?}",
+                    std::string::String::from_utf8_lossy(&req[..n])
+                );
                 tls.write_all(reply.as_bytes()).unwrap();
                 tls.flush().unwrap();
                 tls.conn.send_close_notify();
@@ -811,7 +822,8 @@ mod tests {
         #[test]
         fn the_key_is_fetched_over_verified_tls_and_the_close_is_the_end_of_the_response() {
             let body = std::format!("{{\"publicKey\":\"mkey:{}\"}}", KEYHEX.replace(' ', ""));
-            let reply: &'static str = std::boxed::Box::leak(std::format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}").into_boxed_str());
+            let reply: &'static str =
+                std::boxed::Box::leak(std::format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}").into_boxed_str());
             let k = run(reply, true).expect("key over TLS");
             assert_eq!(k.0[0], 0x7d);
         }

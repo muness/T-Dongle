@@ -220,14 +220,7 @@ impl Env {
 }
 
 /// Run one leased client: handshake, upgrade, read `want` payload bytes (checking the pattern). `order` records which client read each record.
-async fn leased_client(
-    id: usize,
-    port: u16,
-    env: &Env,
-    want: usize,
-    stall: Duration,
-    order: &RefCell<Vec<usize>>,
-) -> Result<usize, ReadError> {
+async fn leased_client(id: usize, port: u16, env: &Env, want: usize, stall: Duration, order: &RefCell<Vec<usize>>) -> Result<usize, ReadError> {
     let (s, k) = test_anchor();
     let anchors = [TrustAnchor { subject: &s, spki: &k }];
     let cert = parse_cert_name(Some(H), None);
@@ -295,7 +288,13 @@ fn three_connections_read_records_into_exact_size_leases_and_hand_every_byte_bac
     let order = order.borrow();
     let switches = order.windows(2).filter(|w| w[0] != w[1]).count();
     assert!(switches >= 12, "only {switches} switches in {order:?}");
-    println!("3 connections, {} KB each in {:?}: leases {}, record order switches {switches}, pool high water {} B", want / 1024, t.elapsed(), env.stats.leases(), env.pool.stats().high_water);
+    println!(
+        "3 connections, {} KB each in {:?}: leases {}, record order switches {switches}, pool high water {} B",
+        want / 1024,
+        t.elapsed(),
+        env.stats.leases(),
+        env.pool.stats().high_water
+    );
 }
 
 #[test]
@@ -306,7 +305,10 @@ fn a_lease_is_as_long_as_the_record_not_as_long_as_the_biggest_record() {
     let env = Env::new(1 << 20);
     let order = RefCell::new(Vec::new());
     let want = 40 * 1500;
-    let (a, b) = block_on(join(leased_client(0, ports[0], &env, want, Duration::from_secs(5), &order), leased_client(1, ports[1], &env, want, Duration::from_secs(5), &order)));
+    let (a, b) = block_on(join(
+        leased_client(0, ports[0], &env, want, Duration::from_secs(5), &order),
+        leased_client(1, ports[1], &env, want, Duration::from_secs(5), &order),
+    ));
     assert_eq!((a.unwrap(), b.unwrap()), (want, want));
     // the handshake's Certificate flight (about 4.5 KB per record) is the biggest lease; data records are 1,500 + 22 B each
     let hw = env.pool.stats().high_water as usize;
@@ -517,4 +519,156 @@ fn live_derp_three_leased_connections() {
     let (a, b, c) = block_on(join3(one(1), one(2), one(3)));
     println!("three leased connections to {host}: {a:?} {b:?} {c:?}; leases {}, high water {}", env.stats.leases(), env.pool.stats().high_water);
     assert_eq!(env.pool.in_use(), 0);
+}
+
+/// Cancelling a stalled body retains its lease; resuming uses the original deadline, then poisons the connection and refunds exactly once.
+#[test]
+fn cancelled_owned_body_retains_lease_and_original_timeout_then_poison_refunds() {
+    use embassy_futures::select::{Either, select};
+    let spec = Spec { records: 1, record: 16384, gap: Duration::ZERO, delay: Duration::from_millis(10), stall_in_last: Some(3000) };
+    let env = Env::new(READ_RECORD_BYTES);
+    let (s, k) = test_anchor();
+    let anchors = [TrustAnchor { subject: &s, spki: &k }];
+    let cert = parse_cert_name(Some(H), None);
+    let params = TlsParams { hostname: H, cert: &cert, anchors: &anchors, now_unix: NOW };
+    let mut wb = vec![0u8; WRITE_RECORD_BYTES];
+    let mut rng = TestRng(1234);
+    block_on(async {
+        let mut c = LeasedTlsDerp::connect(nb_connect(serve(spec)), &mut wb, &env.stats, env.mem(), &params, &mut rng).await.unwrap();
+        let mut req = [0u8; 200];
+        let n = upgrade_request(H, &mut req).unwrap();
+        c.write_all(&req[..n]).await.unwrap();
+        c.flush().await.unwrap();
+        let mut p = UpgradeParser::new();
+        let mut upgraded = false;
+        while !upgraded {
+            c.read_with(
+                || after(Duration::from_secs(2)),
+                |bytes| {
+                    for &b in bytes {
+                        upgraded |= p.push(b) == Upgrade::Done;
+                    }
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let mut deadline = None;
+        let resumed_timer = |deadline: &mut Option<Instant>| {
+            let end = *deadline.get_or_insert_with(|| Instant::now() + Duration::from_millis(150));
+            after(end.saturating_duration_since(Instant::now()))
+        };
+        match select(c.read_owned(|| resumed_timer(&mut deadline)), after(Duration::from_millis(50))).await {
+            Either::Second(()) => {}
+            Either::First(_) => panic!("body must be stalled"),
+        }
+        assert_eq!(env.stats.holders(), 1, "cancelled future retains the original record");
+        assert!(env.pool.in_use() > 16_000);
+        let leases = env.stats.leases();
+        let start = Instant::now();
+        assert!(matches!(c.read_owned(|| resumed_timer(&mut deadline)).await, Err(ReadError::LeaseTimeout)));
+        assert!(start.elapsed() < Duration::from_millis(140), "original timeout was retained");
+        assert_eq!((env.pool.in_use(), env.stats.holders()), (0, 0));
+        assert_eq!(env.stats.leases(), leases);
+        assert_eq!(env.stats.timeouts(), 1);
+        assert!(matches!(c.read_owned(|| after(Duration::from_secs(1))).await, Err(ReadError::LeaseTimeout)));
+        assert_eq!((env.pool.in_use(), env.stats.holders()), (0, 0));
+        assert_eq!(env.stats.leases(), leases, "poisoned stream never reacquires a lease");
+    });
+}
+
+#[test]
+fn owned_record_body_cancel_resume_preserves_exact_plaintext_and_single_lease() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Gated {
+        io: NbSock,
+        budget: Arc<AtomicUsize>,
+    }
+    impl ErrorType for Gated {
+        type Error = ErrorKind;
+    }
+    impl Read for Gated {
+        async fn read(&mut self, buf: &mut [u8]) -> Result<usize, ErrorKind> {
+            let budget = self.budget.load(Ordering::Relaxed);
+            if budget == 0 {
+                return core::future::pending().await;
+            }
+            let limit = buf.len().min(budget);
+            let n = self.io.read(&mut buf[..limit]).await?;
+            if budget != usize::MAX {
+                self.budget.fetch_sub(n, Ordering::Relaxed);
+            }
+            Ok(n)
+        }
+    }
+    impl Write for Gated {
+        async fn write(&mut self, buf: &[u8]) -> Result<usize, ErrorKind> {
+            self.io.write(buf).await
+        }
+        async fn flush(&mut self) -> Result<(), ErrorKind> {
+            self.io.flush().await
+        }
+    }
+    let spec = Spec { records: 2, record: 16384, gap: Duration::ZERO, delay: Duration::from_millis(10), stall_in_last: None };
+    let env = Env::new(READ_RECORD_BYTES);
+    let (s, k) = test_anchor();
+    let anchors = [TrustAnchor { subject: &s, spki: &k }];
+    let cert = parse_cert_name(Some(H), None);
+    let params = TlsParams { hostname: H, cert: &cert, anchors: &anchors, now_unix: NOW };
+    let mut wb = vec![0u8; WRITE_RECORD_BYTES];
+    let mut rng = TestRng(5678);
+    let budget = Arc::new(AtomicUsize::new(usize::MAX));
+    block_on(async {
+        let io = Gated { io: nb_connect(serve(spec)), budget: budget.clone() };
+        let mut c = LeasedTlsDerp::connect(io, &mut wb, &env.stats, env.mem(), &params, &mut rng).await.unwrap();
+        let mut req = [0u8; 200];
+        let n = upgrade_request(H, &mut req).unwrap();
+        c.write_all(&req[..n]).await.unwrap();
+        c.flush().await.unwrap();
+        let mut p = UpgradeParser::new();
+        let mut upgraded = false;
+        while !upgraded {
+            c.read_with(
+                || after(Duration::from_secs(2)),
+                |bytes| {
+                    for &b in bytes {
+                        upgraded |= p.push(b) == Upgrade::Done;
+                    }
+                },
+            )
+            .await
+            .unwrap();
+        }
+        budget.store(7, Ordering::Relaxed); // Complete 5-byte header and only two ciphertext bytes.
+        {
+            let mut read = core::pin::pin!(c.read_owned(|| core::future::pending::<()>()));
+            poll_fn(|cx| {
+                assert!(read.as_mut().poll(cx).is_pending());
+                if budget.load(Ordering::Relaxed) == 0 {
+                    Poll::Ready(())
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            })
+            .await;
+        }
+        assert_eq!(env.stats.holders(), 1);
+        let leases = env.stats.leases();
+        budget.store(usize::MAX, Ordering::Relaxed);
+        let first = c.read_owned(|| after(Duration::from_secs(2))).await.unwrap();
+        assert_eq!(first.len(), 16384);
+        for (i, &b) in first.iter().enumerate() {
+            assert_eq!(b, (i % 251) as u8);
+        }
+        assert_eq!(env.stats.leases(), leases, "resume keeps original lease");
+        drop(first);
+        assert_eq!((env.pool.in_use(), env.stats.holders()), (0, 0));
+        let second = c.read_owned(|| after(Duration::from_secs(2))).await.unwrap();
+        for (i, &b) in second.iter().enumerate() {
+            assert_eq!(b, ((16384 + i) % 251) as u8);
+        }
+        drop(second);
+        assert_eq!((env.pool.in_use(), env.stats.holders()), (0, 0));
+    });
 }
