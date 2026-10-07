@@ -12,35 +12,103 @@ pub const TCP: u8 = 6;
 /// IP protocol number of UDP.
 pub const UDP: u8 = 17;
 
+/// Which check [`check`] failed (what `bad_packet` hides in the C: every one of these is `RT_STAT_BAD_PACKET` there).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Invalid {
+    /// Shorter than 20 bytes or not version 4.
+    NotIpv4,
+    /// IHL below 5 or past the packet.
+    HeaderLen,
+    /// The IPv4 total length differs from the bytes handed over.
+    TotalLen,
+    /// More-fragments or a fragment offset.
+    Fragment,
+    /// ICMP (the C routes TCP and UDP only).
+    Icmp,
+    /// Any other protocol.
+    OtherProto,
+    /// Shorter than the TCP/UDP header.
+    L4Short,
+    /// TCP data offset below 5 words or past the packet.
+    TcpOffset,
+    /// UDP length differs from the payload.
+    UdpLen,
+    /// The IPv4 header checksum.
+    HeaderChecksum,
+}
+
+impl Invalid {
+    /// Every reason.
+    pub const ALL: [Invalid; 10] = [
+        Invalid::NotIpv4,
+        Invalid::HeaderLen,
+        Invalid::TotalLen,
+        Invalid::Fragment,
+        Invalid::Icmp,
+        Invalid::OtherProto,
+        Invalid::L4Short,
+        Invalid::TcpOffset,
+        Invalid::UdpLen,
+        Invalid::HeaderChecksum,
+    ];
+    /// Stable name for the diagnostics line.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Invalid::NotIpv4 => "not_ipv4",
+            Invalid::HeaderLen => "header_len",
+            Invalid::TotalLen => "total_len",
+            Invalid::Fragment => "fragment",
+            Invalid::Icmp => "icmp",
+            Invalid::OtherProto => "other_proto",
+            Invalid::L4Short => "l4_short",
+            Invalid::TcpOffset => "tcp_offset",
+            Invalid::UdpLen => "udp_len",
+            Invalid::HeaderChecksum => "header_checksum",
+        }
+    }
+}
+
 /// Validate `b` as a routable packet and return the IPv4 header length.
 ///
 /// Accepts only: version 4, header at least 20 bytes and inside the packet, total length equal to `b.len()`, no fragmentation (MF or offset;
 /// DF is fine), TCP (data offset sane) or UDP (length field equal to the payload) and a correct header checksum.
 pub fn valid(b: &[u8]) -> Option<usize> {
+    check(b).ok()
+}
+
+/// [`valid`] with the reason.
+pub fn check(b: &[u8]) -> Result<usize, Invalid> {
     let n = b.len();
     if n < 20 || b[0] >> 4 != 4 {
-        return None;
+        return Err(Invalid::NotIpv4);
     }
     let h = usize::from(b[0] & 15) * 4;
-    if h < 20 || h > n || usize::from(rd16(b, 2)) != n || rd16(b, 6) & 0x3fff != 0 {
-        return None;
+    if h < 20 || h > n {
+        return Err(Invalid::HeaderLen);
+    }
+    if usize::from(rd16(b, 2)) != n {
+        return Err(Invalid::TotalLen);
+    }
+    if rd16(b, 6) & 0x3fff != 0 {
+        return Err(Invalid::Fragment);
     }
     let proto = b[9];
     if proto != TCP && proto != UDP {
-        return None;
+        return Err(if proto == 1 { Invalid::Icmp } else { Invalid::OtherProto });
     }
     if n < h + if proto == TCP { 20 } else { 8 } {
-        return None;
+        return Err(Invalid::L4Short);
     }
     if proto == TCP {
         let off = usize::from(b[h + 12] >> 4) * 4;
         if !(20..=n - h).contains(&off) {
-            return None;
+            return Err(Invalid::TcpOffset);
         }
     } else if usize::from(rd16(b, h + 4)) != n - h {
-        return None;
+        return Err(Invalid::UdpLen);
     }
-    csum::header_ok(b, h).then_some(h)
+    if csum::header_ok(b, h) { Ok(h) } else { Err(Invalid::HeaderChecksum) }
 }
 
 /// Clamp the MSS option of a SYN (either direction) to [`MSS_CLAMP`], never enlarging a smaller offer. Non-SYN and non-TCP packets are

@@ -99,6 +99,125 @@ fn usb_ping_through_the_router_is_visible_in_every_counter() {
     gw.check_engine();
 }
 
+fn ip_sum(b: &[u8]) -> u16 {
+    let mut s: u32 = b.chunks(2).map(|c| u32::from(u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)]))).sum();
+    while s > 0xffff {
+        s = (s & 0xffff) + (s >> 16);
+    }
+    !(s as u16)
+}
+
+/// An Ethernet frame carrying an IPv4 packet the way a macOS host builds it (TTL 64, ID set, header checksum filled).
+fn host_frame(src: [u8; 4], dst: [u8; 4], proto: u8, df: bool, l4: &[u8], pad_to: usize) -> Vec<u8> {
+    let mut ip = vec![0x45, 0, 0, 0, 0x5c, 0x1d, if df { 0x40 } else { 0 }, 0, 64, proto, 0, 0];
+    ip.extend_from_slice(&src);
+    ip.extend_from_slice(&dst);
+    let total = (20 + l4.len()) as u16;
+    ip[2..4].copy_from_slice(&total.to_be_bytes());
+    let c = ip_sum(&ip);
+    ip[10..12].copy_from_slice(&c.to_be_bytes());
+    ip.extend_from_slice(l4);
+    let mut pseudo = Vec::new();
+    pseudo.extend_from_slice(&src);
+    pseudo.extend_from_slice(&dst);
+    pseudo.extend_from_slice(&[0, proto]);
+    pseudo.extend_from_slice(&(l4.len() as u16).to_be_bytes());
+    pseudo.extend_from_slice(l4);
+    let off = match proto {
+        6 => Some(36),
+        17 => Some(26),
+        _ => None,
+    };
+    if let Some(o) = off {
+        // the checksum field of the L4 header sits at `o - 20` inside `l4`, and is zero in `pseudo` at 12 + that
+        let pos = 12 + (o - 20);
+        pseudo[pos] = 0;
+        pseudo[pos + 1] = 0;
+        let c = ip_sum(&pseudo);
+        let l = 20 + (o - 20);
+        ip[l..l + 2].copy_from_slice(&c.to_be_bytes());
+    }
+    let mut f = vec![0xff; 6];
+    f.extend_from_slice(&[0x02, 0, 0, 0, 0x77, 0x02]);
+    f.extend_from_slice(&[0x08, 0x00]);
+    f.extend_from_slice(&ip);
+    while f.len() < pad_to {
+        f.push(0);
+    }
+    f
+}
+
+/// Frames as a real macOS host sends them over NCM: a ping (84-byte IP packet, ICMP), a SYN with macOS's option block (MSS, NOP, wscale, NOP, NOP,
+/// timestamps, SACK-permitted, EOL; 64-byte IP packet, DF), the same SYN-ACK-less ACK padded to the 60-byte Ethernet minimum, and a DNS query.
+/// Every drop must name its reason, and the packets the C routes (TCP, UDP) must be routed; ICMP to an alias is `bad_packet` in the C as well.
+#[test]
+fn macos_frames_through_usbnet_and_the_router() {
+    use tdongle_tailnet_fw::TailnetApi;
+    let mut go = go_or_skip!();
+    let (gw, _id, alias) = up(&mut go, "gopeer");
+    let hip = gw.host.wait_dhcp(Duration::from_secs(10)).unwrap();
+    let cmd = |c: &str| {
+        let mut o = String::new();
+        let _ = gw.sh.serial_command(c, &mut o);
+        o
+    };
+    let num = |j: &str, k: &str| -> u64 {
+        let pat = format!("\"{k}\":");
+        let i = j.find(&pat).unwrap() + pat.len();
+        j[i..].chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap()
+    };
+    let extra = || {
+        let mut e = String::new();
+        gw.sh.serial_status_extra(&mut e);
+        e
+    };
+    let settle = || std::thread::sleep(Duration::from_millis(300));
+    let base_bad = num(&cmd("route"), "bad_packet");
+
+    // ping: ICMP echo request, id/seq, 56 bytes of payload starting with a timestamp
+    let mut icmp = vec![8, 0, 0, 0, 0x12, 0x34, 0, 1];
+    icmp.extend_from_slice(&[0x66, 0x1a, 0x2b, 0x3c, 0, 0, 0, 0]);
+    icmp.extend((8u8..56).map(|i| i));
+    let c = ip_sum(&icmp);
+    icmp[2..4].copy_from_slice(&c.to_be_bytes());
+    gw.host.inject(host_frame(hip, alias, 1, false, &icmp, 0));
+    settle();
+    let e = extra();
+    assert_eq!(num(&cmd("route"), "bad_packet"), base_bad + 1, "{e}");
+    let bad = e.lines().find(|l| l.starts_with("tn_bad ")).unwrap();
+    assert!(bad.contains("last=icmp total=84") && bad.contains("hex=45000054"), "{bad}");
+
+    // a macOS SYN with its option block
+    let mut syn = vec![0xc3, 0x50, 0x01, 0xbb, 0x1a, 0x2b, 0x3c, 0x4d, 0, 0, 0, 0, 0xb0, 0x02, 0xff, 0xff, 0, 0, 0, 0];
+    syn.extend_from_slice(&[2, 4, 5, 0xb4, 1, 3, 3, 6, 1, 1, 8, 10, 0x11, 0x22, 0x33, 0x44, 0, 0, 0, 0, 4, 2, 0, 0]);
+    let fwd0 = num(&cmd("route"), "forwarded_out");
+    gw.host.inject(host_frame(hip, alias, 6, true, &syn, 0));
+    // and a bare 40-byte ACK padded to the Ethernet minimum, as a NIC or a Linux host would send it
+    let ack = vec![0xc3, 0x51, 0x01, 0xbb, 0, 0, 0, 1, 0, 0, 0, 1, 0x50, 0x10, 0xff, 0xff, 0, 0, 0, 0];
+    gw.host.inject(host_frame(hip, alias, 6, true, &ack, 60));
+    settle();
+    let e = extra();
+    assert!(e.contains("tn_bad host={icmp:1 }"), "TCP frames must not be bad packets: {e}");
+    assert!(num(&cmd("route"), "forwarded_out") >= fwd0 + 1, "the SYN must be routed: {e}");
+    let eng = e.lines().find(|l| l.starts_with("tn_eng ")).unwrap();
+    assert!(!eng.contains("hs_init=0 "), "routing the SYN starts the handshake: {eng}");
+
+    // a DNS query for the peer from a fresh source port: answered by the gateway (a frame comes back)
+    let before = gw.host.counters.to_host.load(Ordering::Relaxed);
+    let mut q = vec![0xd1, 0x01, 0, 53, 0, 0, 0, 0, 0xab, 0xcd, 0x01, 0, 0, 1, 0, 0, 0, 0, 0, 0];
+    for l in ["gopeer", "lab", "tailnet"] {
+        q.push(l.len() as u8);
+        q.extend_from_slice(l.as_bytes());
+    }
+    q.extend_from_slice(&[0, 0, 1, 0, 1]);
+    let ulen = q.len() as u16;
+    q[4..6].copy_from_slice(&ulen.to_be_bytes());
+    q.drain(0..0);
+    gw.host.inject(host_frame(hip, [192, 168, 77, 1], 17, false, &q[..], 0));
+    settle();
+    assert!(gw.host.counters.to_host.load(Ordering::Relaxed) > before, "no DNS answer: {}", extra());
+}
+
 #[test]
 fn direct_path_is_discovered_and_traffic_moves_to_it() {
     let mut go = go_or_skip!();

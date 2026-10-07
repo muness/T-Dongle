@@ -366,6 +366,24 @@ where
             "tn_eng host_in={} host={:?} tx={:?} rx_in={} rx_derp={} rx={:?} hs_init={} hs_noroute={} hs_resp={} ka_tx={} udp_tx={} derp_tx={} out_refused={}\r\n",
             c.host_in, c.host, c.tx, c.rx_in, c.rx_in_derp, c.rx, c.hs_init_tx, c.hs_init_noroute, c.hs_resp_tx, c.keepalive_tx, c.udp_tx, c.derp_tx, c.out_refused
         );
+        let bad = self.with_engine(|e, _| *e.router().bad());
+        let _ = write!(out, "tn_bad");
+        for (dir, v) in [("host", &bad.host), ("tunnel", &bad.tunnel)] {
+            let _ = write!(out, " {dir}={{");
+            for (i, w) in tdongle_tailnet_router::packet::Invalid::ALL.iter().enumerate() {
+                if v[i] != 0 {
+                    let _ = write!(out, "{}:{} ", w.name(), v[i]);
+                }
+            }
+            let _ = write!(out, "}}");
+        }
+        if bad.last_len != 0 {
+            let _ = write!(out, " last={} total={} hex=", tdongle_tailnet_router::packet::Invalid::ALL[bad.last_why as usize].name(), bad.last_total);
+            for b in &bad.last[..usize::from(bad.last_len)] {
+                let _ = write!(out, "{b:02x}");
+            }
+        }
+        let _ = write!(out, "\r\n");
         for slot in 0..snap.members.len() {
             self.with_engine(|e, now| {
                 e.peers_wg(slot, now, |p| {

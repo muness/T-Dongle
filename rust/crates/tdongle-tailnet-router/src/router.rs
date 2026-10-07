@@ -137,6 +137,30 @@ pub struct Router<const M: usize, const A: usize, const F: usize> {
     last_fill: Option<Millis>,
     last_icmp: Option<Millis>,
     hold: Hold,
+    bad: BadLog,
+}
+
+/// What the router remembers about packets it called invalid: a count per reason and the first bytes of the last one.
+#[derive(Clone, Copy, Debug)]
+pub struct BadLog {
+    /// Per [`packet::Invalid`] (host direction first, then tunnel direction).
+    pub host: [u32; 10],
+    /// Tunnel direction.
+    pub tunnel: [u32; 10],
+    /// Reason of the last bad packet (host direction), as an index into [`packet::Invalid::ALL`].
+    pub last_why: u8,
+    /// Bytes kept of the last bad host packet (at most 64).
+    pub last_len: u8,
+    /// Its total length as handed to the router.
+    pub last_total: u16,
+    /// Its first bytes.
+    pub last: [u8; 64],
+}
+
+impl BadLog {
+    const fn new() -> Self {
+        Self { host: [0; 10], tunnel: [0; 10], last_why: 0, last_len: 0, last_total: 0, last: [0; 64] }
+    }
 }
 
 /// The production configuration: 16 memberships, 64 cached aliases, 64 flows (the C's `ROUTE_MEMBERS`, `RT_ALIASES`, `RT_FLOWS`).
@@ -168,7 +192,12 @@ impl<const M: usize, const A: usize, const F: usize> Router<M, A, F> {
             last_fill: None,
             last_icmp: None,
             hold: Hold::new(),
+            bad: BadLog::new(),
         }
+    }
+    /// The invalid-packet log.
+    pub fn bad(&self) -> &BadLog {
+        &self.bad
     }
 
     // ---- control plane --------------------------------------------------------------------------------------------------------------
@@ -368,7 +397,18 @@ impl<const M: usize, const A: usize, const F: usize> Router<M, A, F> {
     }
 
     fn route_outbound(&mut self, b: &mut [u8], dest: u32, now: Millis, may_hold: bool) -> HostOutcome {
-        let Some(h) = packet::valid(b) else { return self.drop_host(HostDrop::Invalid) };
+        let h = match packet::check(b) {
+            Ok(h) => h,
+            Err(why) => {
+                self.bad.host[why as usize] = self.bad.host[why as usize].saturating_add(1);
+                let n = b.len().min(64);
+                self.bad.last[..n].copy_from_slice(&b[..n]);
+                self.bad.last_len = n as u8;
+                self.bad.last_total = b.len().min(u16::MAX as usize) as u16;
+                self.bad.last_why = why as u8;
+                return self.drop_host(HostDrop::Invalid);
+            }
+        };
         if !packet::clamp_mss(b, h) {
             return self.drop_host(HostDrop::BadTcpOptions);
         }
@@ -505,7 +545,13 @@ impl<const M: usize, const A: usize, const F: usize> Router<M, A, F> {
         }
         let n = usize::from(rd16(pkt, 2));
         let b = &mut pkt[..n];
-        let Some(h) = packet::valid(b) else { return self.drop_tunnel(TunnelDrop::Invalid) };
+        let h = match packet::check(b) {
+            Ok(h) => h,
+            Err(why) => {
+                self.bad.tunnel[why as usize] = self.bad.tunnel[why as usize].saturating_add(1);
+                return self.drop_tunnel(TunnelDrop::Invalid);
+            }
+        };
         if !packet::clamp_mss(b, h) {
             return self.drop_tunnel(TunnelDrop::Invalid);
         }

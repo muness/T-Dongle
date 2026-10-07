@@ -121,6 +121,7 @@ enum Cmd {
 pub struct HostHandle {
     tx: tmpsc::UnboundedSender<Cmd>,
     join: Option<std::thread::JoinHandle<()>>,
+    inject: tmpsc::UnboundedSender<Vec<u8>>,
     /// Counters.
     pub counters: Arc<UsbCounters>,
     /// USB state toggles shared with [`FakeUsb`].
@@ -144,6 +145,10 @@ fn ask<T>(tx: &tmpsc::UnboundedSender<Cmd>, make: impl FnOnce(mpsc::Sender<T>) -
 }
 
 impl HostHandle {
+    /// Put one raw Ethernet frame on the wire towards the dongle, exactly as given (no padding or checksums added).
+    pub fn inject(&self, frame: Vec<u8>) {
+        let _ = self.inject.send(frame);
+    }
     /// Wait until DHCP bound; returns the host's address.
     pub fn wait_dhcp(&self, timeout: Duration) -> Result<[u8; 4], String> {
         ask(&self.tx, |r| Cmd::WaitDhcp(r, timeout), timeout)?
@@ -206,6 +211,7 @@ pub fn spawn_host() -> (FakeUsb, HostHandle) {
         carrier: carrier.clone(),
         counters: counters.clone(),
     };
+    let inject = to_dongle_tx.clone();
     let (cmd_tx, cmd_rx) = tmpsc::unbounded_channel::<Cmd>();
     let c2 = counters.clone();
     let join = std::thread::Builder::new()
@@ -216,7 +222,7 @@ pub fn spawn_host() -> (FakeUsb, HostHandle) {
             local.block_on(&rt, host_main(to_dongle_tx, from_dongle_rx, cmd_rx, c2));
         })
         .unwrap();
-    (usb, HostHandle { tx: cmd_tx, join: Some(join), counters, ready, generation, carrier })
+    (usb, HostHandle { tx: cmd_tx, inject, join: Some(join), counters, ready, generation, carrier })
 }
 
 // ---- the smoltcp device -------------------------------------------------------------------------------------------------------------------------

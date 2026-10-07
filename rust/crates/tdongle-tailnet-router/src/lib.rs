@@ -57,7 +57,7 @@ pub mod tables;
 
 pub use ingress::{Ingress, IngressDrop, IngressFacts, IngressGate, queue_budget};
 pub use outcome::{Dir, HostDrop, HostOutcome, TunnelDrop, TunnelOutcome};
-pub use router::{GatewayRouter, Member, MemberSet, Router};
+pub use router::{BadLog, GatewayRouter, Member, MemberSet, Router};
 pub use stats::{Extra, Stat, Stats};
 pub use tables::{AliasCache, AliasRecord, Flow, FlowInReject, FlowTable};
 
