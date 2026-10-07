@@ -226,7 +226,7 @@ fn the_handle_life_cycle_over_a_real_embassy_stack() {
         let mut udp = net.udp(UdpRole::Member, 0).expect("udp handle");
         assert_eq!(udp.bind(5000), Ok(5000));
         let w = Windows::GATEWAY;
-        assert_eq!(pool.in_use(), w.udp_rx + w.udp_tx + 2 * 4 * core::mem::size_of::<embassy_net::udp::PacketMetadata>());
+        assert_eq!(pool.in_use(), w.udp_rx + w.udp_tx + 2 * 8 * core::mem::size_of::<embassy_net::udp::PacketMetadata>());
         udp.send_to(b"disco?", Ep::v4([10, 0, 0, 2], 6000)).await.unwrap();
         let mut buf = [0u8; 64];
         let (n, from) = tokio::time::timeout(Duration::from_secs(5), udp.recv_from(&mut buf)).await.expect("udp reply timed out").unwrap();
