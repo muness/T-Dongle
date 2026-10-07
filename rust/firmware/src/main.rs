@@ -737,7 +737,7 @@ async fn main(spawner: Spawner) -> ! {
         mac_str: ncm_ids.mac_string,
         mac_hex: hex,
     }));
-    // Compile-time buffer initialization avoids a 24 KB temporary on the boot stack.
+    // Compile-time buffer initialization avoids a 3.2 KB temporary on the boot stack.
     static NTB: ConstStaticCell<[u8; ncm::NTB_OUT_MAX]> = ConstStaticCell::new([0; ncm::NTB_OUT_MAX]);
     let (tx, rx) = ncm.split(NTB.take());
     let (acm_rd, acm_wr) = acm.split();
@@ -1016,27 +1016,27 @@ fn saved_for_join() -> Option<tdongle_nvs_format::load::Loaded> {
 // supervisor's frame (which also owns its saved-profile snapshot).
 #[inline(never)]
 fn configure_station(controller: &mut WifiController<'static>, ssid: &[u8], pass: &[u8], best_bss: Option<Bss>) -> bool {
-        let auth = match pass.try_into() {
-            Ok(p) if !pass.is_empty() => AuthenticationMethodConfig::Wpa2Personal(p),
-            _ => AuthenticationMethodConfig::Open,
-        };
-        let Ok(ssid_t) = ssid.try_into() else {
-            return false;
-        };
-        // The C station configuration (`wifi_fill_station`): all-channel scan, join by signal. esp-radio's default is the FAST scan, which joins the first access point
-        // that answers: on the board that was a far BSS of the right SSID (-88 dBm, channel 1) while the C joined -50 on channel 11.
-        let mut station = StationConfig::default().with_ssid(ssid_t).with_authentication(auth).with_scan_method(ScanMethod::AllChannels);
-        if let (true, Some(b)) = (PIN_BSS.load(Ordering::Relaxed), best_bss.filter(Bss::usable)) {
-            station = station.with_bssid(b.bssid).with_channel(b.channel);
-        }
-        if controller.set_config(&Config::Station(station)).is_err() {
-            init_note("set_config failed");
-            return false;
-        }
-        if controller.set_protocols(Protocols::default()).is_err() {
-            init_note("set_protocols failed"); // default is b/g/n: never LR
-        }
-        true
+    let auth = match pass.try_into() {
+        Ok(p) if !pass.is_empty() => AuthenticationMethodConfig::Wpa2Personal(p),
+        _ => AuthenticationMethodConfig::Open,
+    };
+    let Ok(ssid_t) = ssid.try_into() else {
+        return false;
+    };
+    // The C station configuration (`wifi_fill_station`): all-channel scan, join by signal. esp-radio's default is the FAST scan, which joins the first access point
+    // that answers: on the board that was a far BSS of the right SSID (-88 dBm, channel 1) while the C joined -50 on channel 11.
+    let mut station = StationConfig::default().with_ssid(ssid_t).with_authentication(auth).with_scan_method(ScanMethod::AllChannels);
+    if let (true, Some(b)) = (PIN_BSS.load(Ordering::Relaxed), best_bss.filter(Bss::usable)) {
+        station = station.with_bssid(b.bssid).with_channel(b.channel);
+    }
+    if controller.set_config(&Config::Station(station)).is_err() {
+        init_note("set_config failed");
+        return false;
+    }
+    if controller.set_protocols(Protocols::default()).is_err() {
+        init_note("set_protocols failed"); // default is b/g/n: never LR
+    }
+    true
 }
 
 async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>) -> ! {

@@ -36,9 +36,10 @@ jobs:
           bash -n tools/flash.sh
           python3 tools/test_flash_console.py
           python3 tools/test_flash_script.py
+          python3 tools/test_check_stack.py
       - name: Web UI transport contracts
         run: node webui/test.mjs
-      - run: cargo test --workspace
+      - run: cargo test --workspace -- --test-threads=1
       - name: Boot order of the no_std images (rule 13)
         run: python3 tools/check_boot_order.py firmware/src/main.rs spikes/s1-wifi-l2/src/main.rs
       - name: Rescue arm first (every image)
