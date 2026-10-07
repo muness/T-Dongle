@@ -310,7 +310,8 @@ pub async fn usb_rx(datagram: &[u8]) -> bool {
             return false;
         }
         let mut block: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
-        if hb_ok(FwHeap.free(), n + 16) && block.try_reserve_exact(n).is_ok() {
+        let heap_ok = hb_ok(FwHeap.free(), n + 16) && block.try_reserve_exact(n).is_ok();
+        if heap_ok {
             block.extend_from_slice(&datagram[..n]);
             match USB_RX.try_send(block) {
                 Ok(()) => return true,
@@ -319,7 +320,8 @@ pub async fn usb_rx(datagram: &[u8]) -> bool {
         } else {
             USB_RX_WAITS.fetch_add(1, Ordering::Relaxed);
         }
-        let _ = with_timeout(Duration::from_millis(20), core::future::poll_fn(|cx| USB_RX.poll_ready_to_send(cx))).await;
+        // short of heap the channel has room, so waiting on it returns at once: a bounded sleep instead (see `wait_for_frame_room`)
+        tdongle_tailnet_runtime::usb::wait_for_frame_room(heap_ok, core::future::poll_fn(|cx| USB_RX.poll_ready_to_send(cx))).await;
     }
 }
 
@@ -1311,7 +1313,7 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             use tdongle_tailnet_runtime::derp::WIN_STATS;
             let _ = write!(
                 out,
-                "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={} waited_for_lull={} force_derp={}\r\n",
+                "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={} waited_for_lull={} waited_for_heap={} force_derp={}\r\n",
                 WIN_STATS[3].load(Relaxed),
                 tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_rx,
                 tdongle_tailnet_runtime::net_embassy::Windows::GATEWAY.derp_tx,
@@ -1321,6 +1323,7 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 WIN_STATS[1].load(Relaxed),
                 WIN_STATS[2].load(Relaxed),
                 WIN_STATS[4].load(Relaxed),
+                WIN_STATS[5].load(Relaxed),
                 tdongle_tailnet_engine::shared::FORCE_DERP.load(Relaxed) as u8
             );
         }

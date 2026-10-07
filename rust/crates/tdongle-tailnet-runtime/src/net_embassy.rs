@@ -87,9 +87,11 @@ impl Windows {
 
 /// The relay connection's windows while it carries data (idle: [`Windows::GATEWAY`]'s `derp_rx` / `derp_tx`): 6 KB in, 6 KB out. Taken from the pool at the connect, above
 /// the elastic floor like every window; a refusal falls back to the idle ones.
-pub const DERP_RX_BIG: usize = 6144;
+pub const DERP_RX_BIG: usize = crate::derp::RELAY_RX_BIG;
 /// See [`DERP_RX_BIG`].
-pub const DERP_TX_BIG: usize = 6144;
+pub const DERP_TX_BIG: usize = crate::derp::RELAY_TX_BIG;
+
+const _: () = assert!(Windows::GATEWAY.derp_rx + Windows::GATEWAY.derp_tx == 5760 + 2048, "derp::IDLE_WINDOW_BYTES follows the idle relay windows");
 
 /// Datagrams a UDP socket can queue each way.
 pub const UDP_PKTS: usize = 8;

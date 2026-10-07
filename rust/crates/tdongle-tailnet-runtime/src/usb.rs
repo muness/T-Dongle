@@ -409,6 +409,18 @@ where
     }
 }
 
+/// How a task that takes frames from the USB host waits when it cannot take the next one yet: short of heap (`heap_ok == false`), a bounded sleep (nothing signals that heap
+/// came back, and the channel below has room, so waiting on it would return at once: a task that loops on that never yields and starves the whole thread executor, which
+/// is how the board reset at the heap floor); the channel full, until it has room, at most 20 ms. Always yields at least once. Meanwhile the caller does not read the next
+/// frame, so the host's driver sees NAKs.
+pub async fn wait_for_frame_room(heap_ok: bool, channel_room: impl core::future::Future<Output = ()>) {
+    if heap_ok {
+        let _ = embassy_time::with_timeout(embassy_time::Duration::from_millis(20), channel_room).await;
+    } else {
+        Timer::after_millis(5).await;
+    }
+}
+
 /// What the pump's host branch produced.
 enum HostEvent {
     /// A frame of this length from the host.

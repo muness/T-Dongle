@@ -289,15 +289,28 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
     }
 }
 
+/// The relay connection's big windows (receive, transmit) while it carries data.
+pub const RELAY_RX_BIG: usize = 6144;
+/// See [`RELAY_RX_BIG`].
+pub const RELAY_TX_BIG: usize = 6144;
+/// The idle relay windows' bytes (`Windows::GATEWAY.derp_rx + derp_tx`).
+const IDLE_WINDOW_BYTES: usize = 5760 + 2048;
+
 /// Relay window mode, `[window ms, frames per window that make it big, quiet windows that make it small again]`. Tests shorten them.
 pub static WIN_TIMING: [core::sync::atomic::AtomicU32; 3] = [core::sync::atomic::AtomicU32::new(2000), core::sync::atomic::AtomicU32::new(50), core::sync::atomic::AtomicU32::new(15)];
 /// Switches to the big windows, switches back, falls back because the pool refused the big ones, whether the connection has them now, and windows in which big ones were wanted
 /// but the relay was busy (no lull).
-pub static WIN_STATS: [core::sync::atomic::AtomicU32; 5] = [const { core::sync::atomic::AtomicU32::new(0) }; 5];
+pub static WIN_STATS: [core::sync::atomic::AtomicU32; 6] = [const { core::sync::atomic::AtomicU32::new(0) }; 6];
 /// A request for a window mode from outside the traffic (`tn force-derp`): 1 big, 2 idle, 0 none.
 pub static WIN_FORCE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
 
 impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S, D> {
+    /// Bytes of the idle windows (the figures of `net_embassy::Windows::GATEWAY`).
+    fn idle_window_bytes(&self) -> usize {
+        // the idle relay windows: receive + transmit (kept in step with `Windows::GATEWAY` by the const assert below)
+        IDLE_WINDOW_BYTES
+    }
+
     /// Does the connection need other windows? The relay's windows are small while it idles (the heap is short) and big while it carries data: judged on the relay frames
     /// (both ways) of each [`WIN_TIMING`] window, with hysteresis. `true`: reconnect to get them.
     fn window_mode(&mut self) -> bool {
@@ -332,6 +345,15 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
         }
         if self.want_big == self.win_big || now.saturating_sub(self.last_switch) < 4 * win {
             return false;
+        }
+        if self.want_big {
+            // the big windows are taken from the heap above the floor and must not take it to the floor (everything else that is elastic starves there): only with the extra
+            // memory and 6 KB to spare, otherwise they stay idle and the next window asks again
+            let extra = (RELAY_RX_BIG + RELAY_TX_BIG).saturating_sub(self.idle_window_bytes());
+            if self.sh.mem().heap.free() < tdongle_tailnet_admission::heap::ML_HB_FLOOR + extra + 6 * 1024 {
+                WIN_STATS[5].fetch_add(1, Relaxed);
+                return false;
+            }
         }
         let lull = delta <= 4;
         if !lull && forced == 0 && self.want_big {

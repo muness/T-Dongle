@@ -1089,3 +1089,67 @@ fn window_switches_under_relay_load_do_not_starve_the_executor() {
     assert!(worst >= 5, "the executor kept running through the switches: {worst} ticks in the worst 500 ms");
     gw.check_engine();
 }
+
+/// Short of heap the USB receive task waits for room: the channel it would wait on has room (nothing was pushed), so waiting on it returns at once, and a loop on that never
+/// yielded: the board's thread executor stalled at the heap floor (`previous_op=usb`). `wait_for_frame_room` must yield (a bounded sleep) whatever the channel says: a heartbeat
+/// task on the same executor keeps ticking while a loop waits through it with the heap short and a channel that is always ready.
+#[test]
+fn waiting_for_heap_with_a_channel_that_is_always_ready_yields() {
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let ticks = rt.block_on(async {
+        let ticks = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let t2 = ticks.clone();
+        let heartbeat = tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                t2.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        let started = std::time::Instant::now();
+        let mut rounds = 0u64;
+        while started.elapsed() < Duration::from_secs(1) {
+            // heap short, channel ready: the old loop's iteration
+            tdongle_tailnet_runtime::usb::wait_for_frame_room(false, std::future::ready(())).await;
+            rounds += 1;
+        }
+        heartbeat.abort();
+        println!("{rounds} waits in 1 s");
+        assert!(rounds < 500, "the wait is a sleep, not a spin: {rounds} rounds");
+        ticks.load(Ordering::Relaxed)
+    });
+    assert!(ticks >= 15, "the executor's heartbeat kept ticking: {ticks} in 1 s (20 expected)");
+}
+
+/// The heap pinned near the floor under a USB upload over the relay: every elastic allocation is refused or waits, and none of it may stall the executor (the heartbeat keeps
+/// ticking) or panic; the engine counts what it refused.
+#[test]
+fn a_heap_at_the_floor_under_a_relay_upload_does_not_starve_the_executor() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let mut go = go_or_skip!();
+    let (_, _) = go.peer("gopeer").expect("peer");
+    let mut opts = GatewayOpts::new(&go.control_addr);
+    opts.heap_free = tdongle_tailnet_admission::heap::ML_HB_FLOOR + 23_500;
+    let gw = Gateway::start(opts);
+    gw.net.udp_blocked.store(true, Ordering::SeqCst);
+    let id = gw.add("lab", "tskey-fake");
+    wait_until("the membership to be routing", 60, || gw.is_ready(id));
+    gw.host.wait_dhcp(Duration::from_secs(10)).expect("dhcp");
+    let alias = gw.host.resolve("gopeer.lab.tailnet", Duration::from_secs(20)).expect("dns");
+    let _ = gw.host.echo(alias, 7, b"warm", Duration::from_secs(30));
+    gw.net.derp_write_delay_ms.store(6, Relaxed);
+    let worst = std::thread::scope(|s| {
+        let up = s.spawn(|| gw.host.upload(alias, 9, 256 * 1024, Duration::from_secs(40)));
+        let mut worst = u64::MAX;
+        let mut last = gw.heartbeat.load(Relaxed);
+        while !up.is_finished() {
+            std::thread::sleep(Duration::from_millis(500));
+            let now = gw.heartbeat.load(Relaxed);
+            worst = worst.min(now - last);
+            last = now;
+        }
+        println!("upload at the heap floor: {:?}; pool {:?}", up.join().unwrap().map(|(n, d)| (n, d.as_secs_f64())), gw.sh.pool.stats());
+        worst
+    });
+    println!("fewest heartbeat ticks in 500 ms: {worst} (10 expected)");
+    assert!(worst >= 5, "the executor kept running with the heap at the floor: {worst} ticks in the worst 500 ms");
+}
