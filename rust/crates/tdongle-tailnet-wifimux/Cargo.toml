@@ -26,7 +26,8 @@ embassy-net = { version = "0.9", default-features = false, features = ["proto-ip
 [dev-dependencies]
 tdongle-tailnet-wifimux = { path = ".", features = ["embassy-net"] }
 tdongle-tailnet-types = { path = "../tdongle-tailnet-types", features = ["test-util"] }
-embassy-net = { version = "0.9", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "tcp", "udp"] }
+embassy-net = { version = "0.9", default-features = false, features = ["proto-ipv4", "medium-ethernet", "dhcpv4", "tcp", "udp", "dns"] }
+tdongle-tailnet-runtime = { path = "../tdongle-tailnet-runtime", features = ["embassy-net"] }
 embassy-time = { version = "0.5", features = ["std", "generic-queue-16"] }
 critical-section = { version = "1.2", features = ["std"] }
 proptest = { version = "1", default-features = false, features = ["std"] }

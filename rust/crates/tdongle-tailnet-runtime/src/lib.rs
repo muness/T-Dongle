@@ -125,6 +125,8 @@ pub mod members;
 pub mod net;
 #[cfg(feature = "embassy-net")]
 pub mod net_embassy;
+#[cfg(feature = "embassy-net")]
+pub mod sntp;
 #[cfg(feature = "size-probe")]
 pub mod probe;
 pub mod queue;

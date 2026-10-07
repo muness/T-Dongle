@@ -988,7 +988,6 @@ impl SntpBufs {
 }
 
 /// Seconds between 1900-01-01 and 1970-01-01.
-const NTP_UNIX_OFFSET: u64 = 2_208_988_800;
 
 /// The SNTP state as `status` prints it (`clock=`, `valid=`, `sntp_restarts=`, `server=`): the real clock of this mode, not a default.
 pub fn clock_snapshot() -> (tdongle_serial::clock::Clock, bool) {
@@ -1004,22 +1003,17 @@ static SNTP_TRIES: AtomicU32 = AtomicU32::new(0);
 static SNTP_OK: AtomicU32 = AtomicU32::new(0);
 static SNTP_SERVER: AtomicU32 = AtomicU32::new(0);
 static SNTP_FAIL: AtomicU32 = AtomicU32::new(0);
+/// The address DNS gave the last try (big endian), for the `tn_sntp` line.
+static SNTP_IP: AtomicU32 = AtomicU32::new(0);
+/// The local port of the last try.
+static SNTP_PORT: AtomicU32 = AtomicU32::new(0);
 
 async fn sntp_once(stack: Stack<'static>, sock: &mut embassy_net::udp::UdpSocket<'_>, host: &str) -> Result<u64, u32> {
     use embassy_net::dns::DnsQueryType;
     let addrs = with_timeout(Duration::from_secs(5), stack.dns_query(host, DnsQueryType::A)).await.ok().and_then(Result::ok).ok_or(1u32)?;
     let embassy_net::IpAddress::Ipv4(ip) = *addrs.first().ok_or(1u32)?;
-    let mut req = [0u8; 48];
-    req[0] = 0x23; // LI 0, version 4, mode 3 (client)
-    sock.send_to(&req, (ip, 123)).await.map_err(|_| 2u32)?;
-    let mut resp = [0u8; 64];
-    let (n, _) = with_timeout(Duration::from_secs(4), sock.recv_from(&mut resp)).await.ok().and_then(Result::ok).ok_or(3u32)?;
-    if n < 48 || resp[0] & 7 != 4 || resp[1] == 0 {
-        return Err(4); // not a server answer, or "kiss of death" (stratum 0)
-    }
-    let secs = u64::from(u32::from_be_bytes([resp[40], resp[41], resp[42], resp[43]]));
-    let unix = secs.checked_sub(NTP_UNIX_OFFSET).ok_or(4u32)?;
-    if unix > 1_700_000_000 { Ok(unix) } else { Err(5) } // the C's validity rule
+    SNTP_IP.store(u32::from_be_bytes(ip.octets()), Ordering::Relaxed);
+    tdongle_tailnet_runtime::sntp::exchange(sock, ip, Duration::from_secs(4)).await
 }
 
 #[embassy_executor::task]
@@ -1039,11 +1033,14 @@ async fn sntp_task(stack: Stack<'static>, bufs: &'static mut SntpBufs) -> ! {
             Timer::after_secs(1).await;
             continue;
         }
-        if sock.endpoint().port == 0 && sock.bind(0).is_err() {
+        // a new local port every try: a port that cannot receive (a collision with a NAT mapping, a stale ARP/route state keyed on it) would otherwise fail every server
+        sock.close();
+        if sock.bind(0).is_err() {
             SNTP_FAIL.store(6, Ordering::Relaxed);
             Timer::after_secs(2).await;
             continue;
         }
+        SNTP_PORT.store(u32::from(sock.endpoint().port), Ordering::Relaxed);
         let host = tdongle_serial::clock::SERVER_NAMES[server % tdongle_serial::clock::SERVERS];
         SNTP_SERVER.store((server % tdongle_serial::clock::SERVERS) as u32, Ordering::Relaxed);
         SNTP_TRIES.fetch_add(1, Ordering::Relaxed);
@@ -1247,12 +1244,16 @@ fn sta_report(sh: &Sh, out: &mut String) {
     }
     let _ = write!(
         out,
-        "tn_sntp tries={} ok={} server={} last_fail={} clock_valid={}\r\n",
+        "tn_sntp tries={} ok={} server={} last_fail={} clock_valid={} last_ip={:#010x} last_answer_len={} last_answer_head={:#06x} local_port={}\r\n",
         ld(&SNTP_TRIES),
         ld(&SNTP_OK),
         tdongle_serial::clock::SERVER_NAMES[ld(&SNTP_SERVER) as usize % tdongle_serial::clock::SERVERS],
         ld(&SNTP_FAIL),
-        (CLOCK_BASE.load(Ordering::Relaxed) != 0) as u8
+        (CLOCK_BASE.load(Ordering::Relaxed) != 0) as u8,
+        ld(&SNTP_IP),
+        ld(&tdongle_tailnet_runtime::sntp::LAST_LEN),
+        ld(&tdongle_tailnet_runtime::sntp::LAST_HEAD),
+        ld(&SNTP_PORT)
     );
     let stage = match ld(&DIAL.last_stage) {
         0 => "none",

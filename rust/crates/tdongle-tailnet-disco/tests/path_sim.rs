@@ -142,8 +142,15 @@ fn trust_expiry_decides_by_data() {
         // exactly one re-probe round, forced
         assert_eq!(count_ping(&o, |v| v == Via::Derp), 1, "{case}: one DERP ping");
         assert_eq!(count_ping(&o, |v| matches!(v, Via::Direct(_))), 1, "{case}: stale endpoint probed again");
-        assert_eq!(ps.route(60_003), Route::Derp);
+        // the C keeps the endpoint while data still flows on it (a starved ping must not push a working flow onto the relay), and uses the relay otherwise
+        assert_eq!(ps.route(60_003), if case == "flowing" { Route::Direct(PEER) } else { Route::Derp }, "{case}");
         assert!(!ps.status(60_003).has_direct);
+        if case == "flowing" {
+            // ...until the data stops too: the next tick (no data) gives the endpoint up
+            let dead = TickInput { session_up: session, data_age_ms: None, ..input() };
+            ps.tick(1, 61_000, &dead, &mut budget, &mut w.env(), &mut Actions::new());
+            assert_eq!(ps.route(61_001), Route::Derp, "kept endpoint dropped when the data stops");
+        }
     }
 }
 

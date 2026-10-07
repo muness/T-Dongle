@@ -232,6 +232,8 @@ pub struct Gateway {
     pub answer_arp: bool,
     /// Echo UDP datagrams that were sent to the gateway's MAC for off-link addresses back (the "Internet").
     pub echo_internet: bool,
+    /// Answer UDP datagrams sent to the gateway's MAC for an off-link address with this function of the request payload instead of echoing it (an NTP server, say).
+    pub internet_reply: Option<fn(&[u8]) -> Vec<u8>>,
     pub frames_from_sta: Vec<Vec<u8>>,
 }
 
@@ -317,7 +319,11 @@ impl Gateway {
                     let dst = ip_dst(l3);
                     let src_ip = ip_src(l3);
                     let data = &l3[28..usize::from(u16::from_be_bytes([l3[2], l3[3]]))];
-                    out.push(udp_frame(src, GW_MAC, dst, src_ip, dport, sport, data));
+                    let reply = match self.internet_reply {
+                        Some(f) => f(data),
+                        None => data.to_vec(),
+                    };
+                    out.push(udp_frame(src, GW_MAC, dst, src_ip, dport, sport, &reply));
                 }
             }
         }

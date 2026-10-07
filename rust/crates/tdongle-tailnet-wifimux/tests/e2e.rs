@@ -606,3 +606,43 @@ fn wakes_the_runner_on_every_event_it_must_see() {
     radio.set_credit(Some(2));
     assert!(cw.count() > n4, "credit wake");
 }
+
+/// The wall clock's exchange (`tdongle_tailnet_runtime::sntp`, the code the firmware runs) through the real stack and the mux, on a fresh local port per try as the firmware does:
+/// the answer comes back from an off-link "Internet" host through the gateway, and the device's own UDP socket must receive it (a station that cannot gets no clock, so no TLS,
+/// so no tailnet).
+#[test]
+fn sntp_exchange_through_the_stack_and_the_mux() {
+    fn ntp_answer(req: &[u8]) -> Vec<u8> {
+        assert_eq!(req.len(), 48);
+        assert_eq!(req[0], 0x23);
+        let mut r = vec![0u8; 48];
+        r[0] = 0x24; // LI 0, version 4, mode 4 (server)
+        r[1] = 2; // stratum
+        let secs: u32 = (1_800_000_000u64 + tdongle_tailnet_runtime::sntp::NTP_UNIX_OFFSET) as u32;
+        r[40..44].copy_from_slice(&secs.to_be_bytes());
+        r
+    }
+    let mut lan = Lan::new(RadioHandle::new());
+    lan.gw.internet_reply = Some(ntp_answer);
+    let s = sta(&mut lan);
+    bring_up(&mut lan, &s);
+    let result = Rc::new(RefCell::new(Vec::<Result<u64, u32>>::new()));
+    {
+        let stack = s.stack;
+        let result = result.clone();
+        lan.tasks.push(Box::pin(async move {
+            let (rm, rb, tm, tb) = (leak([PacketMetadata::EMPTY; 4]), leak(vec![0u8; 512]), leak([PacketMetadata::EMPTY; 4]), leak(vec![0u8; 512]));
+            let mut u = UdpSocket::new(stack, rm, rb, tm, tb);
+            for _ in 0..3 {
+                u.close();
+                u.bind(0).unwrap();
+                let r = tdongle_tailnet_runtime::sntp::exchange(&mut u, Ipv4Address::new(129, 6, 15, 28), embassy_time::Duration::from_secs(4)).await;
+                result.borrow_mut().push(r);
+            }
+        }));
+    }
+    let r2 = result.clone();
+    assert!(lan.run_until(move |_| r2.borrow().len() == 3, 40_000), "no answer: {:?}", result.borrow());
+    assert_eq!(*result.borrow(), vec![Ok(1_800_000_000); 3]);
+    assert!(s.port.stats().rx_to_host.get() == 0, "the answer went to the stack, not to the USB host");
+}

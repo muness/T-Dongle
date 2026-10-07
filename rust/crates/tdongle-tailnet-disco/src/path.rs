@@ -657,6 +657,9 @@ pub enum Route {
 
 const NO_RTT: u16 = u16::MAX;
 
+/// `trust_until` value that marks a kept endpoint (see [`PathState::keeps_endpoint`]).
+const KEEP_ENDPOINT: u64 = u64::MAX;
+
 /// One peer's path state. `E` is the number of candidate endpoints kept (the C keeps 8).
 #[derive(Clone)]
 pub struct PathState<const E: usize = 8> {
@@ -740,9 +743,16 @@ impl<const E: usize> PathState<E> {
         n
     }
 
+    /// The C keeps the direct endpoint after the trust lapses while encrypted data still arrives on it (`ml_wg_mgr.c`: "PING-stale but data flowing - keeping endpoint"), so a
+    /// starved ping does not push a working flow onto the relay. Marked by `trust_until == KEEP_ENDPOINT` (no field: the state size is budgeted); a pong, `reset_path` and the
+    /// data stopping (here, not in the C) end it.
+    fn keeps_endpoint(&self) -> bool {
+        !self.has_direct && self.trust_until == KEEP_ENDPOINT && self.best != Ep::NONE
+    }
+
     /// DISCO's choice for this peer now.
     pub fn route(&self, now: Millis) -> Route {
-        if self.has_direct && now <= self.trust_until { Route::Direct(self.best) } else { Route::Derp }
+        if (self.has_direct && now <= self.trust_until) || self.keeps_endpoint() { Route::Direct(self.best) } else { Route::Derp }
     }
 
     /// Snapshot for status.
@@ -1016,6 +1026,7 @@ impl<const E: usize> PathState<E> {
             if input.allowed {
                 let flowing = input.data_age_ms.is_some_and(|a| a < cfg.data_flowing_ms);
                 if flowing {
+                    self.trust_until = KEEP_ENDPOINT;
                     env.counters.trust_lapsed_data_flowing.bump();
                 } else if input.session_up {
                     env.counters.trust_lapsed_reverted.bump();
@@ -1027,6 +1038,11 @@ impl<const E: usize> PathState<E> {
                     self.send_pings(id, now, true, true, PingKind::Discovery, env, out);
                 }
             }
+        }
+        if self.keeps_endpoint() && !input.data_age_ms.is_some_and(|a| a < cfg.data_flowing_ms) {
+            // the endpoint was kept because data still arrived on it; the data has stopped too, so the path is dead (the C leaves this to its 30 s handshake retry)
+            self.trust_until = 0;
+            env.counters.trust_lapsed_reverted.bump();
         }
         if !input.allowed {
             return;
