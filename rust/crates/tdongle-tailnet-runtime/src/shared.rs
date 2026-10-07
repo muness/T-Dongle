@@ -584,6 +584,12 @@ impl SharedBulk {
     }
 }
 
+/// Control workspaces held now (all memberships), for the firmware's heap sampler: the minimum free heap while none is held is the margin the elastic consumers really have.
+pub static NEG_HOLDERS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// Leases that waited for a lull of the relay (count, milliseconds waited in all): the workspace is allowed below the floor, and every other elastic consumer, the relay's
+/// own included, is refused for as long as it is held.
+pub static NEG_DEFERRED: [core::sync::atomic::AtomicU32; 2] = [const { core::sync::atomic::AtomicU32::new(0) }; 2];
+
 /// One session's way to get a [`Bulk`]: from the pool, as a [`Class::Negotiation`] allocation (the join's peak, which the heap floor reserves), waiting when the
 /// pool says no.
 #[derive(Debug)]
@@ -622,6 +628,7 @@ impl core::ops::DerefMut for BulkGuard<'_> {
 
 impl Drop for BulkGuard<'_> {
     fn drop(&mut self) {
+        NEG_HOLDERS.fetch_sub(1, Ordering::Relaxed);
         self.stats.holders.fetch_sub(1, Ordering::Relaxed);
     }
 }
@@ -632,10 +639,24 @@ impl<'a> BulkLease for BulkSource<'a> {
     where
         Self: 'g;
     async fn lease(&self) -> BulkGuard<'a> {
+        // While the relay carries data and the margin over the floor is thinner than the workspace, this waits for a lull (at most 8 s): the workspace may take the heap
+        // below the floor (it is what the floor reserves), and while it is held every other elastic consumer, the relay's frames included, is refused.
+        if crate::derp::relay_busy() && self.mem.heap.free() < tdongle_tailnet_admission::heap::ML_HB_FLOOR + core::mem::size_of::<Bulk>() {
+            let t0 = embassy_time::Instant::now();
+            NEG_DEFERRED[0].fetch_add(1, Ordering::Relaxed);
+            while crate::derp::relay_busy()
+                && self.mem.heap.free() < tdongle_tailnet_admission::heap::ML_HB_FLOOR + core::mem::size_of::<Bulk>()
+                && t0.elapsed() < embassy_time::Duration::from_secs(8)
+            {
+                embassy_time::Timer::after_millis(200).await;
+            }
+            NEG_DEFERRED[1].fetch_add(t0.elapsed().as_millis() as u32, Ordering::Relaxed);
+        }
         // admitted and counted first (this waits for memory), and proven servable by the allocator with a block of exactly this size, which is freed again
         // just before the box takes its place: `Box::new` then does not reach the allocator's out-of-memory handler
         let charge = self.mem.alloc_wait(Class::Negotiation, core::mem::size_of::<Bulk>()).await.into_charge();
         let bulk = alloc::boxed::Box::new(Bulk::new());
+        NEG_HOLDERS.fetch_add(1, Ordering::Relaxed);
         let n = self.stats.holders.fetch_add(1, Ordering::Relaxed) + 1;
         self.stats.max_holders.fetch_max(n, Ordering::Relaxed);
         self.stats.leases.fetch_add(1, Ordering::Relaxed);

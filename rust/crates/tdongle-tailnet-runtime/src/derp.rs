@@ -145,6 +145,8 @@ static XQ: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw
 /// A packet was queued: wakes the visit manager, and (second signal: a signal has one waiter) the link's loop, which pumps what waits for its region.
 static X_SIG: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
 static X_PUMP: embassy_sync::signal::Signal<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, ()> = embassy_sync::signal::Signal::new();
+/// The most bytes the waiting packets held at once.
+pub static XQ_PEAK: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// Packets that may wait for a visit (TCP sends a window of them while the link switches).
 pub const XQ_MAX: usize = 6;
 /// How long a packet waits for the link to reach its region before it is dropped (TCP in the tunnel retransmits).
@@ -160,6 +162,14 @@ pub const X_STARVE_MS: u32 = 10_000;
 /// The last time a data packet was handed to the link (for the region it is on), and when the oldest packet for the home region that had to wait (the link being away) was
 /// queued (0: none), ms clock.
 static HOME_LAST_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// The last data packet the link sent, on the embassy clock (so the memory code, which has no platform, can ask `relay_busy`).
+static LAST_DATA_AT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Did the relay link send data in the last 3 s?
+pub fn relay_busy() -> bool {
+    let at = LAST_DATA_AT.load(core::sync::atomic::Ordering::Relaxed);
+    at != 0 && (embassy_time::Instant::now().as_millis() as u32).wrapping_sub(at) < 3000
+}
 static HOME_WAITING_SINCE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// The region the member's engine homes the link on (its last `Connect` command), and the region the link is visiting (0: none).
 static HOME_REGION: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
@@ -201,6 +211,8 @@ fn push_x<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory>(sh: &Shared<R,
             return false;
         }
         q.push(XPacket { slot: idx as u8, region, dst: key, data: v, at_ms: now });
+        let bytes: usize = q.iter().map(|p| p.data.len()).sum();
+        XQ_PEAK.fetch_max(bytes as u32, Relaxed);
         true
     });
     if ok {
@@ -253,6 +265,7 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'_, '_, R, P, S
                 Ok(()) => {
                     X_COUNTS[1].fetch_add(1, Relaxed);
                     HOME_LAST_MS.store((now as u32).max(1), Relaxed);
+                    LAST_DATA_AT.store(embassy_time::Instant::now().as_millis() as u32 | 1, Relaxed);
                     HOME_WAITING_SINCE.store(0, Relaxed);
                 }
                 Err(_) => {
@@ -493,6 +506,11 @@ where
         // time for the new home to settle before the next switch
         Timer::after_millis(u64::from(VISIT_TIMING[2].load(Relaxed))).await;
     }
+}
+
+/// Bytes of the packets waiting for a visit now.
+pub fn xq_bytes() -> usize {
+    XQ.lock(|q| q.borrow().iter().map(|p| p.data.len()).sum())
 }
 
 /// Forget the visit state (the region the link visits, the home it was told, what waits): for a runtime that starts again in the same process (the host tests; on the device a
@@ -788,6 +806,7 @@ impl<'a, 'p, R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Drv<'a, 'p,
                     self.sh.slots[self.idx].derp_q.discard_front();
                     if !background {
                         HOME_LAST_MS.store((now as u32).max(1), core::sync::atomic::Ordering::Relaxed);
+                        LAST_DATA_AT.store(embassy_time::Instant::now().as_millis() as u32 | 1, core::sync::atomic::Ordering::Relaxed);
                     }
                 }
             }

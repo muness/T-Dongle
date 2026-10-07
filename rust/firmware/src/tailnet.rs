@@ -72,6 +72,9 @@ pub const RX_RING: usize = 32;
 pub const RX_RESERVE: usize = 14 * 1024;
 /// Bytes of frames now in the ring.
 static RX_BYTES: AtomicU32 = AtomicU32::new(0);
+/// The most bytes the radio's receive ring held, and the minimum free heap while no control workspace was held.
+static RX_BYTES_PEAK: AtomicU32 = AtomicU32::new(0);
+static HEAP_MIN_NO_NEG: AtomicU32 = AtomicU32::new(u32::MAX);
 /// Ethernet frames the USB side can hold between the NCM receiver task and the runtime (backpressure beyond that: the OUT endpoint is not re-armed).
 pub const USB_RX_FRAMES: usize = 2;
 /// Peer records per membership of the in-RAM directory (the C keeps the directory in flash; see the report).
@@ -174,6 +177,10 @@ impl HeapProbe for FwHeap {
     fn free(&self) -> usize {
         let f = esp_alloc::HEAP.free();
         HEAP_MIN.fetch_min(f as u32, Ordering::Relaxed);
+        // the margin the elastic consumers really have: the minimum while no control workspace is held (that one is allowed below the floor)
+        if tdongle_tailnet_runtime::shared::NEG_HOLDERS.load(Ordering::Relaxed) == 0 {
+            HEAP_MIN_NO_NEG.fetch_min(f as u32, Ordering::Relaxed);
+        }
         f
     }
     fn largest_block(&self) -> usize {
@@ -616,7 +623,8 @@ pub fn wifi_rx(frame: &[u8]) -> bool {
             return Err(block);
         }
         let at = (r.head + r.count) % RX_RING;
-        RX_BYTES.fetch_add(block.len() as u32, Ordering::Relaxed);
+        let now_bytes = RX_BYTES.fetch_add(block.len() as u32, Ordering::Relaxed) + block.len() as u32;
+        RX_BYTES_PEAK.fetch_max(now_bytes, Ordering::Relaxed);
         r.slots[at] = Some(block);
         r.count += 1;
         Ok(())
@@ -1329,11 +1337,49 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             );
         }
         {
+            // where the heap is: the free heap and its minimum with and without a control workspace held (the workspace may take the heap below the floor: it is what the floor
+            // reserves), the pool, the radio ring, the waiting packets, the relay queue
+            use tdongle_tailnet_runtime::shared::{NEG_DEFERRED, NEG_HOLDERS};
+            let p = sh.pool.stats();
+            let floor = ML_HB_FLOOR as i64;
+            let no_neg = ld(&HEAP_MIN_NO_NEG);
+            let _ = write!(
+                out,
+                "tn_heap free={} min={} (over_floor {}) min_without_negotiation={} (over_floor {}) floor={} negotiations_held_now={} bulk_max_holders={} deferred_for_relay[count,ms]={},{} pool[in_use,high,takes_socket_record_neg,denied_floor_heap_cap]={},{},{}/{}/{},{}/{}/{} rx_ring[now,peak]={},{} visit_queue[now,peak]={},{} relay_queue[now,high]={},{} usb_rx_waits={} bulk_leases={}\r\n",
+                FwHeap.free(),
+                ld(&HEAP_MIN),
+                ld(&HEAP_MIN) as i64 - floor,
+                no_neg,
+                if no_neg == u32::MAX { 0 } else { no_neg as i64 - floor },
+                ML_HB_FLOOR,
+                NEG_HOLDERS.load(Ordering::Relaxed),
+                sh.bulk.max_holders(),
+                NEG_DEFERRED[0].load(Ordering::Relaxed),
+                NEG_DEFERRED[1].load(Ordering::Relaxed),
+                p.in_use,
+                p.high_water,
+                p.takes[0],
+                p.takes[1],
+                p.takes[2],
+                p.denied_floor,
+                p.denied_heap,
+                p.denied_cap,
+                ld(&RX_BYTES),
+                ld(&RX_BYTES_PEAK),
+                tdongle_tailnet_runtime::derp::xq_bytes(),
+                ld(&tdongle_tailnet_runtime::derp::XQ_PEAK),
+                sh.slots.iter().map(|s| s.derp_q.len_bytes()).sum::<usize>(),
+                sh.slots.iter().map(|s| s.derp_q.stats().high_water as usize).max().unwrap_or(0),
+                ld(&USB_RX_WAITS),
+                sh.bulk.leases()
+            );
+        }
+        {
             use tdongle_tailnet_runtime::net_embassy::TCP_DIAG as T;
             let _ = write!(
                 out,
-                "tn_tcp_errs read={} write={} flush_on_closed={} aborted_by_us={} last_op={} (1 read, 2 write, 3 flush) last_state={} (0 Closed, 4 Established, 7 CloseWait) send_queue={} recv_queue={} after_ms={}\r\n",
-                T[0].load(Relaxed), T[1].load(Relaxed), T[2].load(Relaxed), T[3].load(Relaxed), T[4].load(Relaxed), T[5].load(Relaxed), T[6].load(Relaxed), T[7].load(Relaxed), T[8].load(Relaxed)
+                "tn_tcp_errs read={} write={} flush_on_closed={} aborted_by_us={} (control {}, relay {}; connects control {}, relay {}) last_op={} (1 read, 2 write, 3 flush) last_state={} (0 Closed, 4 Established, 7 CloseWait) send_queue={} recv_queue={} after_ms={}\r\n",
+                T[0].load(Relaxed), T[1].load(Relaxed), T[2].load(Relaxed), T[3].load(Relaxed), tdongle_tailnet_runtime::net_embassy::TCP_ABORTS[0].load(Relaxed), tdongle_tailnet_runtime::net_embassy::TCP_ABORTS[1].load(Relaxed), tdongle_tailnet_runtime::net_embassy::TCP_CONNECTS[0].load(Relaxed), tdongle_tailnet_runtime::net_embassy::TCP_CONNECTS[1].load(Relaxed), T[4].load(Relaxed), T[5].load(Relaxed), T[6].load(Relaxed), T[7].load(Relaxed), T[8].load(Relaxed)
             );
         }
         {
