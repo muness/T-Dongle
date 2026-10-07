@@ -693,3 +693,70 @@ fn dns_lookups_work_with_the_firmwares_whole_socket_set() {
         assert_eq!(*a, Some(embassy_net::IpAddress::v4(203, 0, 113, 7)), "{:?}", got.borrow());
     }
 }
+
+/// The USB host's DNS flow through the NAT and the device's own lookups at once, to the same server: each reply goes where it belongs (the host's to the host with its original port,
+/// the stack's to the stack), and the counters say so. Matching is on the mapped port **and** the remote address and port, so a flow of the host never takes the device's reply.
+#[test]
+fn host_dns_through_nat_and_the_devices_own_lookups_do_not_take_each_others_replies() {
+    use std::sync::atomic::Ordering::Relaxed;
+    fn dns_answer(q: &[u8]) -> Vec<u8> {
+        let mut r = q.to_vec();
+        r[2] = 0x81;
+        r[3] = 0x80;
+        r[6..8].copy_from_slice(&1u16.to_be_bytes());
+        r.extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 203, 0, 113, 7]);
+        r
+    }
+    let before: Vec<u32> = tdongle_tailnet_wifimux::tap::REPLY_VERDICTS.iter().map(|c| c.load(Relaxed)).collect();
+    let mut lan = Lan::new(RadioHandle::new());
+    lan.gw.internet_reply = Some(dns_answer);
+    let s = sta(&mut lan);
+    bring_up(&mut lan, &s);
+    let stack = s.stack;
+    let got = Rc::new(RefCell::new(Vec::new()));
+    {
+        let got = got.clone();
+        lan.tasks.push(Box::pin(async move {
+            for _ in 0..8 {
+                let r = embassy_time::with_timeout(embassy_time::Duration::from_secs(5), stack.dns_query("pool.ntp.org", embassy_net::dns::DnsQueryType::A)).await;
+                got.borrow_mut().push(r.ok().and_then(Result::ok).and_then(|v| v.first().copied()));
+            }
+        }));
+    }
+    let (napt, port) = (s.napt, s.port);
+    let host_replies = Rc::new(RefCell::new(Vec::<Vec<u8>>::new()));
+    {
+        let hr = host_replies.clone();
+        lan.tasks.push(Box::pin(async move {
+            let mut buf = [0u8; 1500];
+            loop {
+                let n = port.next_to_host(&mut buf).await;
+                hr.borrow_mut().push(buf[..n].to_vec());
+            }
+        }));
+        lan.tasks.push(Box::pin(async move {
+            for i in 0..8u16 {
+                // the host asks the very server the device uses (the lease's resolver, the gateway)
+                let mut q = vec![0x12, i as u8, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 4, b'h', b'o', b's', b't', 0, 0, 1, 0, 1];
+                q[0] = 0x12;
+                let (p, v) = host_udp(napt, 6000 + i, GW_IP, 53, &q);
+                let Verdict::Forward { len, .. } = v else { panic!("{v:?}") };
+                port.send(&p[..usize::from(len)]).await.unwrap();
+                for _ in 0..20 {
+                    yield_now().await;
+                }
+            }
+        }));
+    }
+    let (g2, h2) = (got.clone(), host_replies.clone());
+    assert!(lan.run_until(move |_| g2.borrow().len() == 8 && h2.borrow().len() == 8, 80_000), "device {:?} host {}", got.borrow(), host_replies.borrow().len());
+    for a in got.borrow().iter() {
+        assert_eq!(*a, Some(embassy_net::IpAddress::v4(203, 0, 113, 7)));
+    }
+    let mut ports: Vec<u16> = host_replies.borrow().iter().map(|r| udp_ports(r).1).collect();
+    ports.sort_unstable();
+    assert_eq!(ports, (6000..6008).collect::<Vec<_>>());
+    let after: Vec<u32> = tdongle_tailnet_wifimux::tap::REPLY_VERDICTS.iter().map(|c| c.load(Relaxed)).collect();
+    assert!(after[0] - before[0] >= 8, "host replies taken by the NAT: {before:?} {after:?}");
+    assert!(after[1] - before[1] >= 8, "the device's replies left to the stack: {before:?} {after:?}");
+}

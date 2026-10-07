@@ -521,6 +521,16 @@ static ARP_RX: AtomicU32 = AtomicU32::new(0);
 static ARP_TX: AtomicU32 = AtomicU32::new(0);
 /// UDP frames by well-known port seen at the driver, each way: DNS (53) and NTP (123), and the driver's polls (`tn_dns` line).
 static DNS_FRAMES: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4]; // dns tx, dns rx, ntp tx, ntp rx
+/// The first 48 bytes of the last DNS query frame the stack sent (Ethernet header, IP header, UDP header: addresses, ports, checksum), for comparing with a capture.
+static LAST_DNS_TX: critical_section::Mutex<RefCell<[u8; 48]>> = critical_section::Mutex::new(RefCell::new([0; 48]));
+fn last_dns_tx_hex() -> String {
+    let h = critical_section::with(|cs| *LAST_DNS_TX.borrow_ref(cs));
+    let mut s = String::new();
+    for b in h {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
 static DRV_TX_POLLS: AtomicU32 = AtomicU32::new(0);
 static DRV_TX_NOROOM: AtomicU32 = AtomicU32::new(0);
 static DRV_RX_POLLS: AtomicU32 = AtomicU32::new(0);
@@ -554,6 +564,13 @@ fn note_frame(frame: &[u8], rx: bool) {
                 let (want, i) = if rx { (sp, 1) } else { (dp, 0) };
                 if want == 53 {
                     DNS_FRAMES[i].fetch_add(1, Ordering::Relaxed);
+                    if !rx {
+                        critical_section::with(|cs| {
+                            let mut h = LAST_DNS_TX.borrow_ref_mut(cs);
+                            let n = frame.len().min(h.len());
+                            h[..n].copy_from_slice(&frame[..n]);
+                        });
+                    }
                 } else if want == 123 {
                     DNS_FRAMES[i + 2].fetch_add(1, Ordering::Relaxed);
                 }
@@ -1275,7 +1292,7 @@ fn sta_report(sh: &Sh, out: &mut String) {
         let servers = STACK_REF.try_get().and_then(|ThreadOnly(st)| st.config_v4()).map(|c| c.dns_servers);
         let _ = write!(
             out,
-            "tn_dns frames[dns_tx,dns_rx,ntp_tx,ntp_rx]={},{},{},{} sntp_dns[started,answered,empty_or_error,timeout]={},{},{},{} drv[tx_polls,tx_noroom,rx_polls]={},{},{} tx_refused={} servers={:?}\r\n",
+            "tn_dns frames[dns_tx,dns_rx,ntp_tx,ntp_rx]={},{},{},{} sntp_dns[started,answered,empty_or_error,timeout]={},{},{},{} drv[tx_polls,tx_noroom,rx_polls]={},{},{} tx_refused={} servers={:?} napt_replies[dns_host,dns_stack,ntp_host,ntp_stack]={},{},{},{} last_dns_tx={}\r\n",
             ld(&DNS_FRAMES[0]),
             ld(&DNS_FRAMES[1]),
             ld(&DNS_FRAMES[2]),
@@ -1288,7 +1305,12 @@ fn sta_report(sh: &Sh, out: &mut String) {
             ld(&DRV_TX_NOROOM),
             ld(&DRV_RX_POLLS),
             ld(&TX_REFUSED),
-            servers
+            servers,
+            ld(&tdongle_tailnet_wifimux::tap::REPLY_VERDICTS[0]),
+            ld(&tdongle_tailnet_wifimux::tap::REPLY_VERDICTS[1]),
+            ld(&tdongle_tailnet_wifimux::tap::REPLY_VERDICTS[2]),
+            ld(&tdongle_tailnet_wifimux::tap::REPLY_VERDICTS[3]),
+            last_dns_tx_hex()
         );
     }
     let _ = write!(

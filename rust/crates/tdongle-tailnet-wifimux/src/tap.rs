@@ -9,6 +9,28 @@ use tdongle_tailnet_types::{Entropy, Millis};
 use tdongle_tailnet_usbnet::napt::{Napt, NaptConfig, Verdict, WifiAddr};
 
 use crate::info::Ipv4Cfg;
+use core::sync::atomic::{AtomicU32, Ordering};
+
+/// UDP replies from port 53 and 123 that the tap sent to the USB host (it matched a host flow) and that it left to the station's own stack, in that order: `[dns host, dns stack,
+/// ntp host, ntp stack]`. Diagnostics: a lookup of the device that never completes is either not on the air (the driver's own counters) or taken here.
+pub static REPLY_VERDICTS: [AtomicU32; 4] = [const { AtomicU32::new(0) }; 4];
+
+fn count_reply(frame: &[u8], to_host: bool) {
+    let ip = &frame[crate::ETH_HDR..];
+    if ip.len() < 28 || ip[0] >> 4 != 4 || ip[9] != 17 {
+        return;
+    }
+    let l4 = usize::from(ip[0] & 15) * 4;
+    if ip.len() < l4 + 2 {
+        return;
+    }
+    let i = match u16::from_be_bytes([ip[l4], ip[l4 + 1]]) {
+        53 => 0,
+        123 => 2,
+        _ => return,
+    };
+    REPLY_VERDICTS[i + usize::from(!to_host)].fetch_add(1, Ordering::Relaxed);
+}
 
 /// Why a tap consumed a frame without delivering it anywhere.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,8 +136,14 @@ impl<const N: usize> RxTap for NaptTap<'_, N> {
             return TapVerdict::Stack;
         }
         match self.napt.with(|n| n.inbound(now, &mut frame[crate::ETH_HDR..])) {
-            Verdict::Forward { len, .. } => TapVerdict::ToHost { offset: crate::ETH_HDR, len: usize::from(len) },
-            Verdict::Local(_) => TapVerdict::Stack,
+            Verdict::Forward { len, .. } => {
+                count_reply(frame, true);
+                TapVerdict::ToHost { offset: crate::ETH_HDR, len: usize::from(len) }
+            }
+            Verdict::Local(_) => {
+                count_reply(frame, false);
+                TapVerdict::Stack
+            }
             Verdict::Reject(_) => TapVerdict::Dropped(TapDrop::Rejected),
             Verdict::Drop(_) => TapVerdict::Dropped(TapDrop::Dropped),
         }
