@@ -297,6 +297,7 @@ static CARRIER: AtomicBool = AtomicBool::new(false);
 /// Called by the NCM receiver task for every datagram while tailnet mode owns the data path: hand it to the runtime, waiting (and so not re-arming the OUT
 /// endpoint: the host's driver sees NAKs) while the runtime cannot take it. `false`: the host left the data interface while we waited.
 pub async fn usb_rx(datagram: &[u8]) -> bool {
+    crate::pm::note_activity(); // the tunnel's encrypt runs next: hold the CPU at 240 MHz (the bridge path does the same through `FwEnv`)
     let n = datagram.len().min(crate::MTU);
     loop {
         if ALT.load(Ordering::Relaxed) == 0 {
@@ -450,6 +451,7 @@ impl UsbFrames for FwUsb {
         n
     }
     fn send(&mut self, frame: &[u8]) -> bool {
+        crate::pm::note_activity();
         FwEnv.usb_ring_send(frame) == RingSend::Accepted
     }
     fn host_ready(&self) -> bool {
@@ -642,6 +644,7 @@ impl Driver for L2Driver {
         RX_WAKER.register(cx.waker());
         let mut buf = [0u8; crate::MTU];
         let len = pop_rx(&mut buf)?;
+        crate::pm::note_activity(); // decrypt and routing follow
         RX_FRAMES.fetch_add(1, Ordering::Relaxed);
         Some((L2Rx { buf, len }, L2Tx))
     }
