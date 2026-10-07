@@ -20,8 +20,8 @@ use crate::access::{self, Facts, Origin};
 use crate::router::Conn;
 use core::fmt;
 
-/// The controller page (the one bundle; `site/controller.html` is a byte-identical copy, a test keeps them equal).
-pub const PAGE: &[u8] = include_bytes!("../../../webui/controller.html");
+/// USB setup page using only the endpoints proxied by the Android in-app view.
+pub const PAGE: &[u8] = include_bytes!("../../../webui/android.html");
 /// The only `Content-Type` `/serial` accepts.
 pub const COMMAND_TYPE: &[u8] = b"application/x-tdongle-command";
 /// The largest request head read (`CONFIG_HTTPD_MAX_REQ_HDR_LEN` of the C is 1024: a browser's head is close to that, so this is larger).
