@@ -138,6 +138,7 @@ fn selftest_commands_parse() {
     assert_eq!(Selftest::parse(" irqoff "), Some(Selftest::IrqOff));
     assert_eq!(Selftest::parse("panic"), Some(Selftest::Panic));
     assert_eq!(Selftest::parse("console"), Some(Selftest::Console));
+    assert_eq!(Selftest::parse("usb"), Some(Selftest::Usb));
     assert_eq!(Selftest::parse("nope"), None);
 }
 

@@ -19,6 +19,7 @@ tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
 tdongle-nvs-write = { path = "../crates/tdongle-nvs-write", features = ["sim"] }
 tdongle-usb-descriptors = { path = "../crates/tdongle-usb-descriptors" }
 tdongle-setup = { path = "../crates/tdongle-setup" }
+tdongle-dhcp = { path = "../crates/tdongle-dhcp" }
 
 # tailnet crates (phase 3)
 tdongle-tailnet-admission = { path = "../crates/tdongle-tailnet-admission" }
@@ -319,5 +320,11 @@ doc = false
 [[bin]]
 name = "tailnet_wifimux_rx"
 path = "fuzz_targets/tailnet_wifimux_rx.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "dhcp_server"
+path = "fuzz_targets/dhcp_server.rs"
 test = false
 doc = false

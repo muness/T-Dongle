@@ -30,6 +30,9 @@ tdongle-wifi-budget = { path = "../crates/tdongle-wifi-budget" }
 esp-wifi-sys-esp32s3 = "0.3"
 critical-section = "1"
 esp-rom-sys = { version = "0.1", features = ["esp32s3"] }
+embassy-net = { version = "0.9", default-features = false, features = ["tcp", "udp", "medium-ethernet", "proto-ipv4"] }
+tdongle-dhcp = { path = "../crates/tdongle-dhcp" }
+tdongle-setup = { path = "../crates/tdongle-setup" }
 tdongle-lcd = { path = "../crates/tdongle-lcd" }
 tdongle-ui = { path = "../crates/tdongle-ui" }
 tdongle-pm = { path = "../crates/tdongle-pm" }

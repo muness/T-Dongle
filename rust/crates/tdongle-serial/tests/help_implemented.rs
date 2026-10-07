@@ -19,7 +19,7 @@ fn every_firmware_command_in_help_is_parsed_and_the_text_has_no_extras() {
     assert_eq!(text.lines().count(), 2);
     let listed: Vec<&str> = text.lines().nth(1).unwrap().strip_prefix("Commands: ").unwrap().split(", ").collect();
     assert_eq!(listed, PHASE1_FIRMWARE_COMMANDS);
-    for unimplemented in ["setup", "cancel"] {
+    for unimplemented in ["retry-startup", "crypto bench"] {
         assert!(!listed.contains(&unimplemented), "{unimplemented} is not implemented and must not be advertised");
     }
 }

@@ -232,3 +232,11 @@ pub fn roaming_assist() {
         }
     }
 }
+
+/// Send one raw Ethernet frame on the soft-AP interface (the setup boot's DHCP replies: unicast to the client's MAC, as lwIP does through its temporary ARP entry). The driver copies the
+/// frame before returning. Not charged to the station TX budget (a few frames per lease).
+pub fn tx_ap(frame: &[u8]) -> bool {
+    // SAFETY: `frame` is readable for its length; the driver copies it into its own buffer before returning.
+    let code = unsafe { sys::esp_wifi_internal_tx(sys::wifi_interface_t_WIFI_IF_AP, frame.as_ptr().cast_mut().cast(), frame.len() as u16) };
+    code == sys::ESP_OK as i32
+}

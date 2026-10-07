@@ -57,7 +57,7 @@ pub enum Tick {
 #[derive(Debug)]
 pub struct Portal {
     token: [u8; TOKEN_LENGTH],
-    preselect: u8,
+    preselect: core::sync::atomic::AtomicU8,
     session: Session,
     ap_name: [u8; crate::boot::SSID_LEN],
 }
@@ -89,7 +89,7 @@ impl Portal {
     /// boot time the ten minute clock starts from, `mac` the station MAC (the access point is `TDongle-XXXXXX`).
     #[must_use]
     pub fn new(boot: &SetupBoot, random: &[u8; 16], mac: &[u8; 6], now_ms: u32) -> Self {
-        Self { token: access::token_format(random), preselect: boot.preselect(), session: boot.session(now_ms), ap_name: crate::boot::ap_ssid(mac) }
+        Self { token: access::token_format(random), preselect: core::sync::atomic::AtomicU8::new(boot.preselect()), session: boot.session(now_ms), ap_name: crate::boot::ap_ssid(mac) }
     }
 
     /// The per-boot token the page carries.
@@ -111,8 +111,8 @@ impl Portal {
     }
 
     /// `setup N` over serial while setup is open: offer saved network `n` (0: none).
-    pub fn set_preselect(&mut self, n: u8) {
-        self.preselect = n;
+    pub fn set_preselect(&self, n: u8) {
+        self.preselect.store(n, core::sync::atomic::Ordering::Relaxed);
     }
 
     /// The control task's check and the failsafe timer: end setup when the session is over or the access point never came up.
@@ -254,7 +254,7 @@ impl Portal {
         let count = host.saved_count();
         let full = origin == Origin::Usb;
         let mut free = if count < PROFILE_LIMIT { count + 1 } else { 0 };
-        let pre = usize::from(self.preselect);
+        let pre = usize::from(self.preselect.load(core::sync::atomic::Ordering::Relaxed));
         if pre != 0 && pre <= count + 1 && pre <= PROFILE_LIMIT {
             free = pre;
         }

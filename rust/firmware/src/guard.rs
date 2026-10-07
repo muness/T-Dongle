@@ -54,6 +54,7 @@ pub fn begin() -> State {
     let mut rec = load();
     let boot = rec.begin_boot();
     store(&rec);
+    SAFE.store(boot.safe_mode, core::sync::atomic::Ordering::Relaxed);
     State { boot, reset: reset_reason() }
 }
 
@@ -190,4 +191,40 @@ pub mod heapless_str {
             Ok(())
         }
     }
+}
+
+/// The setup-boot request words (`setup_rtc`: magic, request, preselected slot). RTC fast memory keeps them over a software reset; a power-on boot zeroes them.
+#[esp_hal::ram(unstable(rtc_fast, persistent))]
+static mut SETUP_WORDS: [u32; 3] = [0; 3];
+
+/// Read and clear the request words (`setup_boot_early`).
+pub fn setup_take() -> [u32; 3] {
+    // SAFETY: only this module touches `SETUP_WORDS`, from the init task and the restart paths, never concurrently with a reset in flight.
+    unsafe {
+        let w = addr_of_mut!(SETUP_WORDS).read_volatile();
+        addr_of_mut!(SETUP_WORDS).write_volatile([0; 3]);
+        w
+    }
+}
+
+/// Leave the request words for the next boot (`setup_boot_request`).
+pub fn setup_set(words: [u32; 3]) {
+    // SAFETY: as in `setup_take`.
+    unsafe { addr_of_mut!(SETUP_WORDS).write_volatile(words) };
+}
+
+/// This boot is a safe-mode boot (the C `gateway_boot_recovery`).
+pub fn safe_mode_now() -> bool {
+    SAFE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+static SAFE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// A restart on purpose (`setup`, `cancel`, Done, `mode`, `reboot`, `confirm-reset`, the setup timeout): take this boot's unstable count back, then reset. Only watchdog, panic and
+/// unplanned resets count toward safe mode.
+pub fn planned_reset() -> ! {
+    let mut rec = load();
+    rec.planned_restart();
+    store(&rec);
+    tdongle_rescue::deliberate_reset()
 }

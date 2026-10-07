@@ -186,3 +186,36 @@ fn hang_and_op_tags_survive_a_reset_and_are_cleared_by_the_right_events() {
     let b = Record::from_words(&r.to_words()).begin_boot();
     assert!(b.previous.op.as_str().len() <= TAG_MAX && b.previous.op.as_str().chars().all(|c| c == 'ä'));
 }
+
+/// A restart the firmware asked for (setup, cancel, Done, mode, reboot, confirm-reset, the setup timeout) must not count: any number of them in a row, however quickly, never
+/// reaches safe mode; real failures still do, and a planned restart between them does not erase them.
+#[test]
+fn planned_restarts_never_make_safe_mode_but_real_failures_still_do() {
+    let mut rec = Record::EMPTY;
+    for _ in 0..10 {
+        let boot = rec.begin_boot();
+        assert!(!boot.safe_mode);
+        rec.planned_restart(); // dies within 30 s, on purpose
+    }
+    // two real failures (a watchdog or panic reset: nothing marks them planned) -> safe mode
+    let mut rec = Record::EMPTY;
+    assert!(!rec.begin_boot().safe_mode);
+    assert!(!rec.begin_boot().safe_mode);
+    assert!(rec.begin_boot().safe_mode);
+    // fail, planned, fail: the planned restart takes back only its own boot's count
+    let mut rec = Record::EMPTY;
+    assert!(!rec.begin_boot().safe_mode); // boot 1 fails (count 1)
+    assert!(!rec.begin_boot().safe_mode); // boot 2 is requested restart
+    rec.planned_restart(); // count back to 1
+    assert!(!rec.begin_boot().safe_mode); // boot 3 fails (count 2)
+    assert!(rec.begin_boot().safe_mode);
+    // the reported case: setup, then cancel ten seconds later, then setup again
+    let mut rec = Record::EMPTY;
+    let _ = rec.begin_boot(); // normal boot, up for 10 s
+    rec.planned_restart(); // `setup`
+    assert!(!rec.begin_boot().safe_mode);
+    rec.planned_restart(); // `cancel`
+    assert!(!rec.begin_boot().safe_mode);
+    rec.planned_restart();
+    assert!(!rec.begin_boot().safe_mode);
+}

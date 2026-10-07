@@ -99,6 +99,8 @@ pub const PHASE1_FIRMWARE_COMMANDS: &[&str] = &[
     "profile JSON",
     "scan",
     "display [B R D]",
+    "setup [N]",
+    "cancel",
     "reset",
     "confirm-reset",
     "mode wifi_bridge",
@@ -107,7 +109,7 @@ pub const PHASE1_FIRMWARE_COMMANDS: &[&str] = &[
     "boot-status",
     "reboot",
     "bootloader",
-    "selftest spin|irqoff|panic|console",
+    "selftest spin|irqoff|panic|console|usb",
     "help",
 ];
 

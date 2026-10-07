@@ -2325,6 +2325,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-dhcp"
+version = "0.3.0-dev"
+
+[[package]]
 name = "tdongle-fw"
 version = "0.3.0-dev"
 dependencies = [
@@ -2353,6 +2357,7 @@ dependencies = [
  "tdongle-aqm",
  "tdongle-boot-guard",
  "tdongle-bridge",
+ "tdongle-dhcp",
  "tdongle-lcd",
  "tdongle-nvs-format",
  "tdongle-nvs-read",
@@ -2361,6 +2366,7 @@ dependencies = [
  "tdongle-rescue",
  "tdongle-saved",
  "tdongle-serial",
+ "tdongle-setup",
  "tdongle-spsc",
  "tdongle-tailnet-engine",
  "tdongle-tailnet-fw",
@@ -2426,6 +2432,14 @@ dependencies = [
  "tdongle-bridge",
  "tdongle-nvs-format",
  "tdongle-traffic",
+]
+
+[[package]]
+name = "tdongle-setup"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-nvs-format",
+ "tdongle-serial",
 ]
 
 [[package]]
