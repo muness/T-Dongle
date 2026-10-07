@@ -196,7 +196,7 @@ The heap must hold, and a `const` assert in `tailnet::budget` says so: the Wi-Fi
 | TCP through the tunnel, DERP down / up (Mbit/s) | 155.1 / 7.5 | 138 to 170 / 7.5 to 7.7 (six runs) |
 | direct down / up | 186.8 / 14.8 | 191 to 211 / 14.6 to 14.9 |
 | join to routing (loopback; the first map is due within 30 s) | n/a | 1.07 to 1.12 s |
-| soak, two tailnets | min free 92,500 | min free 87,792 (model heap now includes the pool), no floor crossing, pool back to 0 |
+| soak, two tailnets | min free 92,500 | min free 80,494 (the model heap now includes the pool, high water 25.5 KB), no floor crossing |
 
 The host's network is tokio, so the embassy-net path (windows from the pool) is covered by its own host test (`embassy_net.rs`: windows held exactly while connected, none after `release`, refusal is a counted `NoMem`), not by the e2e. The per-record TLS buffer costs a block allocation per record (16 KB zeroing at worst); the loopback numbers include it, a board's do not exist yet.
 
