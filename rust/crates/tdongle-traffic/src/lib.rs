@@ -74,6 +74,34 @@ impl Counters {
     }
 }
 
+/// The last complete window's rates, published by the one task that owns a [`Sampler`] for readers on other tasks (the serial `status`
+/// report). Without it a reader only sees counters, and a rate it cannot compute is reported as 0.
+#[derive(Debug, Default)]
+pub struct Rates {
+    down_kbps: AtomicU32,
+    up_kbps: AtomicU32,
+}
+
+impl Rates {
+    /// Zero rates (usable in a `static`).
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { down_kbps: AtomicU32::new(0), up_kbps: AtomicU32::new(0) }
+    }
+
+    /// Publish the sampler's last complete window.
+    pub fn publish(&self, s: &Sampler) {
+        self.down_kbps.store(s.down_kbps, Ordering::Relaxed);
+        self.up_kbps.store(s.up_kbps, Ordering::Relaxed);
+    }
+
+    /// `(down_kbps, up_kbps)` of the last published window.
+    #[must_use]
+    pub fn read(&self) -> (u32, u32) {
+        (self.down_kbps.load(Ordering::Relaxed), self.up_kbps.load(Ordering::Relaxed))
+    }
+}
+
 /// The windowed rate sampler (`traffic_sampler`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Sampler {
@@ -222,6 +250,49 @@ mod tests {
         assert_eq!((t.down_kbps, t.up_kbps, t.history_kbps[1]), (0, 0, 0));
         t.sample(&at(125_000 + 250_000, 25_000, 100, 20), 9000); // a longer window: 2 s, 1 Mbit/s
         assert_eq!((t.down_kbps, t.cursor), (1000, 3));
+    }
+
+    /// iperf through the tailnet at about 1.3 Mbit/s, sampled every 100 ms (the housekeeping cadence), with jittered sample times: the
+    /// published rate is the window's, not the last 100 ms slice's, and is not truncated to 0.
+    #[test]
+    fn published_rate_under_steady_load() {
+        let rates = Rates::new();
+        assert_eq!(rates.read(), (0, 0));
+        let mut t = Sampler::new();
+        let mut c = at(0, 0, 0, 0);
+        let mut now = 10_000u32;
+        t.sample(&c, now);
+        rates.publish(&t);
+        assert_eq!(rates.read(), (0, 0), "no complete window yet");
+        for i in 0..50u32 {
+            let step = 97 + i % 7; // 97..103 ms
+            now += step;
+            c.down_bytes += 1_300_000 / 8 * step / 1000; // 1.3 Mbit/s down
+            c.up_bytes += 40_000 / 8 * step / 1000; // 40 kbit/s of ACKs up
+            t.sample(&c, now);
+            rates.publish(&t);
+        }
+        let (down, up) = rates.read();
+        assert!((1250..=1300).contains(&down), "down {down}");
+        assert!((35..=40).contains(&up), "up {up}");
+    }
+
+    /// Small per-sample deltas accumulate over the window instead of each truncating to 0 kbit/s on its own.
+    #[test]
+    fn small_slices_do_not_truncate() {
+        let mut t = Sampler::new();
+        let mut c = at(0, 0, 0, 0);
+        t.sample(&c, 0);
+        for ms in (10..=1000).step_by(10) {
+            c.up_bytes += 10; // 10 B per 10 ms: 1,000 B over the window = 8 kbit/s
+            t.sample(&c, ms);
+        }
+        assert_eq!(t.up_kbps, 8);
+        // and the window survives the millisecond clock wrapping
+        let mut t = Sampler::new();
+        t.sample(&at(0, 0, 0, 0), u32::MAX - 499);
+        t.sample(&at(125_000, 0, 1, 0), 500);
+        assert_eq!(t.down_kbps, 1000);
     }
 
     #[test]
