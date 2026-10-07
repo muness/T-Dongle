@@ -14,13 +14,14 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
-use tdongle_tailnet_engine::{RamDirectory, TxFate};
+use tdongle_tailnet_engine::flashdir::{FlashDirectory, MemFlash};
+use tdongle_tailnet_engine::TxFate;
 use tdongle_tailnet_fw::{MemberAction, Reply, TailnetApi};
 use tdongle_tailnet_runtime::shared::{Config, Shared};
 use tdongle_tailnet_runtime::wifi::WifiRaw;
 
 /// The directory of the harness's engines.
-pub type Dir = RamDirectory<3, 16, 32>;
+pub type Dir = FlashDirectory<MemFlash, 3, 32>;
 /// The shared state of the harness's runtime.
 pub type Sh = Shared<CriticalSectionRawMutex, MemPlatform, MemStorage, Dir>;
 
@@ -137,7 +138,7 @@ impl Gateway {
             timeouts: tdongle_tailnet_ctl::Timeouts { io_ms: 5_000, first_map_ms: 20_000, idle_ms: 20_000, lease_stall_ms: 5_000 },
             charge_static_bytes: false,
         };
-        let sh: &'static Sh = Box::leak(Box::new(Shared::new(cfg, platform, storage.clone(), Dir::new())));
+        let sh: &'static Sh = Box::leak(Box::new(Shared::new(cfg, platform, storage.clone(), Dir::new(MemFlash::new(Dir::PARTITION_BYTES)))));
         // the heap the runtime draws from: everything it holds is in the pool now (socket windows, TLS records, the control workspace of a negotiation), so the
         // model heap is the pool's `in_use`; the elastic floor must still hold at the minimum
         heap.set_model(move || sh.pool.in_use());

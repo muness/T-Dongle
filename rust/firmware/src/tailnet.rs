@@ -1322,7 +1322,8 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
         }
         {
             use tdongle_tailnet_runtime::derp::WIN_STATS;
-            let _ = write!(
+            crate::dirflash::report(out);
+        let _ = write!(
                 out,
                 "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={} waited_for_lull={} waited_for_heap={} force_derp={} dynamic_windows_enabled={}\r\n",
                 WIN_STATS[3].load(Relaxed),

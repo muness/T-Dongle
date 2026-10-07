@@ -585,50 +585,52 @@ impl<F: DirFlash, const M: usize, const N: usize> FlashDirectory<F, M, N> {
     }
 }
 
+/// A flash in memory that enforces the rules of the real one: erase to 0xFF a sector at a time, programming only clears bits.
+pub struct MemFlash {
+    /// The bytes.
+    pub d: Vec<u8>,
+    /// Fail the n-th write from now (power loss mid-commit), when set.
+    pub fail_after: Option<usize>,
+    /// Writes so far.
+    pub writes: usize,
+}
+impl MemFlash {
+    /// An erased flash of `bytes`.
+    pub fn new(bytes: usize) -> Self {
+        Self { d: alloc::vec![0xFF; bytes], fail_after: None, writes: 0 }
+    }
+}
+impl DirFlash for MemFlash {
+    fn read(&mut self, o: usize, b: &mut [u8]) -> bool {
+        b.copy_from_slice(&self.d[o..o + b.len()]);
+        true
+    }
+    fn erase_sector(&mut self, s: usize) -> bool {
+        self.d[s * SECTOR..(s + 1) * SECTOR].fill(0xFF);
+        true
+    }
+    fn write(&mut self, o: usize, data: &[u8]) -> bool {
+        self.writes += 1;
+        if self.fail_after.is_some_and(|n| self.writes > n) {
+            return false;
+        }
+        for (i, &x) in data.iter().enumerate() {
+            assert!(self.d[o + i] == 0xFF || self.d[o + i] == x, "write over live flash at {}", o + i);
+            self.d[o + i] = x;
+        }
+        true
+    }
+    fn size(&self) -> usize {
+        self.d.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::dir::RamDirectory;
     use tdongle_tailnet_map::types::Group;
     use tdongle_tailnet_types::Key32;
-
-    /// A flash in memory that enforces the rules of the real one: erase to 0xFF a sector at a time, programming only clears bits.
-    struct MemFlash {
-        d: Vec<u8>,
-        /// Fail the n-th write from now (power loss mid-commit), when set.
-        fail_after: Option<usize>,
-        writes: usize,
-    }
-    impl MemFlash {
-        fn new(bytes: usize) -> Self {
-            Self { d: alloc::vec![0xFF; bytes], fail_after: None, writes: 0 }
-        }
-    }
-    impl DirFlash for MemFlash {
-        fn read(&mut self, o: usize, b: &mut [u8]) -> bool {
-            b.copy_from_slice(&self.d[o..o + b.len()]);
-            true
-        }
-        fn erase_sector(&mut self, s: usize) -> bool {
-            self.d[s * SECTOR..(s + 1) * SECTOR].fill(0xFF);
-            true
-        }
-        fn write(&mut self, o: usize, data: &[u8]) -> bool {
-            self.writes += 1;
-            if self.fail_after.is_some_and(|n| self.writes > n) {
-                return false;
-            }
-            for (i, &x) in data.iter().enumerate() {
-                assert_eq!(self.d[o + i] | x, self.d[o + i] | 0, "programmed bytes must be erased or equal");
-                assert!(self.d[o + i] == 0xFF || self.d[o + i] == x, "write over live flash at {}", o + i);
-                self.d[o + i] = x;
-            }
-            true
-        }
-        fn size(&self) -> usize {
-            self.d.len()
-        }
-    }
 
     fn rec(ip: u32, key: u8, id: u64, name: &str) -> PeerRecord {
         let mut r = PeerRecord::new(PeerAction::Add, Group::Peers);
