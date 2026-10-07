@@ -20,6 +20,8 @@ mod ui;
 mod acm;
 mod ncm;
 #[cfg(feature = "tailnet")]
+mod dirflash;
+#[cfg(feature = "tailnet")]
 mod tailnet;
 
 use alloc::string::String;

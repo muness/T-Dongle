@@ -96,7 +96,7 @@ pub fn to_dir_record(r: &PeerRecord) -> DirRecord {
     d
 }
 
-const fn action_of(a: PeerAction) -> Action {
+pub(crate) const fn action_of(a: PeerAction) -> Action {
     match a {
         PeerAction::Add => Action::Add,
         PeerAction::Remove => Action::Remove,

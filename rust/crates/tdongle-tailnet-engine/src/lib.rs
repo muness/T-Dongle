@@ -61,6 +61,7 @@ extern crate std;
 pub mod alias;
 pub mod derp_glue;
 pub mod dir;
+pub mod flashdir;
 pub mod engine;
 #[cfg(feature = "fuzzing")]
 #[doc(hidden)]
