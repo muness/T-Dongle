@@ -1224,6 +1224,61 @@ fn sta_report(sh: &Sh, out: &mut String) {
         );
     }
     {
+        use core::sync::atomic::Ordering::Relaxed;
+        use tdongle_tailnet_runtime::derp::DERP_DIAG as D;
+        let (host, err) = D.text.lock(|t| {
+            let t = t.borrow();
+            let cut = |b: &[u8; 64]| String::from_utf8_lossy(&b[..b.iter().position(|&c| c == 0).unwrap_or(64)]).into_owned();
+            (cut(&t.0), cut(&t.1))
+        });
+        let now = Instant::now().as_millis() as u32;
+        let ready_at = D.ready_at_ms.load(Relaxed);
+        let ip = D.ip.load(Relaxed).to_be_bytes();
+        for (i, sl) in sh.slots.iter().enumerate() {
+            let st = sl.status();
+            let d = &st.derp;
+            let _ = write!(
+                out,
+                "tn_derp slot={} state={} region={} host={} port={} ip={}.{}.{}.{} stage={} (1 dial,2 tcp,3 tls,4 relaying) uptime_ms={} connects={} connect_failures={} frames_rx={} frames_tx={} last_rx_frame_type={:#04x} \
+keepalives={} pings_answered={} pings_dropped={} pongs={} unknown={} malformed={} rx_timeouts={} tx_stalls={} stale={} protocol_errors={} server_info_bad={} \
+last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={} ends[wait,lease,tls_read,write,link]={},{},{},{},{} last_error=\"{}\" tls_untrusted={}\r\n",
+                i,
+                st.derp_state.name(),
+                D.region.load(Relaxed),
+                host,
+                D.port.load(Relaxed),
+                ip[0], ip[1], ip[2], ip[3],
+                D.stage.load(Relaxed),
+                if ready_at == 0 { 0 } else { now.wrapping_sub(ready_at) },
+                d.connects.get(),
+                d.connect_failures.get(),
+                d.frames_rx.get(),
+                d.frames_tx.get(),
+                tdongle_tailnet_runtime::derp::LAST_RX_FRAME_TYPE.load(Relaxed),
+                d.keepalives.get(),
+                d.pings_answered.get(),
+                d.pings_dropped.get(),
+                d.pongs_rx.get(),
+                d.unknown_frames.get(),
+                d.malformed_frames.get(),
+                d.rx_timeouts.get(),
+                d.tx_stalls.get(),
+                d.stale.get(),
+                d.protocol_errors.get(),
+                d.server_info_bad.get(),
+                D.end.load(Relaxed),
+                D.end_after_ms.load(Relaxed),
+                D.ends[1].load(Relaxed),
+                D.ends[2].load(Relaxed),
+                D.ends[3].load(Relaxed),
+                D.ends[4].load(Relaxed),
+                D.ends[5].load(Relaxed),
+                err,
+                st.tls_untrusted
+            );
+        }
+    }
+    {
         // the host-bound path end to end: engine -> host_q -> pump -> ring -> IN NTBs (the bridge's own aggregation and interrupt-executor sender), and the UDP side that feeds it
         use tdongle_tailnet_runtime::{udp as rt_udp, usb as rt_usb};
         let ntbs = ld(&crate::NTB_IN_COUNT);

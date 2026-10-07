@@ -365,6 +365,14 @@ impl TcpConn for EmbTcp {
             s.abort();
         }
     }
+    fn remote_ip(&self) -> u32 {
+        match self.sock.as_ref().and_then(|s| s.remote_endpoint()) {
+            Some(ep) => match ep.addr {
+                IpAddress::Ipv4(v) => u32::from_be_bytes(v.octets()),
+            },
+            None => 0,
+        }
+    }
     async fn release(&mut self) {
         if let Some(s) = self.sock.as_mut() {
             // `abort` only marks the socket closed: the reset reaches the peer when the stack next polls, and a socket removed first would never send it (the

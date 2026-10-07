@@ -850,3 +850,34 @@ fn direct_path_falls_back_to_derp_after_the_trust_lapses() {
     wait_until("direct flag cleared by the next tick", 5, || gw.member_status(id).unwrap().direct_paths == 0);
     gw.check_engine();
 }
+
+/// The relay must stay up through a quiet period and then carry traffic: the real derper sends a KeepAlive about every 60 s and drops a client that does not read or answer. Idle
+/// time is `TN_DERP_IDLE_SECS` (default 300, five minutes: `TN_DERP_IDLE_SECS=300 cargo test -p tdongle-tailnet-host --test e2e derp_survives_idle -- --ignored --nocapture`).
+/// The link must reach ready once and never go back to waiting, with its frames-in counter growing from the server's keepalives alone.
+#[test]
+#[ignore = "five minutes of wall clock: run with --ignored"]
+fn derp_survives_idle_then_carries_traffic() {
+    let idle: u64 = std::env::var("TN_DERP_IDLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(300);
+    let mut go = go_or_skip!();
+    let (gw, _id, alias) = up(&mut go, "gopeer");
+    gw.net.udp_blocked.store(true, Ordering::SeqCst);
+    assert_eq!(gw.host.echo(alias, 7, b"warm", Duration::from_secs(30)).unwrap(), b"warm");
+    let before = gw.sh.slots[0].status().derp;
+    let (connects0, frames0) = (before.connects.get(), before.frames_rx.get());
+    let t0 = std::time::Instant::now();
+    while t0.elapsed() < Duration::from_secs(idle) {
+        std::thread::sleep(Duration::from_secs(5));
+        let st = gw.sh.slots[0].status();
+        assert_eq!(st.derp_state.name(), "ready", "relay left ready after {:?}\n{}", t0.elapsed(), gw.dump());
+    }
+    let after = gw.sh.slots[0].status().derp;
+    assert_eq!(after.connects.get(), connects0, "the relay reconnected during the idle period\n{}", gw.dump());
+    eprintln!("idle {idle} s: frames in {} -> {}, keepalives {}, pings answered {}", frames0, after.frames_rx.get(), after.keepalives.get(), after.pings_answered.get());
+    assert_eq!(gw.host.echo(alias, 7, b"after idle", Duration::from_secs(30)).unwrap(), b"after idle");
+    let (n, d) = gw.host.get_bytes(alias, 80, 512 * 1024, Duration::from_secs(60)).expect("download over derp after idle");
+    assert_eq!(n, 512 * 1024);
+    let (n, _) = gw.host.upload(alias, 9, 256 * 1024, Duration::from_secs(60)).expect("upload over derp after idle");
+    assert_eq!(n, 256 * 1024);
+    println!("derp after {idle} s idle: down {:.1} Mbit/s", mbit(512 * 1024, d));
+    gw.check_engine();
+}

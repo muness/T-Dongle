@@ -90,6 +90,10 @@ pub trait TcpConn: Read + Write {
     async fn connect(&mut self, host: &str, port: u16) -> Result<(), NetError>;
     /// Abort the connection (a reset, no lingering) and return the handle to the unconnected state. Idempotent, never blocks.
     fn close(&mut self);
+    /// The connected peer's IPv4 address (big endian), 0 when not connected or unknown. Diagnostics.
+    fn remote_ip(&self) -> u32 {
+        0
+    }
     /// [`TcpConn::close`], then give the socket and its windows back (the reset needs the stack's next turn to reach the peer, so this waits a moment). A
     /// handle that is not connected again after this holds no memory. Default: [`TcpConn::close`] (an implementation with static buffers has nothing to give).
     async fn release(&mut self) {

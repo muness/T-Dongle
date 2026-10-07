@@ -269,6 +269,9 @@ impl<F: FnMut(Action<'_>)> Sink for F {
     }
 }
 
+/// The type byte of the last frame any link completed (diagnostics: what the server last said before a link died). One value for the image: a membership has one link.
+pub static LAST_RX_FRAME_TYPE: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+
 /// Every count the link keeps. Nothing is dropped silently (ADR 0001 rule 2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Stats {
@@ -874,6 +877,7 @@ impl<const TXQ: usize> Link<TXQ> {
 
     /// A complete frame. False when the link failed (the caller stops reading).
     fn on_frame(&mut self, now: Millis, info: FrameInfo, rng: &mut dyn Entropy, sink: &mut dyn Sink) -> bool {
+        LAST_RX_FRAME_TYPE.store(info.ty.0, core::sync::atomic::Ordering::Relaxed);
         if self.state == State::ServerKey {
             let Message::ServerKey { key, .. } = Message::parse(info.ty, self.reader.body()) else {
                 self.stats.protocol_errors.bump();

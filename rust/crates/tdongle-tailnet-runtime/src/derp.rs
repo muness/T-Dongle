@@ -41,6 +41,87 @@ pub static DERP_EGRESS_HELD: core::sync::atomic::AtomicU32 = core::sync::atomic:
 /// See [`DERP_EGRESS_HELD`]: `[lease_timeout, tls, wait_record, write]`.
 pub static DERP_RECONNECT: [core::sync::atomic::AtomicU32; 4] = [const { core::sync::atomic::AtomicU32::new(0) }; 4];
 
+/// What the relay connection is doing, for the `tn_derp` line: the region and port of the target, its address, the stage reached (1 dial, 2 connected, 3 TLS done, 4 relaying), when
+/// the current link became ready, how the last one ended (`END_*`) after how long, and the text of the transport error that ended it.
+pub struct DerpDiag {
+    /// Region id and port of the last target.
+    pub region: core::sync::atomic::AtomicU32,
+    /// See `region`.
+    pub port: core::sync::atomic::AtomicU32,
+    /// Address dialed (big endian).
+    pub ip: core::sync::atomic::AtomicU32,
+    /// Stage reached by the current attempt.
+    pub stage: core::sync::atomic::AtomicU32,
+    /// Milliseconds clock at the current link's ready, 0 when it is not ready.
+    pub ready_at_ms: core::sync::atomic::AtomicU32,
+    /// How the last link ended (see `END_*`) and how long it had been ready, ms.
+    pub end: core::sync::atomic::AtomicU32,
+    /// See `end`.
+    pub end_after_ms: core::sync::atomic::AtomicU32,
+    /// Links ended by each cause: `[wait_record, lease, tls_read, write, link_asked_close, other]`.
+    pub ends: [core::sync::atomic::AtomicU32; 6],
+    /// Host name and the last transport error text.
+    pub text: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, core::cell::RefCell<([u8; 64], [u8; 64])>>,
+}
+pub use tdongle_tailnet_derp::link::LAST_RX_FRAME_TYPE;
+/// See [`DerpDiag`].
+pub const END_WAIT: u32 = 1;
+/// See [`DerpDiag`].
+pub const END_LEASE: u32 = 2;
+/// See [`DerpDiag`].
+pub const END_TLS_READ: u32 = 3;
+/// See [`DerpDiag`].
+pub const END_WRITE: u32 = 4;
+/// See [`DerpDiag`].
+pub const END_LINK: u32 = 5;
+/// The relay's diagnostics (one membership's relay; a second membership overwrites it).
+pub static DERP_DIAG: DerpDiag = DerpDiag {
+    region: core::sync::atomic::AtomicU32::new(0),
+    port: core::sync::atomic::AtomicU32::new(0),
+    ip: core::sync::atomic::AtomicU32::new(0),
+    stage: core::sync::atomic::AtomicU32::new(0),
+    ready_at_ms: core::sync::atomic::AtomicU32::new(0),
+    end: core::sync::atomic::AtomicU32::new(0),
+    end_after_ms: core::sync::atomic::AtomicU32::new(0),
+    ends: [const { core::sync::atomic::AtomicU32::new(0) }; 6],
+    text: embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(([0; 64], [0; 64]))),
+};
+
+fn diag_text(slot: usize, s: &str) {
+    DERP_DIAG.text.lock(|t| {
+        let mut t = t.borrow_mut();
+        let dst = if slot == 0 { &mut t.0 } else { &mut t.1 };
+        dst.fill(0);
+        let n = s.len().min(dst.len());
+        dst[..n].copy_from_slice(&s.as_bytes()[..n]);
+    });
+}
+
+fn diag_end(sh_now: u64, cause: u32, err: Option<&dyn core::fmt::Debug>) {
+    use core::sync::atomic::Ordering::Relaxed;
+    let ready_at = DERP_DIAG.ready_at_ms.swap(0, Relaxed);
+    DERP_DIAG.end.store(cause, Relaxed);
+    DERP_DIAG.end_after_ms.store(if ready_at == 0 { 0 } else { (sh_now as u32).wrapping_sub(ready_at) }, Relaxed);
+    DERP_DIAG.ends[(cause as usize).min(5)].fetch_add(1, Relaxed);
+    if let Some(e) = err {
+        let mut b = [0u8; 64];
+        let mut w = Cursor(&mut b, 0);
+        let _ = core::fmt::write(&mut w, format_args!("{e:?}"));
+        let n = w.1;
+        diag_text(1, core::str::from_utf8(&b[..n]).unwrap_or(""));
+    }
+}
+
+struct Cursor<'a>(&'a mut [u8], usize);
+impl core::fmt::Write for Cursor<'_> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let n = s.len().min(self.0.len() - self.1);
+        self.0[self.1..self.1 + n].copy_from_slice(&s.as_bytes()[..n]);
+        self.1 += n;
+        Ok(())
+    }
+}
+
 /// Room the host queue must have before a relay record is read (see `stream`).
 pub const HOST_ROOM: usize = 4096;
 
@@ -85,6 +166,8 @@ impl<R: RawMutex, P: Platform, S: Storage, D: PeerDirectory> Sink for DrvSink<'_
         let member = self.member;
         match a {
             Action::Notify(LinkEvent::Connected) => {
+                DERP_DIAG.stage.store(4, core::sync::atomic::Ordering::Relaxed);
+                DERP_DIAG.ready_at_ms.store((self.sh.now() as u32).max(1), core::sync::atomic::Ordering::Relaxed);
                 let _ = self.sh.feed(Input::DerpLinkEvent { member, event: DerpNote::Connected });
             }
             Action::Notify(LinkEvent::Disconnected | LinkEvent::RxStale) => {
@@ -374,9 +457,15 @@ async fn relay<'p, R, P, S, D, T>(
             d.wait(true).await;
         };
         // ---- dial: resolve and connect in one
+        DERP_DIAG.stage.store(1, core::sync::atomic::Ordering::Relaxed);
+        DERP_DIAG.region.store(u32::from(d.link.target().region), core::sync::atomic::Ordering::Relaxed);
+        DERP_DIAG.port.store(u32::from(port), core::sync::atomic::Ordering::Relaxed);
+        diag_text(0, host.as_str());
         let connected = drive(&mut d, true, pin!(tcp.connect(host.as_str(), port))).await;
         match connected {
             Some(Ok(())) => {
+                DERP_DIAG.stage.store(2, core::sync::atomic::Ordering::Relaxed);
+                DERP_DIAG.ip.store(tcp.remote_ip(), core::sync::atomic::Ordering::Relaxed);
                 d.call(Event::Dns(true));
                 d.call(Event::Connected(true));
             }
@@ -443,6 +532,7 @@ where
             return;
         }
     };
+    DERP_DIAG.stage.store(3, core::sync::atomic::Ordering::Relaxed);
     d.call(Event::TlsDone(true));
     loop {
         // transmit what the link staged (the upgrade request, ClientInfo, a relay frame, a pong)
@@ -454,7 +544,8 @@ where
             };
             match drive(d, false, pin!(write)).await {
                 Some(Ok(())) => d.call(Event::TxDone),
-                Some(Err(_)) => {
+                Some(Err(e)) => {
+                    diag_end(sh.now(), END_WRITE, Some(&e));
                     DERP_RECONNECT[3].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                     d.call(Event::Reconnect);
                     return;
@@ -463,6 +554,7 @@ where
             }
         }
         if d.acts.close {
+            diag_end(sh.now(), END_LINK, None);
             return;
         }
         d.pump_egress();
@@ -495,13 +587,15 @@ where
                 match r {
                     Ok(_) => {}
                     Err(e) => {
+                        diag_end(sh.now(), if matches!(e, ReadError::Tls(_)) { END_TLS_READ } else { END_LEASE }, Some(&e));
                         DERP_RECONNECT[usize::from(matches!(e, ReadError::Tls(_)))].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                         d.call(Event::Reconnect);
                         return;
                     }
                 }
             }
-            Either::First(Err(_)) => {
+            Either::First(Err(e)) => {
+                diag_end(sh.now(), END_WAIT, Some(&e));
                 DERP_RECONNECT[2].fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 d.call(Event::Reconnect);
                 return;
