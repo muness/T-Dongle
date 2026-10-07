@@ -496,20 +496,24 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
         }
     }
 
+    #[inline(never)]
     fn on_member_added(&mut self, cx: &mut Cx<'_>, cfg: &MemberConfig) {
         if cfg.id == 0 || self.slot_by_id(cfg.id).is_some() {
             return;
         }
         let Some(slot) = self.members.iter().position(Option::is_none) else { return };
-        let Some(m) = Member::new(cfg, slot as u8) else {
+        // Construct into the final slot. Keeping a by-value Member across the
+        // flash mount retained a ~25 KB temporary in every Shared::feed frame.
+        Member::init_slot(&mut self.members[slot], cfg, slot as u8);
+        let Some(m) = self.members[slot].as_ref() else {
             self.sh.stats.netmap_refused.bump();
             return;
         };
         if !self.sh.dir.attach(slot, &m.rt.node_pub.0) {
+            self.members[slot] = None;
             self.sh.stats.netmap_refused.bump();
             return;
         }
-        self.members[slot] = Some(m);
         self.sh.stats.members_added.bump();
         if cfg.enabled {
             self.on_member_enabled(cx, cfg.id);

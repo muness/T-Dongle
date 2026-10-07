@@ -130,7 +130,7 @@ pub struct Member<const P: usize> {
 
 impl<const P: usize> Member<P> {
     /// Build a membership from its configuration; `None` for an all-zero or small-order private key.
-    #[inline(always)]
+    #[inline(never)]
     pub fn new(cfg: &MemberConfig, slot: u8) -> Option<Self> {
         let identity = Identity::new(&cfg.node_private)?;
         let node_pub = identity.public().clone();
@@ -138,10 +138,8 @@ impl<const P: usize> Member<P> {
         if cfg.disco_private.is_zero() {
             return None;
         }
-        let mut mship = Membership::new();
-        mship.priority_peer_ip = cfg.priority_peer_ip;
         Some(Self {
-            mship,
+            mship: new_membership(cfg.priority_peer_ip),
             rt: Rt {
                 id: cfg.id,
                 slot,
@@ -191,10 +189,25 @@ impl<const P: usize> Member<P> {
         })
     }
 
+    /// Construct at its final address without an intermediate ownership move.
+    #[inline(never)]
+    pub fn init_slot(dst: &mut Option<Self>, cfg: &MemberConfig, slot: u8) {
+        *dst = None;
+        *dst = Self::new(cfg, slot);
+    }
+
     /// Bytes of one membership's state in this engine (host size).
     pub const STATE_BYTES: usize = core::mem::size_of::<Self>();
 }
 
+#[inline(never)]
+fn new_membership<const P: usize>(priority: u32) -> Membership<P> {
+    let mut m = Membership::new();
+    m.priority_peer_ip = priority;
+    m
+}
+
+#[inline(never)]
 fn empty_derp_map() -> DerpMap {
     let node = || DerpNode {
         hostname: FixedStr::new(),
