@@ -12,13 +12,23 @@ const PATTERN: u32 = 0x5AC4_57AC;
 unsafe extern "C" {
     static mut _stack_start: u32;
     static mut _stack_end: u32;
+    /// esp-hal's stack guard word (`stack-guard-offset`, 60 bytes above `_stack_end`), watched by a data watchpoint: a write to it is a stack-overflow
+    /// exception. Painting over it reset the chip on every boot (rc2), so the painted region starts just above it.
+    static mut __stack_chk_guard: u32;
 }
 
 static PAINTED: AtomicBool = AtomicBool::new(false);
 
+/// `(bottom, top)` of the paintable stack: from just above the guard word to the stack's start. The bytes under the guard are counted as free.
 fn bounds() -> (usize, usize) {
     // SAFETY: only the addresses of the linker's symbols are taken.
-    unsafe { (core::ptr::addr_of!(_stack_end) as usize, core::ptr::addr_of!(_stack_start) as usize) }
+    unsafe { (core::ptr::addr_of!(__stack_chk_guard) as usize + 4, core::ptr::addr_of!(_stack_start) as usize) }
+}
+
+/// The bytes between the stack's end and the first painted word (the guard and what lies under it).
+fn below_guard() -> usize {
+    // SAFETY: only the address of the linker's symbol is taken.
+    bounds().0 - unsafe { core::ptr::addr_of!(_stack_end) as usize }
 }
 
 /// Paint the unused stack. Call once, early, from the thread that owns the stack (the main task before it spawns anything).
@@ -50,5 +60,5 @@ pub fn free_bytes() -> u32 {
     while p < top && unsafe { (p as *const u32).read_volatile() } == PATTERN {
         p += 4;
     }
-    (p - bottom) as u32
+    (p - bottom + below_guard()) as u32
 }
