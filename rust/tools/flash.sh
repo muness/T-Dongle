@@ -14,6 +14,7 @@ set -euo pipefail
 MAC="${TDONGLE_MAC:-30:ed:a0:d7:88:bc}"
 ESPTOOL="${ESPTOOL:-$HOME/.espressif/python_env/idf5.5_py3.12_env/bin/esptool.py}"
 APP_PORT="/dev/cu.usbmodem$(echo "$MAC" | tr -d : | tr a-f A-F)1"
+ESPTOOL_PYTHON="$(dirname "$ESPTOOL")/python"
 ROM_PORT=""
 recover=0
 [[ "${1:-}" == --recover ]] && { recover=1; shift; }
@@ -26,25 +27,16 @@ else
   images=(0x20000 "$src")
 fi
 
-# Resolve only this board's serial descendants from the live IORegistry. Never
+# Resolve only this board from live USB serial metadata. Never
 # probe unrelated serial devices: read_mac can change their running state.
 board_ports() {
-  python3 - "$MAC" <<'PORTS'
-import plistlib, subprocess, sys
+  "$ESPTOOL_PYTHON" - "$MAC" <<'PORTS'
+from serial.tools import list_ports
+import sys
 mac = sys.argv[1].replace(':', '').lower()
-tree = plistlib.loads(subprocess.check_output(['ioreg', '-a', '-l', '-p', 'IOService']))
-def walk(node, matched=False):
-    if not isinstance(node, dict):
-        return
-    serial = str(node.get('USB Serial Number', node.get('kUSBSerialNumberString', '')))
-    matched = matched or serial.replace(':', '').lower() == mac
-    port = node.get('IOCalloutDevice')
-    if matched and isinstance(port, str) and port.startswith('/dev/cu.usbmodem'):
-        print(port)
-    for child in node.get('IORegistryEntryChildren', []):
-        walk(child, matched)
-for root in (tree if isinstance(tree, list) else [tree]):
-    walk(root)
+for port in list_ports.comports():
+    if port.vid == 0x303a and (port.serial_number or '').replace(':', '').lower() == mac:
+        print(port.device)
 PORTS
 }
 free_port() { local p; while IFS= read -r p; do [[ -n "$p" ]] && { lsof -t "$p" 2>/dev/null | xargs -r kill -9 2>/dev/null || true; }; done < <(board_ports); }
@@ -63,11 +55,23 @@ free_port
 if ! find_rom_port; then
   if [[ -e "$APP_PORT" ]]; then
     echo "app running: asking it to reboot into download mode"
-    python3 -c "import os,time;fd=os.open('$APP_PORT',os.O_RDWR|os.O_NOCTTY|os.O_NONBLOCK);os.write(fd,b'\r\nbootloader\r\n');time.sleep(1);os.close(fd)" || true
+    python3 -c "import os,time,tty;fd=os.open('$APP_PORT',os.O_RDWR|os.O_NOCTTY|os.O_NONBLOCK);tty.setraw(fd);os.write(fd,b'\r\nbootloader\r\n');time.sleep(1);os.close(fd)" || true
   fi
   deadline=$(( SECONDS + (recover ? 600 : 20) ))
   [[ $recover == 1 ]] && echo "waiting for the board in download mode (hold BOOT and plug it in)..."
   until find_rom_port; do
+    if [[ -e "$APP_PORT" ]]; then
+      "$ESPTOOL_PYTHON" - "$APP_PORT" <<'POKE'
+import os, sys, time, tty
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+try:
+    tty.setraw(fd)
+    os.write(fd, b'\r\nbootloader\r\n')
+    time.sleep(0.3)
+finally:
+    os.close(fd)
+POKE
+    fi
     (( SECONDS < deadline )) || { echo "board $MAC never appeared in download mode; rerun with --recover and hold BOOT while plugging in" >&2; exit 1; }
     sleep 1
   done
