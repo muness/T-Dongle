@@ -61,7 +61,7 @@ use esp_radio::wifi::{
     AuthenticationMethodConfig, Bandwidth, Config, ControllerConfig, PowerSaveMode, WifiController,
     sta::StationConfig,
 };
-use static_cell::StaticCell;
+use static_cell::{ConstStaticCell, StaticCell};
 use tdongle_bridge::{Bridge, Env, HostOutcome, RingSend, TaskContext, TxError};
 use tdongle_serial::bridge_report::{Report, RingReport, RxClassReport, WifiTxReport, write_status_lines};
 use tdongle_nvs_format::mode::Mode as StoredMode;
@@ -737,8 +737,9 @@ async fn main(spawner: Spawner) -> ! {
         mac_str: ncm_ids.mac_string,
         mac_hex: hex,
     }));
-    static NTB: StaticCell<[u8; ncm::NTB_OUT_MAX]> = StaticCell::new();
-    let (tx, rx) = ncm.split(NTB.init([0; ncm::NTB_OUT_MAX]));
+    // Compile-time buffer initialization avoids a 24 KB temporary on the boot stack.
+    static NTB: ConstStaticCell<[u8; ncm::NTB_OUT_MAX]> = ConstStaticCell::new([0; ncm::NTB_OUT_MAX]);
+    let (tx, rx) = ncm.split(NTB.take());
     let (acm_rd, acm_wr) = acm.split();
     static ACM_WR: StaticCell<Mutex<CriticalSectionRawMutex, AcmWriter>> = StaticCell::new();
     let acm_wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter> = ACM_WR.init(Mutex::new(acm_wr));
@@ -804,15 +805,15 @@ async fn init_task(
     guard::stage(Stage::Settings);
     let mut tailnet_mode = false;
     let loaded = match settings::mount(flash).await {
-        Ok((l, stored)) => {
+        Ok(stored) => {
             // the stored mode picks the data path; safe mode returned above, so tailnet mode is never reachable from it
             tailnet_mode = cfg!(feature = "tailnet") && matches!(stored.mode, Ok(StoredMode::TailnetGateway));
             critical_section::with(|cs| STORED.borrow(cs).set(Some(stored)));
             settings::persist_diagnosis(&state).await;
-            if l.saved.list().is_empty() {
+            if SAVED.lock(|c| c.borrow().as_ref().is_none_or(|l| l.saved.list().is_empty())) {
                 init_note("no saved networks");
             }
-            Some(l)
+            Some(stored)
         }
         Err(why) => {
             init_note(why);
@@ -823,17 +824,16 @@ async fn init_task(
     let words = guard::setup_take();
     let software = matches!(esp_hal::system::reset_reason(), Some(esp_hal::rtc_cntl::SocResetReason::CoreSw));
     let store_ok = loaded.is_some();
-    let networks_saved = loaded.as_ref().is_none_or(|l| !l.saved.list().is_empty()); // an unreadable store counts as "has networks" (a damaged store never opens an access point by itself)
+    let networks_saved = SAVED.lock(|c| c.borrow().as_ref().is_none_or(|l| !l.saved.list().is_empty())); // an unreadable store counts as "has networks" (a damaged store never opens an access point by itself)
     let decision = tdongle_setup::boot::SetupBoot::decide(software, words[0], words[1], words[2], networks_saved, store_ok);
     let boot = tdongle_setup::boot::Boot::decide(decision, false);
-    let Some(loaded) = loaded else {
+    let Some(_) = loaded else {
         // no settings: the bridge cannot choose a network, but the USB side stays a plain bridge boot
         if let tdongle_setup::boot::Boot::Bridge(b) = &boot {
             USB_NETWORK_RX.signal(b.usb_network());
         }
         return;
     };
-    SAVED.lock(|c| *c.borrow_mut() = Some(loaded));
     let boot = match boot {
         tdongle_setup::boot::Boot::Setup(setup_boot) => setup::run(setup_boot, wifi, rng, adc, spawner).await,
         tdongle_setup::boot::Boot::Tailnet(_) => return, // not built yet: uninhabited

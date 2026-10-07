@@ -44,7 +44,7 @@ pub struct Stored {
 }
 
 /// Mount the NVS and read every setting (`Store::load_all`: the C load rules, v0.1.x import included, writes nothing). `Err` is the text for the `init` command.
-pub async fn mount(flash: esp_hal::peripherals::FLASH<'static>) -> Result<(Loaded, Stored), &'static str> {
+pub async fn mount(flash: esp_hal::peripherals::FLASH<'static>) -> Result<Stored, &'static str> {
     let fs = FlashStorage::new(flash);
     // esp-storage bounds every operation by the capacity it decoded from a JEDEC read at construction; keep it so a bad read (0 or 4 MB on this 16 MB chip) shows
     NVS_CAPACITY.store(fs.capacity() as u32, Ordering::Relaxed);
@@ -56,10 +56,20 @@ pub async fn mount(flash: esp_hal::peripherals::FLASH<'static>) -> Result<(Loade
     let loaded = store.load_all();
     *STORE.lock().await = Some(store);
     match loaded {
-        Ok(s) => Ok((s.networks, Stored { mode: s.mode.map_err(|e| match e { tdongle_nvs_format::mode::ModeError::InvalidStored(v) => v }), display: s.display })),
+        Ok(s) => {
+            // Publish the profiles here; returning their 5 KB value through the
+            // async init task created several copies on its stack.
+            publish_boot(s.networks);
+            Ok(Stored { mode: s.mode.map_err(|e| match e { tdongle_nvs_format::mode::ModeError::InvalidStored(v) => v }), display: s.display })
+        },
         Err(tdongle_nvs_write::LoadError::Profiles(_)) => Err("saved networks invalid (not overwritten)"),
         Err(_) => Err("saved networks unreadable"),
     }
+}
+
+#[inline(never)]
+fn publish_boot(loaded: Loaded) {
+    crate::SAVED.lock(|c| *c.borrow_mut() = Some(loaded));
 }
 
 fn publish(loaded: Loaded) {
