@@ -65,7 +65,7 @@ pub const MUX_TXQ: usize = 4;
 /// See [`MUX_TXQ`].
 pub const MUX_RXQ: usize = 4;
 /// Frames the radio's receive callback can hold for the stack (the mux pulls up to `RX_BURST` = 8 per poll; more than that so one pull never empties it).
-pub const RX_RING: usize = 16;
+pub const RX_RING: usize = 32;
 /// Bytes of received frames the radio callback may hold in the ring whatever the elastic floor says (ADR 0022 exception: the receive ring is the driver's own
 /// buffering, which the C pins under no floor either). Bounded: a flood costs at most this much of the floor, for the milliseconds a frame waits. Above it,
 /// frames need the heap above the floor like every other consumer. 16 KB is ten full frames, held only for the milliseconds before the stack takes them.
@@ -464,7 +464,9 @@ impl UsbFrames for FwUsb {
         ok
     }
     fn batch_end(&mut self) {
-        crate::RING_SIG.signal(());
+        if crate::RING_WAKE_PENDING.swap(false, Ordering::AcqRel) {
+            crate::RING_SIG.signal(());
+        }
     }
     fn host_ready(&self) -> bool {
         ALT.load(Ordering::Relaxed) != 0 && CONFIGURED.load(Ordering::Relaxed)

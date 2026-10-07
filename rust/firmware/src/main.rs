@@ -147,6 +147,9 @@ static RX_BURSTS_GE4: AtomicU32 = AtomicU32::new(0);
 /// Set by tailnet mode while it pushes a run of frames into the ring: `usb_ring_send` then does not wake the IN task per frame (it would send the first frame alone and
 /// the rest in small NTBs); `tailnet::FwUsb::batch_end` wakes it once for the run.
 static RING_DEFER_SIG: AtomicBool = AtomicBool::new(false);
+/// A frame was pushed with the wake deferred and `batch_end` has not signalled yet (the pump calls `batch_end` every loop; an empty run must not wake the IN task: the
+/// interrupt executor would preempt the thread executor for nothing, 4.6 wakes per NTB were measured).
+static RING_WAKE_PENDING: AtomicBool = AtomicBool::new(false);
 static NTB_IN_US_SUM: AtomicU32 = AtomicU32::new(0);
 static NTB_IN_US_MAX: AtomicU32 = AtomicU32::new(0);
 static IN_WAKES: AtomicU32 = AtomicU32::new(0);
@@ -363,7 +366,9 @@ impl Env for FwEnv {
         }
         if accepted {
             RING_ENQ.fetch_add(1, Ordering::Relaxed);
-            if !RING_DEFER_SIG.load(Ordering::Relaxed) {
+            if RING_DEFER_SIG.load(Ordering::Relaxed) {
+                RING_WAKE_PENDING.store(true, Ordering::Release);
+            } else {
                 RING_SIG.signal(());
             }
             RingSend::Accepted
