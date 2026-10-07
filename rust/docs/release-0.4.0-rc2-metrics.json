@@ -70,5 +70,43 @@
     "rescue": "healthy",
     "safe_mode": false,
     "session_seconds": 600
+  },
+  "join_comparison": {
+    "rc1": {
+      "first_state4_uptime_ms": [
+        12102,
+        12582,
+        12549
+      ],
+      "median_ms": 12549
+    },
+    "rc2_first_set": {
+      "first_state4_uptime_ms": [
+        18923,
+        51827,
+        13285
+      ],
+      "median_ms": 18923
+    },
+    "rc2_after_baseline": {
+      "first_state4_uptime_ms": [
+        12593,
+        18552,
+        13252
+      ],
+      "median_ms": 13252
+    },
+    "rc1_source": "c03e868",
+    "probe_source": "eaddc36850bb6b7dc716b95e59b70d14ac51c619",
+    "probe_is_in_release": false,
+    "probe_map_parse_and_feed_ms": [
+      110,
+      102
+    ],
+    "probe_engine_feed_ms": [
+      59,
+      61
+    ],
+    "interpretation": "The historic ~8 s rc1 baseline did not reproduce. Current rc1 12.1\u201312.6 s overlaps rc2 fast joins. No consistent six-second firmware regression established; intermittent slow rc2 attempts remain recorded. Map parse/engine feed measured about 0.1 s, including ~0.06 s engine/flash work, too small to explain multi-second delays. Specific location/time/server cause is not proven."
   }
 }

@@ -9,7 +9,7 @@ The firmware built from `c7fbe28` boots and reaches tailnet state 4. Later commi
 | # | Gate | Result | Measurement |
 |---|---|---|---|
 | 1 | Flash selftest | Pass | `nvs_capacity=16777216` |
-| 2 | Join time | Measured | State 4 at uptime 14,236 ms; rc1 approximately 8 s |
+| 2 | Join time | Measured and reviewed | Original rc2 14.236 s; matched rc1 12.102/12.582/12.549 s; rc2 after baseline 12.593/18.552/13.252 s |
 | 3 | Flash directory and reboot | Pass | 20 peers restored before the first control map; errors 0; generation 30 |
 | 4 | Direct TCP | Pass | 15 s iperf3 received rates: up 1.2396, down 1.2579 Mbit/s; rc1 1.3 / 1.1–1.2 |
 | 5 | Relay TCP | Pass | Forced DERP, 15 s iperf3 received rates: up 0.4623, down 0.6291 Mbit/s; rc1 0.4 / 0.5; force-DERP restored off |
@@ -41,8 +41,14 @@ The final serial workspace run passed 1,601 tests, with zero failures and 8 igno
 
 ## Owner qualification
 
-The owner accepted the measured temperature peak on 2026-10-07. Join-time repeatability is under investigation before release qualification is finalized. The owner also needs to test the setup AP from a phone, the Android app, and [the web UI checklist](../../docs/webui-checklist.md). Package Android hardware qualification remains false pending that review. Tag 0.4.0 only after the owner explicitly says go.
+The owner accepted the measured temperature peak on 2026-10-07. The matched join comparison did not reproduce the old eight-second rc1 baseline; the owner reviewed the evidence as likely connection/location/time variation. Intermittent slow joins remain documented. The owner also needs to test the setup AP from a phone, the Android app, and [the web UI checklist](../../docs/webui-checklist.md). Package Android hardware qualification remains false pending that review. Tag 0.4.0 only after the owner explicitly says go.
 
 ## Setup-AP handoff
 
 Setup AP was entered only after the completed gateway soak. The fresh setup boot reports stage `running`, rescue `healthy`, safe mode false, and recovery false. Serial status confirms `setup active=1 ap=TDongle-D788BC`. Join that open network from the phone and open `http://192.168.4.1/`. The setup session lasts ten minutes and then returns to the saved tailnet-gateway mode; it does not extend when a client connects. This AP handoff is separate from the 30-minute state-4 gateway soak.
+
+## Matched join comparison
+
+The historical approximately eight-second rc1 measurement was not reproduced under the current conditions. Three reboots of exact rc1 commit `c03e868` reached state 4 at 12.102, 12.582 and 12.549 seconds. Rc2 after restoring the qualified image reached state 4 at 12.593, 18.552 and 13.252 seconds. Earlier rc2 repeats were 18.923, 51.827 and 13.285 seconds. These are first observed state-4 status samples, not precise transition timestamps. All boots became rescue healthy without a replug.
+
+A separate temporary diagnostic build (`eaddc36`, not included in the release image) measured first-map parsing plus engine feed at 110 and 102 ms, of which engine/flash feed took 59 and 61 ms. The multi-second timing is therefore not explained by flash-directory processing in those samples. Current fast rc2 joins overlap the current rc1 baseline; no consistent six-second firmware regression was established. The data is consistent with connection/control-server variation, but does not prove a particular location or time-of-day cause. The slower rc2 attempts remain visible in the [comparison metrics](release-0.4.0-rc2-join-comparison.json). The owner accepted this interpretation. The qualified release image was restored after the temporary probe.
