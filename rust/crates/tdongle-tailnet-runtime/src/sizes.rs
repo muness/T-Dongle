@@ -148,7 +148,7 @@ mod tests {
 #[cfg(target_arch = "xtensa")]
 const _: () = {
     use embassy_sync::blocking_mutex::raw::NoopRawMutex;
-    assert!(core::mem::size_of::<tdongle_tailnet_ctl::Bulk>() <= 17_744);
+    assert!(core::mem::size_of::<tdongle_tailnet_ctl::Bulk>() <= 17_760);
     assert!(core::mem::size_of::<tdongle_tailnet_ctl::SessionBuf>() <= 1_160);
     assert!(core::mem::size_of::<Slot<NoopRawMutex>>() <= 11_600);
     assert!(core::mem::size_of::<crate::shared::SlotStatus>() <= 1_360);

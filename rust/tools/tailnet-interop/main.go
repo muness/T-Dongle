@@ -76,6 +76,14 @@ func main() {
 	}}}
 	// INTEROP_DERP2=1: a second, unmeshed DERP server as region 901 (a packet sent to one region is not forwarded to a client connected to the other: a peer homed on
 	// 901 is reachable only through 901). The `nohome <region>` command marks a region NoMeasureNoHome so that nodes started afterwards cannot choose it as their home.
+	// INTEROP_DERP_FILLERS=n: n more regions (902...) that nothing listens on, marked NoMeasureNoHome: a map with more regions than a gateway keeps in full.
+	var fillers int
+	fmt.Sscanf(os.Getenv("INTEROP_DERP_FILLERS"), "%d", &fillers)
+	for i := 0; i < fillers; i++ {
+		id := tailcfg.DERPRegionID(902 + i)
+		dm.Regions[id] = &tailcfg.DERPRegion{RegionID: id, RegionCode: fmt.Sprintf("f%d", i), RegionName: "Filler", NoMeasureNoHome: true,
+			Nodes: []*tailcfg.DERPNode{{Name: fmt.Sprintf("f%da", i), RegionID: id, HostName: fmt.Sprintf("filler%d.invalid", i), DERPPort: 1, STUNPort: -1}}}
+	}
 	var d2port int
 	if os.Getenv("INTEROP_DERP2") != "" {
 		ds2 := derpserver.New(key.NewNode(), func(f string, a ...any) { log.Printf("derp2: "+f, a...) })
@@ -89,9 +97,13 @@ func main() {
 		dsrv2.StartTLS()
 		fmt.Sscanf(dsrv2.Listener.Addr().String()[strings.LastIndex(dsrv2.Listener.Addr().String(), ":")+1:], "%d", &d2port)
 		pin2 := sha256.Sum256(dsrv2.Certificate().Raw)
-		dm.Regions[901] = &tailcfg.DERPRegion{
-			RegionID: 901, RegionCode: "tsu", RegionName: "Test 2",
-			Nodes: []*tailcfg.DERPNode{{Name: "901a", RegionID: 901, HostName: "127.0.0.1", IPv4: "127.0.0.1", DERPPort: d2port, STUNPort: stunPort, InsecureForTests: true,
+		r2 := 901
+		if v := os.Getenv("INTEROP_DERP2_ID"); v != "" {
+			fmt.Sscanf(v, "%d", &r2)
+		}
+		dm.Regions[tailcfg.DERPRegionID(r2)] = &tailcfg.DERPRegion{
+			RegionID: tailcfg.DERPRegionID(r2), RegionCode: "tsu", RegionName: "Test 2",
+			Nodes: []*tailcfg.DERPNode{{Name: "r2a", RegionID: tailcfg.DERPRegionID(r2), HostName: "127.0.0.1", IPv4: "127.0.0.1", DERPPort: d2port, STUNPort: stunPort, InsecureForTests: true,
 				CertName: "sha256-raw:" + hex.EncodeToString(pin2[:])}},
 		}
 	}

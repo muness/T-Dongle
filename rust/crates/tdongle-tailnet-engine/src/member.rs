@@ -80,6 +80,8 @@ pub struct Rt<const P: usize> {
     pub domain: FixedStr<63>,
     /// DERP map.
     pub derp_map: DerpMap,
+    /// Every region of the map in compact form: where a link to the region a peer is homed on is dialled.
+    pub derp_index: tdongle_tailnet_map::types::DerpIndex,
     /// The DERP region we are homed on (0 = none yet).
     pub home_derp: u16,
     /// The node key expired.
@@ -164,6 +166,7 @@ impl<const P: usize> Member<P> {
                 self_name: FixedStr::new(),
                 domain: FixedStr::new(),
                 derp_map: empty_derp_map(),
+                derp_index: tdongle_tailnet_map::types::DerpIndex::empty(),
                 home_derp: 0,
                 key_expired: false,
                 derp_ready: false,

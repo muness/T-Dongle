@@ -300,6 +300,119 @@ impl DerpMap {
     }
 }
 
+/// Regions the compact index of the DERP map keeps (Tailscale's public map has about thirty).
+pub const MAX_DERP_INDEX: usize = 32;
+/// Longest host name the compact index keeps (a longer one is left out and counted).
+pub const DERP_INDEX_HOST_MAX: usize = 32;
+/// Pinned leaf certificates the index can hold (public regions use the default policy; a self-hosted map pins at most a region or two).
+pub const DERP_INDEX_PINS: usize = 2;
+
+/// How a region's relay is authenticated, as far as the index keeps it: the default (verify against the host name), a pinned leaf, or never connect. A `CertName`
+/// that is a different DNS name is kept as the unusable `Invalid` (public Tailscale regions use the default).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexCert {
+    /// Verify against the host name.
+    Hostname,
+    /// The leaf must hash to this SHA-256.
+    Pin([u8; 32]),
+    /// Do not connect.
+    Invalid,
+}
+
+/// One region of the DERP map, reduced to what a link to it needs: the id, the first usable node's host and port, how to authenticate it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DerpEntry {
+    /// `RegionID`.
+    pub region_id: u16,
+    /// `DERPPort`; 0 = 443.
+    pub port: u16,
+    /// The node's `HostName`.
+    pub host: FixedStr<DERP_INDEX_HOST_MAX>,
+    /// 0: verify against the host name; 1: never connect; 2 and up: the leaf must hash to `pins[kind - 2]` of the index.
+    kind: u8,
+}
+
+/// Every region of the DERP map in compact form, whether or not the 4 full regions kept for the netcheck include it: a peer may be homed on any region, and a link to it
+/// needs only this much. About 1.3 KB for 32 regions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DerpIndex {
+    /// Entries; the first `count`.
+    pub entries: [DerpEntry; MAX_DERP_INDEX],
+    /// Pinned leaf hashes the entries refer to; the first `pin_count`.
+    pins: [[u8; 32]; DERP_INDEX_PINS],
+    /// Number of valid `entries`.
+    pub count: u8,
+    pin_count: u8,
+}
+
+impl DerpIndex {
+    /// `size_of::<DerpIndex>()` on the compiling target.
+    pub const SIZE: usize = core::mem::size_of::<DerpIndex>();
+
+    /// No regions.
+    pub const fn empty() -> Self {
+        Self {
+            entries: [const { DerpEntry { region_id: 0, port: 0, host: FixedStr::new(), kind: 0 } }; MAX_DERP_INDEX],
+            pins: [[0; 32]; DERP_INDEX_PINS],
+            count: 0,
+            pin_count: 0,
+        }
+    }
+
+    /// Forget everything.
+    pub fn clear(&mut self) {
+        self.count = 0;
+        self.pin_count = 0;
+    }
+
+    /// The valid entries.
+    pub fn list(&self) -> &[DerpEntry] {
+        &self.entries[..self.count as usize]
+    }
+
+    /// The entry of `region`.
+    pub fn find(&self, region: u16) -> Option<&DerpEntry> {
+        self.list().iter().find(|e| e.region_id == region)
+    }
+
+    /// How `e` is authenticated.
+    pub fn cert_of(&self, e: &DerpEntry) -> IndexCert {
+        match e.kind {
+            0 => IndexCert::Hostname,
+            1 => IndexCert::Invalid,
+            k => self.pins.get(usize::from(k) - 2).map_or(IndexCert::Invalid, |p| IndexCert::Pin(*p)),
+        }
+    }
+
+    /// Add a region. False (nothing added) if the index is full, the id is a duplicate, or a pin has no room.
+    pub fn push(&mut self, region_id: u16, port: u16, host: &str, cert: IndexCert) -> bool {
+        let i = self.count as usize;
+        if i >= MAX_DERP_INDEX || self.find(region_id).is_some() {
+            return false;
+        }
+        let kind = match cert {
+            IndexCert::Hostname => 0,
+            IndexCert::Invalid => 1,
+            IndexCert::Pin(p) => match self.pins[..self.pin_count as usize].iter().position(|q| *q == p) {
+                Some(k) => k as u8 + 2,
+                None if (self.pin_count as usize) < DERP_INDEX_PINS => {
+                    self.pins[self.pin_count as usize] = p;
+                    self.pin_count += 1;
+                    self.pin_count - 1 + 2
+                }
+                None => return false,
+            },
+        };
+        let e = &mut self.entries[i];
+        e.region_id = region_id;
+        e.port = port;
+        e.host.set(host);
+        e.kind = kind;
+        self.count += 1;
+        true
+    }
+}
+
 /// A DNS resolver (`dnstype.Resolver`).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct DnsResolver {

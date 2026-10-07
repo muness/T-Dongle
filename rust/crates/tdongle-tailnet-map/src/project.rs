@@ -152,6 +152,21 @@ pub enum MapEvent<'a> {
     SelfNode(&'a SelfNode),
     /// The DERP regions, at commit time (only when the map carried `DERPMap.Regions`; `count` may be 0).
     Derp(&'a DerpMap),
+    /// One DERP region in compact form, **as the region is decoded** (not at commit time: the full map keeps only a few regions, and the rest would have to be stored here
+    /// until commit, in the control workspace, to be delivered then). `first`: the first region of this map's `DERPMap`, the sink starts a new index. A map that is
+    /// aborted afterwards leaves a partial index of regions that did exist; the next map replaces it.
+    DerpRegion {
+        /// The first region of a `DERPMap`.
+        first: bool,
+        /// `RegionID`.
+        region_id: u16,
+        /// `DERPPort`; 0 = 443.
+        port: u16,
+        /// The first usable node's `HostName`.
+        host: &'a str,
+        /// Authentication.
+        cert: &'a IndexCert,
+    },
     /// `DNSConfig`, at commit time.
     Dns(&'a DnsConfig),
     /// `Domain` (the tailnet's MagicDNS domain), at commit time.
@@ -230,6 +245,8 @@ pub struct MapStats {
     pub fields_duplicate: Counter,
     /// Non-home DERP regions dropped because [`MAX_DERP_REGIONS`] were already kept.
     pub derp_regions_dropped: Counter,
+    /// Regions left out of the compact DERP index: more than [`MAX_DERP_INDEX`], a duplicate id, or a host name that does not fit.
+    pub derp_index_dropped: Counter,
     /// A kept region replaced by the preferred one arriving late.
     pub derp_regions_replaced: Counter,
     /// DERP nodes beyond [`MAX_DERP_NODES`] per region.
@@ -467,6 +484,8 @@ struct State {
     // DERP
     derp_present: bool,
     derp: DerpMap,
+    /// Regions of this map's `DERPMap` handed to the sink so far (the first one tells the sink to start a new index).
+    derp_index_n: u8,
     region: DerpRegion,
     rb: RegionBuild,
     region_keys: u8,
@@ -513,6 +532,7 @@ impl State {
             self_node: None,
             derp_present: false,
             derp: DerpMap::empty(),
+            derp_index_n: 0,
             region: DerpRegion::empty(),
             rb: RegionBuild { seen: 0, rid: None },
             region_keys: 0,
@@ -675,6 +695,28 @@ impl State {
         Ok(())
     }
 
+    /// Hand the region just decoded (`self.region`) to the sink in compact form: its first node that can serve DERP, with a host name that fits and a usable certificate
+    /// policy.
+    fn index_region<S: MapSink>(&mut self, sink: &mut S) -> Result<(), MapError> {
+        let r = &self.region;
+        if r.region_id == 0 {
+            return Ok(());
+        }
+        let Some(n) = r.node_list().iter().find(|n| !n.stun_only && !n.hostname.as_str().is_empty()) else { return Ok(()) };
+        if n.hostname.as_str().len() > DERP_INDEX_HOST_MAX {
+            self.stats.derp_index_dropped.bump();
+            return Ok(());
+        }
+        let cert = match &n.cert {
+            DerpCert::Hostname => IndexCert::Hostname,
+            DerpCert::Pin(p) => IndexCert::Pin(*p),
+            DerpCert::Name(_) | DerpCert::Invalid => IndexCert::Invalid,
+        };
+        let first = self.derp_index_n == 0;
+        self.derp_index_n = self.derp_index_n.saturating_add(1);
+        sink.event(MapEvent::DerpRegion { first, region_id: r.region_id, port: n.derp_port, host: n.hostname.as_str(), cert: &cert }).map_err(|_| MapError::SinkRefused)
+    }
+
     fn on_key(&mut self, t: Text<'_>) -> Result<(), MapError> {
         let Some(top) = self.depth.checked_sub(1).map(|i| self.frames[i as usize]) else {
             return Err(MapError::Json(JsonError::Unexpected(b'"')));
@@ -684,19 +726,6 @@ impl State {
         self.key_unclean = !t.is_clean();
         self.key_f = field_lookup(top.role, &t);
         let mut gp = gp_field(top.gp, &t);
-        if top.gp == Gp::Regions && gp != Gp::Drop {
-            // The C keeps the first MAX_DERP_REGIONS regions and, after that, only the preferred one (matched by the key's text).
-            let mut digits = [0u8; 5];
-            let n = u32_digits(self.cfg.home_derp as u32, &mut digits);
-            let is_home = !t.is_truncated() && t.bytes == &digits[..n];
-            if self.region_keys as usize >= MAX_DERP_REGIONS && !is_home {
-                gp = Gp::Drop;
-                self.stats.derp_regions_dropped.bump();
-            }
-            if gp != Gp::Drop {
-                self.region_keys = self.region_keys.saturating_add(1);
-            }
-        }
         self.key_gp = gp;
         self.key_dup = false;
         if self.key_f != F::None {
@@ -929,6 +958,7 @@ impl State {
                 (F::DRegions, true) if !self.derp_present => {
                     self.derp_present = true;
                     self.derp.count = 0;
+                    self.derp_index_n = 0;
                     self.region_keys = 0;
                     Role::Regions
                 }
@@ -1437,6 +1467,8 @@ impl State {
                 });
             }
             Role::Region => {
+                // every region goes into the compact index, whether or not it is one of the few kept in full
+                self.index_region(sink)?;
                 // `decode_derp_regions`: past MAX_DERP_REGIONS only the preferred region is kept, replacing the last one.
                 let home = self.rb.rid == Some(self.cfg.home_derp as i32);
                 let mut keep = true;

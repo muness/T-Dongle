@@ -151,6 +151,9 @@ pub const X_IDLE_MS: u32 = 60_000;
 static X_LAST_MS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 /// `[queued, sent, dropped (queue full), dropped (heap), dropped (region not in the map), link starts]`.
 pub static X_COUNTS: [core::sync::atomic::AtomicU32; 6] = [const { core::sync::atomic::AtomicU32::new(0) }; 6];
+/// The certificate policy of the region the extra link dials (its map entry's).
+static X_CERT: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, RefCell<Option<tdongle_tailnet_tls::DerpCert>>> =
+    embassy_sync::blocking_mutex::Mutex::new(RefCell::new(None));
 /// State and counts of the extra link's last run, for `tn_derp`.
 pub static X_STATS: embassy_sync::blocking_mutex::Mutex<embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex, RefCell<(State, tdongle_tailnet_derp::link::Stats)>> =
     embassy_sync::blocking_mutex::Mutex::new(RefCell::new((State::Idle, tdongle_tailnet_derp::link::Stats::new())));
@@ -237,7 +240,7 @@ where
             X_SIG.wait().await;
         };
         let member = slot.id.load(core::sync::atomic::Ordering::Acquire);
-        let Some((host, port)) = sh.with_engine(|e, _| e.derp_target(member, region)) else {
+        let Some((host, port, cert)) = sh.with_engine(|e, _| e.derp_target(member, region)) else {
             // a region the member's map does not have: nothing to dial
             let n = XQ.lock(|q| {
                 let mut q = q.borrow_mut();
@@ -258,6 +261,11 @@ where
         }
         X_COUNTS[5].fetch_add(1, Relaxed);
         X_LAST_MS.store((sh.now() as u32).max(1), Relaxed);
+        X_CERT.lock(|c| *c.borrow_mut() = Some(match cert {
+            tdongle_tailnet_map::types::IndexCert::Hostname => tdongle_tailnet_tls::DerpCert::Hostname,
+            tdongle_tailnet_map::types::IndexCert::Pin(p) => tdongle_tailnet_tls::DerpCert::Pin(p),
+            tdongle_tailnet_map::types::IndexCert::Invalid => tdongle_tailnet_tls::DerpCert::Invalid,
+        }));
         let key = slot.ident.lock(|i| i.borrow().wg.clone());
         // the link runs as a heap future; the watcher ends it when the home link is gone or the link has been idle
         let link = alloc::boxed::Box::pin(async {
@@ -733,7 +741,11 @@ where
 {
     let sh = d.sh;
     let slot = &sh.slots[d.idx];
-    let cert = slot.status().certs.of(d.link.target().region);
+    let cert = if d.x.is_some() {
+        X_CERT.lock(|c| c.borrow().clone()).unwrap_or(tdongle_tailnet_tls::DerpCert::Invalid)
+    } else {
+        slot.status().certs.of(d.link.target().region)
+    };
     let now_unix = sh.platform.unix_seconds().unwrap_or(0);
     let params = TlsParams { hostname: host, cert: &cert, anchors: DEFAULT_ANCHORS, now_unix };
     let mut rng = crate::shared::PlatformRng(&sh.platform);

@@ -421,7 +421,11 @@ fn projection_eighty_regions_keep_four_and_the_preferred_one() {
     assert_eq!(d.region_list().iter().map(|r| r.region_id).collect::<Vec<_>>(), vec![1, 2, 3, 79]);
     assert_eq!(stats.derp_regions_replaced.get(), 1);
     assert_eq!(stats.derp_regions_dropped.get(), 75);
-    assert!((stats.projected_bytes as usize) < j.len() / 5);
+    // the compact index has every region the map had room for (32), whatever the full map kept
+    let ix = rec.derp_index.clone().unwrap();
+    assert_eq!(ix.count as usize, 32);
+    assert_eq!(ix.find(1).unwrap().host.as_str(), "derp.example.com");
+    assert!(ix.find(32).is_some() && ix.find(33).is_none());
     assert_eq!(d.regions[3].nodes[0].ipv6, Some([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
     assert_eq!(d.regions[0].nodes[0].derp_port, 443);
     // a home region that is not in the map: the first four stay
@@ -461,7 +465,13 @@ fn projection_public_derp_map_fixture() {
     let d = rec.derp.unwrap();
     assert_eq!(d.count, 4);
     assert!(d.region_list().iter().any(|r| r.region_id == 4), "the preferred region survives");
-    assert!((stats.projected_bytes as usize) < j.len() / 3);
+    // every region of the public map is in the index, including the ones the full map does not keep
+    let ix = rec.derp_index.clone().unwrap();
+    assert!(ix.count as usize > d.count as usize, "index {} regions, map {}", ix.count, d.count);
+    assert_eq!(stats.derp_index_dropped.get(), 0);
+    for e in ix.list() {
+        assert_eq!(ix.cert_of(e), tdongle_tailnet_map::types::IndexCert::Hostname);
+    }
     for r in d.region_list() {
         assert!(r.node_count as usize <= MAX_DERP_NODES_FOR_TEST);
         assert!(!r.code.is_empty() && !r.name.is_empty() || r.region_id == 0);

@@ -891,8 +891,7 @@ fn derp_survives_idle_then_carries_traffic() {
 /// Two unmeshed DERP servers (regions 900 and 901) and a peer homed on the region the gateway is **not** homed on: a relay server only forwards to clients connected to it, so
 /// the gateway must send the peer's packets to the peer's home region, through a second link of its own, and still receive what the peer sends to the gateway's home region.
 /// With one link (before) every packet for the peer was dropped by the wrong server and the flow carried nothing.
-#[test]
-fn a_peer_homed_on_another_derp_region_is_reached_through_a_second_link() {
+fn peer_on_another_region(env: &[(&str, String)], peer_region: u32, expect_index: u8) {
     let bin = match go_binary() {
         Ok(b) => b,
         Err(e) => {
@@ -900,7 +899,7 @@ fn a_peer_homed_on_another_derp_region_is_reached_through_a_second_link() {
             return;
         }
     };
-    let mut go = tdongle_tailnet_host::server::GoServer::spawn_with(&bin, &[("INTEROP_DERP2", "1".to_string())]).expect("go server with two regions");
+    let mut go = tdongle_tailnet_host::server::GoServer::spawn_with(&bin, env).expect("go server with two regions");
     let gw = Gateway::start(GatewayOpts::new(&go.control_addr));
     gw.net.udp_blocked.store(true, Ordering::SeqCst);
     let id = gw.add("lab", "tskey-fake");
@@ -908,8 +907,13 @@ fn a_peer_homed_on_another_derp_region_is_reached_through_a_second_link() {
     // the region the gateway's own link is on; the peer is started afterwards and may not choose that region as its home
     wait_until("the home link to be ready", 30, || gw.sh.slots[0].status().derp_state.name() == "ready");
     let home = tdongle_tailnet_runtime::derp::DERP_DIAG.region.load(Ordering::Relaxed);
-    assert!(home == 900 || home == 901, "home region {home}");
+    assert!(home == 900 || home == peer_region, "home region {home}");
     assert_eq!(go.cmd(&format!("nohome {home}")), "OK");
+    if home == peer_region {
+        // the gateway chose the peer's region: not the scenario (the peer may not use it as its home now), the other tests cover one region
+        eprintln!("SKIP: the gateway homed on the region meant for the peer");
+        return;
+    }
     let (_, _) = go.peer("gopeer").expect("peer");
     gw.host.wait_dhcp(Duration::from_secs(10)).expect("dhcp");
     let alias = gw.host.resolve("gopeer.lab.tailnet", Duration::from_secs(30)).expect("dns");
@@ -938,5 +942,22 @@ fn a_peer_homed_on_another_derp_region_is_reached_through_a_second_link() {
     let (queued, sent, starts) = (X_COUNTS[0].load(Ordering::Relaxed), X_COUNTS[1].load(Ordering::Relaxed), X_COUNTS[5].load(Ordering::Relaxed));
     println!("home region {home}; extra link: queued {queued} sent {sent} starts {starts}; down {:.1} up {:.1} Mbit/s", mbit(n, d), mbit(n2, d2));
     assert!(queued > 100 && sent * 100 >= queued * 95, "the packets for the peer went through the extra link (a few may wait or drop while it connects): queued {queued} sent {sent}");
+    let indexed = gw.sh.with_engine(|e, _| e.member(id).map_or(0, |m| m.rt.derp_index.count));
+    assert_eq!(indexed, expect_index, "every region of the map is in the compact index");
     gw.check_engine();
+}
+
+#[test]
+fn a_peer_homed_on_another_derp_region_is_reached_through_a_second_link() {
+    peer_on_another_region(&[("INTEROP_DERP2", "1".to_string())], 901, 2);
+}
+
+/// The map has five regions, the gateway keeps four of them in full (the netcheck's, the C's bound), and the peer is homed on the fifth: its address comes from the compact index.
+#[test]
+fn a_peer_homed_on_the_fifth_region_of_the_map_is_reached_through_the_index() {
+    peer_on_another_region(
+        &[("INTEROP_DERP2", "1".to_string()), ("INTEROP_DERP2_ID", "905".to_string()), ("INTEROP_DERP_FILLERS", "3".to_string())],
+        905,
+        5,
+    );
 }

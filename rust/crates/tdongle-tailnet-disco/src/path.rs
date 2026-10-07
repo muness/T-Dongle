@@ -750,6 +750,14 @@ impl<const E: usize> PathState<E> {
         !self.has_direct && self.trust_until == KEEP_ENDPOINT && self.best != Ep::NONE
     }
 
+    /// A WireGuard packet of the peer came in through the relay: an endpoint kept past the trust lapse (while data still arrived on it) is given up, because the data now
+    /// comes another way and answering on a path that may be dead would lose it. A trusted path is left alone (the peer may use both).
+    pub fn on_derp_data(&mut self) {
+        if self.keeps_endpoint() {
+            self.trust_until = 0;
+        }
+    }
+
     /// DISCO's choice for this peer now.
     pub fn route(&self, now: Millis) -> Route {
         if (self.has_direct && now <= self.trust_until) || self.keeps_endpoint() { Route::Direct(self.best) } else { Route::Derp }

@@ -45,6 +45,11 @@ impl<T: NetmapTarget> MapSink for NetmapSink<T> {
             MapEvent::PeerSeen { .. } | MapEvent::CollectServices(_) | MapEvent::KeepAlive => return Ok(()),
             MapEvent::SelfNode(n) => NetmapEvent::SelfNode(n.clone()),
             MapEvent::Derp(d) => NetmapEvent::Derp(d.clone()),
+            MapEvent::DerpRegion { first, region_id, port, host, cert } => {
+                let mut h = FixedStr::<32>::new();
+                h.set(host);
+                NetmapEvent::DerpRegion { first, region_id, port, host: h, cert: *cert }
+            }
             MapEvent::Dns(c) => NetmapEvent::Dns(c.clone()),
             MapEvent::Domain(s) => {
                 let mut d = FixedStr::<63>::new();

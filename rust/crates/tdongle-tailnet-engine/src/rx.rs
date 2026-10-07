@@ -67,7 +67,7 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
             Ok(MsgType::Initiation) => self.rx_initiation(cx, slot, from, data),
             Ok(MsgType::Response) => self.rx_response(cx, slot, from, data),
             Ok(MsgType::CookieReply) => self.rx_cookie_reply(cx, slot, data),
-            Ok(MsgType::Transport) => self.rx_transport(cx, slot, data),
+            Ok(MsgType::Transport) => self.rx_transport(cx, slot, data, !is_udp),
             Err(_) => RxFate::Garbage,
         }
     }
@@ -358,7 +358,7 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
 
     // ---- WireGuard transport -------------------------------------------------------------------------------------------------------------------
 
-    fn rx_transport(&mut self, cx: &mut Cx<'_>, slot: usize, data: &mut [u8]) -> RxFate {
+    fn rx_transport(&mut self, cx: &mut Cx<'_>, slot: usize, data: &mut [u8], via_derp: bool) -> RxFate {
         let now = cx.now;
         let Ok(h) = TransportHeader::parse(data) else { return RxFate::WgDataDropped };
         let Some(m) = self.members[slot].as_mut() else { return RxFate::NoMember };
@@ -385,6 +385,10 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
         };
         if let Some(p) = m.mship.table.get_mut(idx) {
             p.jit_used_ms = now;
+        }
+        if via_derp {
+            // the peer is sending through the relay: its direct path is not carrying what it sends, so a kept endpoint is not a reason to answer on it
+            m.rt.paths[idx].on_derp_data();
         }
         if !out.keepalive {
             m.rt.wg_bytes[idx][1] = m.rt.wg_bytes[idx][1].saturating_add(out.plain_len as u32);

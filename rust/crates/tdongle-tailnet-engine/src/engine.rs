@@ -155,15 +155,27 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
     pub fn jit_store(&self) -> &crate::jit::JitStore<JB> {
         &self.sh.store
     }
-    /// Where to dial relay region `region` of the member's DERP map (host and port of its first node): the relay links a membership opens besides its home one, for peers
-    /// that are homed elsewhere.
-    pub fn derp_target(&self, id: MemberId, region: u16) -> Option<(tdongle_tailnet_types::FixedStr<64>, u16)> {
+    /// Where to dial relay region `region` of the member's DERP map: the host and port of its first node and how to authenticate it. Regions beyond the few kept in
+    /// full (the netcheck's) are found in the compact index, so a peer homed on any region of the map can be reached.
+    pub fn derp_target(&self, id: MemberId, region: u16) -> Option<(tdongle_tailnet_types::FixedStr<64>, u16, tdongle_tailnet_map::types::IndexCert)> {
+        use tdongle_tailnet_map::derp_cert::DerpCert as MapCert;
+        use tdongle_tailnet_map::types::IndexCert;
         let m = self.member(id)?;
+        if let Some(e) = m.rt.derp_index.find(region) {
+            let mut h = tdongle_tailnet_types::FixedStr::new();
+            h.set(e.host.as_str());
+            return Some((h, if e.port != 0 { e.port } else { 443 }, m.rt.derp_index.cert_of(e)));
+        }
         let r = m.rt.derp_map.region_list().iter().find(|r| r.region_id == region)?;
         let n = r.node_list().first()?;
         let mut h = tdongle_tailnet_types::FixedStr::new();
         h.set(n.hostname.as_str());
-        Some((h, if n.derp_port != 0 { n.derp_port } else { 443 }))
+        let cert = match &n.cert {
+            MapCert::Hostname => IndexCert::Hostname,
+            MapCert::Pin(p) => IndexCert::Pin(*p),
+            _ => IndexCert::Invalid,
+        };
+        Some((h, if n.derp_port != 0 { n.derp_port } else { 443 }, cert))
     }
 
     /// Membership by id.
@@ -682,6 +694,15 @@ impl<D: PeerDirectory, const M: usize, const P: usize, const K: usize, const A: 
             NetmapEvent::Derp(d) => {
                 let Some(m) = self.members[slot].as_mut() else { return false };
                 m.rt.derp_map = d.clone();
+                true
+            }
+            NetmapEvent::DerpRegion { first, region_id, port, host, cert } => {
+                let Some(m) = self.members[slot].as_mut() else { return false };
+                if *first {
+                    m.rt.derp_index.clear();
+                }
+                // a full index drops the region (the map had more than it can hold)
+                m.rt.derp_index.push(*region_id, *port, host.as_str(), *cert);
                 true
             }
             NetmapEvent::Dns(c) => {

@@ -12,6 +12,7 @@ pub struct Rec {
     pub seen: Vec<(u64, bool)>,
     pub self_node: Option<SelfNode>,
     pub derp: Option<DerpMap>,
+    pub derp_index: Option<tdongle_tailnet_map::types::DerpIndex>,
     pub dns: Option<DnsConfig>,
     pub domain: Option<String>,
     pub control_time: Option<(i64, u32)>,
@@ -45,6 +46,13 @@ impl MapSink for Rec {
             MapEvent::Derp(d) => {
                 self.order.push("derp");
                 self.derp = Some(d.clone());
+            }
+            MapEvent::DerpRegion { first, region_id, port, host, cert } => {
+                let ix = self.derp_index.get_or_insert_with(tdongle_tailnet_map::types::DerpIndex::empty);
+                if first {
+                    ix.clear();
+                }
+                ix.push(region_id, port, host, *cert);
             }
             MapEvent::Dns(d) => {
                 self.order.push("dns");

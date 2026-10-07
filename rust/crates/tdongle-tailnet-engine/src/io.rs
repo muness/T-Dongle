@@ -50,6 +50,19 @@ pub enum NetmapEvent {
     SelfNode(SelfNode),
     /// The DERP regions.
     Derp(DerpMap),
+    /// One DERP region in compact form, as the projector decodes it (`first`: start a new index).
+    DerpRegion {
+        /// The first region of a `DERPMap`.
+        first: bool,
+        /// `RegionID`.
+        region_id: u16,
+        /// `DERPPort`; 0 = 443.
+        port: u16,
+        /// The first usable node's host name.
+        host: FixedStr<32>,
+        /// Authentication.
+        cert: tdongle_tailnet_map::types::IndexCert,
+    },
     /// The DNS configuration (the engine keeps the first search domain).
     Dns(DnsConfig),
     /// The tailnet's MagicDNS domain.
