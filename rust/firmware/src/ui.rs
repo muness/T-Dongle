@@ -328,8 +328,17 @@ pub async fn ui_task(hw: Hardware) -> ! {
         let active_name = if active_slot >= 1 { names[(active_slot - 1) as usize] } else { Text::new() };
         let connected = crate::CONNECTED_NOW.load(Ordering::Relaxed);
         let heap = esp_alloc::HEAP.free() as u32;
+        // tailnet mode: the member counts of the gateway (`gateway_display_state`); bridge mode: none
+        #[cfg(feature = "tailnet")]
+        let panel = crate::tailnet::panel();
+        #[cfg(not(feature = "tailnet"))]
+        let panel: Option<()> = None;
+        #[cfg(feature = "tailnet")]
+        let counts = panel.unwrap_or_default();
+        #[cfg(not(feature = "tailnet"))]
+        let counts = ();
         let snapshot = Snapshot {
-            bridge: true,
+            bridge: panel.is_none(),
             wifi: connected,
             recovery: false,
             saved_wifi: saved_count > 0,
@@ -351,8 +360,19 @@ pub async fn ui_task(hw: Hardware) -> ! {
             heap_min: crate::l2::HEAP_MIN.load(Ordering::Relaxed).min(heap),
             heap_largest: heap,
             reset_reason: 0,
+            #[cfg(feature = "tailnet")]
+            saved: counts.saved,
+            #[cfg(feature = "tailnet")]
+            enabled: counts.enabled,
+            #[cfg(feature = "tailnet")]
+            ready: counts.ready,
+            #[cfg(feature = "tailnet")]
+            login: counts.login,
+            #[cfg(feature = "tailnet")]
+            failed: counts.failed,
             ..Snapshot::default()
         };
+        let _ = counts;
         let lookup = |slot: u32| -> Option<&str> { names.get((slot as usize).wrapping_sub(1)).map(Text::as_str) };
         let inputs = Inputs {
             button_down: down,
@@ -395,7 +415,7 @@ pub async fn ui_task(hw: Hardware) -> ! {
             LED_WRITES.fetch_add(1, Ordering::Relaxed);
         }
         if let Some(cmd) = ui.take_command() {
-            dispatch(cmd);
+            dispatch(cmd).await;
         }
     }
 }
@@ -419,14 +439,26 @@ async fn apply(p: &mut Panel, backlight: Option<&Backlight>, percent: u32, rotat
     }
 }
 
-/// A command a button gesture chose (`gateway_ui_take_command`): the same lines the serial console takes.
-fn dispatch(cmd: Command) {
+/// A command a button gesture chose (`gateway_ui_take_command`): the same operations the serial console runs, so a button and a terminal cannot disagree.
+async fn dispatch(cmd: Command) {
     match cmd {
         Command::Use(n) => {
             let count = SAVED.lock(|c| c.borrow().as_ref().map_or(0, |l| l.saved.list().len())) as u32;
             if (1..=count).contains(&n) {
                 crate::PINNED.store(n as i32 - 1, Ordering::Relaxed);
                 crate::USE_REQ.signal(());
+                let _ = crate::settings::make_preferred(n as i32 - 1).await;
+                crate::PINNED.store(n as i32 - 1, Ordering::Relaxed);
+            }
+        }
+        Command::Reset => {
+            let _ = crate::settings::reset();
+        }
+        Command::ConfirmReset => {
+            let (_, restart) = crate::settings::confirm_reset().await;
+            if restart {
+                Timer::after_millis(300).await;
+                tdongle_rescue::deliberate_reset()
             }
         }
         other => crate::ui_command(other),

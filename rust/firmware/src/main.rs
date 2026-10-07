@@ -11,12 +11,14 @@ extern crate alloc;
 mod ops;
 mod guard;
 mod supervise;
-mod saved;
+mod settings;
 mod l2;
 mod pm;
 mod ui;
 mod acm;
 mod ncm;
+#[cfg(feature = "tailnet")]
+mod tailnet;
 
 use alloc::string::String;
 use core::cell::RefCell;
@@ -89,6 +91,8 @@ type NcmReceiver = ncm::Receiver<'static, Drv>;
 
 static ALT: AtomicU8 = AtomicU8::new(0); // NCM data interface alternate setting (1 = streaming)
 static CONFIGURED: AtomicBool = AtomicBool::new(false);
+/// Bumped whenever the host (re)selects or leaves the NCM data interface or resets the bus: the tailnet runtime drops flows of an older generation.
+static USB_GEN: AtomicU32 = AtomicU32::new(0);
 static DTR: AtomicBool = AtomicBool::new(false);
 static RESETS: AtomicU32 = AtomicU32::new(0);
 static LINK_UP_USB: AtomicBool = AtomicBool::new(false); // what the bridge told the USB side (carrier)
@@ -411,6 +415,7 @@ impl Handler for Ctl {
     fn reset(&mut self) {
         supervise::USB_CONFIGURED.store(false, Ordering::Relaxed);
         RESETS.fetch_add(1, Ordering::Relaxed);
+        USB_GEN.fetch_add(1, Ordering::Relaxed);
         DTR.store(false, Ordering::Relaxed);
         ALT.store(0, Ordering::Relaxed);
         CONFIGURED.store(false, Ordering::Relaxed);
@@ -427,6 +432,7 @@ impl Handler for Ctl {
     fn set_alternate_setting(&mut self, iface: InterfaceNumber, alt: u8) {
         if iface == self.ncm_data_if {
             ALT.store(alt, Ordering::Relaxed);
+            USB_GEN.fetch_add(1, Ordering::Relaxed);
             if alt == 0 {
                 // streaming stopped: whatever sits in the ring belongs to a stream that no longer exists
                 let n = critical_section::with(|cs| RING.borrow_ref_mut(cs).flush());
@@ -594,7 +600,7 @@ static SCAN_REQ: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static SCAN_DONE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 /// The mode and display settings read from the NVS at boot (`None` until the init task has read them).
-static STORED: CsMutex<core::cell::Cell<Option<saved::Stored>>> = CsMutex::new(core::cell::Cell::new(None));
+static STORED: CsMutex<core::cell::Cell<Option<settings::Stored>>> = CsMutex::new(core::cell::Cell::new(None));
 /// Console `use N`: the saved network (0-based) the link task must join and keep; -1 = by rank. A failed join of the pinned slot drops the pin (C `pin_failed_slot`).
 static PINNED: AtomicI32 = AtomicI32::new(-1);
 static PIN_FAILED: AtomicU32 = AtomicU32::new(0);
@@ -700,6 +706,8 @@ async fn main(spawner: Spawner) -> ! {
     let (acm_rd, acm_wr) = acm.split();
     static ACM_WR: StaticCell<Mutex<CriticalSectionRawMutex, AcmWriter>> = StaticCell::new();
     let acm_wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter> = ACM_WR.init(Mutex::new(acm_wr));
+    #[cfg(feature = "tailnet")]
+    let _ = tailnet::WRITER.init(acm_wr);
     let dev = b.build();
 
     // The USB device attaches when `usb_task` first runs: spawn it before anything else and do not block between here and the first `.await`.
@@ -712,6 +720,7 @@ async fn main(spawner: Spawner) -> ! {
     int_spawner.spawn(usb_tx_task(SendTx(tx)).unwrap());
     spawner.spawn(ring_housekeeping_task().unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
+    spawner.spawn(settings::task().unwrap());
     spawner.spawn(
         ui::ui_task(ui::Hardware {
             spi: peripherals.SPI2,
@@ -751,20 +760,21 @@ async fn init_task(
         return;
     }
 
-    // ---- the saved networks: read-only from the NVS the C firmware wrote ----
+    // ---- the stored settings: the NVS the C firmware wrote (the C load rules, v0.1.x import included) ----
     guard::stage(Stage::Settings);
-    let mut flash = esp_storage::FlashStorage::new(flash);
-    let stored = saved::load_stored(&mut flash);
-    critical_section::with(|cs| STORED.borrow(cs).set(Some(stored)));
-    let loaded = match saved::load(&mut flash) {
-        Ok(l) if !l.saved.list().is_empty() => Some(l),
-        Ok(_) => {
-            init_note("no saved networks");
-            None
+    let mut tailnet_mode = false;
+    let loaded = match settings::mount(flash).await {
+        Ok((l, stored)) => {
+            // the stored mode picks the data path; safe mode returned above, so tailnet mode is never reachable from it
+            tailnet_mode = cfg!(feature = "tailnet") && matches!(stored.mode, Ok(StoredMode::TailnetGateway));
+            critical_section::with(|cs| STORED.borrow(cs).set(Some(stored)));
+            if l.saved.list().is_empty() {
+                init_note("no saved networks");
+            }
+            Some(l)
         }
-        Err(e) => {
-            println!("nvs: {:?}", e);
-            init_note("saved networks unreadable");
+        Err(why) => {
+            init_note(why);
             None
         }
     };
@@ -798,11 +808,17 @@ async fn init_task(
     if controller.set_max_tx_power(80).is_err() {
         init_note("set_max_tx_power failed");
     }
-    spawner.spawn(worker_task(worker).unwrap());
+    if tailnet_mode {
+        #[cfg(feature = "tailnet")]
+        tailnet::start(spawner);
+        drop(worker); // the bridge's host to Wi-Fi worker is not used: the runtime's USB task is the data path
+    } else {
+        spawner.spawn(worker_task(worker).unwrap());
+    }
     spawner.spawn(pm::timer_task().unwrap());
     pm::start();
     SAVED.lock(|c| *c.borrow_mut() = Some(loaded));
-    link_loop(&mut controller, bridge, loaded).await
+    link_loop(&mut controller, bridge).await
 }
 
 // ======================================================================================================================
@@ -904,11 +920,34 @@ fn drop_failed_pin(slot: usize) {
     }
 }
 
-async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>, loaded: tdongle_nvs_format::load::Loaded) -> ! {
+/// Tailnet mode owns the data path in this boot.
+fn tailnet_active() -> bool {
+    #[cfg(feature = "tailnet")]
+    return tailnet::active();
+    #[cfg(not(feature = "tailnet"))]
+    false
+}
+
+/// The link went up or down: tell whichever data path runs (the bridge, or the tailnet runtime's embassy-net driver).
+fn link_hook(bridge: &'static Bridge<FwEnv>, up: bool, ctx: &TaskContext) {
+    #[cfg(feature = "tailnet")]
+    if tailnet::active() {
+        tailnet::link(up);
+        return;
+    }
+    bridge.link(up, ctx);
+}
+
+async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>) -> ! {
     // SAFETY: this is the link supervisor task; it may block and is not a driver callback.
     let ctx = unsafe { TaskContext::assume() };
     let mut next = 0usize;
     loop {
+        // The list as it is now (a console `profile`, `del` or reset replaces it): nothing saved means nothing to join.
+        let Some(loaded) = SAVED.lock(|c| *c.borrow()).filter(|l| !l.saved.list().is_empty()) else {
+            let _ = with_timeout(Duration::from_secs(2), USE_REQ.wait()).await;
+            continue;
+        };
         // Strongest saved network that a scan (hidden SSIDs included) sees; none seen: try the saved list in order (directed probes find hidden ones).
         guard::stage(Stage::Scan);
         let scan = scan_all(controller).await;
@@ -970,9 +1009,11 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
         if controller.set_protocols(Protocols::default()).is_err() {
             init_note("set_protocols failed"); // default is b/g/n: never LR
         }
-        guard::op("roaming_assist");
-        l2::roaming_assist(); // bridge mode: 802.11k/v on, as C (`wifi_roaming_assist`)
-        guard::op("");
+        if !tailnet_active() {
+            guard::op("roaming_assist");
+            l2::roaming_assist(); // bridge mode: 802.11k/v on, as C (`wifi_roaming_assist`)
+            guard::op("");
+        }
         guard::stage(Stage::Connect);
         match with_timeout(Duration::from_secs(30), controller.connect_async()).await {
             Ok(Ok(info)) => {
@@ -995,7 +1036,7 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 let joined = l2::joined_bss();
                 guard::op("");
                 critical_section::with(|cs| *BSS_JOINED.borrow_ref_mut(cs) = joined);
-                bridge.link(true, &ctx);
+                link_hook(bridge, true, &ctx);
                 loop {
                     match select(select3(controller.wait_for_disconnect_async(), SCAN_REQ.wait(), USE_REQ.wait()), Timer::after_secs(2)).await {
                         Either::First(Either3::Second(())) => {
@@ -1024,7 +1065,7 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 RSSI_VALID.store(false, Ordering::Relaxed);
                 CONNECTED_NOW.store(false, Ordering::Relaxed);
                 l2::link_changed(); // and when it dropped, without completing what was in them
-                bridge.link(false, &ctx);
+                link_hook(bridge, false, &ctx);
             }
             Ok(Err(e)) => {
                 println!("connect failed: {:?}, retrying", e);
@@ -1098,6 +1139,17 @@ async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer
             };
             RX_DATAGRAMS.fetch_add(1, Ordering::Relaxed);
             let len = d.len() as u32;
+            #[cfg(feature = "tailnet")]
+            if tailnet::active() {
+                // tailnet mode owns the data path: the datagram goes to the runtime (waiting for it, which keeps the OUT endpoint un-armed) and never to the bridge
+                if !tailnet::usb_rx(d).await {
+                    break 'conn;
+                }
+                UP_FRAMES.fetch_add(1, Ordering::Relaxed);
+                UP_BYTES.fetch_add(len, Ordering::Relaxed);
+                rx.advance();
+                continue;
+            }
             if USB_MODE.load(Ordering::Relaxed) == USB_SINK {
                 // `usb sink`: count the datagram and drop it (measures host -> device alone)
                 SINK_FRAMES.fetch_add(1, Ordering::Relaxed);
@@ -1496,7 +1548,7 @@ fn build_status(bridge: &Bridge<FwEnv>, out: &mut String) {
     };
     let _ = write_status_lines(out, &Report { l2: &st, ring: &ring, rx: &rx, wifi_tx: &wtx });
     let stored_mode = critical_section::with(|cs| STORED.borrow(cs).get()).map_or("unknown", |x| x.mode.map_or("invalid", |m| m.name()));
-    let _ = write!(out, "rust_port phase=1 stored_mode={} running=wifi_bridge\r\n", stored_mode);
+    let _ = write!(out, "rust_port phase=1 stored_mode={} running={}\r\n", stored_mode, if tailnet_active() { "tailnet_gateway" } else { "wifi_bridge" });
     let _ = write!(
         out,
         "rust_heap size={} used={} free_internal={} minimum_internal={}\r\n",
@@ -1624,6 +1676,12 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
 
 async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
     let mut s = String::new();
+    #[cfg(feature = "tailnet")]
+    if let Some(reply) = tailnet::console(line).await {
+        // a command the tailnet gateway owns (route, members, memory, inbound, member ..., tn-mem, tailnet-status)
+        out(wr, &reply, 3000).await;
+        return;
+    }
     match line {
         "heap" => heap_line(&mut s),
         "boot-status" => {
@@ -1717,7 +1775,13 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
             s.push_str("heap stream off\r\n");
         }
         _ => match Command::parse(line) {
-            Command::Status => build_status(bridge, &mut s),
+            Command::Status => {
+                build_status(bridge, &mut s);
+                #[cfg(feature = "tailnet")]
+                if let Some(extra) = tailnet::status_extra().await {
+                    s.push_str(&extra);
+                }
+            }
             Command::Help => {
                 let _ = reply::write_help_implemented(&mut s, "T-Dongle Wi-Fi bridge", reply::PHASE1_FIRMWARE_COMMANDS);
             }
@@ -1747,23 +1811,39 @@ async fn handle(wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: 
                 if (1..=count).contains(&n) {
                     PINNED.store(n - 1, Ordering::Relaxed);
                     USE_REQ.signal(());
-                    // the preference is not persisted until the NVS writer lands (C: `wifi_set_preferred`)
-                    let _ = reply::write_use_ok(&mut s, n, false);
+                    // v0.1.1: `use N` also makes N the preferred network, kept across restarts (a failed write only costs the preference)
+                    s.push_str(&settings::call(settings::Req::Use(n)).await.0);
                 } else {
                     s.push_str(reply::USE_INVALID);
                 }
             }
-            Command::Use(SlotArg::TrailingGarbage) => s.push_str(reply::USE_INVALID),
-            Command::Mode(None) => s.push_str(reply::MODE_INVALID),
-            Command::Mode(Some(StoredMode::TailnetGateway)) => s.push_str("ERR Tailnet gateway mode is not part of this firmware yet; flash the C image\r\n"),
-            Command::Mode(Some(StoredMode::WifiBridge)) => {
-                let stored = critical_section::with(|cs| STORED.borrow(cs).get()).map(|x| x.mode);
-                if matches!(stored, Some(Ok(StoredMode::WifiBridge))) {
-                    out(wr, reply::MODE_SAVED, 500).await;
+            Command::Del(SlotArg::Number(n)) => s.push_str(&settings::call(settings::Req::Del(n)).await.0),
+            Command::Del(SlotArg::TrailingGarbage) => s.push_str(reply::DEL_FAILED),
+            Command::Profile(json) => s.push_str(&settings::call(settings::Req::Profile(String::from(json))).await.0),
+            Command::Display(DisplayArgs::Set(d)) => s.push_str(&settings::call(settings::Req::Display(d)).await.0),
+            Command::Display(DisplayArgs::Invalid) => s.push_str(reply::DISPLAY_USAGE),
+            Command::Reset => s.push_str(&settings::call(settings::Req::Reset).await.0),
+            Command::ConfirmReset => {
+                let (text, restart) = settings::call(settings::Req::ConfirmReset).await;
+                if restart {
+                    out(wr, &text, 500).await;
                     Timer::after(Duration::from_millis(300)).await;
                     tdongle_rescue::deliberate_reset()
                 }
-                s.push_str(reply::MODE_NOT_SAVED);
+                s.push_str(&text);
+            }
+            Command::Use(SlotArg::TrailingGarbage) => s.push_str(reply::USE_INVALID),
+            Command::Mode(None) => s.push_str(reply::MODE_INVALID),
+            Command::Mode(Some(StoredMode::TailnetGateway)) if !cfg!(feature = "tailnet") => s.push_str("ERR Tailnet gateway mode is not part of this firmware build\r\n"),
+            Command::Mode(Some(StoredMode::TailnetGateway)) if state.boot.safe_mode => s.push_str("ERR Tailnet gateway mode is not available in safe mode (`normal` and a reset first)\r\n"),
+            Command::Mode(Some(mode)) => {
+                let (text, restart) = settings::call(settings::Req::Mode(mode)).await;
+                if restart {
+                    out(wr, &text, 500).await;
+                    Timer::after(Duration::from_millis(300)).await;
+                    tdongle_rescue::deliberate_reset()
+                }
+                s.push_str(&text);
             }
             Command::Reboot => {
                 guard::leave_safe_mode();

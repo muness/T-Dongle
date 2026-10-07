@@ -72,7 +72,18 @@ fn now_ms() -> u32 {
 unsafe extern "C" fn rx_cb(buffer: *mut c_void, len: u16, eb: *mut c_void) -> sys::esp_err_t {
     RX_CALLBACKS.fetch_add(1, Ordering::Relaxed);
     let bridge = BRIDGE.load(Ordering::Acquire);
-    if !buffer.is_null() && len != 0 && !bridge.is_null() && RX_ON.load(Ordering::Acquire) {
+    #[cfg(feature = "tailnet")]
+    let taken = if !buffer.is_null() && len != 0 {
+        // SAFETY: the driver guarantees `buffer` is readable for `len` bytes until `esp_wifi_internal_free_rx_buffer(eb)`.
+        crate::tailnet::wifi_rx(unsafe { core::slice::from_raw_parts(buffer.cast::<u8>(), usize::from(len)) })
+    } else {
+        false
+    };
+    #[cfg(not(feature = "tailnet"))]
+    let taken = false;
+    if taken {
+        // tailnet mode copied the frame into its ring; the driver's buffer is freed below
+    } else if !buffer.is_null() && len != 0 && !bridge.is_null() && RX_ON.load(Ordering::Acquire) {
         // SAFETY: the driver guarantees `buffer` is readable for `len` bytes until `esp_wifi_internal_free_rx_buffer(eb)`; `bridge` is the 'static bridge set in `start`.
         let frame = unsafe { core::slice::from_raw_parts(buffer.cast::<u8>(), usize::from(len)) };
         // SAFETY: as above; `wifi_rx` is the callback entry of the bridge and takes `&self`.
