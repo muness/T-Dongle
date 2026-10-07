@@ -65,7 +65,13 @@ pub const MUX_TXQ: usize = 4;
 /// See [`MUX_TXQ`].
 pub const MUX_RXQ: usize = 4;
 /// Frames the radio's receive callback can hold for the stack (the mux pulls up to `RX_BURST` = 8 per poll; more than that so one pull never empties it).
-pub const RX_RING: usize = 10;
+pub const RX_RING: usize = 16;
+/// Bytes of received frames the radio callback may hold in the ring whatever the elastic floor says (ADR 0022 exception: the receive ring is the driver's own
+/// buffering, which the C pins under no floor either). Bounded: a flood costs at most this much of the floor, for the milliseconds a frame waits. Above it,
+/// frames need the heap above the floor like every other consumer. 16 KB is ten full frames, held only for the milliseconds before the stack takes them.
+pub const RX_RESERVE: usize = 16 * 1024;
+/// Bytes of frames now in the ring.
+static RX_BYTES: AtomicU32 = AtomicU32::new(0);
 /// Ethernet frames the USB side can hold between the NCM receiver task and the runtime (backpressure beyond that: the OUT endpoint is not re-armed).
 pub const USB_RX_FRAMES: usize = 2;
 /// Peer records per membership of the in-RAM directory (the C keeps the directory in flash; see the report).
@@ -555,7 +561,8 @@ pub fn wifi_rx(frame: &[u8]) -> bool {
     note_frame(frame, true);
     // admitted like an elastic consumer (the frame and its allocator header must leave the floor free), then copied into a block of its own length
     let mut block: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
-    if !hb_ok(FwHeap.free(), frame.len() + 16) || block.try_reserve_exact(frame.len()).is_err() {
+    let within_reserve = RX_BYTES.load(Ordering::Relaxed) as usize + frame.len() <= RX_RESERVE;
+    if !(within_reserve || hb_ok(FwHeap.free(), frame.len() + 16)) || block.try_reserve_exact(frame.len()).is_err() {
         RX_HEAP_REFUSED.fetch_add(1, Ordering::Relaxed);
         return true;
     }
@@ -567,6 +574,7 @@ pub fn wifi_rx(frame: &[u8]) -> bool {
             return Err(block);
         }
         let at = (r.head + r.count) % RX_RING;
+        RX_BYTES.fetch_add(block.len() as u32, Ordering::Relaxed);
         r.slots[at] = Some(block);
         r.count += 1;
         Ok(())
@@ -596,6 +604,7 @@ fn pop_rx(out: &mut [u8; crate::MTU]) -> Option<usize> {
     })?;
     let n = block.len().min(out.len());
     out[..n].copy_from_slice(&block[..n]);
+    RX_BYTES.fetch_sub(block.len() as u32, Ordering::Relaxed);
     Some(n)
 }
 
@@ -1136,7 +1145,7 @@ fn sta_report(sh: &Sh, out: &mut String) {
     }
     let _ = write!(
         out,
-        " dhcp_rx={} dhcp_tx={} arp_rx={} arp_tx={} wifi_rx={} rx_dropped={} rx_heap_refused={} tx_refused={} up_ms={}\r\n",
+        " dhcp_rx={} dhcp_tx={} arp_rx={} arp_tx={} wifi_rx={} rx_dropped={} rx_heap_refused={} tx_refused={} rx_ring_bytes={} heap_free={} heap_min={} up_ms={}\r\n",
         ld(&DHCP_RX),
         ld(&DHCP_TX),
         ld(&ARP_RX),
@@ -1145,6 +1154,9 @@ fn sta_report(sh: &Sh, out: &mut String) {
         ld(&RX_DROPPED),
         ld(&RX_HEAP_REFUSED),
         ld(&TX_REFUSED),
+        ld(&RX_BYTES),
+        FwHeap.free(),
+        ld(&HEAP_MIN),
         Instant::now().as_millis()
     );
     if let Some(p) = DIAG_PORT.try_get() {
