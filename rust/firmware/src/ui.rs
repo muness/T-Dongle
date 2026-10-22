@@ -343,7 +343,7 @@ pub async fn ui_task(hw: Hardware) -> ! {
         let snapshot = Snapshot {
             bridge: panel.is_none(),
             wifi: connected,
-            recovery: false,
+            recovery: crate::guard::safe_mode_now(),
             saved_wifi: saved_count > 0,
             active_slot,
             active_name: active_name.as_str(),
