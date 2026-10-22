@@ -78,7 +78,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 /// The version `status`, `boot-status` and the LCD report: `TDONGLE_VERSION` when the release workflow sets it, else the development name.
 const FIRMWARE: &str = match option_env!("TDONGLE_VERSION") {
     Some(v) => v,
-    None => "0.3.0-rust",
+    None => env!("CARGO_PKG_VERSION"),
 };
 const MTU: usize = 1514;
 /// OUT endpoint buffers: EP0 (64) + ACM bulk OUT (64) + the NCM bulk OUT transfer buffer (one whole NTB).
@@ -1048,16 +1048,47 @@ fn configure_station(controller: &mut WifiController<'static>, ssid: &str, pass:
     true
 }
 
+/// Preserve the driver's actionable reason without treating an unknown enum as a numeric code.
+fn record_disconnect(reason: esp_radio::wifi::DisconnectReason) {
+    use esp_radio::wifi::DisconnectReason as R;
+    const NO_AP: u32 = 201;
+    const AUTH_FAILED: u32 = 202;
+    const FOUR_WAY_TIMEOUT: u32 = 15;
+    const BEACON_TIMEOUT: u32 = 200;
+    const HANDSHAKE_TIMEOUT: u32 = 204;
+    LAST_REASON.store(
+        match reason {
+            R::NoAccessPointFound => NO_AP,
+            R::AuthenticationFailed => AUTH_FAILED,
+            R::FourWayHandshakeTimeout => FOUR_WAY_TIMEOUT,
+            R::BeaconTimeout => BEACON_TIMEOUT,
+            R::HandshakeTimeout => HANDSHAKE_TIMEOUT,
+            _ => 0, // unmapped; exact enum is retained in the diagnostic text
+        },
+        Ordering::Relaxed,
+    );
+    let mut text = guard::heapless_str::Text::new();
+    let _ = write!(text, "{reason:?}");
+    init_note(text.as_str());
+}
+
 async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>) -> ! {
     // SAFETY: this is the link supervisor task; it may block and is not a driver callback.
     let ctx = unsafe { TaskContext::assume() };
-    let mut next = 0usize;
+    let mut tried = 0u8;
+    let mut failures = 0u32;
     loop {
         // The list as it is now (a console `profile`, `del` or reset replaces it): nothing saved means nothing to join.
         let Some(loaded) = saved_for_join() else {
-            let _ = with_timeout(Duration::from_secs(2), USE_REQ.wait()).await;
+            if matches!(select3(SCAN_REQ.wait(), USE_REQ.wait(), Timer::after_secs(2)).await, Either3::First(())) {
+                let _ = scan_all(controller).await;
+            }
             continue;
         };
+        let count = loaded.saved.list().len();
+        if (u16::from(tried) & ((1u16 << count) - 1)) == (1u16 << count) - 1 {
+            tried = 0;
+        }
         // Strongest saved network that a scan (hidden SSIDs included) sees; none seen: try the saved list in order (directed probes find hidden ones).
         guard::stage(Stage::Scan);
         let scan = scan_all(controller).await;
@@ -1068,7 +1099,7 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 for (i, v) in signal.iter().enumerate() {
                     SCAN_SIGNAL[i].store(*v as i32, Ordering::Relaxed);
                 }
-                let chosen = tdongle_saved::choose(&loaded, &signal);
+                let chosen = tdongle_saved::choose_untried(&loaded, &signal, tried);
                 if let Some(slot) = chosen {
                     // the strongest access point of that SSID: what the all-channel, by-signal join selects, and what `bss pin on` pins
                     let ssid = loaded.saved.list()[slot].ssid_bytes();
@@ -1087,11 +1118,9 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
         let slot = if pinned >= 0 && (pinned as usize) < count {
             pinned as usize
         } else {
-            slot.unwrap_or_else(|| {
-                next = (next + 1) % count;
-                next
-            })
+            slot.or_else(|| tdongle_saved::choose_untried(&loaded, &[tdongle_saved::NOT_SEEN_DBM; tdongle_saved::PROFILE_LIMIT], tried)).unwrap_or(0)
         };
+        tried |= 1 << slot;
         let Some((ssid, pass)) = tdongle_saved::credentials(&loaded.saved, slot) else {
             Timer::after_secs(2).await;
             continue;
@@ -1109,6 +1138,8 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
         guard::stage(Stage::Connect);
         match with_timeout(Duration::from_secs(30), controller.connect_async()).await {
             Ok(Ok(info)) => {
+                tried = 0;
+                failures = 0;
                 println!("connected: {:?}", info);
                 guard::stage(Stage::Running);
                 CONNECTS.fetch_add(1, Ordering::Relaxed);
@@ -1142,7 +1173,9 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                         Either::First(Either3::First(r)) => {
                             DISCONNECTS.fetch_add(1, Ordering::Relaxed);
                             println!("disconnected: {:?}", r.is_ok());
-                            let _ = &LAST_REASON; // reason code: DisconnectedInfo field not mapped in the spike
+                            if let Ok(info) = r {
+                                record_disconnect(info.reason);
+                            }
                             break;
                         }
                         Either::Second(()) => match {
@@ -1178,6 +1211,9 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
             }
             Ok(Err(e)) => {
                 println!("connect failed: {:?}, retrying", e);
+                if let esp_radio::wifi::ConnectionError::Failed(info) = e {
+                    record_disconnect(info.reason);
+                }
                 drop_failed_pin(slot);
             }
             Err(_) => {
@@ -1185,7 +1221,12 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 drop_failed_pin(slot);
             }
         }
-        Timer::after_secs(2).await;
+        let delay = tdongle_saved::retry_delay_ms(failures);
+        failures = failures.saturating_add(1);
+        if matches!(select(USE_REQ.wait(), Timer::after_millis(u64::from(delay))).await, Either::First(())) {
+            tried = 0;
+            failures = 0;
+        }
     }
 }
 
@@ -1889,7 +1930,11 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
             let mut pkt = [0u8; 64];
             let len = match select3(rd.read_packet(&mut pkt), Timer::after_millis(500), HTTP_LINE.receive()).await {
                 Either3::First(Ok(len)) => len,
-                Either3::First(Err(_)) => break,
+                Either3::First(Err(_)) => {
+                    // A new USB session must not complete a command from the previous host.
+                    reader = LineReader::new();
+                    break;
+                }
                 Either3::Second(()) => continue,
                 Either3::Third(line) => {
                     http_line(bridge, state, &line).await;

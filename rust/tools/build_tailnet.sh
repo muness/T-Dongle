@@ -19,7 +19,7 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' firmware/Cargo.toml | head -1)
 dist=dist/tdongle-rust-$version-tailnet
 rm -rf "$dist"; mkdir -p "$dist"
 elf=$CARGO_TARGET_DIR/xtensa-esp32s3-none-elf/release/tdongle-fw
-(cd firmware && cargo +esp build --release --features "tailnet,${MEMBERS:-members-1}")
+(cd firmware && cargo +esp build --locked --release --features "tailnet,${MEMBERS:-members-1}")
 espflash save-image --chip esp32s3 --flash-mode dio --flash-freq 40mhz --flash-size 16mb "$elf" "$dist/app-tailnet.bin"
 cp "$elf" "$dist/tdongle-fw.elf"
 want=$(shasum -a 256 "$elf" | cut -d' ' -f1)

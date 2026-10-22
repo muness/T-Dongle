@@ -14,7 +14,7 @@ elf=$CARGO_TARGET_DIR/xtensa-esp32s3-none-elf/release/tdongle-fw
 flags=(--chip esp32s3 --flash-mode dio --flash-freq 40mhz --flash-size 16mb)
 bl=${RESCUE_BOOTLOADER:-spikes/dist/bootloader-rescue.bin}
 build() { # features outname
-  (cd firmware && cargo build --release ${1:+--features $1})
+  (cd firmware && cargo build --locked --release ${1:+--features $1})
   espflash save-image "${flags[@]}" "$elf" "$dist/$2"
   local want got
   want=$(shasum -a 256 "$elf" | cut -d' ' -f1)

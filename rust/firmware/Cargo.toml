@@ -1,6 +1,6 @@
 [package]
 name = "tdongle-fw"
-version = "0.3.0-dev"
+version = "0.4.0-beta.1"
 edition = "2024"
 publish = false
 

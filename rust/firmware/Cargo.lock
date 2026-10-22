@@ -2330,7 +2330,7 @@ version = "0.3.0-dev"
 
 [[package]]
 name = "tdongle-fw"
-version = "0.3.0-dev"
+version = "0.4.0-beta.1"
 dependencies = [
  "critical-section",
  "embassy-executor",
