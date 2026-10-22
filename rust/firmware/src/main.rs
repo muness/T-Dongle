@@ -8,23 +8,31 @@
 
 extern crate alloc;
 
-mod ops;
+#[cfg(feature = "c5")]
+mod c5;
 mod guard;
-mod supervise;
+mod ops;
 mod stackmark;
+mod supervise;
+#[cfg(not(feature = "c5"))]
 mod temperature;
-mod settings;
-mod l2;
-mod dhcp;
-mod pm;
-mod setup;
-mod ui;
+#[cfg(feature = "c5")]
+#[path = "c5/temperature.rs"]
+mod temperature;
+#[cfg(feature = "c5")]
+use c5::rescue as tdongle_rescue;
 mod acm;
-mod ncm;
+mod dhcp;
 #[cfg(feature = "tailnet")]
 mod dirflash;
+mod l2;
+mod ncm;
+mod pm;
+mod settings;
+mod setup;
 #[cfg(feature = "tailnet")]
 mod tailnet;
+mod ui;
 
 use alloc::string::String;
 use core::cell::RefCell;
@@ -33,12 +41,9 @@ use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering};
 
 use critical_section::Mutex as CsMutex;
 use embassy_executor::Spawner;
-use tdongle_boot_guard::Stage;
 use embassy_futures::select::{Either, Either3, select, select3};
 use embassy_futures::yield_now;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use esp_hal::interrupt::Priority;
-use esp_rtos::embassy::InterruptExecutor;
 use embassy_sync::channel::Channel;
 use embassy_sync::mutex::Mutex;
 use embassy_sync::signal::Signal;
@@ -48,23 +53,25 @@ use embassy_usb::types::{InterfaceNumber, StringIndex};
 use embassy_usb::{Builder, Handler, UsbDevice, UsbVersion};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::interrupt::Priority;
 use esp_hal::timer::timg::TimerGroup;
+#[cfg(not(feature = "c5"))]
 use esp_hal::usb::otg::Usb;
+#[cfg(not(feature = "c5"))]
 use esp_hal::usb::otg::embassy_usb_device::{Config as OtgConfig, Driver as UsbDriver};
 use esp_println::println;
 use esp_radio::wifi::Protocols;
+use esp_radio::wifi::scan::ScanConfig;
 use esp_radio::wifi::scan::ScanTypeConfig;
 use esp_radio::wifi::sta::ScanMethod;
-use tdongle_saved::Bss;
-use esp_radio::wifi::scan::ScanConfig;
-use esp_radio::wifi::{
-    AuthenticationMethodConfig, Bandwidth, Config, ControllerConfig, PowerSaveMode, WifiController,
-    sta::StationConfig,
-};
+use esp_radio::wifi::{AuthenticationMethodConfig, Bandwidth, Config, ControllerConfig, PowerSaveMode, WifiController, sta::StationConfig};
+use esp_rtos::embassy::InterruptExecutor;
 use static_cell::{ConstStaticCell, StaticCell};
+use tdongle_boot_guard::Stage;
 use tdongle_bridge::{Bridge, Env, HostOutcome, RingSend, TaskContext, TxError};
-use tdongle_serial::bridge_report::{Report, RingReport, RxClassReport, WifiTxReport, write_status_lines};
 use tdongle_nvs_format::mode::Mode as StoredMode;
+use tdongle_saved::Bss;
+use tdongle_serial::bridge_report::{Report, RingReport, RxClassReport, WifiTxReport, write_status_lines};
 use tdongle_serial::command::{Command, DisplayArgs, SlotArg};
 use tdongle_serial::console::{Event, LineReader};
 use tdongle_serial::memory_log::Record;
@@ -73,7 +80,6 @@ use tdongle_serial::status::{DisplayState, Mode, Prefs, Snapshot, Traffic, write
 use tdongle_serial::wifi_link::Events;
 
 esp_bootloader_esp_idf::esp_app_desc!();
-
 
 /// The version `status`, `boot-status` and the LCD report: `TDONGLE_VERSION` when the release workflow sets it, else the development name.
 const FIRMWARE: &str = match option_env!("TDONGLE_VERSION") {
@@ -98,11 +104,21 @@ const HEAP_RECLAIMED: usize = tailnet::budget::HEAP_RECLAIMED;
 #[cfg(feature = "tailnet")]
 const HEAP_REGULAR: usize = tailnet::budget::HEAP_REGULAR;
 
+#[cfg(not(feature = "c5"))]
 type Drv = UsbDriver<'static>;
+#[cfg(not(feature = "c5"))]
 type AcmWriter = acm::AcmWriter<'static, Drv>;
+#[cfg(not(feature = "c5"))]
 type AcmReader = acm::AcmReader<'static, Drv>;
+#[cfg(not(feature = "c5"))]
 type NcmSender = ncm::Sender<'static, Drv>;
+#[cfg(not(feature = "c5"))]
 type NcmReceiver = ncm::Receiver<'static, Drv>;
+
+#[cfg(feature = "c5")]
+type AcmWriter = c5::serial::Writer;
+#[cfg(feature = "c5")]
+type AcmReader = c5::serial::Reader;
 
 // ======================================================================================================================
 // Shared state
@@ -329,6 +345,8 @@ impl Env for FwEnv {
 
     // Wi-Fi RX callback context (the poll task): copy and return, never wait.
     fn usb_ring_send(&self, frame: &[u8]) -> RingSend {
+        #[cfg(feature = "c5")]
+        return c5::serial::send_frame(frame);
         if ALT.load(Ordering::Relaxed) == 0 || USB_MODE.load(Ordering::Relaxed) != USB_BRIDGE {
             RING_NOT_READY.fetch_add(1, Ordering::Relaxed);
             return RingSend::NotReady;
@@ -348,7 +366,9 @@ impl Env for FwEnv {
             _ => 4,
         }]
         .fetch_add(1, Ordering::Relaxed);
-        let burst = if gap < 300 { RX_BURST_LEN.fetch_add(1, Ordering::Relaxed) + 1 } else {
+        let burst = if gap < 300 {
+            RX_BURST_LEN.fetch_add(1, Ordering::Relaxed) + 1
+        } else {
             RX_BURST_LEN.store(1, Ordering::Relaxed);
             1
         };
@@ -431,6 +451,7 @@ impl Env for FwEnv {
 // USB control handler (copied from S2, plus `configured`)
 // ======================================================================================================================
 
+#[cfg(not(feature = "c5"))]
 struct Ctl {
     acm_if: InterfaceNumber,
     ncm_if: InterfaceNumber,
@@ -441,6 +462,7 @@ struct Ctl {
     mac_hex: &'static str,
 }
 
+#[cfg(not(feature = "c5"))]
 impl Handler for Ctl {
     fn reset(&mut self) {
         supervise::USB_CONFIGURED.store(false, Ordering::Relaxed);
@@ -658,10 +680,14 @@ async fn main(spawner: Spawner) -> ! {
     let peripherals = esp_hal::init(esp_hal::Config::default().with_cpu_clock(CpuClock::max()));
     tdongle_rescue::arm();
     stackmark::paint();
+    #[cfg(not(feature = "c5"))]
     esp_alloc::heap_allocator!(#[esp_hal::ram(reclaimed)] size: HEAP_RECLAIMED);
-    #[cfg(feature = "tailnet")]
+    #[cfg(all(feature = "tailnet", not(feature = "c5")))]
     esp_alloc::heap_allocator!(#[esp_hal::ram(unstable(dcache_reclaimed))] size: tailnet::budget::HEAP_DCACHE);
+    #[cfg(not(feature = "c5"))]
     esp_alloc::heap_allocator!(size: HEAP_REGULAR);
+    #[cfg(feature = "c5")]
+    c5::memory::init(peripherals.PSRAM, state.boot.safe_mode);
 
     let timg0 = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timg0.timer0, peripherals.FROM_CPU_INTR0);
@@ -696,89 +722,116 @@ async fn main(spawner: Spawner) -> ! {
         }
     };
 
-    // ---- USB (S2): serial and NCM MAC string = chip MAC ----
-    static HEX: StaticCell<[u8; 12]> = StaticCell::new();
-    let hex = HEX.init(ops::mac_hex(&mac));
-    let hex: &'static str = core::str::from_utf8(hex).unwrap_or("000000000000");
+    #[cfg(not(feature = "c5"))]
+    let (acm_rd, acm_wr) = {
+        // ---- USB (S2): serial and NCM MAC string = chip MAC ----
+        static HEX: StaticCell<[u8; 12]> = StaticCell::new();
+        let hex = HEX.init(ops::mac_hex(&mac));
+        let hex: &'static str = core::str::from_utf8(hex).unwrap_or("000000000000");
 
-    let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
-    // a reset that was not a power-on (panic, supervisor, the rescue watchdog's core-only reset) left the host with the old device: detach, and hold it detached for
-    // `usb_watch::DETACH_HOLD_MS` before `usb_task` attaches, so the host sees an unplug and enumerates afresh
-    supervise::boot_detach(matches!(esp_hal::system::reset_reason(), Some(esp_hal::rtc_cntl::SocResetReason::ChipPowerOn)));
-    static EP_OUT: StaticCell<[u8; EP_OUT_BYTES]> = StaticCell::new();
-    let mut otg_config = OtgConfig::default();
-    // PATCH (vendor/embassy-usb-synopsys-otg): the NCM bulk OUT endpoint (0x04) is armed for a whole NTB.
-    #[cfg(not(feature = "stock-out"))]
-    {
-        otg_config.out_transfer_bytes[4] = ncm::NTB_OUT_MAX as u16;
-    }
-    let driver = UsbDriver::new(usb, EP_OUT.init([0; EP_OUT_BYTES]), otg_config);
+        let usb = Usb::new_fs(peripherals.USB_FS, peripherals.GPIO20, peripherals.GPIO19);
+        // a reset that was not a power-on (panic, supervisor, the rescue watchdog's core-only reset) left the host with the old device: detach, and hold it detached for
+        // `usb_watch::DETACH_HOLD_MS` before `usb_task` attaches, so the host sees an unplug and enumerates afresh
+        supervise::boot_detach(matches!(esp_hal::system::reset_reason(), Some(esp_hal::rtc_cntl::SocResetReason::ChipPowerOn)));
+        static EP_OUT: StaticCell<[u8; EP_OUT_BYTES]> = StaticCell::new();
+        let mut otg_config = OtgConfig::default();
+        // PATCH (vendor/embassy-usb-synopsys-otg): the NCM bulk OUT endpoint (0x04) is armed for a whole NTB.
+        #[cfg(not(feature = "stock-out"))]
+        {
+            otg_config.out_transfer_bytes[4] = ncm::NTB_OUT_MAX as u16;
+        }
+        let driver = UsbDriver::new(usb, EP_OUT.init([0; EP_OUT_BYTES]), otg_config);
 
-    let mut config = embassy_usb::Config::new(0x303A, 0x4001);
-    config.bcd_usb = UsbVersion::Two;
-    config.device_release = 0x0100;
-    config.manufacturer = Some("T-Dongle Adapter Project");
-    config.product = Some("T-Dongle-S3 NCM");
-    config.serial_number = Some(hex);
-    config.max_power = 500;
-    config.self_powered = false;
-    config.supports_remote_wakeup = false;
+        let mut config = embassy_usb::Config::new(0x303A, 0x4001);
+        config.bcd_usb = UsbVersion::Two;
+        config.device_release = 0x0100;
+        config.manufacturer = Some("T-Dongle Adapter Project");
+        config.product = Some("T-Dongle-S3 NCM");
+        config.serial_number = Some(hex);
+        config.max_power = 500;
+        config.self_powered = false;
+        config.supports_remote_wakeup = false;
 
-    static CFG: StaticCell<[u8; 256]> = StaticCell::new();
-    static BOS: StaticCell<[u8; 16]> = StaticCell::new();
-    static CTRL: StaticCell<[u8; 64]> = StaticCell::new();
-    let mut b = Builder::new(driver, config, CFG.init([0; 256]), BOS.init([0; 16]), &mut [], CTRL.init([0; 64]));
-    let (acm_ids, acm) = acm::build(&mut b, 64);
-    let (ncm_ids, ncm) = ncm::build(&mut b, 64);
-    static CTL: StaticCell<Ctl> = StaticCell::new();
-    b.handler(CTL.init(Ctl {
-        acm_if: acm_ids.comm_if,
-        ncm_if: ncm_ids.comm_if,
-        ncm_data_if: ncm_ids.data_if,
-        acm_str: acm_ids.iface_string,
-        ncm_str: ncm_ids.iface_string,
-        mac_str: ncm_ids.mac_string,
-        mac_hex: hex,
-    }));
-    // Compile-time buffer initialization avoids a 3.2 KB temporary on the boot stack.
-    static NTB: ConstStaticCell<[u8; ncm::NTB_OUT_MAX]> = ConstStaticCell::new([0; ncm::NTB_OUT_MAX]);
-    let (tx, rx) = ncm.split(NTB.take());
-    let (acm_rd, acm_wr) = acm.split();
-    static ACM_WR: StaticCell<Mutex<CriticalSectionRawMutex, AcmWriter>> = StaticCell::new();
-    let acm_wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter> = ACM_WR.init(Mutex::new(acm_wr));
-    #[cfg(feature = "tailnet")]
-    let _ = tailnet::WRITER.init(acm_wr);
-    let dev = b.build();
+        static CFG: StaticCell<[u8; 256]> = StaticCell::new();
+        static BOS: StaticCell<[u8; 16]> = StaticCell::new();
+        static CTRL: StaticCell<[u8; 64]> = StaticCell::new();
+        let mut b = Builder::new(driver, config, CFG.init([0; 256]), BOS.init([0; 16]), &mut [], CTRL.init([0; 64]));
+        let (acm_ids, acm) = acm::build(&mut b, 64);
+        let (ncm_ids, ncm) = ncm::build(&mut b, 64);
+        static CTL: StaticCell<Ctl> = StaticCell::new();
+        b.handler(CTL.init(Ctl {
+            acm_if: acm_ids.comm_if,
+            ncm_if: ncm_ids.comm_if,
+            ncm_data_if: ncm_ids.data_if,
+            acm_str: acm_ids.iface_string,
+            ncm_str: ncm_ids.iface_string,
+            mac_str: ncm_ids.mac_string,
+            mac_hex: hex,
+        }));
+        // Compile-time buffer initialization avoids a 3.2 KB temporary on the boot stack.
+        static NTB: ConstStaticCell<[u8; ncm::NTB_OUT_MAX]> = ConstStaticCell::new([0; ncm::NTB_OUT_MAX]);
+        let (tx, rx) = ncm.split(NTB.take());
+        let (acm_rd, acm_wr) = acm.split();
+        static ACM_WR: StaticCell<Mutex<CriticalSectionRawMutex, AcmWriter>> = StaticCell::new();
+        let acm_wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter> = ACM_WR.init(Mutex::new(acm_wr));
+        #[cfg(feature = "tailnet")]
+        let _ = tailnet::WRITER.init(acm_wr);
+        let dev = b.build();
 
-    // The USB device attaches when `usb_task` first runs: spawn it before anything else and do not block between here and the first `.await`.
-    int_spawner.spawn(usb_task(SendDevice(dev)).unwrap());
+        // The USB device attaches when `usb_task` first runs: spawn it before anything else and do not block between here and the first `.await`.
+        int_spawner.spawn(usb_task(SendDevice(dev)).unwrap());
+
+        spawner.spawn(usb_rx_task(rx, producer).unwrap());
+        int_spawner.spawn(usb_tx_task(SendTx(tx)).unwrap());
+
+        (acm_rd, acm_wr)
+    };
+    #[cfg(feature = "c5")]
+    let (acm_rd, acm_wr) = c5::serial::start(peripherals.USB_DEVICE, spawner);
     int_spawner.spawn(console_task(acm_rd, acm_wr, bridge, state).unwrap());
     int_spawner.spawn(supervise::supervisor_task(dogs, state.boot.safe_mode).unwrap());
     supervise::THREAD_SPAWNER.get_or_init(|| spawner.make_send());
     spawner.spawn(supervise::thread_pulse_task().unwrap());
-    spawner.spawn(usb_rx_task(rx, producer).unwrap());
-    int_spawner.spawn(usb_tx_task(SendTx(tx)).unwrap());
     spawner.spawn(ring_housekeeping_task().unwrap());
     spawner.spawn(heap_task(acm_wr).unwrap());
     spawner.spawn(settings::task().unwrap());
     spawner.spawn(temperature::task().unwrap());
+    #[cfg(not(feature = "c5"))]
     spawner.spawn(
         ui::ui_task(ui::Hardware {
             spi: peripherals.SPI2,
-            mosi: peripherals.GPIO3,
-            clk: peripherals.GPIO5,
-            cs: peripherals.GPIO4,
-            dc: peripherals.GPIO2,
-            rst: peripherals.GPIO1,
-            bl: peripherals.GPIO38,
-            button: peripherals.GPIO0,
-            led_data: peripherals.GPIO40,
-            led_clk: peripherals.GPIO39,
+            mosi: peripherals.GPIO3.into(),
+            clk: peripherals.GPIO5.into(),
+            cs: peripherals.GPIO4.into(),
+            dc: peripherals.GPIO2.into(),
+            rst: peripherals.GPIO1.into(),
+            bl: peripherals.GPIO38.into(),
+            button: peripherals.GPIO0.into(),
+            led_data: peripherals.GPIO40.into(),
+            led_clk: peripherals.GPIO39.into(),
             ledc: peripherals.LEDC,
         })
         .unwrap(),
     );
-    spawner.spawn(init_task(peripherals.WIFI, peripherals.FLASH, peripherals.RNG, peripherals.ADC1, spawner, bridge, worker, state.boot.safe_mode, *state).unwrap());
+    #[cfg(feature = "c5")]
+    spawner.spawn(
+        ui::ui_task(ui::Hardware {
+            spi: peripherals.SPI2,
+            mosi: peripherals.GPIO2.into(),
+            clk: peripherals.GPIO6.into(),
+            cs: peripherals.GPIO10.into(),
+            dc: peripherals.GPIO3.into(),
+            rst: peripherals.GPIO1.into(),
+            bl: peripherals.GPIO0.into(),
+            button: peripherals.GPIO28.into(),
+            led_data: peripherals.GPIO5.into(),
+            led_clk: peripherals.GPIO4.into(),
+        })
+        .unwrap(),
+    );
+    spawner.spawn(
+        init_task(peripherals.WIFI, peripherals.FLASH, peripherals.RNG, peripherals.ADC1, spawner, bridge, worker, state.boot.safe_mode, *state).unwrap(),
+    );
     loop {
         Timer::after_secs(3600).await;
     }
@@ -810,7 +863,7 @@ async fn init_task(
     let loaded = match settings::mount(flash).await {
         Ok(stored) => {
             // the stored mode picks the data path; safe mode returned above, so tailnet mode is never reachable from it
-            tailnet_mode = cfg!(feature = "tailnet") && matches!(stored.mode, Ok(StoredMode::TailnetGateway));
+            tailnet_mode = cfg!(feature = "c5") || cfg!(feature = "tailnet") && matches!(stored.mode, Ok(StoredMode::TailnetGateway));
             critical_section::with(|cs| STORED.borrow(cs).set(Some(stored)));
             settings::persist_diagnosis(&state).await;
             if SAVED.lock(|c| c.borrow().as_ref().is_none_or(|l| l.saved.list().is_empty())) {
@@ -827,7 +880,7 @@ async fn init_task(
     let words = guard::setup_take();
     let software = matches!(esp_hal::system::reset_reason(), Some(esp_hal::rtc_cntl::SocResetReason::CoreSw));
     let store_ok = loaded.is_some();
-    let networks_saved = SAVED.lock(|c| c.borrow().as_ref().is_none_or(|l| !l.saved.list().is_empty())); // an unreadable store counts as "has networks" (a damaged store never opens an access point by itself)
+    let networks_saved = cfg!(feature = "c5") || SAVED.lock(|c| c.borrow().as_ref().is_none_or(|l| !l.saved.list().is_empty())); // an unreadable store counts as "has networks" (a damaged store never opens an access point by itself)
     let decision = tdongle_setup::boot::SetupBoot::decide(software, words[0], words[1], words[2], networks_saved, store_ok);
     let boot = tdongle_setup::boot::Boot::decide(decision, false);
     let Some(_) = loaded else {
@@ -855,8 +908,17 @@ async fn init_task(
             return;
         }
     };
+    #[cfg(feature = "c5")]
+    c5::mode::load().await;
     // Both directions go through `l2` (the C data path), not esp-radio's token API (which wedged: see l2.rs).
     l2::start(bridge);
+    #[cfg(feature = "c5")]
+    if c5::mode::wireless() {
+        if !c5::mode::configure(&mut controller, StationConfig::default()) {
+            init_note("wireless gateway AP failed");
+        }
+        l2::register();
+    }
     // Each of these is a tuning, not a requirement: report and carry on.
     if controller.set_power_saving(PowerSaveMode::None).is_err() {
         init_note("set_power_saving failed");
@@ -879,7 +941,10 @@ async fn init_task(
         if let Err(e) = tailnet::start(spawner) {
             println!("tailnet gateway not started: {:?}", e);
             init_note("tailnet not started: heap short");
+            #[cfg(not(feature = "c5"))]
             spawner.spawn(worker_task(worker).unwrap());
+            #[cfg(feature = "c5")]
+            drop(worker); // keep management available; C5 has no L2 fallback transport
         } else {
             drop(worker);
         }
@@ -1038,9 +1103,17 @@ fn configure_station(controller: &mut WifiController<'static>, ssid: &str, pass:
     if let (true, Some(b)) = (PIN_BSS.load(Ordering::Relaxed), best_bss.filter(Bss::usable)) {
         station = station.with_bssid(b.bssid).with_channel(b.channel);
     }
-    if controller.set_config(&Config::Station(station)).is_err() {
+    #[cfg(feature = "c5")]
+    let configured = c5::mode::configure(controller, station);
+    #[cfg(not(feature = "c5"))]
+    let configured = controller.set_config(&Config::Station(station)).is_ok();
+    if !configured {
         init_note("set_config failed");
         return false;
+    }
+    #[cfg(feature = "c5")]
+    if controller.set_band_mode(esp_radio::wifi::BandMode::Auto).is_err() {
+        init_note("dual-band selection failed");
     }
     if controller.set_protocols(Protocols::default()).is_err() {
         init_note("set_protocols failed"); // default is b/g/n: never LR
@@ -1048,16 +1121,45 @@ fn configure_station(controller: &mut WifiController<'static>, ssid: &str, pass:
     true
 }
 
+/// Preserve the driver's actionable reason without treating an unknown enum as a numeric code.
+fn record_disconnect(reason: esp_radio::wifi::DisconnectReason) {
+    use esp_radio::wifi::DisconnectReason as R;
+    const NO_AP: u32 = 201;
+    const AUTH_FAILED: u32 = 202;
+    const FOUR_WAY_TIMEOUT: u32 = 15;
+    LAST_REASON.store(
+        match reason {
+            R::NoAccessPointFound => NO_AP,
+            R::AuthenticationFailed => AUTH_FAILED,
+            R::FourWayHandshakeTimeout => FOUR_WAY_TIMEOUT,
+            R::BeaconTimeout => 200,
+            R::HandshakeTimeout => 204,
+            _ => 0, // unmapped; exact enum is retained in the diagnostic text
+        },
+        Ordering::Relaxed,
+    );
+    let mut text = guard::heapless_str::Text::new();
+    let _ = write!(text, "{reason:?}");
+    init_note(text.as_str());
+}
+
 async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Bridge<FwEnv>) -> ! {
     // SAFETY: this is the link supervisor task; it may block and is not a driver callback.
     let ctx = unsafe { TaskContext::assume() };
-    let mut next = 0usize;
+    let mut tried = 0u8;
+    let mut failures = 0u32;
     loop {
         // The list as it is now (a console `profile`, `del` or reset replaces it): nothing saved means nothing to join.
         let Some(loaded) = saved_for_join() else {
-            let _ = with_timeout(Duration::from_secs(2), USE_REQ.wait()).await;
+            if matches!(select3(SCAN_REQ.wait(), USE_REQ.wait(), Timer::after_secs(2)).await, Either3::First(())) {
+                let _ = scan_all(controller).await;
+            }
             continue;
         };
+        let count = loaded.saved.list().len();
+        if (u16::from(tried) & ((1u16 << count) - 1)) == (1u16 << count) - 1 {
+            tried = 0;
+        }
         // Strongest saved network that a scan (hidden SSIDs included) sees; none seen: try the saved list in order (directed probes find hidden ones).
         guard::stage(Stage::Scan);
         let scan = scan_all(controller).await;
@@ -1068,7 +1170,7 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 for (i, v) in signal.iter().enumerate() {
                     SCAN_SIGNAL[i].store(*v as i32, Ordering::Relaxed);
                 }
-                let chosen = tdongle_saved::choose(&loaded, &signal);
+                let chosen = tdongle_saved::choose_untried(&loaded, &signal, tried);
                 if let Some(slot) = chosen {
                     // the strongest access point of that SSID: what the all-channel, by-signal join selects, and what `bss pin on` pins
                     let ssid = loaded.saved.list()[slot].ssid_bytes();
@@ -1087,11 +1189,9 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
         let slot = if pinned >= 0 && (pinned as usize) < count {
             pinned as usize
         } else {
-            slot.unwrap_or_else(|| {
-                next = (next + 1) % count;
-                next
-            })
+            slot.or_else(|| tdongle_saved::choose_untried(&loaded, &[tdongle_saved::NOT_SEEN_DBM; tdongle_saved::PROFILE_LIMIT], tried)).unwrap_or(0)
         };
+        tried |= 1 << slot;
         let Some((ssid, pass)) = tdongle_saved::credentials(&loaded.saved, slot) else {
             Timer::after_secs(2).await;
             continue;
@@ -1109,6 +1209,8 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
         guard::stage(Stage::Connect);
         match with_timeout(Duration::from_secs(30), controller.connect_async()).await {
             Ok(Ok(info)) => {
+                tried = 0;
+                failures = 0;
                 println!("connected: {:?}", info);
                 guard::stage(Stage::Running);
                 CONNECTS.fetch_add(1, Ordering::Relaxed);
@@ -1142,7 +1244,9 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                         Either::First(Either3::First(r)) => {
                             DISCONNECTS.fetch_add(1, Ordering::Relaxed);
                             println!("disconnected: {:?}", r.is_ok());
-                            let _ = &LAST_REASON; // reason code: DisconnectedInfo field not mapped in the spike
+                            if let Ok(info) = r {
+                                record_disconnect(info.reason);
+                            }
                             break;
                         }
                         Either::Second(()) => match {
@@ -1178,6 +1282,9 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
             }
             Ok(Err(e)) => {
                 println!("connect failed: {:?}, retrying", e);
+                if let esp_radio::wifi::ConnectionError::Failed(info) = e {
+                    record_disconnect(info.reason);
+                }
                 drop_failed_pin(slot);
             }
             Err(_) => {
@@ -1185,7 +1292,12 @@ async fn link_loop(controller: &mut WifiController<'static>, bridge: &'static Br
                 drop_failed_pin(slot);
             }
         }
-        Timer::after_secs(2).await;
+        let delay = tdongle_saved::retry_delay_ms(failures);
+        failures = failures.saturating_add(1);
+        if matches!(select(USE_REQ.wait(), Timer::after_millis(u64::from(delay))).await, Either::First(())) {
+            tried = 0;
+            failures = 0;
+        }
     }
 }
 
@@ -1221,11 +1333,14 @@ async fn worker_task(mut worker: tdongle_bridge::Worker<'static, FwEnv>) -> ! {
 
 /// The USB device, moved to the interrupt executor. `UsbDevice` is not `Send` only because its handler list is `dyn Handler` without the bound; the one handler (`Ctl`) holds
 /// interface numbers and `&'static str`s and touches only atomics and critical-section statics, and after this move nothing else uses the device.
+#[cfg(not(feature = "c5"))]
 struct SendDevice(UsbDevice<'static, Drv>);
 
 // SAFETY: see above: single owner after the move, handler state is atomics and critical-section guarded statics.
+#[cfg(not(feature = "c5"))]
 unsafe impl Send for SendDevice {}
 
+#[cfg(not(feature = "c5"))]
 #[embassy_executor::task]
 async fn usb_task(mut dev: SendDevice) -> ! {
     supervise::attach_allowed().await;
@@ -1234,6 +1349,7 @@ async fn usb_task(mut dev: SendDevice) -> ! {
 
 /// host -> Wi-Fi: one datagram at a time into `Producer::host`. HOLD keeps the datagram in the NTB buffer and does not read the next
 /// NTB packet until `rx_resume` (RESUME_SIG) fires: the OUT endpoint is not re-armed, the host is NAKed.
+#[cfg(not(feature = "c5"))]
 #[embassy_executor::task]
 async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer<'static, FwEnv>) -> ! {
     // the USB network belongs to a bridge boot: a setup boot never gets the capability, so these tasks never run (ADR 0001 rule 3)
@@ -1307,6 +1423,7 @@ async fn usb_rx_task(mut rx: NcmReceiver, mut producer: tdongle_bridge::Producer
 }
 
 /// Wi-Fi -> host: the ring drains into one NTB per datagram (no IN aggregation yet).
+#[cfg(not(feature = "c5"))]
 #[embassy_executor::task]
 async fn usb_tx_task(mut tx: SendTx) -> ! {
     USB_NETWORK_TX.wait().await;
@@ -1357,7 +1474,8 @@ async fn usb_tx_task(mut tx: SendTx) -> ! {
             if moved != 0 {
                 break moved;
             }
-            if with_timeout(Duration::from_millis(50), RING_SIG.wait()).await.is_err() { // wake regularly to notice a mode change
+            if with_timeout(Duration::from_millis(50), RING_SIG.wait()).await.is_err() {
+                // wake regularly to notice a mode change
                 IN_TIMEOUTS.fetch_add(1, Ordering::Relaxed);
             } else {
                 IN_WAKES.fetch_add(1, Ordering::Relaxed);
@@ -1399,9 +1517,11 @@ async fn usb_tx_task(mut tx: SendTx) -> ! {
 
 /// The IN sender, moved to the interrupt executor so a Wi-Fi burst is on the wire within microseconds of `rx_cb` (the thread executor runs the bridge worker and can be busy).
 /// `NcmSender` is not `Send` only because the driver's endpoint types are not marked so; after the move nothing else uses it.
+#[cfg(not(feature = "c5"))]
 struct SendTx(NcmSender);
 
 // SAFETY: single owner after the move; the endpoint is touched only by `usb_tx_task`.
+#[cfg(not(feature = "c5"))]
 unsafe impl Send for SendTx {}
 
 /// One empty ring slot on the heap, or `None` when the allocator has no block for it.
@@ -1436,7 +1556,14 @@ async fn ring_housekeeping_task() -> ! {
         });
         let now = Instant::now().as_millis() as u32;
         let idle = now.wrapping_sub(LAST_BUSY_MS.load(Ordering::Relaxed));
-        match elastic::step(used, cap, RING_MAX.load(Ordering::Relaxed) as usize, elastic::CHUNK_SLOTS * core::mem::size_of::<RingSlot>(), esp_alloc::HEAP.free(), idle) {
+        match elastic::step(
+            used,
+            cap,
+            RING_MAX.load(Ordering::Relaxed) as usize,
+            elastic::CHUNK_SLOTS * core::mem::size_of::<RingSlot>(),
+            esp_alloc::HEAP.free(),
+            idle,
+        ) {
             Step::Grow => {
                 // fallible: the heap check above counts free bytes, not one block; a refused chunk is a denied grow, not an out-of-memory panic
                 let (Some(a), Some(b)) = (ring_slot_box(), ring_slot_box()) else {
@@ -1556,7 +1683,17 @@ fn scan_text(out: &mut String) {
         let _ = write!(
             out,
             "ssid={} bssid={:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x} channel={} rssi={} auth={} usable={}",
-            ssid, b[0], b[1], b[2], b[3], b[4], b[5], row.bss.channel, row.bss.rssi, row.auth, u8::from(row.bss.usable())
+            ssid,
+            b[0],
+            b[1],
+            b[2],
+            b[3],
+            b[4],
+            b[5],
+            row.bss.channel,
+            row.bss.rssi,
+            row.auth,
+            u8::from(row.bss.usable())
         );
         if let Some(i) = slot {
             let _ = write!(out, " saved={}", i + 1);
@@ -1584,10 +1721,14 @@ pub(crate) fn scan_rows(mut f: impl FnMut(&[u8; 32], i32, u8)) {
 /// The strongest access point of the joined network's SSID in the latest scan table.
 fn best_from_latest_scan() -> Option<Bss> {
     let selected = SELECTED.load(Ordering::Relaxed);
-    let ssid: heapless_ssid::Ssid = SAVED.lock(|c| c.borrow().as_ref().and_then(|l| l.saved.list().get(usize::try_from(selected).ok()?).map(|p| heapless_ssid::Ssid::from(p.ssid_bytes()))))?;
+    let ssid: heapless_ssid::Ssid = SAVED
+        .lock(|c| c.borrow().as_ref().and_then(|l| l.saved.list().get(usize::try_from(selected).ok()?).map(|p| heapless_ssid::Ssid::from(p.ssid_bytes()))))?;
     critical_section::with(|cs| {
         let t = SCAN_TABLE.borrow_ref(cs);
-        tdongle_saved::strongest_bss(ssid.as_bytes(), t.rows[..t.count].iter().map(|r| (&r.ssid[..usize::from(r.ssid_len)], r.bss.bssid, r.bss.channel, r.bss.rssi)))
+        tdongle_saved::strongest_bss(
+            ssid.as_bytes(),
+            t.rows[..t.count].iter().map(|r| (&r.ssid[..usize::from(r.ssid_len)], r.bss.bssid, r.bss.channel, r.bss.rssi)),
+        )
     })
 }
 
@@ -1871,7 +2012,12 @@ pub const CONSOLE_NOMEM_REPLY: &str = "ERR low memory, try again\r\n";
 pub static CONSOLE_NOMEM: AtomicU32 = AtomicU32::new(0);
 
 #[embassy_executor::task]
-async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>, bridge: &'static Bridge<FwEnv>, state: &'static guard::State) -> ! {
+async fn console_task(
+    mut rd: AcmReader,
+    wr: &'static Mutex<CriticalSectionRawMutex, AcmWriter>,
+    bridge: &'static Bridge<FwEnv>,
+    state: &'static guard::State,
+) -> ! {
     let mut reader = LineReader::new();
     loop {
         // every wait has a 500 ms timer so the loop proves it is being polled (`supervise::console_alive`) even with no host attached
@@ -1889,7 +2035,10 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
             let mut pkt = [0u8; 64];
             let len = match select3(rd.read_packet(&mut pkt), Timer::after_millis(500), HTTP_LINE.receive()).await {
                 Either3::First(Ok(len)) => len,
-                Either3::First(Err(_)) => break,
+                Either3::First(Err(_)) => {
+                    reader = LineReader::new();
+                    break;
+                }
                 Either3::Second(()) => continue,
                 Either3::Third(line) => {
                     http_line(bridge, state, &line).await;
@@ -1917,6 +2066,15 @@ async fn console_task(mut rd: AcmReader, wr: &'static Mutex<CriticalSectionRawMu
 }
 
 async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard::State, line: &str) {
+    #[cfg(feature = "c5")]
+    if let Some(reply) = c5::mode::command(line).await {
+        emit(wr, &reply, 3000).await;
+        if reply.starts_with("OK gateway saved") {
+            Timer::after_millis(500).await;
+            guard::planned_reset();
+        }
+        return;
+    }
     // The reply buffer is reserved up front and fallibly: the console runs in the interrupt executor, above everything, and an infallible `String` growing at a moment the
     // heap is fragmented is an out-of-memory panic. Without the block the command is refused with a static line (no allocation) and the device stays up.
     #[cfg(feature = "tailnet")]
@@ -1953,7 +2111,12 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
                 Some(mode) => {
                     SOURCE_KBPS.store(kbps, Ordering::Relaxed);
                     USB_MODE.store(mode, Ordering::Relaxed);
-                    let _ = write!(s, "usb {} {}\r\n", ["bridge", "sink", "source"][usize::from(mode)], if mode == USB_SOURCE { if kbps == 0 { "max" } else { "rate" } } else { "" });
+                    let _ = write!(
+                        s,
+                        "usb {} {}\r\n",
+                        ["bridge", "sink", "source"][usize::from(mode)],
+                        if mode == USB_SOURCE { if kbps == 0 { "max" } else { "rate" } } else { "" }
+                    );
                 }
                 None => s.push_str("usage: usb bridge|sink|source RATE_KBPS|max\r\n"),
             }
@@ -1972,7 +2135,11 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
         #[cfg(feature = "diagnostics")]
         b if b == "bss pin on" || b == "bss pin off" => {
             PIN_BSS.store(b.ends_with("on"), Ordering::Relaxed);
-            let _ = write!(s, "bss pin {} (applies to the next join)\r\n", if b.ends_with("on") { "on: BSSID and channel of the strongest usable access point" } else { "off: all-channel scan, join by signal (C)" });
+            let _ = write!(
+                s,
+                "bss pin {} (applies to the next join)\r\n",
+                if b.ends_with("on") { "on: BSSID and channel of the strongest usable access point" } else { "off: all-channel scan, join by signal (C)" }
+            );
         }
         #[cfg(feature = "tailnet")]
         "selftest flash" => dirflash::selftest(&mut s),
@@ -1997,7 +2164,11 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
         },
         u if u == "usbwatch enforce on" || u == "usbwatch enforce off" => {
             supervise::USB_ENFORCE.store(u.ends_with("on"), Ordering::Relaxed);
-            let _ = write!(s, "usbwatch enforce {} (resets on a USB fault; trips are counted either way, see `usb_live`)\r\n", if u.ends_with("on") { "on" } else { "off" });
+            let _ = write!(
+                s,
+                "usbwatch enforce {} (resets on a USB fault; trips are counted either way, see `usb_live`)\r\n",
+                if u.ends_with("on") { "on" } else { "off" }
+            );
         }
         #[cfg(feature = "diagnostics")]
         r if r.starts_with("ring max ") => match r["ring max ".len()..].trim().parse::<u32>() {
@@ -2017,6 +2188,11 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
             Timer::after(Duration::from_millis(200)).await;
             crate::guard::planned_reset()
         }
+        #[cfg(feature = "c5")]
+        "bootloader" => {
+            s.push_str("ERR Hold BOOT while plugging in the C5 to enter ROM download mode\r\n");
+        }
+        #[cfg(not(feature = "c5"))]
         "bootloader" => {
             guard::leave_safe_mode(); // a deliberate reset is not a failed boot
             emit(wr, "rebooting to ROM download mode\r\n", 500).await;
@@ -2080,7 +2256,13 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
                         let current = SELECTED.load(Ordering::Relaxed);
                         for (i, p) in l.saved.list().iter().enumerate() {
                             let slot = &l.meta.slot[i];
-                            let line = reply::ListLine::new(i as u32, current == i as i32 && CONNECTED_NOW.load(Ordering::Relaxed), slot.name_bytes(), p.ssid_bytes(), slot.priority);
+                            let line = reply::ListLine::new(
+                                i as u32,
+                                current == i as i32 && CONNECTED_NOW.load(Ordering::Relaxed),
+                                slot.name_bytes(),
+                                p.ssid_bytes(),
+                                slot.priority,
+                            );
                             // SSIDs are raw bytes; the console is text: lossy is what a terminal shows anyway
                             s.push_str(&String::from_utf8_lossy(line.as_bytes()));
                         }
@@ -2120,9 +2302,16 @@ async fn handle(wr: Sink, bridge: &'static Bridge<FwEnv>, state: &'static guard:
                 s.push_str(&text);
             }
             Command::Use(SlotArg::TrailingGarbage) => s.push_str(reply::USE_INVALID),
+            Command::Mode(Some(StoredMode::WifiBridge)) if cfg!(feature = "c5") => {
+                s.push_str("ERR C5 uses the routed gateway; choose gateway usb or gateway wireless\r\n")
+            }
             Command::Mode(None) => s.push_str(reply::MODE_INVALID),
-            Command::Mode(Some(StoredMode::TailnetGateway)) if !cfg!(feature = "tailnet") => s.push_str("ERR Tailnet gateway mode is not part of this firmware build\r\n"),
-            Command::Mode(Some(StoredMode::TailnetGateway)) if state.boot.safe_mode => s.push_str("ERR Tailnet gateway mode is not available in safe mode (`normal` and a reset first)\r\n"),
+            Command::Mode(Some(StoredMode::TailnetGateway)) if !cfg!(feature = "tailnet") => {
+                s.push_str("ERR Tailnet gateway mode is not part of this firmware build\r\n")
+            }
+            Command::Mode(Some(StoredMode::TailnetGateway)) if state.boot.safe_mode => {
+                s.push_str("ERR Tailnet gateway mode is not available in safe mode (`normal` and a reset first)\r\n")
+            }
             Command::Mode(Some(mode)) => {
                 let (text, restart) = settings::call(settings::Req::Mode(mode)).await;
                 if restart {

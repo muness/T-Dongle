@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/.cache/cargo-target}"
-cargo +1.98.1 test --locked -p tdongle-wifi-policy -p tdongle-serial-ip -p tdongle-tailnet-usbnet -p tdongle-tailnet-wifimux -- --test-threads=1
+cargo +1.98.1 test --locked --workspace -- --test-threads=1
 tools/build-c5.sh
 tools/build_tailnet.sh
 # Record source provenance beside both image sets, without claiming hardware validation.

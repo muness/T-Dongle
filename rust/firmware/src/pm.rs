@@ -24,6 +24,7 @@ static LOCKED: [AtomicBool; MAX_BURSTS] = [const { AtomicBool::new(false) }; MAX
 static TIMER_SIG: Signal<CriticalSectionRawMutex, u32> = Signal::new();
 
 /// Switch the CPU clock between the PLL taps. Register writes only: safe in any context.
+#[cfg(not(feature = "c5"))]
 fn set_cpu_mhz(mhz: u32) {
     let sel = match mhz {
         80 => SEL_80,
@@ -145,4 +146,9 @@ pub async fn timer_task() -> ! {
         Timer::after_micros(u64::from(delay_us)).await;
         PM.activity_fire();
     }
+}
+
+#[cfg(feature = "c5")]
+fn set_cpu_mhz(_: u32) {
+    CPU_MHZ.store(240, Ordering::Relaxed);
 }

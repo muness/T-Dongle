@@ -16,6 +16,9 @@ use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::Instant;
+#[cfg(feature = "c5")]
+use esp_wifi_sys_esp32c5::include as sys;
+#[cfg(not(feature = "c5"))]
 use esp_wifi_sys_esp32s3::include as sys;
 use tdongle_bridge::{Bridge, TxError};
 use tdongle_serial::wifi_link::{AP_AX, AP_B, AP_G, AP_N, Info, PHY_UNKNOWN, PS_UNKNOWN, SECOND_UNKNOWN};
@@ -101,6 +104,10 @@ unsafe extern "C" fn rx_cb(buffer: *mut c_void, len: u16, eb: *mut c_void) -> sy
 /// A frame completed (sent or failed): its buffer is free. Wi-Fi task, so IRAM (it can run while the flash cache is off).
 #[esp_hal::ram]
 unsafe extern "C" fn tx_done(_ifidx: u8, _data: *mut u8, _len: *mut u16, _ok: bool) {
+    #[cfg(feature = "c5")]
+    if _ifidx != sys::wifi_interface_t_WIFI_IF_STA as u8 {
+        return;
+    }
     PINS.done();
     TX_DONE_SIG.signal(());
 }
@@ -114,7 +121,32 @@ pub fn start(bridge: &'static Bridge<FwEnv>) {
 
 /// Register (or re-register) the two callbacks. Called after the radio driver is initialised and again once it is started and associated: `esp_wifi_set_tx_done_cb`
 /// is documented to need a started driver, and esp-radio registers its own at init, so the last registration must be ours.
+#[cfg(feature = "c5")]
+unsafe extern "C" fn ap_rx(buffer: *mut c_void, len: u16, eb: *mut c_void) -> sys::esp_err_t {
+    if !buffer.is_null() && crate::c5::mode::wireless() {
+        // SAFETY: driver owns this buffer until free below; try_host_rx copies it synchronously.
+        let frame = unsafe { core::slice::from_raw_parts(buffer.cast::<u8>(), usize::from(len)) };
+        if crate::tailnet::try_host_rx(frame) {
+            crate::UP_BYTES.fetch_add(u32::from(len), Ordering::Relaxed);
+            crate::UP_FRAMES.fetch_add(1, Ordering::Relaxed);
+        } else {
+            RX_IGNORED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    if !eb.is_null() {
+        unsafe { sys::esp_wifi_internal_free_rx_buffer(eb) };
+    }
+    sys::ESP_OK as sys::esp_err_t
+}
+
 pub fn register() {
+    #[cfg(feature = "c5")]
+    if crate::c5::mode::wireless() {
+        unsafe {
+            sys::esp_wifi_internal_reg_rxcb(sys::wifi_interface_t_WIFI_IF_AP, Some(ap_rx));
+        }
+    }
+
     // SAFETY: `tx_done` and `rx_cb` are valid callbacks of the types the driver expects; both registrations replace esp-radio's (whose token API this image does not use).
     let code = unsafe { sys::esp_wifi_set_tx_done_cb(Some(tx_done)) };
     TX_DONE_OK.store(code == sys::ESP_OK as sys::esp_err_t, Ordering::Release);
@@ -181,7 +213,13 @@ pub fn link_read() -> Info {
         }
         l.channel = ap.primary;
         l.secondary = ap.second as u8;
-        l.ap_bw_mhz = if ap.bandwidth == sys::wifi_bandwidth_t_WIFI_BW40 { 40 } else if ap.bandwidth == sys::wifi_bandwidth_t_WIFI_BW20 { 20 } else { 0 };
+        l.ap_bw_mhz = if ap.bandwidth == sys::wifi_bandwidth_t_WIFI_BW40 {
+            40
+        } else if ap.bandwidth == sys::wifi_bandwidth_t_WIFI_BW20 {
+            20
+        } else {
+            0
+        };
         l.ap_modes = (if ap.phy_11b() != 0 { AP_B } else { 0 })
             | (if ap.phy_11g() != 0 { AP_G } else { 0 })
             | (if ap.phy_11n() != 0 { AP_N } else { 0 })
@@ -192,7 +230,13 @@ pub fn link_read() -> Info {
         }
         let mut bw: sys::wifi_bandwidth_t = 0;
         if sys::esp_wifi_get_bandwidth(sys::wifi_interface_t_WIFI_IF_STA, &mut bw) == sys::ESP_OK as i32 {
-            l.bw_cfg_mhz = if bw == sys::wifi_bandwidth_t_WIFI_BW40 { 40 } else if bw == sys::wifi_bandwidth_t_WIFI_BW20 { 20 } else { 0 };
+            l.bw_cfg_mhz = if bw == sys::wifi_bandwidth_t_WIFI_BW40 {
+                40
+            } else if bw == sys::wifi_bandwidth_t_WIFI_BW20 {
+                20
+            } else {
+                0
+            };
         }
         let mut ps: sys::wifi_ps_type_t = 0;
         if sys::esp_wifi_get_ps(&mut ps) == sys::ESP_OK as i32 {

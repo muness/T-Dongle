@@ -5,6 +5,9 @@
 //! configured and everything has advanced for 30 s (`tdongle_rescue::HealthyTimer`), and names a stalled executor before resetting.
 #![allow(dead_code)]
 
+#[cfg(feature = "c5")]
+use crate::c5::rescue as tdongle_rescue;
+
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use embassy_executor::SendSpawner;
@@ -27,6 +30,7 @@ pub static CONSOLE_FROZEN: AtomicBool = AtomicBool::new(false);
 pub static THREAD_SPAWNER: OnceLock<SendSpawner> = OnceLock::new();
 
 /// The OTG core's registers, read-only here (the driver owns writes): the supervisor's USB liveness input. Reading status registers has no side effects.
+#[cfg(not(feature = "c5"))]
 mod otg {
     const BASE: usize = 0x6008_0000;
     const GINTSTS: usize = 0x014;
@@ -190,13 +194,19 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
                     usb_policy.prior_resets = 0;
                     set_usb_streak(0);
                 }
-                usb_policy.enforce = USB_ENFORCE.load(Ordering::Relaxed);
+                usb_policy.enforce = !cfg!(feature = "c5") && USB_ENFORCE.load(Ordering::Relaxed);
                 let decision = usb_policy.decide(now, &sample);
                 for (cell, n) in USB_TRIPS.iter().zip(usb_policy.trips) {
                     cell.store(n, Ordering::Relaxed);
                 }
                 if let Some(fault) = decision {
-                    USB_FAULT.store(match fault { Fault::NotConfigured => 1, Fault::IrqNotServiced => 2, }, Ordering::Relaxed);
+                    USB_FAULT.store(
+                        match fault {
+                            Fault::NotConfigured => 1,
+                            Fault::IrqNotServiced => 2,
+                        },
+                        Ordering::Relaxed,
+                    );
                     healthy.observe(now, false);
                     guard::hang(Fault::HANG);
                     tdongle_rescue::demote(); // an unplanned reset the bootloader must count, even if this image had been healthy
@@ -206,7 +216,10 @@ pub async fn supervisor_task(mut dogs: guard::Dogs, safe_mode: bool) -> ! {
                 }
                 dogs.feed();
                 SUP_FEEDS.fetch_add(1, Ordering::Relaxed);
-                if healthy.observe(now, USB_CONFIGURED.load(Ordering::Relaxed)) && !marked {
+                let operational = USB_CONFIGURED.load(Ordering::Relaxed);
+                #[cfg(feature = "c5")]
+                let operational = operational || crate::tailnet::active() || crate::setup::AP_UP.load(Ordering::Relaxed);
+                if healthy.observe(now, operational) && !marked {
                     tdongle_rescue::mark_healthy();
                     guard::mark_stable(safe_mode);
                     marked = true;
@@ -270,4 +283,21 @@ pub fn write_usb_live(out: &mut alloc::string::String) {
         USB_TRIPS[0].load(Ordering::Relaxed),
         USB_TRIPS[1].load(Ordering::Relaxed)
     );
+}
+
+#[cfg(feature = "c5")]
+mod otg {
+    pub const EVENTS: u32 = 0;
+    pub fn pending() -> u32 {
+        0
+    }
+    pub fn dsts() -> (u32, bool) {
+        (0, true)
+    }
+    pub fn detach() {
+        crate::c5::serial::disconnect();
+    }
+    pub fn stop_servicing() {
+        crate::c5::serial::FROZEN.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
 }

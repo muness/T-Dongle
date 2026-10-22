@@ -16,7 +16,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: riscv32imac-unknown-none-elf
-      - run: cargo test --locked --manifest-path rust/Cargo.toml -p tdongle-wifi-policy -p tdongle-serial-ip -p tdongle-tailnet-usbnet -p tdongle-tailnet-wifimux -- --test-threads=1
+      - run: cargo test --locked --manifest-path rust/Cargo.toml --workspace -- --test-threads=1
+      - run: python3 rust/tools/test_c5_console.py
+      - run: node rust/webui/test.mjs
       - run: cargo install espflash --version 4.6.0 --locked
       - run: rust/tools/build-c5.sh
       - uses: actions/upload-artifact@v4

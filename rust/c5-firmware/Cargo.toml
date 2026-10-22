@@ -3,29 +3,98 @@ name = "tdongle-c5-vpn"
 version = "0.4.0-rc2"
 edition = "2024"
 publish = false
+
+[[bin]]
+name = "tdongle-c5-vpn"
+path = "../firmware/src/main.rs"
+
 [workspace]
+
 [dependencies]
-esp-hal = { version = "=1.2.2", features = ["esp32c5", "unstable"] }
+esp32c5 = "=0.4.0"
+# pins: S1 (radio) + S2 (USB/embassy) union; same versions as the two spikes
+esp-hal = { version = "~1.2", features = ["esp32c5", "unstable"] }
 esp-radio = { version = "=1.0.0-beta.1", features = ["esp32c5", "wifi", "unstable"] }
 esp-rtos = { version = "0.4", features = ["esp32c5", "esp-radio", "esp-alloc", "embassy"] }
-esp-alloc = { version = "0.11", features = ["esp32c5"] }
+esp-alloc = { version = "0.11", default-features = false, features = ["esp32c5", "compat"] }
 esp-bootloader-esp-idf = { version = "0.6", features = ["esp32c5"] }
+# Logs use UART: Serial/JTAG carries framed packets and must never receive unframed logs.
+esp-println = { version = "0.18", default-features = false, features = ["esp32c5", "uart", "critical-section"] }
+# no `panic-handler`: `common/guard.rs` has its own that records the panic in RTC memory and resets
+esp-backtrace = { version = "0.20", default-features = false, features = ["esp32c5", "println"] }
 embassy-executor = "0.10"
 embassy-time = "0.5"
 embassy-sync = "0.8"
 embassy-futures = "0.1"
-embassy-net = { version = "0.9", default-features = false, features = ["medium-ethernet", "proto-ipv4", "dhcpv4"] }
+embassy-usb = { version = "0.6", default-features = false }
+embassy-net-driver = "0.2"
 static_cell = "2.1"
-portable-atomic = { version = "1", features = ["critical-section"] }
-embedded-io-async = "0.7"
-tdongle-wifi-policy = { path = "../crates/tdongle-wifi-policy" }
+embassy-usb-synopsys-otg = "0.4"
+tdongle-usb-out = { path = "../crates/tdongle-usb-out" }
+tdongle-wifi-budget = { path = "../crates/tdongle-wifi-budget" }
+esp-wifi-sys-esp32c5 = "0.3"
 tdongle-serial-ip = { path = "../crates/tdongle-serial-ip" }
-tdongle-tailnet-wifimux = { path = "../crates/tdongle-tailnet-wifimux", features = ["embassy-net"] }
-tdongle-tailnet-usbnet = { path = "../crates/tdongle-tailnet-usbnet" }
-tdongle-tailnet-types = { path = "../crates/tdongle-tailnet-types" }
+portable-atomic = { version = "1", features = ["critical-section"] }
+critical-section = "1"
+esp-rom-sys = { version = "0.1", features = ["esp32c5"] }
+embassy-net = { version = "0.9", default-features = false, features = ["tcp", "udp", "medium-ethernet", "proto-ipv4"] }
+tdongle-dhcp = { path = "../crates/tdongle-dhcp" }
+tdongle-setup = { path = "../crates/tdongle-setup" }
+tdongle-lcd = { path = "../crates/tdongle-lcd" }
+tdongle-ui = { path = "../crates/tdongle-ui" }
+tdongle-pm = { path = "../crates/tdongle-pm" }
+
+# the pure logic (host-tested crates)
+tdongle-bridge = { path = "../crates/tdongle-bridge" }
+tdongle-aqm = { path = "../crates/tdongle-aqm" }
+tdongle-spsc = { path = "../crates/tdongle-spsc" }
+tdongle-serial = { path = "../crates/tdongle-serial" }
+tdongle-traffic = { path = "../crates/tdongle-traffic" }
+tdongle-rescue = { path = "../crates/tdongle-rescue", features = [] }
+tdongle-boot-guard = { path = "../crates/tdongle-boot-guard" }
+tdongle-saved = { path = "../crates/tdongle-saved" }
+tdongle-nvs-read = { path = "../crates/tdongle-nvs-read" }
+tdongle-nvs-write = { path = "../crates/tdongle-nvs-write", features = ["embedded-storage"] }
+tdongle-nvs-format = { path = "../crates/tdongle-nvs-format" }
+tdongle-wifi-policy = { path = "../crates/tdongle-wifi-policy" }
+esp-storage = { version = "0.10", features = ["esp32c5", "embedded-storage"] }
+embedded-storage = "0.3"
+
+# tailnet gateway mode (Phase 3, ADR 0002): the runtime, its seam and the Wi-Fi / USB data-path crates
+embedded-io-async = { version = "0.7", optional = true }
+tdongle-tailnet-fw = { path = "../crates/tdongle-tailnet-fw", optional = true }
+tdongle-tailnet-pool = { path = "../crates/tdongle-tailnet-pool", optional = true }
+tdongle-tailnet-admission = { path = "../crates/tdongle-tailnet-admission", optional = true }
+tdongle-tailnet-sockmem = { path = "../crates/tdongle-tailnet-sockmem", optional = true }
+tdongle-tailnet-runtime = { path = "../crates/tdongle-tailnet-runtime", features = ["embassy-net", "wifimux"], optional = true }
+tdongle-tailnet-wifimux = { path = "../crates/tdongle-tailnet-wifimux", features = ["embassy-net"], optional = true }
+tdongle-tailnet-usbnet = { path = "../crates/tdongle-tailnet-usbnet", optional = true }
+tdongle-tailnet-engine = { path = "../crates/tdongle-tailnet-engine", optional = true }
+tdongle-tailnet-peers = { path = "../crates/tdongle-tailnet-peers", optional = true }
+tdongle-tailnet-map = { path = "../crates/tdongle-tailnet-map", optional = true }
+tdongle-tailnet-members = { path = "../crates/tdongle-tailnet-members", optional = true }
+
 [patch.crates-io]
 esp-hal = { path = "../vendor/esp-hal" }
+embassy-usb-synopsys-otg = { path = "../vendor/embassy-usb-synopsys-otg" }
+
+[features]
+# C5 runs the shared routed gateway with three membership workers; bulk state is in PSRAM.
+default = ["c5", "tailnet"]
+c5 = []
+tailnet = ["embassy-net/dns", "embassy-net/dhcpv4", "dep:embedded-io-async", "dep:tdongle-tailnet-fw", "dep:tdongle-tailnet-pool", "dep:tdongle-tailnet-admission", "dep:tdongle-tailnet-sockmem", "dep:tdongle-tailnet-runtime", "dep:tdongle-tailnet-wifimux", "dep:tdongle-tailnet-usbnet", "dep:tdongle-tailnet-engine", "dep:tdongle-tailnet-peers", "dep:tdongle-tailnet-map", "dep:tdongle-tailnet-members"]
+members-1 = ["tdongle-tailnet-runtime?/slots-1"]
+members-2 = ["tdongle-tailnet-runtime?/slots-2"]
+# Stock one-packet OUT transfers (no multi-packet arming): the A/B baseline.
+stock-out = []
+# Measurement commands (usb sink/source, bss pin): off in the release image.
+diagnostics = []
+
 [profile.release]
 opt-level = "s"
 lto = "fat"
+codegen-units = 1
 debug = 1
+
+[profile.dev]
+opt-level = "s"

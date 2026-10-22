@@ -84,7 +84,11 @@ struct FwHost {
 
 impl FwHost {
     fn new() -> Self {
-        Self { loaded: crate::SAVED.lock(|c| *c.borrow()).unwrap_or(Loaded { saved: Default::default(), meta: tdongle_nvs_format::wifi_meta::MetaSet::defaults(&[]) }) }
+        Self {
+            loaded: crate::SAVED
+                .lock(|c| *c.borrow())
+                .unwrap_or(Loaded { saved: Default::default(), meta: tdongle_nvs_format::wifi_meta::MetaSet::defaults(&[]) }),
+        }
     }
 
     fn commit(&mut self, edited: Option<(tdongle_nvs_format::wifi_profiles::SavedNetworks, tdongle_nvs_format::wifi_meta::MetaSet)>) -> bool {
@@ -314,6 +318,17 @@ fn configure_ap(controller: &mut WifiController<'static>, name: &[u8]) -> bool {
             return false;
         }
     };
+    #[cfg(feature = "c5")]
+    let ap = {
+        let secret = crate::c5::mode::password();
+        let Ok(pass) = core::str::from_utf8(&secret) else {
+            return false;
+        };
+        let Ok(pass) = pass.try_into() else {
+            return false;
+        };
+        ap.with_authentication(AuthenticationMethodConfig::Wpa2Personal(pass))
+    };
     if controller.set_config(&Config::AccessPointStation(StationConfig::default(), ap)).is_err() {
         crate::init_note("setup: access point did not start");
         return false;
@@ -340,6 +355,7 @@ pub async fn run(
     START_MS.store(now_ms(), Ordering::Relaxed);
     // True random bytes before the radio runs (`setup_random`): the token must not be guessable.
     let mut random = [0u8; 16];
+    #[cfg(not(feature = "c5"))]
     {
         let _source = esp_hal::rng::TrngSource::new(rng, adc);
         match esp_hal::rng::Trng::try_new() {
@@ -347,6 +363,8 @@ pub async fn run(
             Err(_) => crate::init_note("no true random source: setup token not available"),
         }
     }
+    #[cfg(feature = "c5")]
+    esp_hal::rng::Rng::new().read(&mut random);
     // never an all-zero token: without randomness the portal is not served; the session ends at the end of the grace period
     let random_ok = random != [0u8; 16];
     let mac: [u8; 6] = esp_hal::efuse::base_mac_address().as_bytes().try_into().unwrap_or([0; 6]);
@@ -376,6 +394,8 @@ pub async fn run(
             }
         }
     };
+    #[cfg(feature = "c5")]
+    crate::c5::mode::fresh_setup_secret();
     if !configure_ap(&mut controller, portal.ap_name()) {
         loop {
             Timer::after_secs(3600).await;
@@ -386,7 +406,11 @@ pub async fn run(
     let device = Interface::access_point();
     let ap_mac = device.mac_address();
     let resources: &'static mut StackResources<8> = Box::leak(Box::new(StackResources::new()));
-    let config = embassy_net::Config::ipv4_static(StaticConfigV4 { address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 4, 1), 24), gateway: None, dns_servers: Default::default() });
+    let config = embassy_net::Config::ipv4_static(StaticConfigV4 {
+        address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 4, 1), 24),
+        gateway: None,
+        dns_servers: Default::default(),
+    });
     let seed = u64::from(esp_hal::rng::Rng::new().random()) << 32 | u64::from(esp_hal::rng::Rng::new().random());
     let (stack, runner) = embassy_net::new(device, config, resources, seed);
     spawn_boxed(spawner, async move {

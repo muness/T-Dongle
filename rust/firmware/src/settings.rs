@@ -23,7 +23,11 @@ pub const NVS_OFFSET: u32 = 0x9000;
 /// Size of the `nvs` partition.
 pub const NVS_SIZE: u32 = 0x1_0000;
 
+#[cfg(not(feature = "c5"))]
 type Flash = NorPartition<FlashStorage<'static>>;
+
+#[cfg(feature = "c5")]
+type Flash = NorPartition<crate::c5::flash::Flash>;
 
 /// The T-Dongle-S3's flash (W25Q128, JEDEC 0x1840ef).
 pub const EXPECTED_CAPACITY: usize = 16 * 1024 * 1024;
@@ -51,6 +55,8 @@ pub async fn mount(flash: esp_hal::peripherals::FLASH<'static>) -> Result<Stored
     if fs.capacity() != EXPECTED_CAPACITY {
         esp_println::println!("nvs: esp-storage capacity {} B, expected {} B (bad JEDEC read?)", fs.capacity(), EXPECTED_CAPACITY);
     }
+    #[cfg(feature = "c5")]
+    let fs = crate::c5::flash::Flash(fs);
     let part = NorPartition::new(fs, NVS_OFFSET);
     let mut store = Store::mount(part, NVS_SIZE).map_err(|_| "nvs mount failed")?;
     let loaded = load_boot(&mut store);
@@ -68,8 +74,13 @@ fn load_boot(store: &mut Store<Flash>) -> Result<Stored, &'static str> {
             // Publish the profiles here; returning their 5 KB value through the
             // async init task created several copies on its stack.
             publish_boot(s.networks);
-            Ok(Stored { mode: s.mode.map_err(|e| match e { tdongle_nvs_format::mode::ModeError::InvalidStored(v) => v }), display: s.display })
-        },
+            Ok(Stored {
+                mode: s.mode.map_err(|e| match e {
+                    tdongle_nvs_format::mode::ModeError::InvalidStored(v) => v,
+                }),
+                display: s.display,
+            })
+        }
         Err(tdongle_nvs_write::LoadError::Profiles(_)) => Err("saved networks invalid (not overwritten)"),
         Err(_) => Err("saved networks unreadable"),
     }
@@ -116,7 +127,8 @@ pub async fn profile(json: &str) -> String {
     };
     let p = parsed.profile;
     let name = (!p.name.starts_with(&[0])).then_some(&p.name[..]);
-    let Some((list, meta)) = tdongle_saved::edit::save_with(&cur.saved, &cur.meta, &p.ssid, &p.pass, name, i32::from(p.priority), false, parsed.slot as i32) else {
+    let Some((list, meta)) = tdongle_saved::edit::save_with(&cur.saved, &cur.meta, &p.ssid, &p.pass, name, i32::from(p.priority), false, parsed.slot as i32)
+    else {
         return String::from(reply::PROFILE_SAVE_FAILED);
     };
     match save_networks(&list, &meta).await {
@@ -406,7 +418,8 @@ pub async fn set_force_derp(on: bool) {
 
 /// The last recorded failure, kept in flash (`rust_diag/last`) because the RTC record does not survive a power cycle or a trip through ROM download mode: what the previous boot
 /// died of (`previous_hang`, `previous_op`, panic), written once at the next boot when there is one, and printed by `status` (`last_diag`) until a newer one replaces it.
-pub static LAST_DIAG: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::RefCell<String>> = embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(String::new()));
+pub static LAST_DIAG: embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, core::cell::RefCell<String>> =
+    embassy_sync::blocking_mutex::Mutex::new(core::cell::RefCell::new(String::new()));
 
 /// Persist this boot's view of the previous failure (if it was one) and load the one on flash for `status`.
 pub async fn persist_diagnosis(state: &crate::guard::State) {

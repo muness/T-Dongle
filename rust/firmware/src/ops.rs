@@ -3,6 +3,9 @@
 //! `#[path = "../../common/ops.rs"] mod ops;` so no spike depends on another.
 #![allow(dead_code)]
 
+#[cfg(feature = "c5")]
+use crate::c5::rescue as tdongle_rescue;
+
 use core::fmt::Write;
 
 /// Hex of the 12-digit chip MAC used as the USB serial (uppercase, same as the C firmware).
@@ -16,6 +19,7 @@ pub fn mac_hex(mac: &[u8; 6]) -> [u8; 12] {
 }
 
 /// What C does for `bootloader`: set RTC_CNTL_FORCE_DOWNLOAD_BOOT (OPTION1 bit 0), then reset; the ROM then enters download mode.
+#[cfg(not(feature = "c5"))]
 pub fn enter_bootloader() -> ! {
     const RTC_CNTL_OPTION1_REG: *mut u32 = (0x6000_8000usize + 0x12C) as *mut u32;
     // SAFETY: fixed, always-mapped RTC_CNTL register on the ESP32-S3 (TRM RTC_CNTL_OPTION1_REG); read-modify-write of one bit, single task.

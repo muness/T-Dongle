@@ -2,6 +2,9 @@
 //! `boot-status` report. Included with `#[path = "../../common/guard.rs"] mod guard;`.
 #![allow(dead_code)]
 
+#[cfg(feature = "c5")]
+use crate::c5::rescue as tdongle_rescue;
+
 use core::fmt::Write;
 use core::panic::PanicInfo;
 use core::ptr::addr_of_mut;

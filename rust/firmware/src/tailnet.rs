@@ -23,6 +23,7 @@ use core::cell::RefCell;
 use core::fmt::Write as _;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
+use crate::dirflash::EspDirFlash;
 use embassy_executor::Spawner;
 use embassy_net::{Config as NetConfig, Runner, Stack, StackResources};
 use embassy_net_driver::{Capabilities, Driver, HardwareAddress, LinkState, RxToken, TxToken};
@@ -34,23 +35,22 @@ use embassy_sync::waitqueue::AtomicWaker;
 use embassy_time::{Duration, Instant, Timer, with_timeout};
 use static_cell::{ConstStaticCell, StaticCell};
 use tdongle_bridge::{Env, RingSend};
-use crate::dirflash::EspDirFlash;
+use tdongle_tailnet_admission::heap::{ML_HB_FLOOR, hb_ok};
 use tdongle_tailnet_engine::flashdir::FlashDirectory;
 use tdongle_tailnet_fw::{HeapProbe, MemberCounts, Platform, Storage, StorageError, TailnetApi, UsbFrames};
-use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, LinkGen, Windows};
-use tdongle_tailnet_admission::heap::{ML_HB_FLOOR, hb_ok};
-use tdongle_tailnet_sockmem::HeapSockMem;
-use tdongle_tailnet_runtime::shared::{Config as RtConfig, MAX_RUN, PlatformRng, SlotState};
-use tdongle_tailnet_runtime::wifi_mux::MuxWifi;
+use tdongle_tailnet_runtime::Shared;
 use tdongle_tailnet_runtime::control::control_slot;
-use tdongle_tailnet_runtime::net::Net;
 use tdongle_tailnet_runtime::derp::{derp_extra, derp_slot};
 use tdongle_tailnet_runtime::members::supervisor;
+use tdongle_tailnet_runtime::net::Net;
+use tdongle_tailnet_runtime::net_embassy::{EmbassyNet, LinkGen, Windows};
+use tdongle_tailnet_runtime::shared::{Config as RtConfig, MAX_RUN, PlatformRng, SlotState};
 use tdongle_tailnet_runtime::sizes::{FUT_CONTROL, FUT_DERP, FUT_DNS, FUT_LINK, FUT_SUPERVISOR, FUT_TIMER, FUT_UDP, FUT_USB};
 use tdongle_tailnet_runtime::tasks::{dns_upstream, engine_timer, link_watch};
 use tdongle_tailnet_runtime::udp::udp_slot;
 use tdongle_tailnet_runtime::usb::usb_pump;
-use tdongle_tailnet_runtime::Shared;
+use tdongle_tailnet_runtime::wifi_mux::MuxWifi;
+use tdongle_tailnet_sockmem::HeapSockMem;
 use tdongle_tailnet_usbnet::napt::NaptConfig;
 use tdongle_tailnet_wifimux::tap::{NaptTap, SharedNapt};
 use tdongle_tailnet_wifimux::{StackDriver, WifiMux};
@@ -83,10 +83,11 @@ pub const USB_RX_FRAMES: usize = 2;
 /// ([`DIR_GEOMETRY`]); the directory's RAM is fixed (`size_of::<Dir>()`, about 2.8 KB inside the shared state) whatever the tailnet's size.
 pub const DIR_CACHE: usize = 8;
 /// How the `peerstore` partition is cut between the memberships.
-pub const DIR_GEOMETRY: tdongle_tailnet_engine::flashdir::Geometry = match tdongle_tailnet_engine::flashdir::Geometry::of(crate::dirflash::PEERSTORE_SIZE, MEMBERS) {
-    Some(g) => g,
-    None => panic!("the peerstore partition is too small"),
-};
+pub const DIR_GEOMETRY: tdongle_tailnet_engine::flashdir::Geometry =
+    match tdongle_tailnet_engine::flashdir::Geometry::of(crate::dirflash::PEERSTORE_SIZE, MEMBERS) {
+        Some(g) => g,
+        None => panic!("the peerstore partition is too small"),
+    };
 /// Sockets of the embassy-net stack: 3 per membership (control, DERP, UDP) + the DNS forwarder + SNTP + DHCP + the DNS client + one for the lookup in flight (the dials and SNTP take turns on it) + 1 spare.
 const STACK_SOCKETS: usize = 3 * MEMBERS + 6;
 
@@ -119,6 +120,7 @@ unsafe impl RawMutex for TaskLock {
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
 /// What the image's DRAM is divided into, and the inequalities that must hold (each a build error, like the C's `_Static_assert`s on the heap budget).
+#[cfg(not(feature = "c5"))]
 pub mod budget {
     use super::{Sh, TAILNET_HEAP_BYTES};
     use tdongle_tailnet_admission::heap::ML_HB_FLOOR;
@@ -327,6 +329,10 @@ impl Storage for FwStorage {
 /// Frames from the host waiting for the runtime: each a heap block of its own length, taken above the elastic floor ("USB receive frames", ADR 0022). Full or
 /// short of heap, [`usb_rx`] waits, which leaves the OUT endpoint un-armed: the host's driver sees NAKs.
 static USB_RX: Channel<CriticalSectionRawMutex, alloc::vec::Vec<u8>, USB_RX_FRAMES> = Channel::new();
+#[cfg(feature = "c5")]
+pub fn clear_host_queue() {
+    while USB_RX.try_receive().is_ok() {}
+}
 static CARRIER: AtomicBool = AtomicBool::new(false);
 
 /// Called by the NCM receiver task for every datagram while tailnet mode owns the data path: hand it to the runtime, waiting (and so not re-arming the OUT
@@ -352,6 +358,20 @@ pub async fn usb_rx(datagram: &[u8]) -> bool {
         // short of heap the channel has room, so waiting on it returns at once: a bounded sleep instead (see `wait_for_frame_room`)
         tdongle_tailnet_runtime::usb::wait_for_frame_room(heap_ok, core::future::poll_fn(|cx| USB_RX.poll_ready_to_send(cx))).await;
     }
+}
+
+/// Nonblocking ingress for a client-facing radio callback; never waits for runtime capacity.
+#[cfg(feature = "c5")]
+pub fn try_host_rx(frame: &[u8]) -> bool {
+    if !active() || ALT.load(Ordering::Relaxed) == 0 || frame.len() > crate::MTU {
+        return false;
+    }
+    let mut owned = alloc::vec::Vec::new();
+    if owned.try_reserve_exact(frame.len()).is_err() {
+        return false;
+    }
+    owned.extend_from_slice(frame);
+    USB_RX.try_send(owned).is_ok()
 }
 
 /// Frames for the USB-side stack ([`usb_stack`]), and its waker.
@@ -523,15 +543,22 @@ async fn serve_one(sock: &mut embassy_net::tcp::TcpSocket<'_>, conn: &tdongle_se
             let mut body = alloc::vec::Vec::new();
             let status = match api() {
                 Some(api) => {
-                    let mut sink = |chunk: &[u8]| body.try_reserve(chunk.len()).is_ok() && {
-                        body.extend_from_slice(chunk);
-                        true
+                    let mut sink = |chunk: &[u8]| {
+                        body.try_reserve(chunk.len()).is_ok() && {
+                            body.extend_from_slice(chunk);
+                            true
+                        }
                     };
                     let _ = api.render_status(&mut sink);
                     "200 OK"
                 }
                 None => "503 Service Unavailable",
             };
+            #[cfg(feature = "c5")]
+            if body.last() == Some(&b'}') {
+                body.pop();
+                body.extend_from_slice(if crate::c5::mode::wireless() { b",\"c5_transport\":\"wireless\"}" } else { b",\"c5_transport\":\"usb\"}" });
+            }
             let _ = usb::write_head(&mut h, status, usb::JSON, Some(body.len()), Kind::Text);
             send_all(sock, h.as_bytes()).await && send_all(sock, &body).await
         }
@@ -1051,6 +1078,8 @@ pub fn start(spawner: Spawner) -> Result<(), StartError> {
         }
     }
     let sh: &'static Sh = alloc::boxed::Box::leak(alloc::boxed::Box::new(SHARED_INIT));
+    #[cfg(feature = "c5")]
+    assert!(crate::c5::memory::external_contains(core::ptr::from_ref(sh).cast(), core::mem::size_of::<Sh>()), "tailnet state must reside in PSRAM");
     critical_section::with(|cs| *RING.borrow_ref_mut(cs) = Some(alloc::boxed::Box::new(RxRing::EMPTY)));
     let _ = SHARED_REF.init(sh);
 
@@ -1453,7 +1482,14 @@ fn sta_report(sh: &Sh, out: &mut String) {
         Some(ThreadOnly(st)) => (st.is_link_up(), st.is_config_up(), st.config_v4()),
         None => (false, false, None),
     };
-    let _ = write!(out, "tn_sta link_up={} wifi_connected={} stack_link={} stack_config={}", LINK_UP.load(Ordering::Relaxed) as u8, crate::CONNECTED_NOW.load(Ordering::Relaxed) as u8, up as u8, cfg_up as u8);
+    let _ = write!(
+        out,
+        "tn_sta link_up={} wifi_connected={} stack_link={} stack_config={}",
+        LINK_UP.load(Ordering::Relaxed) as u8,
+        crate::CONNECTED_NOW.load(Ordering::Relaxed) as u8,
+        up as u8,
+        cfg_up as u8
+    );
     match v4 {
         Some(c) => {
             let _ = write!(out, " ip={}/{}", c.address.address(), c.address.prefix_len());
@@ -1535,7 +1571,10 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
                 D.region.load(Relaxed),
                 host,
                 D.port.load(Relaxed),
-                ip[0], ip[1], ip[2], ip[3],
+                ip[0],
+                ip[1],
+                ip[2],
+                ip[3],
                 D.stage.load(Relaxed),
                 if ready_at == 0 { 0 } else { now.wrapping_sub(ready_at) },
                 d.connects.get(),
@@ -1568,7 +1607,7 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
         {
             use tdongle_tailnet_runtime::derp::WIN_STATS;
             crate::dirflash::report(out);
-        let _ = write!(
+            let _ = write!(
                 out,
                 "tn_derp_windows big_now={} (idle rx/tx {}/{} B, big {}/{} B) to_big={} to_small={} refused_by_pool={} waited_for_lull={} waited_for_heap={} force_derp={} dynamic_windows_enabled={}\r\n",
                 WIN_STATS[3].load(Relaxed),
@@ -1654,7 +1693,19 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             let _ = write!(
                 out,
                 "tn_tcp_errs read={} write={} flush_on_closed={} aborted_by_us={} (control {}, relay {}; connects control {}, relay {}) last_op={} (1 read, 2 write, 3 flush) last_state={} (0 Closed, 4 Established, 7 CloseWait) send_queue={} recv_queue={} after_ms={}\r\n",
-                T[0].load(Relaxed), T[1].load(Relaxed), T[2].load(Relaxed), T[3].load(Relaxed), tdongle_tailnet_runtime::net_embassy::TCP_ABORTS[0].load(Relaxed), tdongle_tailnet_runtime::net_embassy::TCP_ABORTS[1].load(Relaxed), tdongle_tailnet_runtime::net_embassy::TCP_CONNECTS[0].load(Relaxed), tdongle_tailnet_runtime::net_embassy::TCP_CONNECTS[1].load(Relaxed), T[4].load(Relaxed), T[5].load(Relaxed), T[6].load(Relaxed), T[7].load(Relaxed), T[8].load(Relaxed)
+                T[0].load(Relaxed),
+                T[1].load(Relaxed),
+                T[2].load(Relaxed),
+                T[3].load(Relaxed),
+                tdongle_tailnet_runtime::net_embassy::TCP_ABORTS[0].load(Relaxed),
+                tdongle_tailnet_runtime::net_embassy::TCP_ABORTS[1].load(Relaxed),
+                tdongle_tailnet_runtime::net_embassy::TCP_CONNECTS[0].load(Relaxed),
+                tdongle_tailnet_runtime::net_embassy::TCP_CONNECTS[1].load(Relaxed),
+                T[4].load(Relaxed),
+                T[5].load(Relaxed),
+                T[6].load(Relaxed),
+                T[7].load(Relaxed),
+                T[8].load(Relaxed)
             );
         }
         {
@@ -1759,7 +1810,15 @@ last_end={} (1 wait,2 lease,3 tls_read,4 write,5 link_close) last_end_after_ms={
             m.stage_dropped,
             DIR_GEOMETRY.tx_slots()
         );
-        let _ = write!(out, "tn_ctl slot={} stage={} connected={} end=\"{}\" error=\"{}\"\r\n", i, st.control_stage, st.connected as u8, st.last_end.as_str(), st.last_error.as_str());
+        let _ = write!(
+            out,
+            "tn_ctl slot={} stage={} connected={} end=\"{}\" error=\"{}\"\r\n",
+            i,
+            st.control_stage,
+            st.connected as u8,
+            st.last_end.as_str(),
+            st.last_error.as_str()
+        );
     }
     {
         // is the DNS query leaving the driver, does the answer come back to it, and does the stack poll the driver at all
@@ -1841,7 +1900,18 @@ fn handle(sh: &'static Sh, line: &str, out: &mut String) -> bool {
     if line == "\u{1}status-extra" {
         api.serial_status_extra(out);
         sta_report(sh, out);
-        let _ = write!(out, "tailnet_rust members={} napt_flows={} mux_tx={} mux_rx={} wifi_rx={} wifi_rx_dropped={} wifi_tx_refused={} usb_rx_queue={}\r\n", MEMBERS, NAPT_FLOWS, MUX_TXQ, MUX_RXQ, RX_FRAMES.load(Ordering::Relaxed), RX_DROPPED.load(Ordering::Relaxed), TX_REFUSED.load(Ordering::Relaxed), USB_RX_FRAMES);
+        let _ = write!(
+            out,
+            "tailnet_rust members={} napt_flows={} mux_tx={} mux_rx={} wifi_rx={} wifi_rx_dropped={} wifi_tx_refused={} usb_rx_queue={}\r\n",
+            MEMBERS,
+            NAPT_FLOWS,
+            MUX_TXQ,
+            MUX_RXQ,
+            RX_FRAMES.load(Ordering::Relaxed),
+            RX_DROPPED.load(Ordering::Relaxed),
+            TX_REFUSED.load(Ordering::Relaxed),
+            USB_RX_FRAMES
+        );
         return true;
     }
     if let Some(arg) = line.strip_prefix("tn force-derp") {
@@ -1851,7 +1921,12 @@ fn handle(sh: &'static Sh, line: &str, out: &mut String) -> bool {
             "off" => FORCE_DERP.store(false, Ordering::Relaxed),
             _ => {}
         }
-        let _ = write!(out, "tn_force_derp on={} dropped_udp={} (peers fall back to the relay within about 10 s of `on`; `off` lets disco find the direct path again)\r\n", FORCE_DERP.load(Ordering::Relaxed) as u8, FORCE_DERP_DROPPED.load(Ordering::Relaxed));
+        let _ = write!(
+            out,
+            "tn_force_derp on={} dropped_udp={} (peers fall back to the relay within about 10 s of `on`; `off` lets disco find the direct path again)\r\n",
+            FORCE_DERP.load(Ordering::Relaxed) as u8,
+            FORCE_DERP_DROPPED.load(Ordering::Relaxed)
+        );
         return true;
     }
     if line == "tn-wg" {
@@ -2061,4 +2136,15 @@ pub fn panel() -> Option<Panel> {
         }
     }
     Some(Panel { saved: u32::from(c.configured), enabled: u32::from(c.enabled), ready, login, failed, tunnels: u32::from(c.tunnels) })
+}
+
+#[cfg(feature = "c5")]
+pub mod budget {
+    pub const WIFI_AND_USB: usize = 58 * 1024;
+    pub const RING_BASE: usize = 8 * 1536;
+    pub const HEAP_RECLAIMED: usize = 0;
+    pub const HEAP_DCACHE: usize = 0;
+    pub const HEAP_REGULAR: usize = crate::c5::memory::INTERNAL_HEAP;
+    pub const HEAP_TOTAL: usize = HEAP_REGULAR + crate::c5::memory::EXTERNAL_HEAP;
+    pub const HEADROOM: usize = HEAP_TOTAL - super::TAILNET_HEAP_BYTES;
 }

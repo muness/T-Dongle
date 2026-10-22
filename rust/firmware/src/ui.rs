@@ -5,12 +5,17 @@
 //! it polls every `POLL_MS` like `gateway_display_tick`. Every hardware call here is bounded; a panel that does not answer cannot stop the console (own task, thread executor).
 #![allow(clippy::too_many_arguments)]
 
+#[cfg(feature = "c5")]
+use crate::c5::backlight::Backlight;
 use core::sync::atomic::Ordering;
 
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull};
+#[cfg(not(feature = "c5"))]
 use esp_hal::ledc::channel::{self, ChannelIFace};
+#[cfg(not(feature = "c5"))]
 use esp_hal::ledc::timer::{self, TimerIFace};
+#[cfg(not(feature = "c5"))]
 use esp_hal::ledc::{Ledc, LowSpeed};
 use esp_hal::spi::master::{Config as SpiConfig, Spi};
 use esp_hal::time::Rate;
@@ -19,9 +24,9 @@ use tdongle_ui::menu::ROWS;
 use tdongle_ui::settings::Settings;
 use tdongle_ui::setup_boot::Session;
 use tdongle_ui::text::Text;
-use tdongle_ui::ui::{Command, Content, Inputs, Snapshot, Ui, POLL_MS};
+use tdongle_ui::ui::{Command, Content, Inputs, POLL_MS, Snapshot, Ui};
 
-use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32};
 
 use crate::{FIRMWARE, SAVED, STORED};
 
@@ -150,10 +155,12 @@ impl Panel {
 }
 
 /// Backlight: LEDC PWM, 1 kHz, 8 bit, on the active-low pin (`backlight_init`).
+#[cfg(not(feature = "c5"))]
 struct Backlight {
     channel: channel::Channel<'static, LowSpeed>,
 }
 
+#[cfg(not(feature = "c5"))]
 impl Backlight {
     fn apply(&self, percent: u32) {
         let duty = tdongle_lcd::backlight_duty(percent);
@@ -189,15 +196,16 @@ fn settings() -> (Option<Settings>, bool) {
 /// The pins and peripherals of the front panel.
 pub struct Hardware {
     pub spi: esp_hal::peripherals::SPI2<'static>,
-    pub mosi: esp_hal::peripherals::GPIO3<'static>,
-    pub clk: esp_hal::peripherals::GPIO5<'static>,
-    pub cs: esp_hal::peripherals::GPIO4<'static>,
-    pub dc: esp_hal::peripherals::GPIO2<'static>,
-    pub rst: esp_hal::peripherals::GPIO1<'static>,
-    pub bl: esp_hal::peripherals::GPIO38<'static>,
-    pub button: esp_hal::peripherals::GPIO0<'static>,
-    pub led_data: esp_hal::peripherals::GPIO40<'static>,
-    pub led_clk: esp_hal::peripherals::GPIO39<'static>,
+    pub mosi: esp_hal::gpio::AnyPin<'static>,
+    pub clk: esp_hal::gpio::AnyPin<'static>,
+    pub cs: esp_hal::gpio::AnyPin<'static>,
+    pub dc: esp_hal::gpio::AnyPin<'static>,
+    pub rst: esp_hal::gpio::AnyPin<'static>,
+    pub bl: esp_hal::gpio::AnyPin<'static>,
+    pub button: esp_hal::gpio::AnyPin<'static>,
+    pub led_data: esp_hal::gpio::AnyPin<'static>,
+    pub led_clk: esp_hal::gpio::AnyPin<'static>,
+    #[cfg(not(feature = "c5"))]
     pub ledc: esp_hal::peripherals::LEDC<'static>,
 }
 
@@ -210,23 +218,32 @@ fn note(text: &str) {
 pub async fn ui_task(hw: Hardware) -> ! {
     let hw = hw;
     // Backlight pin first: off (high) until the first frame is on the glass.
-    let mut ledc = Ledc::new(hw.ledc);
-    ledc.set_global_slow_clock(esp_hal::ledc::LSGlobalClkSource::APBClk);
-    let timer: &'static mut esp_hal::ledc::timer::Timer<'static, LowSpeed> = alloc::boxed::Box::leak(alloc::boxed::Box::new(ledc.timer::<LowSpeed>(timer::Number::Timer0)));
-    let timer_ok = timer
-        .configure(timer::config::Config { duty: timer::config::Duty::Duty8Bit, clock_source: timer::LSClockSource::APBClk, frequency: Rate::from_khz(1) })
-        .is_ok();
-    let timer: &'static esp_hal::ledc::timer::Timer<'static, LowSpeed> = timer;
-    let mut channel = ledc.channel::<LowSpeed>(channel::Number::Channel0, hw.bl);
-    let backlight = if timer_ok && channel.configure(channel::config::Config { timer, duty_pct: 100, drive_mode: DriveMode::PushPull }).is_ok() {
-        Some(Backlight { channel })
-    } else {
-        note("backlight PWM failed");
-        PANEL_STATE.store(3, Ordering::Relaxed);
-        None
-    };
+    #[cfg(not(feature = "c5"))]
+    let backlight = {
+        let mut ledc = Ledc::new(hw.ledc);
+        ledc.set_global_slow_clock(esp_hal::ledc::LSGlobalClkSource::APBClk);
+        let timer: &'static mut esp_hal::ledc::timer::Timer<'static, LowSpeed> =
+            alloc::boxed::Box::leak(alloc::boxed::Box::new(ledc.timer::<LowSpeed>(timer::Number::Timer0)));
+        let timer_ok = timer
+            .configure(timer::config::Config { duty: timer::config::Duty::Duty8Bit, clock_source: timer::LSClockSource::APBClk, frequency: Rate::from_khz(1) })
+            .is_ok();
+        let timer: &'static esp_hal::ledc::timer::Timer<'static, LowSpeed> = timer;
+        let mut channel = ledc.channel::<LowSpeed>(channel::Number::Channel0, hw.bl);
+        let backlight = if timer_ok && channel.configure(channel::config::Config { timer, duty_pct: 100, drive_mode: DriveMode::PushPull }).is_ok() {
+            Some(Backlight { channel })
+        } else {
+            note("backlight PWM failed");
+            PANEL_STATE.store(3, Ordering::Relaxed);
+            None
+        };
 
-    let mut led = Led { data: Output::new(hw.led_data, Level::Low, OutputConfig::default()), clock: Output::new(hw.led_clk, Level::Low, OutputConfig::default()) };
+        backlight
+    };
+    #[cfg(feature = "c5")]
+    let backlight = Some(crate::c5::backlight::Backlight::new(hw.bl));
+
+    let mut led =
+        Led { data: Output::new(hw.led_data, Level::Low, OutputConfig::default()), clock: Output::new(hw.led_clk, Level::Low, OutputConfig::default()) };
     let button = Input::new(hw.button, InputConfig::default().with_pull(Pull::Up));
     let mut rst = Output::new(hw.rst, Level::High, OutputConfig::default());
     let spi = Spi::new(hw.spi, SpiConfig::default().with_frequency(Rate::from_hz(panel::SPI_HZ)).with_mode(esp_hal::spi::Mode::_0))
@@ -343,14 +360,21 @@ pub async fn ui_task(hw: Hardware) -> ! {
         let snapshot = Snapshot {
             bridge: panel.is_none(),
             wifi: connected,
-            recovery: false,
+            recovery: crate::guard::safe_mode_now(),
             saved_wifi: saved_count > 0,
             active_slot,
             active_name: active_name.as_str(),
             ssid: ssid_text,
             setup_ap_name: core::str::from_utf8(&setup_name_bytes).unwrap_or("").trim_end_matches('\0'),
+            #[cfg(not(feature = "c5"))]
             usb: crate::ALT.load(Ordering::Relaxed) != 0,
+            #[cfg(feature = "c5")]
+            // Shared LED policy consumes downstream readiness; the C5 connection page labels the actual transport.
+            usb: crate::c5::serial::connected() || crate::c5::mode::AP_READY.load(Ordering::Relaxed),
+            #[cfg(not(feature = "c5"))]
             usb_configured: crate::CONFIGURED.load(Ordering::Relaxed),
+            #[cfg(feature = "c5")]
+            usb_configured: crate::c5::serial::connected(),
             usb_suspended: false,
             link_connected: connected,
             link_rssi_valid: crate::RSSI_VALID.load(Ordering::Relaxed),
@@ -410,6 +434,64 @@ pub async fn ui_task(hw: Hardware) -> ! {
                     }
                     compose_rows(&text, *attention)
                 }
+            };
+            #[cfg(feature = "c5")]
+            let view = if !ui.menu.open && (setup_active || ui.page == 3) {
+                let secret = crate::c5::mode::password();
+                let name = if setup_active {
+                    alloc::string::String::from(core::str::from_utf8(&setup_name_bytes).unwrap_or("").trim_end_matches('\0'))
+                } else {
+                    crate::c5::mode::name()
+                };
+                let heading = if setup_active {
+                    "Temporary setup"
+                } else if crate::c5::mode::wireless() {
+                    "Wireless gateway"
+                } else {
+                    "USB / Android VPN"
+                };
+                let url = if setup_active { "http://192.168.4.1" } else { "http://192.168.77.1" };
+                let password = core::str::from_utf8(&secret).unwrap_or("unavailable");
+                let footer = if setup_active {
+                    alloc::format!("Expires in {}s", setup_session.seconds_left(now as u32))
+                } else {
+                    alloc::string::String::from("Internet not checked")
+                };
+                let lines = [heading, name.as_str(), password, url, footer.as_str()];
+                tdongle_lcd::view::compose_text_rows(lines, false)
+            } else if !ui.menu.open && ui.page == 0 {
+                let transport = if crate::c5::mode::wireless() {
+                    if crate::c5::mode::AP_READY.load(Ordering::Relaxed) { "Wireless AP ready" } else { "Wireless AP unavailable" }
+                } else if crate::c5::serial::connected() {
+                    "USB session ready"
+                } else {
+                    "USB session waiting"
+                };
+                let wifi = if connected && crate::RSSI_VALID.load(Ordering::Relaxed) {
+                    alloc::format!("WiFi {} dBm", crate::RSSI.load(Ordering::Relaxed))
+                } else if connected {
+                    alloc::string::String::from("WiFi connected")
+                } else {
+                    critical_section::with(|cs| alloc::string::String::from(crate::INIT_NOTE.borrow_ref(cs).as_str()))
+                };
+                let members = alloc::format!("Tailnets {}/{} ready", counts.ready, counts.enabled);
+                let lines = [
+                    transport,
+                    if ssid_text.is_empty() { "No upstream association" } else { ssid_text },
+                    wifi.as_str(),
+                    members.as_str(),
+                    "Internet not checked",
+                ];
+                tdongle_lcd::view::compose_text_rows(lines, !connected)
+            } else if !ui.menu.open && ui.page == 2 {
+                let uptime = alloc::format!("Up {}s Joins {}", now / 1000, crate::CONNECTS.load(Ordering::Relaxed));
+                let total = alloc::format!("Free heap {} B", heap);
+                let internal = alloc::format!("Internal {} B", esp_alloc::HEAP.free_caps(esp_alloc::MemoryCapability::Internal.into()));
+                let reset = crate::guard::reset_reason();
+                let title = if crate::guard::safe_mode_now() { "Health: recovery" } else { "Health" };
+                tdongle_lcd::view::compose_text_rows([title, uptime.as_str(), total.as_str(), internal.as_str(), reset.as_str()], false)
+            } else {
+                view
             };
             p.draw(&view).await;
         }
