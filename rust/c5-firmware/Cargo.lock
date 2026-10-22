@@ -1748,7 +1748,12 @@ dependencies = [
  "tdongle-tailnet-types",
  "tdongle-tailnet-usbnet",
  "tdongle-tailnet-wifimux",
+ "tdongle-wifi-policy",
 ]
+
+[[package]]
+name = "tdongle-nvs-format"
+version = "0.3.0-dev"
 
 [[package]]
 name = "tdongle-serial-ip"
@@ -1787,6 +1792,13 @@ dependencies = [
  "tdongle-tailnet-admission",
  "tdongle-tailnet-types",
  "tdongle-tailnet-usbnet",
+]
+
+[[package]]
+name = "tdongle-wifi-policy"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-nvs-format",
 ]
 
 [[package]]

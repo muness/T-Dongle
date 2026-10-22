@@ -3,7 +3,7 @@ on:
   push:
     branches: [feature/c5-usb-vpn]
   pull_request:
-    paths: ['rust/c5-firmware/**', 'rust/crates/tdongle-serial-ip/**', 'rust/tools/build-c5.sh', '.github/workflows/c5-vpn.yml']
+    paths: ['rust/**', '.github/workflows/c5-vpn.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,10 +16,31 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           targets: riscv32imac-unknown-none-elf
-      - run: cargo test --locked --manifest-path rust/Cargo.toml -p tdongle-serial-ip -p tdongle-tailnet-usbnet -p tdongle-tailnet-wifimux -- --test-threads=1
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p tdongle-wifi-policy -p tdongle-serial-ip -p tdongle-tailnet-usbnet -p tdongle-tailnet-wifimux -- --test-threads=1
       - run: cargo install espflash --version 4.6.0 --locked
       - run: rust/tools/build-c5.sh
       - uses: actions/upload-artifact@v4
         with:
           name: c5-vpn-0.4.0-rc2-${{ github.sha }}
           path: rust/dist/tdongle-c5-vpn-0.4.0-rc2/
+  s3-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+      - name: Install pinned Xtensa tools
+        run: |
+          curl -fLsS https://github.com/esp-rs/espup/releases/download/v0.17.1/espup-x86_64-unknown-linux-gnu -o /tmp/espup
+          chmod +x /tmp/espup
+          /tmp/espup install --targets esp32s3 --toolchain-version 1.97.0.0 --export-file "$HOME/export-esp.sh"
+          cargo +1.98.1 install espflash --version 4.6.0 --locked
+      - name: Build S3 using the same shared crates
+        run: |
+          . "$HOME/export-esp.sh"
+          export CARGO_TARGET_DIR="$HOME/.cache/cargo-target"
+          rust/tools/build_tailnet.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: s3-shared-regression-${{ github.sha }}
+          path: rust/dist/tdongle-rust-*-tailnet/

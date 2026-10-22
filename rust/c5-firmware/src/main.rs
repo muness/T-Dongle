@@ -240,19 +240,25 @@ async fn wifi_task(mut wifi: WifiController<'static>, info: Info) {
             status(j.session, 2, [0; 4]);
             continue;
         }
-        let mut backoff = 1;
+        let mut failures: u32 = 0;
         while j.session == SESSION.load(Ordering::Relaxed) {
             if !wifi.is_connected() {
                 info.new_association();
                 match with_timeout(Duration::from_secs(20), wifi.connect_async()).await {
                     Ok(Ok(_)) => {
-                        backoff = 1;
+                        failures = 0;
                         WIFI_SESSION.store(j.session, Ordering::Relaxed);
                     }
                     _ => {
                         status(j.session, 3, [0; 4]);
-                        Timer::after_secs(backoff).await;
-                        backoff = (backoff * 2).min(16);
+                        // Reuse the bounded retry policy from the shared S3 codebase.
+                        let delay = tdongle_wifi_policy::retry::retry_delay_ms(failures);
+                        failures = failures.saturating_add(1);
+                        // A fresh Android session must not wait out the previous one's backoff.
+                        let retry_at = now() + u64::from(delay);
+                        while j.session == SESSION.load(Ordering::Relaxed) && now() < retry_at {
+                            Timer::after_millis(retry_at.saturating_sub(now()).min(250)).await;
+                        }
                     }
                 }
             }

@@ -18,6 +18,7 @@ embassy-net = { version = "0.9", default-features = false, features = ["medium-e
 static_cell = "2.1"
 portable-atomic = { version = "1", features = ["critical-section"] }
 embedded-io-async = "0.7"
+tdongle-wifi-policy = { path = "../crates/tdongle-wifi-policy" }
 tdongle-serial-ip = { path = "../crates/tdongle-serial-ip" }
 tdongle-tailnet-wifimux = { path = "../crates/tdongle-tailnet-wifimux", features = ["embassy-net"] }
 tdongle-tailnet-usbnet = { path = "../crates/tdongle-tailnet-usbnet" }
