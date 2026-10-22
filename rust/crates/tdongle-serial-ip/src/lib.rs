@@ -16,7 +16,12 @@ pub const STATUS: u8 = 4;
 pub const IP: u8 = 5;
 pub const STOP: u8 = 6;
 pub const PING: u8 = 7;
-pub const BOARD: &[u8] = b"TDONGLE-C5 0.4.0-rc2 serial-ip/1";
+/// One printable owner-console command; never arbitrary binary input.
+pub const COMMAND: u8 = 8;
+/// A chunk of the same dispatcher reply used by the S3 console.
+pub const REPLY: u8 = 9;
+pub const GATEWAY: [u8; 4] = [192, 168, 77, 1];
+pub const BOARD: &[u8] = b"TDONGLE-C5 0.4.0-rc2 serial-ip/2";
 pub const HOST: [u8; 4] = [192, 168, 77, 2];
 
 pub fn crc16(bytes: &[u8]) -> u16 {

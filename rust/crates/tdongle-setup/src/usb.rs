@@ -421,6 +421,8 @@ pub fn command_plan(head: &Head<'_>, body: &[u8]) -> Plan {
         Action::Unknown => Plan::Refuse(text::UNKNOWN_ACTION),
         Action::SetupDone => Plan::Fail(text::SETUP_NOT_RUNNING),
         Action::Mode => match f.string(f.mode) {
+            Some(b"c5_usb") => line(&[b"gateway usb"], LineKind::Mode),
+            Some(b"c5_wireless") => line(&[b"gateway wireless"], LineKind::Mode),
             Some(m @ (b"wifi_bridge" | b"tailnet_gateway")) => line(&[b"mode ", m], LineKind::Mode),
             _ => Plan::Fail(text::MODE_CHOOSE),
         },
@@ -488,7 +490,7 @@ pub enum Outcome<'r> {
 #[must_use]
 pub fn line_outcome(kind: LineKind, reply: &str) -> Outcome<'_> {
     match kind {
-        LineKind::Mode if reply.starts_with("OK mode saved") => Outcome::Ok,
+        LineKind::Mode if (reply.starts_with("OK mode saved") || reply.starts_with("OK gateway saved")) => Outcome::Ok,
         LineKind::Mode if reply == tdongle_serial::reply::MODE_INVALID => Outcome::Fail(text::MODE_CHOOSE),
         LineKind::Mode => Outcome::Fail(text::MODE_NOT_SAVED),
         LineKind::Member => match reply.trim_end() {

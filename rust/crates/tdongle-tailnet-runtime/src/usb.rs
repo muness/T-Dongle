@@ -57,7 +57,10 @@ pub fn derive_usb_mac(sta: [u8; 6]) -> Mac {
 
 /// Build `frame` = Ethernet header (to the host) + `ip`; returns the length, or `None` if the host's address is not known yet.
 fn frame_to_host(un: &UsbSide, ip: &[u8], out: &mut [u8]) -> Option<usize> {
-    let (_, host_mac) = un.arp.host()?;
+    if ip.len() < 20 {
+        return None;
+    }
+    let host_mac = un.arp.peek(rd32(ip, 16))?;
     if out.len() < 14 + ip.len() {
         return None;
     }
@@ -585,6 +588,28 @@ mod tests {
         wr32(a, 14, HOST_IP);
         wr32(a, 24, for_ip);
         f
+    }
+
+    #[test]
+    fn replies_use_destination_neighbor_not_first_host() {
+        let sh = shared();
+        let mut un = side(&sh);
+        let mut out = [0; 1536];
+        let first = arp_request(USB_IP);
+        let _ = un.arp.handle(1, &first[14..], &mut out);
+        let second_mac = [2, 0, 0, 0, 0, 3];
+        let second_ip = ip4(192, 168, 77, 3);
+        let mut second = arp_request(USB_IP);
+        second[22..28].copy_from_slice(&second_mac);
+        wr32(&mut second, 28, second_ip);
+        let _ = un.arp.handle(2, &second[14..], &mut out);
+        let packet = icmp_echo(USB_IP, second_ip, b"second client");
+        assert!(frame_to_host(&un, &packet, &mut out).is_some());
+        assert_eq!(&out[..6], &second_mac);
+        let first_packet = icmp_echo(USB_IP, HOST_IP, b"first client");
+        assert!(frame_to_host(&un, &first_packet, &mut out).is_some());
+        assert_eq!(&out[..6], &HOST_MAC);
+        assert!(frame_to_host(&un, &icmp_echo(USB_IP, ip4(192, 168, 77, 99), b"unknown"), &mut out).is_none());
     }
 
     fn icmp_echo(src: u32, dst: u32, payload: &[u8]) -> Vec<u8> {

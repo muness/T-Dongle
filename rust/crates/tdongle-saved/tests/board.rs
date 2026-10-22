@@ -138,3 +138,21 @@ mod bss {
         assert_eq!(tdongle_saved::choose(&l, &signal), Some(0));
     }
 }
+
+#[test]
+fn failed_preferred_network_cannot_starve_fallback_profiles() {
+    let l = load(&mut Nvs::new(SliceFlash(V03), SIZE)).unwrap();
+    let signal = signals(&l.saved, [(b"217IoT".as_slice(), -50), (b"iPhone".as_slice(), -60)].into_iter());
+    assert_eq!(tdongle_saved::choose_untried(&l, &signal, 0), Some(1));
+    assert_eq!(tdongle_saved::choose_untried(&l, &signal, 1 << 1), Some(0));
+    // The hidden third network still gets its directed probe after both visible networks fail.
+    assert_eq!(tdongle_saved::choose_untried(&l, &signal, (1 << 1) | 1), Some(2));
+    assert_eq!(tdongle_saved::choose_untried(&l, &signal, 7), None);
+    assert_eq!(tdongle_saved::choose_untried(&l, &signal, 0), Some(1));
+}
+
+#[test]
+fn reconnect_backoff_is_bounded_even_after_counter_saturation() {
+    assert_eq!((0..6).map(tdongle_saved::retry_delay_ms).collect::<Vec<_>>(), [1000, 2000, 4000, 8000, 16000, 30000]);
+    assert_eq!(tdongle_saved::retry_delay_ms(u32::MAX), 30000);
+}

@@ -17,7 +17,8 @@ use tdongle_nvs_format::load::{LoadInputs, Loaded, load_wifi_profiles};
 use tdongle_nvs_format::wifi_meta;
 use tdongle_nvs_format::wifi_profiles::{self, SavedNetworks, SavedNetworksError};
 use tdongle_nvs_read::{Error, Flash, Nvs};
-use tdongle_wifi_policy::rank::{NOT_SEEN_DBM, PROFILE_LIMIT, Rank, pick_ranked};
+pub use tdongle_wifi_policy::rank::{NOT_SEEN_DBM, PROFILE_LIMIT};
+use tdongle_wifi_policy::rank::{Rank, pick_ranked};
 
 /// `sizeof(wifi_config_t)` in ESP-IDF v5.5.5 (the union is as large as `wifi_sta_config_t`: 184 bytes on Xtensa). The C firmware refuses a `tn_settings/wifi` blob of
 /// any other size, and so does this reader.
@@ -96,6 +97,25 @@ pub fn signals<'a>(saved: &SavedNetworks, scan: impl Iterator<Item = (&'a [u8], 
 #[must_use]
 pub fn choose(loaded: &Loaded, signal: &[i16; PROFILE_LIMIT]) -> Option<usize> {
     pick_ranked(signal, loaded.saved.list().len(), None, false, &rank(loaded))
+}
+
+/// Choose a saved profile not yet attempted in this retry cycle. Visible ranked profiles
+/// come first; hidden profiles still receive a directed connection attempt.
+#[must_use]
+pub fn choose_untried(loaded: &Loaded, signal: &[i16; PROFILE_LIMIT], tried: u8) -> Option<usize> {
+    let mut eligible = *signal;
+    for (slot, value) in eligible.iter_mut().enumerate() {
+        if tried & (1 << slot) != 0 {
+            *value = NOT_SEEN_DBM;
+        }
+    }
+    choose(loaded, &eligible).filter(|slot| tried & (1 << slot) == 0).or_else(|| (0..loaded.saved.list().len()).find(|slot| tried & (1 << slot) == 0))
+}
+
+/// Bounded reconnect delay shared with the firmware's existing Wi-Fi policy.
+#[must_use]
+pub fn retry_delay_ms(failures: u32) -> u32 {
+    tdongle_wifi_policy::retry::retry_delay_ms(failures)
 }
 
 /// The credentials of slot `slot` as the radio's station config wants them: UTF-8 SSID and password. A password that is not UTF-8 cannot be passed on, and the

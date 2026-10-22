@@ -399,3 +399,16 @@ pub fn compose_rows(rows: &[[u8; ROW_BYTES]; LCD_ROWS], attention: bool) -> View
     compose_rows_into(&mut v, rows, attention);
     v
 }
+
+/// Compose five independently bounded text rows. Long UTF-8 names cannot spill into another field.
+pub fn compose_text_rows(lines: [&str; LCD_ROWS], attention: bool) -> View {
+    let mut rows = [[0; ROW_BYTES]; LCD_ROWS];
+    for (row, line) in rows.iter_mut().zip(lines) {
+        let mut end = line.len().min(ROW_BYTES - 1);
+        while !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        row[..end].copy_from_slice(&line.as_bytes()[..end]);
+    }
+    compose_rows(&rows, attention)
+}

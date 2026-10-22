@@ -185,3 +185,15 @@ fn wifi_scan_body_has_the_c_shape() {
     write_wifi_scan(&mut j, core::iter::empty());
     assert_eq!(std::str::from_utf8(j.bytes()).unwrap(), "{\"networks\":[],\"ok\":true,\"count\":0,\"truncated\":false}");
 }
+
+#[test]
+fn c5_transports_use_separate_commands_and_the_same_origin_checks() {
+    for (mode, command) in [("c5_usb", "gateway usb"), ("c5_wireless", "gateway wireless")] {
+        let body = format!(r#"{{"action":"mode","mode":"{mode}"}}"#);
+        assert_eq!(plan(&body), line(command, LineKind::Mode));
+        let foreign = String::from_utf8(app_post("/command", "application/json", &body)).unwrap().replace("http://192.168.77.1", "http://evil.example");
+        assert!(matches!(routed(&USB, foreign.as_bytes()), Answer::Refuse(_)));
+    }
+    assert_eq!(line_outcome(LineKind::Mode, "OK gateway saved; reboot to apply\r\n"), Outcome::Ok);
+    assert_ne!(line_outcome(LineKind::Mode, "ERR gateway not saved\r\n"), Outcome::Ok);
+}

@@ -43,6 +43,8 @@
 #[cfg(feature = "sim")]
 extern crate std;
 
+pub mod transport;
+
 mod crc;
 #[cfg(feature = "embedded-storage")]
 mod nor;
