@@ -2510,6 +2510,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tdongle-serial-ip"
+version = "0.3.0-dev"
+dependencies = [
+ "tdongle-tailnet-types",
+ "tdongle-tailnet-usbnet",
+]
+
+[[package]]
 name = "tdongle-setup"
 version = "0.3.0-dev"
 dependencies = [

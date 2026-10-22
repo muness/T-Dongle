@@ -139,3 +139,5 @@ The dongle also has a serial console on its USB port, at 115200 baud. Type `help
 Everything else lives in [docs/REFERENCE.md](docs/REFERENCE.md): build and release, flash layout, versioning, every console command, upgrade behaviour and design decisions. Measurements and test history are in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 Based on [DrWhax/esp32-usb-wifi](https://github.com/DrWhax/esp32-usb-wifi); see [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md) for credits and licenses.
+
+Experimental Rust C5 Android USB VPN: [build, protocol and limits](rust/docs/c5-usb-vpn.md).

@@ -1,0 +1,25 @@
+name: C5 USB VPN preview
+on:
+  push:
+    branches: [feature/c5-usb-vpn]
+  pull_request:
+    paths: ['rust/c5-firmware/**', 'rust/crates/tdongle-serial-ip/**', 'rust/tools/build-c5.sh', '.github/workflows/c5-vpn.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98.1
+        with:
+          targets: riscv32imac-unknown-none-elf
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p tdongle-serial-ip -p tdongle-tailnet-usbnet -p tdongle-tailnet-wifimux -- --test-threads=1
+      - run: cargo install espflash --version 4.6.0 --locked
+      - run: rust/tools/build-c5.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c5-vpn-0.4.0-rc2-${{ github.sha }}
+          path: rust/dist/tdongle-c5-vpn-0.4.0-rc2/

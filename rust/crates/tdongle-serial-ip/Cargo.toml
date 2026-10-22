@@ -1,0 +1,13 @@
+[package]
+name = "tdongle-serial-ip"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tdongle-tailnet-usbnet = { path = "../tdongle-tailnet-usbnet" }
+tdongle-tailnet-types = { path = "../tdongle-tailnet-types" }

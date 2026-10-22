@@ -1,0 +1,30 @@
+[package]
+name = "tdongle-c5-vpn"
+version = "0.4.0-rc2"
+edition = "2024"
+publish = false
+[workspace]
+[dependencies]
+esp-hal = { version = "=1.2.2", features = ["esp32c5", "unstable"] }
+esp-radio = { version = "=1.0.0-beta.1", features = ["esp32c5", "wifi", "unstable"] }
+esp-rtos = { version = "0.4", features = ["esp32c5", "esp-radio", "esp-alloc", "embassy"] }
+esp-alloc = { version = "0.11", features = ["esp32c5"] }
+esp-bootloader-esp-idf = { version = "0.6", features = ["esp32c5"] }
+embassy-executor = "0.10"
+embassy-time = "0.5"
+embassy-sync = "0.8"
+embassy-futures = "0.1"
+embassy-net = { version = "0.9", default-features = false, features = ["medium-ethernet", "proto-ipv4", "dhcpv4"] }
+static_cell = "2.1"
+portable-atomic = { version = "1", features = ["critical-section"] }
+embedded-io-async = "0.7"
+tdongle-serial-ip = { path = "../crates/tdongle-serial-ip" }
+tdongle-tailnet-wifimux = { path = "../crates/tdongle-tailnet-wifimux", features = ["embassy-net"] }
+tdongle-tailnet-usbnet = { path = "../crates/tdongle-tailnet-usbnet" }
+tdongle-tailnet-types = { path = "../crates/tdongle-tailnet-types" }
+[patch.crates-io]
+esp-hal = { path = "../vendor/esp-hal" }
+[profile.release]
+opt-level = "s"
+lto = "fat"
+debug = 1
